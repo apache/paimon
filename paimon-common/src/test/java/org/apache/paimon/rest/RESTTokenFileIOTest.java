@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -40,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -224,6 +226,144 @@ class RESTTokenFileIOTest {
                 .isEqualTo("https://refreshed");
         verify(delegate, times(2)).createBlobPresignedUrl(root, descriptor, validity);
         verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testTokenShorterThanAnHourIsNotReloadedOnEveryCall() throws IOException {
+        AtomicLong now = new AtomicLong(1700000000000L);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenAnswer(
+                        ignored -> tokenResponse(now.get() + Duration.ofMinutes(40).toMillis()));
+        RESTTokenFileIO fileIO = restTokenFileIO(loader(mock(FileIO.class)), api, identifier, now);
+
+        for (int i = 0; i < 5; i++) {
+            fileIO.exists(new Path("oss://bucket/table/data"));
+        }
+        verify(api, times(1)).loadTableToken(identifier);
+
+        // past half of its lifetime
+        now.addAndGet(Duration.ofMinutes(21).toMillis());
+        fileIO.exists(new Path("oss://bucket/table/data"));
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testFailedReloadKeepsTheValidToken() throws IOException {
+        AtomicLong now = new AtomicLong(1700000000000L);
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        GetTableTokenResponse first = tokenResponse(now.get() + Duration.ofHours(2).toMillis());
+        when(api.loadTableToken(identifier))
+                .thenReturn(first)
+                .thenThrow(new IllegalStateException("REST server unavailable"));
+        RESTTokenFileIO fileIO = restTokenFileIO(loader(delegate), api, identifier, now);
+        fileIO.exists(new Path("oss://bucket/table/data"));
+
+        // inside the refresh window, while the token is still valid
+        now.addAndGet(Duration.ofMinutes(90).toMillis());
+        assertThat(fileIO.exists(new Path("oss://bucket/table/data"))).isTrue();
+        assertThat(fileIO.validToken().token()).isEqualTo(first.getToken());
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    private static FileIOLoader loader(FileIO delegate) {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        return loader;
+    }
+
+    private static GetTableTokenResponse tokenResponse(long expiresAtMillis) {
+        return new GetTableTokenResponse(
+                Collections.singletonMap("test.token", UUID.randomUUID().toString()),
+                expiresAtMillis);
+    }
+
+    private static RESTTokenFileIO restTokenFileIO(
+            FileIOLoader loader, RESTApi api, Identifier identifier, AtomicLong now) {
+        return new RESTTokenFileIO(
+                CatalogContext.create(new Options(), loader, null),
+                api,
+                identifier,
+                new Path("oss://bucket/table")) {
+            @Override
+            long currentTimeMillis() {
+                return now.get();
+            }
+        };
+    }
+
+    @Test
+    void testDelegateOptionsNameTheTableAndTokenExpiry() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenReturn(true);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier table = new Identifier("db", "table", "b1");
+        long expiresAt = System.currentTimeMillis() + Duration.ofHours(2).toMillis();
+        when(api.loadTableToken(table))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                expiresAt));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null),
+                        api,
+                        new Identifier("db", "table", "b1", "files"),
+                        root);
+
+        fileIO.exists(root);
+
+        ArgumentCaptor<CatalogContext> context = ArgumentCaptor.forClass(CatalogContext.class);
+        verify(delegate, atLeastOnce()).configure(context.capture());
+        Options options = context.getValue().options();
+        // a system table refreshes the token of its table
+        assertThat(options.get(RESTTokenRefresher.DATABASE)).isEqualTo("db");
+        assertThat(options.get(RESTTokenRefresher.OBJECT)).isEqualTo("table$branch_b1");
+        assertThat(options.get(RESTTokenRefresher.EXPIRES_AT_MILLIS))
+                .isEqualTo(String.valueOf(expiresAt));
+        assertThat(options.get(RESTTokenRefresher.TOKEN_KEYS)).isEqualTo("token");
+    }
+
+    @Test
+    void testDelegateIsSharedOnlyBySameTableAndCatalogOptions() throws IOException {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(invocation -> mock(FileIO.class));
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        // every table and user gets the same token
+        when(api.loadTableToken(any()))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                System.currentTimeMillis() + Duration.ofHours(2).toMillis()));
+        Options userA = new Options();
+        userA.set("token", "user-a");
+        Options userB = new Options();
+        userB.set("token", "user-b");
+
+        FileIO delegate = restTokenFileIO(userA, loader, api, "table_a").fileIO();
+
+        assertThat(restTokenFileIO(userA, loader, api, "table_a").fileIO()).isSameAs(delegate);
+        assertThat(restTokenFileIO(userA, loader, api, "table_b").fileIO()).isNotSameAs(delegate);
+        assertThat(restTokenFileIO(userB, loader, api, "table_a").fileIO()).isNotSameAs(delegate);
+    }
+
+    private static RESTTokenFileIO restTokenFileIO(
+            Options options, FileIOLoader loader, RESTApi api, String table) {
+        return new RESTTokenFileIO(
+                CatalogContext.create(options, loader, null),
+                api,
+                Identifier.create("db", table),
+                new Path("oss://bucket/" + table));
     }
 
     @Test

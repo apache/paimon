@@ -132,6 +132,7 @@ import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -2207,7 +2208,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
                         System.currentTimeMillis() + 4000_000L);
         setDataTokenToRestServerForMock(identifier, newDataToken);
-        RESTToken nextFileDataToken = fileIO.validToken();
+        RESTToken nextFileDataToken;
+        try {
+            // past half of the first token's lifetime, so it is due for a reload
+            RESTTokenRefresher.clockOffsetMillis = Duration.ofMinutes(31).toMillis();
+            nextFileDataToken = fileIO.validToken();
+        } finally {
+            RESTTokenRefresher.clockOffsetMillis = 0;
+        }
         assertEquals(newDataToken, nextFileDataToken);
         assertEquals(true, nextFileDataToken.expireAtMillis() - fileDataToken.expireAtMillis() > 0);
 
