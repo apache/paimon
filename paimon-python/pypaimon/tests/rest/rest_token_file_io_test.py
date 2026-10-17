@@ -22,6 +22,7 @@ import signal
 import tempfile
 import threading
 import time
+import types
 import unittest
 import warnings
 import weakref
@@ -244,41 +245,91 @@ class RESTTokenFileIOTest(unittest.TestCase):
                          "the forked child blocked on a lock held by a parent thread")
         self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
 
-    def test_cache_misses_log_one_summary_per_interval(self):
-        cache = TTLCache(maxsize=2, ttl=3600)
-        stats = {"created": 0, "evicted": 0, "warned": False, "next_log": 0.0}
-        open_files = [(10, 1000)]
+    def _touch_with_summary_stats(self, cache, stats, clock, open_files, steps):
+        # Each step sets the clock and open files, then reads through a FileIO with that token name.
         module = 'pypaimon.catalog.rest.rest_token_file_io'
-
-        def touch(name):
-            self._file_io_with_token(
-                self.warehouse_path, self.catalog_options, self._valid_token(name)).exists("x")
-
         with patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', cache), \
                 patch.object(RESTTokenFileIO, '_FILE_IO_STATS', stats), \
                 patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
-                patch(module + '._open_files', side_effect=lambda: open_files[0]), \
+                patch(module + '.time', types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)), \
                 patch(_FILE_IO_GET, side_effect=_FakeFileIO), \
                 self.assertLogs(module, level='INFO') as logs:
-            for name in ("a", "b", "c", "c"):
-                touch(name)
-            # The first eviction warned without waiting for the interval, a repeat waits.
-            touch("d")
-            # Crowded descriptors warn even without evictions.
-            cache.clear()
-            stats.update(created=0, evicted=0, warned=False, next_log=0.0)
-            open_files[0] = (900, 1000)
-            touch("f")
+            for now, files, name in steps:
+                clock[0] = now
+                if files is not None:
+                    open_files[0] = files
+                if name is None:
+                    cache.clear()
+                    continue
+                self._file_io_with_token(
+                    self.warehouse_path, self.catalog_options, self._valid_token(name)).exists("x")
+        return logs.records
 
-        self.assertEqual(['INFO', 'WARNING', 'WARNING'], [r.levelname for r in logs.records])
-        messages = [r.getMessage() for r in logs.records]
-        self.assertIn("holds 1/2 FileIOs", messages[0])
+    def test_cache_misses_log_one_summary_per_interval(self):
+        cache = TTLCache(maxsize=3, ttl=1e9)
+        stats = dict(RESTTokenFileIO._FILE_IO_STATS, created=0, evicted=0, warned=False, next_log=0.0,
+                     fds=None, next_scan=0.0)
+        open_files = [(10, 1000)]
+        scan = MagicMock(side_effect=lambda: open_files[0])
+        with patch('pypaimon.catalog.rest.rest_token_file_io._open_files', scan):
+            records = self._touch_with_summary_stats(cache, stats, [0.0], open_files, [
+                (1000, None, "a"),
+                (1100, None, "b"),
+                # Crowded descriptors warn at once, even within the interval of an INFO summary.
+                (1200, (900, 1000), "c"),
+                # After a warning, misses neither log nor list descriptors until the interval ends.
+                (1300, None, "d"),
+                (1801, (10, 1000), "e"),
+                (2402, None, None),
+                (2402, None, "f"),
+            ])
+
+        self.assertEqual(['INFO', 'WARNING', 'WARNING', 'INFO'], [r.levelname for r in records])
+        messages = [r.getMessage() for r in records]
+        self.assertIn("holds 1/3 FileIOs", messages[0])
         self.assertIn("1 FileIOs created and 0 evicted", messages[0])
         self.assertIn("open files 10/1000", messages[0])
-        self.assertIn("holds 2/2 FileIOs", messages[1])
-        self.assertIn("2 FileIOs created and 1 evicted", messages[1])
-        self.assertIn("1 FileIOs created and 0 evicted", messages[2])
-        self.assertIn("open files 900/1000", messages[2])
+        self.assertIn("holds 3/3 FileIOs", messages[1])
+        self.assertIn("2 FileIOs created and 0 evicted", messages[1])
+        self.assertIn("open files 900/1000", messages[1])
+        self.assertIn("2 FileIOs created and 2 evicted", messages[2])
+        self.assertIn("open files 10/1000", messages[2])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[3])
+        self.assertEqual(5, scan.call_count)
+
+    def test_open_files_are_listed_at_most_one_percent_of_the_time(self):
+        clock = [100.0]
+        stats = {"fds": None, "next_scan": 0.0}
+
+        def scan():
+            clock[0] += 0.002
+            return 10, 1000
+
+        module = 'pypaimon.catalog.rest.rest_token_file_io'
+        with patch(module + '._open_files', side_effect=scan) as open_files, \
+                patch(module + '.time', types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)):
+            for now in (100.0, 100.1, 100.19, 100.21):
+                clock[0] = now
+                self.assertEqual((10, 1000), RESTTokenFileIO._sample_open_files(stats, now))
+        # A 2 ms scan at 100.0 defers the next one to 100.2.
+        self.assertEqual(2, open_files.call_count)
+
+    def test_cache_miss_reports_unknown_open_files_when_they_cannot_be_listed(self):
+        real_listdir = os.listdir
+
+        def listdir(path="."):
+            if path == "/proc/self/fd":
+                raise OSError("not listable")
+            return real_listdir(path)
+
+        stats = dict(RESTTokenFileIO._FILE_IO_STATS, created=0, evicted=0, warned=False, next_log=0.0,
+                     fds=None, next_scan=0.0)
+        with patch('os.listdir', side_effect=listdir):
+            records = self._touch_with_summary_stats(
+                TTLCache(maxsize=3, ttl=1e9), stats, [0.0], [None], [(1000, None, "a")])
+        self.assertEqual(1, len(records))
+        self.assertEqual('INFO', records[0].levelname)
+        self.assertIn("open files unknown", records[0].getMessage())
 
     def test_short_lived_token_warns_once_per_interval(self):
         file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)

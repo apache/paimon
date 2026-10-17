@@ -59,7 +59,8 @@ class RESTTokenFileIO(FileIO):
 
     # Cache misses log a summary at most this often; idle processes log nothing.
     _STATS_LOG_INTERVAL = 600
-    _FILE_IO_STATS = {"created": 0, "evicted": 0, "warned": False, "next_log": 0.0}
+    _FILE_IO_STATS = {"created": 0, "evicted": 0, "warned": False, "next_log": 0.0,
+                      "fds": None, "next_scan": 0.0}
     _SHORT_TOKEN_STATS = {"count": 0, "next_log": 0.0}
 
     def __init__(self, identifier: Identifier, path: str,
@@ -161,12 +162,14 @@ class RESTTokenFileIO(FileIO):
         cache.expire()
         if len(cache) >= cache.maxsize:
             stats["evicted"] += 1
-        # Misses are rare unless tokens storm, and then each also costs a token request.
-        fds = _open_files()
         now = time.monotonic()
+        quiet = now < stats["next_log"]
+        if quiet and stats["warned"]:
+            return
+        fds = self._sample_open_files(stats, now)
         crowded = stats["evicted"] > 0 or (fds is not None and fds[0] * 5 > fds[1] * 4)
         # The first sign of trouble is logged at once; anything else waits for the interval.
-        if now < stats["next_log"] and (stats["warned"] or not crowded):
+        if quiet and not crowded:
             return
         self.log.log(
             logging.WARNING if crowded else logging.INFO,
@@ -176,6 +179,14 @@ class RESTTokenFileIO(FileIO):
             stats["created"], stats["evicted"], "unknown" if fds is None else "%d/%d" % fds)
         stats.update(created=0, evicted=0, warned=crowded,
                      next_log=now + self._STATS_LOG_INTERVAL)
+
+    @staticmethod
+    def _sample_open_files(stats, now):
+        # Listing /proc/self/fd takes about 0.5 ms per 1,000 descriptors, so scan at most 1% of the time.
+        if now >= stats["next_scan"]:
+            stats["fds"] = _open_files()
+            stats["next_scan"] = now + 100 * (time.monotonic() - now)
+        return stats["fds"]
 
     def _get_file_io_scope(self) -> str:
         # FileIO.get binds its result to the path (e.g. the OSS bucket) and the catalog options.

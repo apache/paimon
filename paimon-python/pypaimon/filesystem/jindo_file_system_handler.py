@@ -61,27 +61,36 @@ _LOG = logging.getLogger(__name__)
 
 
 class _StreamStats:
-    """Counts open native streams and logs only when the count passes a power of two."""
+    """Counts open streams of JindoFileSystemHandler, not those PVFS opens through pyjindo.ossfs."""
 
     # Reentrant: garbage collection may finalize a stream while this thread holds it.
     _lock = threading.RLock()
+    _pid = os.getpid()
     open = 0
     milestone = 256
 
     @classmethod
+    def _get_lock(cls):
+        # A parent thread may hold the lock across a fork, so a child takes a new one.
+        if cls._pid != os.getpid():
+            cls._lock, cls._pid = threading.RLock(), os.getpid()
+        return cls._lock
+
+    @classmethod
     def opened(cls):
-        with cls._lock:
+        with cls._get_lock():
             cls.open += 1
             count = cls.open
             report = count >= cls.milestone
             if report:
                 cls.milestone *= 2
         if report:
-            _LOG.info("%d Jindo streams are open; each holds native buffers until closed", count)
+            _LOG.info("%d streams of JindoFileSystemHandler are open; each holds native buffers until closed",
+                      count)
 
     @classmethod
     def closed(cls):
-        with cls._lock:
+        with cls._get_lock():
             cls.open -= 1
 
 
