@@ -150,6 +150,7 @@ class ContiguousWindowPlanTest(unittest.TestCase):
     def test_independent_payload_column_files_are_read(self):
         self._check_independent_column_files(native=False)
 
+    @pytest.mark.native_plan
     @unittest.skipUnless(native_reader_available(),
                          "pypaimon-rust native reader API not installed")
     def test_native_plan_retains_independent_payload_column_files(self):

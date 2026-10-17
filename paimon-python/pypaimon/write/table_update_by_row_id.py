@@ -670,7 +670,7 @@ class TableUpdateByRowId:
         # DE reads relax nested nullability. Restore and validate the declared
         # write types at the writer boundary, including untouched input batches.
         write_schema = PyarrowFieldParser.from_paimon_schema(
-            [self.table.field_dict[name] for name in data.column_names])
+            [self.table.field_dict[name] for name in data.schema.names])
         return normalize_arrow_write_nullability(data, write_schema)
 
     @classmethod

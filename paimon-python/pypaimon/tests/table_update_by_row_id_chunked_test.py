@@ -34,6 +34,22 @@ from pypaimon.write.writer.single_file_writer import SingleFileWriter
 
 class TableUpdateByRowIdChunkedTest(unittest.TestCase):
 
+    def test_write_normalization_accepts_legacy_record_batch_interface(self):
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        batch = pa.record_batch([pa.array([1, 2], type=pa.int32())], names=['payload'])
+
+        class LegacyRecordBatch:
+            # Arrow 6 exposes names through schema, not column_names.
+            schema = batch.schema
+            columns = batch.columns
+
+        updater = self._updater()
+        updater.table = mock.Mock(field_dict={'payload': DataField(0, 'payload', AtomicType('INT'))})
+        normalized = updater._normalize_write_data(LegacyRecordBatch())
+        self.assertEqual(normalized.schema, batch.schema)
+        self.assertEqual(normalized.columns[0].to_pylist(), [1, 2])
+
     def test_streaming_overlay_rejects_sidecar_before_output(self):
         table = mock.Mock()
         table.is_primary_key_table = False
