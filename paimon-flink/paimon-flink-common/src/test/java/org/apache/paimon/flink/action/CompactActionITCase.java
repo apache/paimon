@@ -313,6 +313,67 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         }
     }
 
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(booleans = {true, false})
+    @Timeout(60)
+    public void testHistoryPartitionCompactWithPartitionAddedAfterBuild(boolean mode)
+            throws Exception {
+        FileStoreTable table;
+        if (mode) {
+            table =
+                    prepareTable(
+                            Arrays.asList("dt", "hh"),
+                            Arrays.asList("dt", "hh", "k"),
+                            Collections.emptyList(),
+                            Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+        } else {
+            // for unaware bucket table
+            Map<String, String> tableOptions = new HashMap<>();
+            tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+            tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+
+            table =
+                    prepareTable(
+                            Arrays.asList("dt", "hh"),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            tableOptions);
+        }
+
+        writeData(rowData(1, 100, 15, BinaryString.fromString("20221208")));
+        writeData(rowData(2, 100, 15, BinaryString.fromString("20221208")));
+        Thread.sleep(5000);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--partition_idle_time",
+                        "5s");
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+
+        // the job is built, the partitions are planned when it runs
+        writeData(rowData(1, 100, 15, BinaryString.fromString("20221210")));
+        writeData(rowData(2, 100, 15, BinaryString.fromString("20221210")));
+        env.execute();
+
+        checkLatestSnapshot(table, 5, Snapshot.CommitKind.COMPACT);
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits).hasSize(2);
+        for (DataSplit split : splits) {
+            String dt = split.partition().getString(0).toString();
+            // the idle partition is compacted, the one written after the build is not
+            assertThat(split.dataFiles()).hasSize(dt.equals("20221208") ? 1 : 2);
+        }
+    }
+
     @Test
     public void testStreamingCompactWithChangedExternalPath() throws Exception {
         String externalPath1 = getTempDirPath();
