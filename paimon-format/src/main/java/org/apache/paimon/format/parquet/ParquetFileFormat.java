@@ -65,6 +65,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     private final FormatContext formatContext;
     private final Options options;
     private final int readBatchSize;
+    private final boolean localZonedTimestampMillisAsMicros;
 
     public ParquetFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -72,6 +73,12 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
         this.formatContext = formatContext;
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
+        this.localZonedTimestampMillisAsMicros =
+                !"disabled"
+                        .equalsIgnoreCase(
+                                formatContext
+                                        .options()
+                                        .getString("metadata.iceberg.storage", "disabled"));
     }
 
     @VisibleForTesting
@@ -110,7 +117,9 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         FormatWriterFactory rawFactory =
-                new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+                new ParquetWriterFactory(
+                        new RowDataParquetBuilder(
+                                type, options, localZonedTimestampMillisAsMicros));
         ShreddingWritePlanFactory writePlanFactory =
                 ShreddingWritePlanWriterFactories.createWritePlanFactory(
                         type, formatContext.options(), SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
@@ -121,7 +130,8 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
 
     @Override
     public void validateDataFields(RowType rowType) {
-        ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        ParquetSchemaConverter.convertToParquetMessageType(
+                rowType, localZonedTimestampMillisAsMicros);
     }
 
     @Override
