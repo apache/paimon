@@ -46,6 +46,19 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 
 
+_IMMUTABLE_CELL_TYPES = frozenset((bool, int, float, str, bytes, type(None)))
+
+
+def _copy_window_value(value):
+    # Arrow numeric vectors are flat lists. Copy the container without walking
+    # deepcopy's memo machinery for every scalar in overlapping windows.
+    if type(value) in _IMMUTABLE_CELL_TYPES:
+        return value
+    if type(value) is list and all(type(item) in _IMMUTABLE_CELL_TYPES for item in value):
+        return value.copy()
+    return copy.deepcopy(value)
+
+
 class ContiguousWindowDataset(Dataset):
     """Map-style training samples from a single table of contiguous frames.
 
@@ -310,7 +323,7 @@ class ContiguousWindowDataset(Dataset):
         for name in self.columns:
             plans, rows = reads[name]
             row_ids, padding = plans[position]
-            values = [copy.deepcopy(
+            values = [_copy_window_value(
                 self.pad_values[name] if row_id is None else rows[row_id][name])
                 for row_id in row_ids]
             if self.window_size is None:
