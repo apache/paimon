@@ -62,7 +62,8 @@ def _scalar_case(kind):
     coefficient = '1508079088755887087797858531882816082'
     value = Decimal(coefficient[:-1] + '.' + coefficient[-1])
     factory = pa.decimal256 if kind.startswith('decimal256') else pa.decimal128
-    source = pa.array([value, None, value.copy_negate(), Decimal('1.0')], type=factory(38, 1))
+    precision = 76 if kind.startswith('decimal256_wide') else 38
+    source = pa.array([value, None, value.copy_negate(), Decimal('1.0')], type=factory(precision, 1))
     expected = [1.508079088755887e35, None, -1.508079088755887e35, 1.0]
     target = pa.float64()
     if kind.endswith('_float'):
@@ -76,7 +77,8 @@ def _scalar_case(kind):
 @pytest.mark.parametrize('operation', _OPERATIONS)
 @pytest.mark.parametrize('shape', ['root', 'row', 'array', 'map'])
 @pytest.mark.parametrize('kind', ['fixed_binary', 'empty_fixed_binary', 'half_float',
-                                  'decimal_double', 'decimal_float', 'decimal256_double', 'decimal256_float'])
+                                  'decimal_double', 'decimal_float', 'decimal256_double', 'decimal256_float',
+                                  'decimal256_wide_double', 'decimal256_wide_float'])
 def test_scalar_input_encodings_keep_values(tmp_path, native, stream, operation, shape, kind):
     source, target, expected = _wrap(*_scalar_case(kind), shape)
     table = _table(tmp_path, target, native)
@@ -200,6 +202,53 @@ def test_union_import_aligns_foreign_children_and_row_siblings(tmp_path, native,
     table = _table(tmp_path, target, native)
     _apply(table, source, native, False, operation)
     _check(table, [{'n': i, 'sibling': i} for i in range(1, 5)])
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('operation', ['row_id', 'incremental', 'upsert'])
+@pytest.mark.parametrize('shape', ['nested_sibling', 'nested_child', 'masked_struct', 'masked_fixed_array'])
+def test_sparse_union_import_normalizes_all_parent_coordinates(tmp_path, native, stream, operation, shape):
+    ids = pa.array([7] * 6, type=pa.int8())
+    numbers = pa.array([None, 1, 2, None, 4, None], type=pa.int32())
+    nested_type = pa.struct([('a', pa.struct([('b', pa.int32())]))])
+    nested = pa.array([{'a': {'b': i}} for i in range(6)], type=nested_type)
+    union = pa.UnionArray.from_sparse(ids, [pa.array(range(6), type=pa.int32())], type_codes=[7])
+    if shape == 'nested_child':
+        source = pa.UnionArray.from_sparse(ids, [nested], type_codes=[7])
+        target = nested_type
+        expected = nested.slice(1, 4).to_pylist()
+    else:
+        if shape == 'nested_sibling':
+            ordinary, ordinary_type = nested, nested_type
+        elif shape == 'masked_struct':
+            ordinary = pa.StructArray.from_arrays(
+                [numbers], fields=[pa.field('n', pa.int32(), nullable=False)], mask=numbers.is_null())
+            ordinary_type = pa.struct([('n', pa.int32())])
+        else:
+            ordinary = pa.FixedSizeListArray.from_arrays(
+                numbers, type=pa.list_(pa.field('item', pa.int32(), nullable=False), 1), mask=numbers.is_null())
+            ordinary_type = pa.list_(pa.int32())
+        source = pa.StructArray.from_arrays([union, ordinary], names=['u', 'ordinary'])
+        target = pa.struct([('u', pa.int32()), ('ordinary', ordinary_type)])
+        expected = [{'u': i, 'ordinary': item} for i, item in enumerate(ordinary.to_pylist()[1:5], 1)]
+    source = source.slice(1, 4)
+    source.validate(full=True)
+    table = _table(tmp_path, target, native)
+    _apply(table, source, native, stream, operation)
+    _check(table, expected)
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('operation', _OPERATIONS)
+@pytest.mark.parametrize('precision,scale', [(39, 1), (76, 39)])
+def test_wide_decimal_floating_input_does_not_require_decimal128(tmp_path, native, operation, precision, scale):
+    coefficient = '1508079088755887087797858531882816082' + '0' * (scale - 1)
+    value = Decimal(coefficient + 'e-' + str(scale))
+    source = pa.array([value, None, value.copy_negate(), Decimal('1.0')], type=pa.decimal256(precision, scale))
+    table = _table(tmp_path, pa.float64(), native)
+    _apply(table, source, native, False, operation)
+    _check(table, [1.508079088755887e35, None, -1.508079088755887e35, 1.0])
 
 
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
