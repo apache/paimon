@@ -79,6 +79,17 @@ class SelectionTest(unittest.TestCase):
             self.assertTrue(result['python'])
             self.assertFalse(result['java'])
 
+    def test_rest_contract_runs_java_and_python(self):
+        for path in sorted(plan.REST_SPECS):
+            with self.subTest(path=path):
+                result = plan.select([path])
+                self.assertTrue(result['docs'] and result['python'])
+                self.assertEqual(self.suites([path]), {'core'})
+        result = plan.select([plan.OPENAPI_V4_ACTIONS])
+        self.assertTrue(result['python'] and result['licensing'])
+        self.assertEqual(self.suites([plan.OPENAPI_V4_ACTIONS]), plan.ALL_JAVA)
+        self.assertFalse(plan.select(['paimon-api/src/main/java/org/apache/paimon/rest/RESTApi.java'])['python'])
+
     def test_leaf_modules_and_workflows(self):
         self.assertEqual(self.suites(['paimon-eslib/pom.xml']), {'eslib'})
         self.assertEqual(self.suites(['paimon-e2e-tests/pom.xml']),
