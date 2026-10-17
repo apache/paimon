@@ -35,4 +35,9 @@ public class OperatorBackendStateStore implements StateStore {
     public <T> ListState<T> getListState(ListStateDescriptor<T> descriptor) throws Exception {
         return delegate.getListState(descriptor);
     }
+
+    @Override
+    public <T> ListState<T> getUnionListState(ListStateDescriptor<T> descriptor) throws Exception {
+        return delegate.getUnionListState(descriptor);
+    }
 }
