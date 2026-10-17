@@ -250,7 +250,7 @@ CALL sys.compact_database(
 * `--excluding_tables`  is used to specify which source tables are not to be compacted. The usage is same as "--including_tables". "--excluding_tables" has higher priority than "--including_tables" if you specified both.
 * `--mode` is used to specify compaction mode. Possible values:
   * "divided" (the default mode if you haven't specified one): start a sink for each table, the compaction of the new table requires restarting the job.
-  * "combined": start a single combined sink for all tables, the new table will be automatically compacted.
+  * "combined": start a single combined sink for all tables, the new table will be automatically compacted. If no table matches, a batch job fails, while a streaming job logs a warning and keeps waiting for matching tables.
 * `--catalog_conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here](./configurations) for a complete list of catalog configurations.
 * `--table_conf` is the configuration for compaction. Each configuration should be specified in the format `key=value`. Pivotal configuration is listed below:
 

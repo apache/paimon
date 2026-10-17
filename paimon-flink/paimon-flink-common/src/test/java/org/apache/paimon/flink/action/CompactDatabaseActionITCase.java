@@ -457,6 +457,45 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 .hasMessageContaining("Data evolution table compact only supports batch mode");
     }
 
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
+    public void testNoTablesMatchedInBatchMode(String mode) throws Exception {
+        createTable(
+                "db1",
+                "t1",
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("dt", "hh", "k"),
+                Collections.singletonMap("bucket", "1"));
+        CompactDatabaseAction action =
+                new CompactDatabaseAction(Collections.singletonMap("warehouse", warehouse))
+                        .includingTables("t1")
+                        .withDatabaseCompactMode(mode);
+        action.withStreamExecutionEnvironment(
+                streamExecutionEnvironmentBuilder().batchMode().build());
+        assertThatThrownBy(action::build)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no tables to be compacted")
+                .hasMessageContaining("'databaseName.tableName'");
+    }
+
+    @Test
+    public void testNoTablesMatchedInCombinedStreamingMode() throws Exception {
+        createTable(
+                "db1",
+                "t1",
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("dt", "hh", "k"),
+                Collections.singletonMap("bucket", "1"));
+        CompactDatabaseAction action =
+                new CompactDatabaseAction(Collections.singletonMap("warehouse", warehouse))
+                        .includingTables("t1")
+                        .withDatabaseCompactMode("combined");
+        action.withStreamExecutionEnvironment(
+                streamExecutionEnvironmentBuilder().streamingMode().build());
+        // Tables matching the patterns may be created after the streaming job starts.
+        action.build();
+    }
+
     private void writeDataEvolutionRecords(FileStoreTable table) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
