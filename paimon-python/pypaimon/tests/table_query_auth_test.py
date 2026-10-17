@@ -18,6 +18,7 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -177,6 +178,20 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         self.assertEqual(len(converted.splits()), 2)
         for qs in converted.splits():
             self.assertIsInstance(qs, QueryAuthSplit)
+
+    def test_auth_wrapping_preserves_lazy_native_statistics(self):
+        result = TableQueryAuthResult([_simple_filter_json()], None)
+        handle = object()
+        plan = Plan([_FakeSplit("s1")], snapshot_id=7, _native_stats=handle)
+        counters = ScanStats(native_planned=True, entries_total=10)
+        with patch.object(ScanStats, 'from_native', return_value=counters) as convert:
+            wrapped = result.convert_plan(plan)
+            convert.assert_not_called()
+            self.assertEqual(wrapped.snapshot_id, 7)
+            self.assertIsInstance(wrapped.splits()[0], QueryAuthSplit)
+            self.assertIs(wrapped.stats(), counters)
+            self.assertIs(wrapped.stats(), counters)
+            convert.assert_called_once_with(handle)
 
     def test_wraps_splits_with_masking(self):
         result = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})

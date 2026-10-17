@@ -366,9 +366,11 @@ and split metadata plus counters for actual Native planning work, available in
 `explanation.planning_counters`. Statistics collection retains early manifest,
 sidecar and LIMIT optimizations. The Python scanner's before/after pruning funnel
 is unavailable for Native plans because skipped entries are not decoded.
-For programmatic access, `plan, stats = builder.new_scan().scan_with_stats()`
-returns the same counters as `plan.stats()`. Ordinary plans return `None`
-from this getter. Snapshot metadata is available separately as `plan.snapshot_id`.
+Every Native plan includes lightweight counters. Use
+`plan = builder.new_scan().plan()` followed by `plan.stats()`; conversion to
+Python counters is deferred until this getter is called. The existing
+`plan, stats = builder.new_scan().scan_with_stats()` API remains available
+for both planners. Snapshot metadata is available separately as `plan.snapshot_id`.
 
 Fixed-bucket Native planning also handles ORs of equality/IN predicates,
 intersects repeated key constraints, and specializes predicates per partition.

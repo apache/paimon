@@ -16,7 +16,7 @@
 # under the License.
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 from pypaimon.read.split import Split
@@ -29,10 +29,20 @@ class Plan:
     _splits: List[Split]
     snapshot_id: Optional[int] = field(default=None)
     _scan_stats: Optional[ScanStats] = field(default=None, repr=False, compare=False)
+    _native_stats: Any = field(default=None, repr=False, compare=False)
 
     def splits(self) -> List[Split]:
         return self._splits
 
     def stats(self) -> Optional[ScanStats]:
-        """Counters collected by this plan, or None for ordinary planning."""
+        """Planning counters, converted from Native only when requested."""
+        native_stats = self._native_stats
+        if native_stats is not None:
+            self._scan_stats = ScanStats.from_native(native_stats)
+            self._native_stats = None
         return self._scan_stats
+
+    def __getstate__(self):
+        # Native handles are process-local. Serialize counters as Python scalars.
+        self.stats()
+        return self.__dict__.copy()

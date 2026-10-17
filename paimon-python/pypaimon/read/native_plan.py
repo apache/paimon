@@ -453,8 +453,7 @@ def native_plan(
         chunk_shuffle: Optional[Tuple[int, int]] = None,
         shard: Optional[Tuple[int, int]] = None,
         partition_predicate: Optional[Predicate] = None,
-        global_index_result=None,
-        collect_stats: bool = False) -> Plan:
+        global_index_result=None) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -515,14 +514,8 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    if collect_stats:
-        scan = scan.with_stats()
     rust_plan = scan.plan()
-    plan = _from_native_plan(table, rust_plan)
-    if collect_stats:
-        from pypaimon.read.scan_stats import ScanStats
-        plan._scan_stats = ScanStats.from_native(rust_plan.stats())
-    return plan
+    return _from_native_plan(table, rust_plan)
 
 
 def _native_stream_auth_supported(table):
@@ -584,4 +577,4 @@ def _from_native_plan(table, rust_plan) -> Plan:
         # Older bindings cannot distinguish an empty committed snapshot from a
         # table without snapshots. Let the Python scanner recover the metadata.
         raise RuntimeError("Native runtime cannot report an empty plan's snapshot")
-    return Plan(splits, snapshot_id=snapshot_id)
+    return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())

@@ -18,6 +18,7 @@
 import json as _json
 import logging
 import re
+from dataclasses import replace
 from typing import List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
@@ -183,7 +184,7 @@ class TableScan:
             return [(range_.from_, range_.to) for range_ in row_ranges]
         return None
 
-    def _try_native_plan(self, collect_stats: bool = False) -> Optional[Plan]:
+    def _try_native_plan(self) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
         Predicate and limit are pushed into Rust planning and are still enforced
@@ -198,13 +199,11 @@ class TableScan:
             has_distribution = (fs.idx_of_this_subtask is not None
                                 or fs.start_pos_of_this_subtask is not None)
             extra_options = {}
-            if collect_stats:
-                extra_options['collect_stats'] = True
             if self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 if self._incremental_snapshot_range is None:
                     return Plan([], _scan_stats=ScanStats(
                         native_planned=True, partition_keys_before=None, partition_keys_after=None,
-                        buckets_seen=None, buckets_after_pruning=None) if collect_stats else None)
+                        buckets_seen=None, buckets_after_pruning=None))
                 extra_options['incremental_range'] = self._incremental_snapshot_range
                 if self.table.options.changelog_producer() != ChangelogProducer.NONE:
                     extra_options['incremental_mode'] = 'changelog'
@@ -271,7 +270,7 @@ class TableScan:
                 if not (getattr(fs, 'deletion_vectors_enabled', False)
                         and not self.table.is_primary_key_table):
                     splits = fs._apply_push_down_limit(splits)
-            return Plan(splits, snapshot_id=plan.snapshot_id, _scan_stats=plan.stats())
+            return replace(plan, _splits=splits)
         except Exception as e:
             _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.
@@ -300,13 +299,13 @@ class TableScan:
         """Run :meth:`plan` while recording manifest / pruning counters.
 
         Only used by :meth:`ReadBuilder.explain`; the regular read path
-        keeps going through :meth:`plan`. Native explain collects complete
+        keeps going through :meth:`plan`. Native scans always collect lightweight
         counters in the same core planning pass, without opening data files.
         """
         native_auth = (self.table.options.query_auth_enabled
                        and self._native_requested() and self._native_plan_supported())
         if native_auth:
-            native = self._try_native_plan(collect_stats=True)
+            native = self._try_native_plan()
             if native is not None:
                 return native, native.stats()
         auth_result = self.__auth_query()
@@ -314,7 +313,7 @@ class TableScan:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
         if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
-            native = self._try_native_plan(collect_stats=True)
+            native = self._try_native_plan()
             if native is not None:
                 return native, native.stats()
         plan, stats = self.file_scanner.scan_with_stats()

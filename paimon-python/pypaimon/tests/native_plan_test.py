@@ -655,7 +655,7 @@ class NativePlanTest(unittest.TestCase):
         self.assertIs(plan.stats(), counters)
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
-            row_ranges=None, collect_stats=True)
+            row_ranges=None)
         fs.scan_with_stats.assert_not_called()
         fs.scan.assert_not_called()
 
@@ -1216,7 +1216,7 @@ class NativePlanTest(unittest.TestCase):
             with self.subTest(snapshot_id=snapshot_id, legacy=legacy):
                 table = _scan(True, Mock()).table
                 table.table_schema = Mock(fields=[], partition_keys=[])
-                rust_plan = SimpleNamespace(splits=lambda: [])
+                rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None)
                 if not legacy:
                     rust_plan.snapshot_id = lambda: snapshot_id
                 scan = SimpleNamespace(plan=lambda: rust_plan)
@@ -1236,7 +1236,7 @@ class NativePlanTest(unittest.TestCase):
         table.table_schema = TableSchema(0, [])
         table.options = CoreOptions(Options({}))
         table.current_branch.return_value = 'b1'
-        rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 7)
+        rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None, snapshot_id=lambda: 7)
         scan = Mock()
         scan.plan.return_value = rust_plan
         rt = Mock()
@@ -1360,7 +1360,7 @@ class NativePlanTest(unittest.TestCase):
     def test_native_plan_forwards_explicit_incremental_mode(self):
         table = _scan(True, Mock()).table
         table.table_schema = Mock(fields=[], partition_keys=[])
-        rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 4)
+        rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None, snapshot_id=lambda: 4)
         rust_scan = Mock()
         rust_scan.plan.return_value = rust_plan
         builder = Mock()

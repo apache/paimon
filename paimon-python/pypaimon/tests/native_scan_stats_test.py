@@ -209,8 +209,7 @@ def test_native_stats_are_readonly_and_normal_planning_stays_lightweight(rest_ca
     table, schema = _create(catalog)
     _append(table, [{'id': i, 'value': i} for i in range(3)], schema)
     scan = _native_table(table).new_read_builder().new_scan()
-    assert scan.plan().stats() is None
-    plan = scan.with_stats().plan()
+    plan = scan.plan()
     stats = plan.stats()
     assert stats.manifest_entries_read == stats.manifest_entries_after_manifest_filters == 1
     assert plan.snapshot_id() == 1
@@ -218,7 +217,15 @@ def test_native_stats_are_readonly_and_normal_planning_stays_lightweight(rest_ca
         stats.manifest_entries_read = 100
     with patch('pypaimon.read.scan_stats.ScanStats.from_native',
                side_effect=AssertionError('ordinary plan requested statistics')):
-        assert table.new_read_builder().new_scan().plan().snapshot_id == 1
+        ordinary = table.new_read_builder().new_scan().plan()
+        assert ordinary.snapshot_id == 1
+    converted = ordinary.stats()
+    assert converted.planning_counters['manifest_entries_read'] == 1
+    assert converted.planning_counters['final_files'] == 1
+    assert ordinary.stats() is converted
+    # An untouched Native handle must be converted during serialization too.
+    restored = pickle.loads(pickle.dumps(table.new_read_builder().new_scan().plan()))
+    assert restored.stats() == converted
 
 
 @pytest.mark.parametrize('changelog', [False, True])
