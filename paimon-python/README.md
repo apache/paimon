@@ -366,6 +366,8 @@ and split metadata plus counters for actual Native planning work, available in
 `explanation.planning_counters`. Statistics collection retains early manifest,
 sidecar and LIMIT optimizations. The Python scanner's before/after pruning funnel
 is unavailable for Native plans because skipped entries are not decoded.
+Final split, file and byte totals describe the returned Plan after Python's
+post-processing and deferred LIMIT; decoding counters retain the Native work.
 Every Native plan includes lightweight counters. Use
 `plan = builder.new_scan().plan()` followed by `plan.stats()`; conversion to
 Python counters is deferred until this getter is called. The existing

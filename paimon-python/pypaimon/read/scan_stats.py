@@ -19,6 +19,37 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Set, Tuple
 
 
+_NATIVE_COUNTER_FIELDS = (
+    'base_manifest_files',
+    'delta_manifest_files',
+    'manifest_files_before_partition_pruning',
+    'manifest_files_after_partition_pruning',
+    'manifest_files_pruned_by_row_ranges',
+    'manifest_entries_read',
+    'manifest_entries_pruned_by_bucket',
+    'manifest_entries_pruned_by_partition',
+    'manifest_entries_after_entry_pruning',
+    'manifest_entries_pruned_by_level',
+    'manifest_entries_pruned_by_row_ranges',
+    'manifest_entries_pruned_by_data_stats',
+    'manifest_entries_after_manifest_filters',
+    'manifest_entries_after_merge',
+    'manifest_entries_pruned_by_cross_schema_stats',
+    'manifest_entries_after_cross_schema_stats',
+    'data_evolution_groups_before_stats',
+    'data_evolution_groups_pruned_by_stats',
+    'data_evolution_groups_pruned_by_row_ranges',
+    'split_candidates_built',
+    'limit_early_stopped',
+    'splits_before_limit',
+    'splits_after_limit',
+    'final_splits',
+    'final_files',
+    'planned_data_file_bytes',
+    'limit',
+)
+
+
 @dataclass
 class ScanStats:
     """Counters accumulated by :class:`FileScanner` when it is asked to
@@ -58,40 +89,22 @@ class ScanStats:
 
     @classmethod
     def from_native(cls, stats):
+        return cls._from_native_counters({name: getattr(stats, name) for name in _NATIVE_COUNTER_FIELDS})
+
+    @classmethod
+    def empty_native(cls, limit=None):
+        counters = dict.fromkeys(_NATIVE_COUNTER_FIELDS, 0)
+        counters.update(limit=limit, limit_early_stopped=False)
+        return cls._from_native_counters(counters)
+
+    @classmethod
+    def _from_native_counters(cls, counters):
         return cls(
-            manifest_files_total=stats.manifest_files_before_partition_pruning,
-            manifest_files_after_partition=stats.manifest_files_after_partition_pruning,
-            entries_total=stats.manifest_entries_read,
+            manifest_files_total=counters['manifest_files_before_partition_pruning'],
+            manifest_files_after_partition=counters['manifest_files_after_partition_pruning'],
+            entries_total=counters['manifest_entries_read'],
             entries_potential_total=None, entries_after_partition=None,
             entries_after_bucket=None, entries_after_stats=None,
-            planning_counters={name: getattr(stats, name) for name in (
-                'base_manifest_files',
-                'delta_manifest_files',
-                'manifest_files_before_partition_pruning',
-                'manifest_files_after_partition_pruning',
-                'manifest_files_pruned_by_row_ranges',
-                'manifest_entries_read',
-                'manifest_entries_pruned_by_bucket',
-                'manifest_entries_pruned_by_partition',
-                'manifest_entries_after_entry_pruning',
-                'manifest_entries_pruned_by_level',
-                'manifest_entries_pruned_by_row_ranges',
-                'manifest_entries_pruned_by_data_stats',
-                'manifest_entries_after_manifest_filters',
-                'manifest_entries_after_merge',
-                'manifest_entries_pruned_by_cross_schema_stats',
-                'manifest_entries_after_cross_schema_stats',
-                'data_evolution_groups_before_stats',
-                'data_evolution_groups_pruned_by_stats',
-                'data_evolution_groups_pruned_by_row_ranges',
-                'split_candidates_built',
-                'limit_early_stopped',
-                'splits_before_limit',
-                'splits_after_limit',
-                'final_splits',
-                'final_files',
-                'planned_data_file_bytes',
-                'limit',
-            )},
+            planning_counters=counters,
             partition_keys_before=None, partition_keys_after=None,
             buckets_seen=None, buckets_after_pruning=None, native_planned=True)

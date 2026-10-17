@@ -141,6 +141,73 @@ def test_native_explain_preserves_limit_stopping_without_row_filter(rest_catalog
         split.file_paths for split in reader.new_scan().plan().splits()]
 
 
+@pytest.mark.parametrize('selection', ['whole_shard', 'partial_shard', 'whole_slice', 'partial_slice'])
+@pytest.mark.parametrize('limit', [1, 2])
+def test_native_statistics_follow_distributed_limit(rest_catalog, selection, limit):
+    catalog, _ = rest_catalog
+    table, schema = _create(catalog)
+    for value in range(3):
+        _append(table, [{'id': value, 'value': value}], schema)
+    reader = table.new_read_builder().with_limit(limit)
+    scan = reader.new_scan()
+    if selection.endswith('shard'):
+        scan.with_shard(0, 1 if selection == 'whole_shard' else 2)
+    else:
+        scan.with_slice(0 if selection == 'whole_slice' else 1, 3)
+    with patch('pypaimon.read.scan_stats.ScanStats.from_native',
+               side_effect=AssertionError('planning eagerly converted Native statistics')):
+        plan = scan.plan()
+    stats = plan.stats()
+    assert stats.native_planned
+    counters = stats.planning_counters
+    assert counters['manifest_entries_read'] == counters['split_candidates_built'] == 3
+    assert counters['splits_before_limit'] == 3
+    assert counters['final_splits'] == counters['splits_after_limit'] == len(plan.splits()) == limit
+    assert counters['final_files'] == sum(len(split.files) for split in plan.splits()) == limit
+    assert counters['planned_data_file_bytes'] == sum(split.file_size for split in plan.splits())
+    assert counters['limit'] == limit
+    assert not counters['limit_early_stopped']  # Native built all candidates before Python applied LIMIT.
+    assert plan.stats() is stats
+    assert pickle.loads(pickle.dumps(plan)).stats() == stats
+    assert len(reader.new_read().to_arrow(plan.splits())) == limit
+
+
+@pytest.mark.parametrize('window', ['future', 'equal'])
+@pytest.mark.parametrize('limit', [None, 1])
+def test_native_empty_incremental_window_has_zero_statistics(rest_catalog, window, limit):
+    catalog, _ = rest_catalog
+    table, schema = _create(catalog)
+    _append(table, [{'id': 0, 'value': 0}], schema)
+    timestamp = table.snapshot_manager().get_latest_snapshot().time_millis
+    bounds = (timestamp + 1000, timestamp + 2000) if window == 'future' else (timestamp, timestamp)
+    selected = table.copy({'incremental-between-timestamp': '{},{}'.format(*bounds)})
+    reader = selected.new_read_builder()
+    if limit is not None:
+        reader.with_limit(limit)
+    scan = reader.new_scan()
+    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+        plan, stats = scan.scan_with_stats()
+    assert plan.splits() == []
+    assert plan.snapshot_id is None
+    assert stats.native_planned
+    expected = plan.stats().planning_counters
+    reference = table._copy_with_snapshot(None).new_read_builder()
+    if limit is not None:
+        reference.with_limit(limit)
+    assert expected == reference.new_scan().plan().stats().planning_counters
+    assert expected['final_files'] == expected['manifest_entries_read'] == 0
+    assert expected['limit'] == limit
+    assert expected['limit_early_stopped'] is False
+    for name in ['entries_potential_total', 'entries_after_partition', 'entries_after_bucket',
+                 'entries_after_stats', 'partition_keys_before', 'partition_keys_after',
+                 'buckets_seen', 'buckets_after_pruning']:
+        assert getattr(stats, name) is None
+    explanation = _native_explain(reader)
+    assert explanation.planning_counters == expected
+    assert 'Native planning counters' in str(explanation)
+    assert pickle.loads(pickle.dumps(plan)).stats() == stats
+
+
 def test_native_explain_records_cross_schema_overwrite_netting(rest_catalog):
     from pypaimon.schema.data_types import AtomicType
     from pypaimon.schema.schema_change import SchemaChange

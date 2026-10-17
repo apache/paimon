@@ -201,9 +201,7 @@ class TableScan:
             extra_options = {}
             if self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 if self._incremental_snapshot_range is None:
-                    return Plan([], _scan_stats=ScanStats(
-                        native_planned=True, partition_keys_before=None, partition_keys_after=None,
-                        buckets_seen=None, buckets_after_pruning=None))
+                    return Plan([], _scan_stats=ScanStats.empty_native(self.limit))
                 extra_options['incremental_range'] = self._incremental_snapshot_range
                 if self.table.options.changelog_producer() != ChangelogProducer.NONE:
                     extra_options['incremental_mode'] = 'changelog'
@@ -270,7 +268,7 @@ class TableScan:
                 if not (getattr(fs, 'deletion_vectors_enabled', False)
                         and not self.table.is_primary_key_table):
                     splits = fs._apply_push_down_limit(splits)
-            return replace(plan, _splits=splits)
+            return replace(plan, _splits=splits, _stats_limit=self.limit if defer_limit else None)
         except Exception as e:
             _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.

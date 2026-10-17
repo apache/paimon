@@ -30,6 +30,8 @@ class Plan:
     snapshot_id: Optional[int] = field(default=None)
     _scan_stats: Optional[ScanStats] = field(default=None, repr=False, compare=False)
     _native_stats: Any = field(default=None, repr=False, compare=False)
+    # A LIMIT hint deferred until after Native row-position selection.
+    _stats_limit: Optional[int] = field(default=None, repr=False, compare=False)
 
     def splits(self) -> List[Split]:
         return self._splits
@@ -39,6 +41,18 @@ class Plan:
         native_stats = self._native_stats
         if native_stats is not None:
             self._scan_stats = ScanStats.from_native(native_stats)
+            # Python can filter or limit splits after Native planning. Keep the
+            # actual planning work, but summarize the final returned selection.
+            files, data_bytes = 0, 0
+            for split in self._splits:
+                for file in split.files:
+                    files += 1
+                    data_bytes += max(0, file.file_size)
+            counters = self._scan_stats.planning_counters
+            counters.update(final_splits=len(self._splits), splits_after_limit=len(self._splits),
+                            final_files=files, planned_data_file_bytes=min(data_bytes, 2 ** 64 - 1))
+            if self._stats_limit is not None:
+                counters['limit'] = self._stats_limit
             self._native_stats = None
         return self._scan_stats
 

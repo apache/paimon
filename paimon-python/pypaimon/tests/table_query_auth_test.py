@@ -183,7 +183,9 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
         result = TableQueryAuthResult([_simple_filter_json()], None)
         handle = object()
         plan = Plan([_FakeSplit("s1")], snapshot_id=7, _native_stats=handle)
-        counters = ScanStats(native_planned=True, entries_total=10)
+        counters = ScanStats.empty_native()
+        counters.entries_total = 10
+        counters.planning_counters['manifest_entries_read'] = 10
         with patch.object(ScanStats, 'from_native', return_value=counters) as convert:
             wrapped = result.convert_plan(plan)
             convert.assert_not_called()
@@ -191,6 +193,8 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
             self.assertIsInstance(wrapped.splits()[0], QueryAuthSplit)
             self.assertIs(wrapped.stats(), counters)
             self.assertIs(wrapped.stats(), counters)
+            self.assertEqual(counters.planning_counters['manifest_entries_read'], 10)
+            self.assertEqual(counters.planning_counters['final_splits'], 1)
             convert.assert_called_once_with(handle)
 
     def test_wraps_splits_with_masking(self):
