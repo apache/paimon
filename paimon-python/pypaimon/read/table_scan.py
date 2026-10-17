@@ -18,6 +18,7 @@
 import json as _json
 import logging
 import re
+from dataclasses import replace
 from typing import List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
@@ -200,7 +201,7 @@ class TableScan:
             extra_options = {}
             if self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 if self._incremental_snapshot_range is None:
-                    return Plan([])
+                    return Plan([], _scan_stats=ScanStats.empty_native(self.limit))
                 extra_options['incremental_range'] = self._incremental_snapshot_range
                 if self.table.options.changelog_producer() != ChangelogProducer.NONE:
                     extra_options['incremental_mode'] = 'changelog'
@@ -267,7 +268,7 @@ class TableScan:
                 if not (getattr(fs, 'deletion_vectors_enabled', False)
                         and not self.table.is_primary_key_table):
                     splits = fs._apply_push_down_limit(splits)
-            return Plan(splits, snapshot_id=plan.snapshot_id)
+            return replace(plan, _splits=splits, _stats_limit=self.limit if defer_limit else None)
         except Exception as e:
             _raise_if_native_fork_safety_error(e)
             # Any native construction/planning/pruning failure -> fall back.
@@ -296,15 +297,15 @@ class TableScan:
         """Run :meth:`plan` while recording manifest / pruning counters.
 
         Only used by :meth:`ReadBuilder.explain`; the regular read path
-        keeps going through :meth:`plan`. Native plans return stats=None;
-        explain reports their split metadata without pruning counters.
+        keeps going through :meth:`plan`. Native scans always collect lightweight
+        counters in the same core planning pass, without opening data files.
         """
         native_auth = (self.table.options.query_auth_enabled
                        and self._native_requested() and self._native_plan_supported())
         if native_auth:
             native = self._try_native_plan()
             if native is not None:
-                return native, None
+                return native, native.stats()
         auth_result = self.__auth_query()
         if self._query_auth_fn is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
@@ -312,7 +313,7 @@ class TableScan:
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
-                return native, None
+                return native, native.stats()
         plan, stats = self.file_scanner.scan_with_stats()
         return wrap_plan_with_auth(auth_result, plan), stats
 

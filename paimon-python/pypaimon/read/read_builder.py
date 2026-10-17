@@ -226,8 +226,8 @@ class ReadBuilder:
 
         Cost: ``explain()`` reads manifest list + manifests but never
         opens data files. To produce accurate before/after counters it
-        suppresses the manifest-reader's early bucket filter and forces
-        single-threaded manifest decoding, so it can be measurably
+        suppresses early bucket and sidecar pruning and counts candidates
+        before applying LIMIT, so it can be measurably
         heavier than a regular ``new_scan().plan()`` on tables where the
         early filter usually prunes aggressively (e.g. very wide
         HASH_FIXED tables with a tight predicate).
@@ -482,9 +482,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStat
     table_schema = table.table_schema
     bucket_mode_str = _safe_bucket_mode(table)
 
-    # Native plans expose split metadata without Python pruning counters.
-    native_planned = stats is None
-    if native_planned:
+    native_planned = stats is None or stats.native_planned
+    if stats is None or native_planned:
         partition_pruning = bucket_pruning = file_skipping = None
     else:
         partition_pruning = _partition_pruning(stats, scan)
@@ -586,6 +585,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStat
         split_size_p95=sz_p95,
         has_auth=plan_has_auth,
         native_planned=native_planned,
+        planning_counters=stats.planning_counters if stats is not None else None,
         splits=split_infos if verbose else None,
     )
 

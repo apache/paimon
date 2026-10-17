@@ -18,6 +18,7 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -28,7 +29,9 @@ from pypaimon.catalog.table_query_auth import (
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
+from pypaimon.read.scan_stats import ScanStats
 
 
 class _FakeField:
@@ -58,15 +61,6 @@ class _FakeSplit:
 
     def merged_row_count(self):
         return 100
-
-
-class _FakePlan:
-    def __init__(self, splits, snapshot_id=None):
-        self._splits = splits
-        self.snapshot_id = snapshot_id
-
-    def splits(self):
-        return self._splits
 
 
 class _FakeTable:
@@ -124,7 +118,7 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
 
     def test_no_auth_returns_original_plan(self):
         result = TableQueryAuthResult(None, None)
-        plan = _FakePlan([_FakeSplit()])
+        plan = Plan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertIs(converted, plan)
 
@@ -134,7 +128,7 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
 
     def test_empty_filter_and_masking_returns_original(self):
         result = TableQueryAuthResult([], {})
-        plan = _FakePlan([_FakeSplit()])
+        plan = Plan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertIs(converted, plan)
 
@@ -177,22 +171,42 @@ class TestTableQueryAuthResultConvertPlan(unittest.TestCase):
 
     def test_wraps_splits_with_filter(self):
         result = TableQueryAuthResult([_simple_filter_json()], None)
-        plan = _FakePlan([_FakeSplit("s1"), _FakeSplit("s2")])
+        stats = ScanStats(entries_after_stats=2)
+        plan = Plan([_FakeSplit("s1"), _FakeSplit("s2")], _scan_stats=stats)
         converted = result.convert_plan(plan)
+        self.assertIs(converted.stats(), stats)
         self.assertEqual(len(converted.splits()), 2)
         for qs in converted.splits():
             self.assertIsInstance(qs, QueryAuthSplit)
 
+    def test_auth_wrapping_preserves_lazy_native_statistics(self):
+        result = TableQueryAuthResult([_simple_filter_json()], None)
+        handle = object()
+        plan = Plan([_FakeSplit("s1")], snapshot_id=7, _native_stats=handle)
+        counters = ScanStats.empty_native()
+        counters.entries_total = 10
+        counters.planning_counters['manifest_entries_read'] = 10
+        with patch.object(ScanStats, 'from_native', return_value=counters) as convert:
+            wrapped = result.convert_plan(plan)
+            convert.assert_not_called()
+            self.assertEqual(wrapped.snapshot_id, 7)
+            self.assertIsInstance(wrapped.splits()[0], QueryAuthSplit)
+            self.assertIs(wrapped.stats(), counters)
+            self.assertIs(wrapped.stats(), counters)
+            self.assertEqual(counters.planning_counters['manifest_entries_read'], 10)
+            self.assertEqual(counters.planning_counters['final_splits'], 1)
+            convert.assert_called_once_with(handle)
+
     def test_wraps_splits_with_masking(self):
         result = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
-        plan = _FakePlan([_FakeSplit()])
+        plan = Plan([_FakeSplit()])
         converted = result.convert_plan(plan)
         self.assertEqual(len(converted.splits()), 1)
         self.assertIsInstance(converted.splits()[0], QueryAuthSplit)
 
     def test_inner_split_preserved(self):
         result = TableQueryAuthResult([_simple_filter_json()], None)
-        plan = _FakePlan([_FakeSplit("original")])
+        plan = Plan([_FakeSplit("original")])
         converted = result.convert_plan(plan)
         self.assertEqual(converted.splits()[0].split.name, "original")
 
@@ -370,7 +384,7 @@ class TestPlanForWrite(unittest.TestCase):
     def test_no_restriction_returns_plan_unchanged(self):
         from pypaimon.read.table_scan import TableScan
 
-        plain_plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plain_plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plain_plan, auth_result=None)
         result = TableScan.plan_for_write(scan)
         self.assertIs(result, plain_plan)
@@ -379,7 +393,7 @@ class TestPlanForWrite(unittest.TestCase):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult([_simple_filter_json()], None)
-        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
             TableScan.plan_for_write(scan)
@@ -388,7 +402,7 @@ class TestPlanForWrite(unittest.TestCase):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult(None, {"col": '{"name":"NULL"}'})
-        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
             TableScan.plan_for_write(scan)
@@ -397,7 +411,7 @@ class TestPlanForWrite(unittest.TestCase):
         from pypaimon.read.table_scan import TableScan
 
         auth = TableQueryAuthResult([_simple_filter_json()], None)
-        empty_plan = _FakePlan([], snapshot_id=5)
+        empty_plan = Plan([], snapshot_id=5)
         scan = _FakeScan(empty_plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
             TableScan.plan_for_write(scan)
@@ -405,7 +419,7 @@ class TestPlanForWrite(unittest.TestCase):
     def test_no_restrictions_allows_write(self):
         from pypaimon.read.table_scan import TableScan
 
-        plan = _FakePlan([_FakeSplit()], snapshot_id=5)
+        plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=None)
         result = TableScan.plan_for_write(scan)
         self.assertIs(result, plan)

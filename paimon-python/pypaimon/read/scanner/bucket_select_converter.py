@@ -392,7 +392,7 @@ class _Selector:
         # ``total_buckets <= 0`` shows up for postpone / legacy / special
         # entries and must NOT be pruned: returning False here would drop
         # rows the writer hashed under a different convention. Fail open.
-        if total_buckets <= 0:
+        if bucket < 0 or total_buckets <= 0:
             return True
         try:
             return bucket in self._compute(partition, total_buckets)
@@ -430,8 +430,9 @@ class _Selector:
                 self._predicate, partition_field_names, partition_values)
 
         if effective_predicate is _AlwaysFalse:
-            # No row in this partition can match — empty bucket set.
-            frozen: FrozenSet[int] = frozenset()
+            # Java cannot extract Equal/In values from AlwaysFalse. Leave
+            # rejection to the partition predicate rather than the key hash.
+            frozen: FrozenSet[int] = frozenset(range(total_buckets))
             self._cache[cache_key] = frozen
             return frozen
 

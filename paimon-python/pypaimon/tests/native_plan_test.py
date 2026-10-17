@@ -99,6 +99,32 @@ def _scan(native_enabled, file_scanner):
 
 class NativePlanTest(unittest.TestCase):
 
+    def test_native_final_statistics_preserve_work_and_saturate_unknown_sizes(self):
+        from pypaimon.read.scan_stats import ScanStats
+        counters = ScanStats.empty_native()
+        counters.planning_counters.update(
+            manifest_entries_read=10, split_candidates_built=5, splits_before_limit=5)
+        maximum = 2 ** 63 - 1
+        splits = [SimpleNamespace(files=[SimpleNamespace(file_size=size) for size in sizes])
+                  for sizes in [[maximum, -1], [maximum, 2]]]
+        plan = Plan(splits, 7, _native_stats=object(), _stats_limit=1)
+        with patch.object(ScanStats, 'from_native', return_value=counters) as convert:
+            stats = plan.stats()
+            self.assertIs(plan.stats(), stats)
+            convert.assert_called_once()
+        actual = stats.planning_counters
+        self.assertEqual(actual['manifest_entries_read'], 10)
+        self.assertEqual(actual['split_candidates_built'], 5)
+        self.assertEqual(actual['splits_before_limit'], 5)
+        self.assertEqual(actual['final_splits'], 2)
+        self.assertEqual(actual['splits_after_limit'], 2)
+        self.assertEqual(actual['final_files'], 4)
+        self.assertEqual(actual['planned_data_file_bytes'], 2 ** 64 - 1)
+        self.assertEqual(actual['limit'], 1)
+        zero = Plan([], 7, _native_stats=object(), _stats_limit=0)
+        with patch.object(ScanStats, 'from_native', return_value=ScanStats.empty_native()):
+            self.assertEqual(zero.stats().planning_counters['limit'], 0)
+
     def test_variant_read_type_matches_java_interop_fixture(self):
         actual = _variant_read_type_json(
             [DataField(7, 'payload', AtomicType('VARIANT'))],
@@ -643,13 +669,16 @@ class NativePlanTest(unittest.TestCase):
                 fs.scan.assert_called_once_with()
 
     def test_scan_with_stats_preserves_native_empty_snapshot(self):
+        from pypaimon.read.scan_stats import ScanStats
         fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)
-        native = Plan([], 7)
+        counters = ScanStats.empty_native()
+        native = Plan([], 7, _scan_stats=counters)
         with patch('pypaimon.read.native_plan.native_plan', return_value=native) as np:
             plan, stats = scan.scan_with_stats()
         self.assertEqual(plan.snapshot_id, 7)
-        self.assertIsNone(stats)
+        self.assertIs(stats, counters)
+        self.assertIs(plan.stats(), counters)
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
             row_ranges=None)
@@ -1213,7 +1242,7 @@ class NativePlanTest(unittest.TestCase):
             with self.subTest(snapshot_id=snapshot_id, legacy=legacy):
                 table = _scan(True, Mock()).table
                 table.table_schema = Mock(fields=[], partition_keys=[])
-                rust_plan = SimpleNamespace(splits=lambda: [])
+                rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None)
                 if not legacy:
                     rust_plan.snapshot_id = lambda: snapshot_id
                 scan = SimpleNamespace(plan=lambda: rust_plan)
@@ -1233,7 +1262,7 @@ class NativePlanTest(unittest.TestCase):
         table.table_schema = TableSchema(0, [])
         table.options = CoreOptions(Options({}))
         table.current_branch.return_value = 'b1'
-        rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 7)
+        rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None, snapshot_id=lambda: 7)
         scan = Mock()
         scan.plan.return_value = rust_plan
         rt = Mock()
@@ -1357,7 +1386,7 @@ class NativePlanTest(unittest.TestCase):
     def test_native_plan_forwards_explicit_incremental_mode(self):
         table = _scan(True, Mock()).table
         table.table_schema = Mock(fields=[], partition_keys=[])
-        rust_plan = SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 4)
+        rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None, snapshot_id=lambda: 4)
         rust_scan = Mock()
         rust_scan.plan.return_value = rust_plan
         builder = Mock()

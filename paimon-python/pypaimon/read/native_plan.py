@@ -514,7 +514,8 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    return _from_native_plan(table, scan.plan())
+    rust_plan = scan.plan()
+    return _from_native_plan(table, rust_plan)
 
 
 def _native_stream_auth_supported(table):
@@ -576,4 +577,4 @@ def _from_native_plan(table, rust_plan) -> Plan:
         # Older bindings cannot distinguish an empty committed snapshot from a
         # table without snapshots. Let the Python scanner recover the metadata.
         raise RuntimeError("Native runtime cannot report an empty plan's snapshot")
-    return Plan(splits, snapshot_id=snapshot_id)
+    return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())

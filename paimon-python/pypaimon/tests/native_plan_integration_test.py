@@ -1548,7 +1548,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
     @unittest.skipUnless(native_method_available('Plan', 'snapshot_id'),
                          "pypaimon_rust snapshot metadata API not installed")
-    def test_native_explain_reports_split_metadata_without_pruning_counters(self):
+    def test_native_explain_reports_split_metadata_and_pruning_counters(self):
         self.cat.create_table(
             'default.explain_metadata_t', Schema.from_pyarrow_schema(
                 self.schema, options={'metadata.stats-mode': 'full'}), False)
@@ -1563,13 +1563,20 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(result.snapshot_id, 2)
         self.assertEqual(result.split_count, 1)
         self.assertEqual(result.file_count, 1)
-        self.assertIn('pruning not tracked', str(result))
+        self.assertNotIn('pruning not tracked', str(result))
         self.assertIsNone(result.file_skipping)
+        self.assertEqual(result.planning_counters['manifest_entries_read'], 2)
+        self.assertEqual(result.planning_counters['manifest_entries_pruned_by_data_stats'], 1)
+        self.assertEqual(result.planning_counters['final_files'], 1)
         builder.with_filter(builder.new_predicate_builder().equal('k', 99))
         empty = builder.explain()
         self.assertTrue(empty.native_planned)
         self.assertEqual(empty.snapshot_id, 2)
         self.assertEqual(empty.split_count, 0)
+        self.assertIsNone(empty.file_skipping)
+        self.assertEqual(empty.planning_counters['manifest_entries_read'], 2)
+        self.assertEqual(empty.planning_counters['manifest_entries_pruned_by_data_stats'], 2)
+        self.assertEqual(empty.planning_counters['final_files'], 0)
 
     def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(

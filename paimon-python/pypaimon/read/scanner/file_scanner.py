@@ -699,6 +699,7 @@ class FileScanner:
         """
         self.scan_stats = ScanStats()
         plan = self.scan()
+        plan._scan_stats = self.scan_stats
         return plan, self.scan_stats
 
     def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'FileScanner':

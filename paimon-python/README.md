@@ -362,7 +362,23 @@ print(explanation.native_planned)
 The adapter checks the installed binding's capabilities and falls back to the
 Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
-and split metadata; native pruning counters are not exposed.
+and split metadata plus counters for actual Native planning work, available in
+`explanation.planning_counters`. Statistics collection retains early manifest,
+sidecar and LIMIT optimizations. The Python scanner's before/after pruning funnel
+is unavailable for Native plans because skipped entries are not decoded.
+Final split, file and byte totals describe the returned Plan after Python's
+post-processing and deferred LIMIT; decoding counters retain the Native work.
+Every Native plan includes lightweight counters. Use
+`plan = builder.new_scan().plan()` followed by `plan.stats()`; conversion to
+Python counters is deferred until this getter is called. The existing
+`plan, stats = builder.new_scan().scan_with_stats()` API remains available
+for both planners. Snapshot metadata is available separately as `plan.snapshot_id`.
+
+Fixed-bucket Native planning also handles ORs of equality/IN predicates,
+intersects repeated key constraints, and specializes predicates per partition.
+It follows Java's 1000-candidate combination limit and keeps scans conservative
+when a predicate cannot determine buckets. Masked fields do not drive raw-value
+bucket pruning.
 
 To run both split planning and data-file reading in Rust, enable the independent
 native-read option:
