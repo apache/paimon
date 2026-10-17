@@ -1162,8 +1162,8 @@ class TestShreddingWrite(unittest.TestCase):
             overflow_py = GenericVariant(overflow, result['metadata']).to_python()
             self.assertIn('extra', overflow_py)
 
-    def test_scalar_type_mismatch_and_overflow_keep_residual(self):
-        cases = [
+    def test_scalar_shredding_preserves_types_and_values(self):
+        residual_cases = [
             (0, pa.float64()), (2.5, pa.int64()), (2.0, pa.int64()),
             (True, pa.int64()), (False, pa.float64()), (1, pa.bool_()),
             (None, pa.int64()), ('12', pa.int64()), ([], pa.string()),
@@ -1173,16 +1173,7 @@ class TestShreddingWrite(unittest.TestCase):
             (Decimal('123.45'), pa.decimal128(4, 2)),
             (datetime.datetime(2024, 1, 1, microsecond=1), pa.timestamp('ms')),
         ]
-        for value, arrow_type in cases:
-            with self.subTest(value=value, arrow_type=arrow_type):
-                gv = GenericVariant.from_python(value)
-                schema = VariantSchema(value_idx=0, typed_idx=1,
-                                       scalar_arrow_type=arrow_type)
-                row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
-                self.assertEqual(row, {'value': gv.value(), 'typed_value': None})
-
-    def test_compatible_scalars_still_use_typed_column(self):
-        cases = [
+        typed_cases = [
             (True, pa.bool_()), (-128, pa.int8()), (127, pa.int8()),
             (2 ** 63 - 1, pa.int64()), (1.25, pa.float64()),
             (-0.0, pa.float64()), ('hello', pa.string()), (b'abc', pa.binary()),
@@ -1190,14 +1181,17 @@ class TestShreddingWrite(unittest.TestCase):
             (datetime.date(2024, 1, 1), pa.date32()),
             (datetime.datetime(2024, 1, 1, microsecond=1), pa.timestamp('us')),
         ]
-        for value, arrow_type in cases:
-            with self.subTest(value=value, arrow_type=arrow_type):
-                gv = GenericVariant.from_python(value)
-                schema = VariantSchema(value_idx=0, typed_idx=1,
-                                       scalar_arrow_type=arrow_type)
-                row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
-                self.assertIsNone(row['value'])
-                self.assertEqual(rebuild_value(row, schema, {}), gv.value())
+        for residual, cases in ((True, residual_cases), (False, typed_cases)):
+            for value, arrow_type in cases:
+                with self.subTest(value=value, arrow_type=arrow_type):
+                    gv = GenericVariant.from_python(value)
+                    schema = VariantSchema(value_idx=0, typed_idx=1,
+                                           scalar_arrow_type=arrow_type)
+                    row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
+                    self.assertEqual(row['value'], gv.value() if residual else None)
+                    if residual:
+                        self.assertIsNone(row['typed_value'])
+                    self.assertEqual(rebuild_value(row, schema, {}), gv.value())
 
     def test_float_wire_type_is_preserved(self):
         metadata = GenericVariant.from_python(0).metadata()
