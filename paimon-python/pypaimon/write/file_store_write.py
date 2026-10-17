@@ -179,13 +179,10 @@ class FileStoreWrite:
             default = -1 if self.table.is_primary_key_table else 1
             return self._seq_number_stats(partition).get(bucket, default)
 
-        # Dedicated Blob files are an append-table layout. PK tables require
-        # managed packs and references attached to their key-value Parquet files.
-        if self._has_blob_columns():
-            if self.table.is_primary_key_table:
-                raise NotImplementedError(
-                    'Primary-key Blob writes require the native writer; '
-                    'enable write.native.enabled and write Arrow batches')
+        # Dedicated Blob files are an append-table layout. Primary-key tables
+        # store descriptors in the key-value file and list packs in a .blobref
+        # sidecar written by KeyValueDataWriter.
+        if self._has_blob_columns() and not self.table.is_primary_key_table:
             return DedicatedFormatWriter(
                 table=self.table,
                 partition=partition,
@@ -197,7 +194,8 @@ class FileStoreWrite:
                 changelog_producer=self.changelog_producer,
                 blob_uri_reader_factory=self.blob_uri_reader_factory,
             )
-        elif self._has_vector_columns() and options.with_vector_format():
+        elif (self._has_vector_columns() and options.with_vector_format()
+              and not (self.table.is_primary_key_table and self._has_blob_columns())):
             return DataVectorWriter(
                 table=self.table,
                 partition=partition,

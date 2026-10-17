@@ -631,7 +631,13 @@ class Blob(ABC):
     @staticmethod
     def _blob_ref_from_descriptor(
             descriptor: 'BlobDescriptor', file_io=None, uri_reader_factory=None,
+            table_path=None,
     ) -> 'BlobRef':
+        if table_path:
+            from pypaimon.blob.managed_blob_payload import resolve_table_blob_uri
+            uri = resolve_table_blob_uri(table_path, descriptor.uri)
+            if uri != descriptor.uri:
+                descriptor = BlobDescriptor(uri, descriptor.offset, descriptor.length)
         if uri_reader_factory is None:
             if file_io is None:
                 raise ValueError("file_io is required to resolve BlobDescriptor bytes")
@@ -643,6 +649,7 @@ class Blob(ABC):
     @staticmethod
     def from_descriptor_bytes(
             data: Optional[bytes], file_io=None, uri_reader_factory=None,
+            table_path=None,
     ) -> Optional['Blob']:
         """Build a Blob from bytes known to contain a descriptor.
 
@@ -669,7 +676,8 @@ class Blob(ABC):
             raise ValueError(
                 "Expected BlobDescriptor bytes, got raw bytes") from exc
         return Blob._blob_ref_from_descriptor(
-            descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
+            descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory,
+            table_path=table_path)
 
     @staticmethod
     def from_view(view_struct: BlobViewStruct) -> 'BlobView':
@@ -678,6 +686,7 @@ class Blob(ABC):
     @staticmethod
     def from_bytes(
             data: Optional[bytes], file_io=None, uri_reader_factory=None, allow_blob_data: bool = True,
+            table_path=None,
     ) -> Optional['Blob']:
         if data is None:
             return None
@@ -695,7 +704,8 @@ class Blob(ABC):
                     + ("" if allow_blob_data else " (allow_blob_data=False)")
                 ) from exc
             return Blob._blob_ref_from_descriptor(
-                descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
+                descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory,
+                table_path=table_path)
         return BlobData(data)
 
 

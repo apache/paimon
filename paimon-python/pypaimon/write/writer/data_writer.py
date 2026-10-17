@@ -287,15 +287,16 @@ class DataWriter(ABC):
         logical_data = data
         extra_files = []
         row_sidecar_path = None
+        managed_reference_path = None
         changelog_meta = None
         shared_shredding_stats = {}
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
 
-        # One data file means up to three files on disk -- the data file, its row
-        # sidecar and its changelog -- and none of them is committed until all of
-        # them have landed. A caller that retries the flush still holds these
-        # rows in its buffer, so publishing the data file before the changelog
+        # One data file means the data file plus its row sidecar, managed BLOB
+        # reference and changelog. None of them is committed until all of them
+        # have landed. A caller that retries the flush still holds these rows
+        # in its buffer, so publishing the data file before the changelog
         # exists would make the retry write a second copy of rows the first meta
         # already covers.
         try:
@@ -310,6 +311,12 @@ class DataWriter(ABC):
                     fields=self._row_sidecar_fields(logical_data),
                     zstd_level=self.zstd_level)
                 extra_files.append(row_sidecar_name)
+
+            additional_extra_files = self._additional_extra_files(file_path, logical_data)
+            if additional_extra_files:
+                extra_files.extend(additional_extra_files)
+                managed_reference_path = self._managed_reference_path(
+                    file_path, additional_extra_files)
 
             statistics = self._data_file_statistics(logical_data)
             data_meta = self._create_data_file_meta(
@@ -335,6 +342,8 @@ class DataWriter(ABC):
             self.file_io.delete_quietly(file_path)
             if row_sidecar_path is not None:
                 self.file_io.delete_quietly(row_sidecar_path)
+            if managed_reference_path is not None:
+                self.file_io.delete_quietly(managed_reference_path)
             raise
 
         self._finish_data_file(data_meta, changelog_meta, shared_shredding_stats)
@@ -522,6 +531,18 @@ class DataWriter(ABC):
         # New files use Java's escaped partition names, including on the pure
         # Python writer path. Never introduce another Python-specific layout.
         return canonical_data_file_path(self.table, self.partition, self.bucket, file_name)
+
+    def _additional_extra_files(self, file_path: str, data: pa.Table) -> List[str]:
+        """Sidecars written beside one data file. Empty for writers that have none."""
+        return []
+
+    @staticmethod
+    def _managed_reference_path(file_path: str, extra_files: List[str]):
+        from pypaimon.blob.managed_blob_reference_file import ManagedBlobReferenceFile
+        if any(name.endswith(ManagedBlobReferenceFile.REFERENCE_FILE_SUFFIX)
+               for name in extra_files):
+            return ManagedBlobReferenceFile.sidecar_path(file_path)
+        return None
 
     def _should_write_row_sidecar(self) -> bool:
         return (

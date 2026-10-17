@@ -300,6 +300,16 @@ def is_blob_file_field(field: 'DataField') -> bool:
     return is_blob_file_type(field.type)
 
 
+def managed_blob_field_names(fields, inline_fields=None):
+    """Blob-file fields stored in managed packs rather than inline descriptors."""
+    inline = inline_fields or set()
+    return {
+        field.name
+        for field in fields
+        if is_blob_file_field(field) and field.name not in inline
+    }
+
+
 @dataclass
 class DataField:
     FIELD_ID = "id"
