@@ -1514,7 +1514,6 @@ class TestVariantPaimonTable(unittest.TestCase):
                              'NativeTableWrite' if native else 'BatchTableWrite')
             commit = builder.new_commit()
             try:
-                # Multiple rows and multiple write calls through the actual writer.
                 for start in range(0, len(gvs), 3):
                     batch = pa.RecordBatch.from_arrays([
                         pa.array(range(start, min(start + 3, len(gvs))), type=pa.int64()),
