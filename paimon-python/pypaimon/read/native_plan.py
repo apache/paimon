@@ -577,4 +577,6 @@ def _from_native_plan(table, rust_plan) -> Plan:
         # Older bindings cannot distinguish an empty committed snapshot from a
         # table without snapshots. Let the Python scanner recover the metadata.
         raise RuntimeError("Native runtime cannot report an empty plan's snapshot")
-    return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())
+    # Bindings before Plan.stats() plan natively but report no counters.
+    stats = getattr(rust_plan, 'stats', None)
+    return Plan(splits, snapshot_id=snapshot_id, _native_stats=stats() if callable(stats) else None)

@@ -125,6 +125,15 @@ class NativePlanTest(unittest.TestCase):
         with patch.object(ScanStats, 'from_native', return_value=ScanStats.empty_native()):
             self.assertEqual(zero.stats().planning_counters['limit'], 0)
 
+    def test_bindings_without_plan_stats_still_plan_natively(self):
+        from pypaimon.read.native_plan import _from_native_plan
+        table = Mock(table_schema=SimpleNamespace(fields=[], partition_keys=[]),
+                     trimmed_primary_keys_fields=[])
+        table.options.native_read_enabled.return_value = False
+        plan = _from_native_plan(table, SimpleNamespace(splits=lambda: [], snapshot_id=lambda: 7))
+        self.assertEqual(plan.snapshot_id, 7)
+        self.assertIsNone(plan.stats())
+
     def test_variant_read_type_matches_java_interop_fixture(self):
         actual = _variant_read_type_json(
             [DataField(7, 'payload', AtomicType('VARIANT'))],
