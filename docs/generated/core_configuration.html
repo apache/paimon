@@ -45,6 +45,18 @@ under the License.
             <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
         </tr>
         <tr>
+            <td><h5>append.compaction.row-group-copy.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable Parquet RowGroup copy fast path for append-only table compaction. When enabled and all whitelist conditions are met, compaction concatenates compressed RowGroups without decoding and re-encoding rows.</td>
+        </tr>
+        <tr>
+            <td><h5>append.compaction.row-group-copy.min-average-compressed-row-group-size</h5></td>
+            <td style="word-wrap: break-word;">8 mb</td>
+            <td>MemorySize</td>
+            <td>Minimum average compressed RowGroup size required to use the RowGroup copy fast path. The average is computed as the sum of compressed RowGroup sizes from Parquet footers divided by the total RowGroup count in the compaction batch. Before reading footers, batches whose average input file size is below this threshold are rejected because they cannot reach the threshold when each file has at least one RowGroup. Set to 0 to disable the size guard.</td>
+        </tr>
+        <tr>
             <td><h5>async-file-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

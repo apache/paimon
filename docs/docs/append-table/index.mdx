@@ -121,6 +121,22 @@ Sorting can narrow the value ranges in each file and improve pruning. Start with
 [File indexes](./query-performance#file-indexes) provide additional filtering for supported predicates, including
 Bloom filter, bitmap, and range bitmap indexes.
 
+**Parquet RowGroup copy fast path**
+
+For Parquet files, compaction normally decodes every row and re-encodes it into new files. By setting
+`append.compaction.row-group-copy.enabled` to true, compaction instead concatenates the compressed RowGroups of the
+input files directly and only rewrites the file footer, which avoids decode/re-encode entirely and significantly
+reduces compaction cost. The fast path is applied only when all input files are eligible (same schema, same codec,
+no deletion vectors, no row tracking, no file index or bloom filter, not written with Parquet writer v2, etc.);
+otherwise compaction silently falls back to the traditional rewrite path.
+
+By default, RowGroup copy is used only when the average compressed RowGroup size in the compaction
+batch is at least `append.compaction.row-group-copy.min-average-compressed-row-group-size` (8 MiB).
+Small-file compaction batches are rejected early using manifest file sizes before reading Parquet
+footers. Set the threshold to `0` to disable the size guard. RowGroup copy is also disabled when
+`scan.ignore-corrupt-files` is true, because copying damaged pages can hide healthy inputs in the
+same output file.
+
 ### Row-Level Operations {#row-level-operations}
 
 [Row-level operations](./row-level-operations) explains Spark SQL `DELETE`, `UPDATE`, and `MERGE INTO`, including the

@@ -42,6 +42,7 @@ import org.apache.parquet.column.statistics.FloatStatistics;
 import org.apache.parquet.column.statistics.IntStatistics;
 import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.PrimitiveType;
 
@@ -50,6 +51,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
@@ -87,17 +89,26 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
             // immediately visible after close.
             Map<String, Statistics<?>> columnStats =
                     ParquetUtil.extractColumnStats((ParquetMetadata) writerMetadata);
-            SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
-            return IntStream.range(0, rowType.getFieldCount())
-                    .mapToObj(
-                            i -> {
-                                DataField field = rowType.getFields().get(i);
-                                return toFieldStats(
-                                        field, columnStats.get(field.name()), collectors[i]);
-                            })
-                    .toArray(SimpleColStats[]::new);
+            return toFieldStats(columnStats);
         }
         return extract(fileIO, path, length);
+    }
+
+    /** Extract column stats from the given RowGroups without reading the file. */
+    public SimpleColStats[] extractFromBlocks(List<BlockMetaData> blocks) {
+        return toFieldStats(ParquetUtil.extractColumnStatsFromBlocks(blocks));
+    }
+
+    private SimpleColStats[] toFieldStats(Map<String, Statistics<?>> columnStats) {
+        SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
+        return IntStream.range(0, rowType.getFieldCount())
+                .mapToObj(
+                        i -> {
+                            DataField field = rowType.getFields().get(i);
+                            return toFieldStats(
+                                    field, columnStats.get(field.name()), collectors[i]);
+                        })
+                .toArray(SimpleColStats[]::new);
     }
 
     @Override
@@ -105,19 +116,7 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
             FileIO fileIO, Path path, long length) throws IOException {
         Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
                 ParquetUtil.extractColumnStats(fileIO, path, length, options);
-        SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
-        return Pair.of(
-                IntStream.range(0, rowType.getFieldCount())
-                        .mapToObj(
-                                i -> {
-                                    DataField field = rowType.getFields().get(i);
-                                    return toFieldStats(
-                                            field,
-                                            statsPair.getLeft().get(field.name()),
-                                            collectors[i]);
-                                })
-                        .toArray(SimpleColStats[]::new),
-                statsPair.getRight());
+        return Pair.of(toFieldStats(statsPair.getLeft()), statsPair.getRight());
     }
 
     private SimpleColStats toFieldStats(

@@ -1126,6 +1126,32 @@ public class CoreOptions implements Serializable {
                             "Ratio of the deleted rows in a data file to be forced compacted for "
                                     + "append-only table.");
 
+    public static final ConfigOption<Boolean> APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED =
+            key("append.compaction.row-group-copy.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable Parquet RowGroup copy fast path for append-only "
+                                    + "table compaction. When enabled and all whitelist conditions "
+                                    + "are met, compaction concatenates compressed RowGroups "
+                                    + "without decoding and re-encoding rows.");
+
+    public static final ConfigOption<MemorySize>
+            APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE =
+                    key("append.compaction.row-group-copy.min-average-compressed-row-group-size")
+                            .memoryType()
+                            .defaultValue(MemorySize.ofMebiBytes(8))
+                            .withDescription(
+                                    "Minimum average compressed RowGroup size required to use the "
+                                            + "RowGroup copy fast path. The average is computed as "
+                                            + "the sum of compressed RowGroup sizes from Parquet "
+                                            + "footers divided by the total RowGroup count in the "
+                                            + "compaction batch. Before reading footers, batches "
+                                            + "whose average input file size is below this "
+                                            + "threshold are rejected because they cannot reach "
+                                            + "the threshold when each file has at least one "
+                                            + "RowGroup. Set to 0 to disable the size guard.");
+
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -3993,6 +4019,15 @@ public class CoreOptions implements Serializable {
 
     public double compactionDeleteRatioThreshold() {
         return options.get(COMPACTION_DELETE_RATIO_THRESHOLD);
+    }
+
+    public boolean appendCompactionRowGroupCopyEnabled() {
+        return options.get(APPEND_COMPACTION_ROW_GROUP_COPY_ENABLED);
+    }
+
+    public long appendCompactionRowGroupCopyMinAverageCompressedRowGroupSize() {
+        return options.get(APPEND_COMPACTION_ROW_GROUP_COPY_MIN_AVG_COMPRESSED_ROW_GROUP_SIZE)
+                .getBytes();
     }
 
     public long dynamicBucketTargetRowNum() {
