@@ -18,13 +18,16 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.RowDataKeyAndBucketExtractor;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -65,7 +68,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
     public void testExtract() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
-        RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
+        FixedBucketRowKeyExtractor expected = extractor(schema);
         CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema);
 
         int numTests = random.nextInt(1000) + 1;
@@ -85,7 +88,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
                             v1,
                             StringData.fromString(k2),
                             StringData.fromString(v2));
-            expected.setRecord(rowData);
+            expected.setRecord(new FlinkRowWrapper(rowData));
 
             Map<String, String> data = new HashMap<>();
             data.put("pt1", pt1);
@@ -109,7 +112,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
     public void testNullPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
-        RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
+        FixedBucketRowKeyExtractor expected = extractor(schema);
         CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema);
 
         long k1 = random.nextLong();
@@ -120,7 +123,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
         GenericRowData rowData =
                 GenericRowData.of(
                         null, null, k1, v1, StringData.fromString(k2), StringData.fromString(v2));
-        expected.setRecord(rowData);
+        expected.setRecord(new FlinkRowWrapper(rowData));
 
         Map<String, String> data = new HashMap<>();
         data.put("pt1", null);
@@ -143,7 +146,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
     public void testEmptyPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
-        RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
+        FixedBucketRowKeyExtractor expected = extractor(schema);
         CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema);
 
         long k1 = random.nextLong();
@@ -159,7 +162,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
                         v1,
                         StringData.fromString(k2),
                         StringData.fromString(v2));
-        expected.setRecord(rowData);
+        expected.setRecord(new FlinkRowWrapper(rowData));
 
         Map<String, String> data = new HashMap<>();
         data.put("pt1", "");
@@ -178,6 +181,44 @@ public class CdcRecordKeyAndBucketExtractorTest {
         assertThat(actual.bucket()).isEqualTo(expected.bucket());
     }
 
+    @Test
+    public void testPerPartitionBucketMapping() throws Exception {
+        TableSchema schema = createTableSchema();
+        Map<String, String> data = new HashMap<>();
+        data.put("pt1", "p1");
+        data.put("pt2", "1");
+        data.put("k1", "1");
+        data.put("v1", "10");
+        data.put("k2", "k2");
+        data.put("v2", "v2");
+
+        CdcRecord record = new CdcRecord(RowKind.INSERT, data);
+        CdcRecordKeyAndBucketExtractor partitionExtractor =
+                new CdcRecordKeyAndBucketExtractor(schema);
+        partitionExtractor.setRecord(record);
+
+        Map<BinaryRow, Integer> bucketCounts = new HashMap<>();
+        bucketCounts.put(partitionExtractor.partition().copy(), 2);
+        PartitionBucketMapping mapping = new PartitionBucketMapping(4, bucketCounts);
+
+        FixedBucketRowKeyExtractor expected = new FixedBucketRowKeyExtractor(schema, mapping);
+        expected.setRecord(
+                new FlinkRowWrapper(
+                        GenericRowData.of(
+                                StringData.fromString("p1"),
+                                1,
+                                1L,
+                                10,
+                                StringData.fromString("k2"),
+                                StringData.fromString("v2"))));
+        CdcRecordKeyAndBucketExtractor actual = new CdcRecordKeyAndBucketExtractor(schema, mapping);
+        actual.setRecord(record);
+
+        assertThat(actual.partition()).isEqualTo(expected.partition());
+        assertThat(actual.bucket()).isEqualTo(expected.bucket());
+        org.assertj.core.api.Assertions.assertThat(actual.bucket()).isLessThan(2);
+    }
+
     private TableSchema createTableSchema() throws Exception {
         return SchemaUtils.forceCommit(
                 new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
@@ -187,5 +228,10 @@ public class CdcRecordKeyAndBucketExtractorTest {
                         Arrays.asList("pt1", "pt2", "k1", "k2"),
                         Collections.singletonMap("bucket", "1"),
                         ""));
+    }
+
+    private FixedBucketRowKeyExtractor extractor(TableSchema schema) {
+        return new FixedBucketRowKeyExtractor(
+                schema, PartitionBucketMapping.defaultBuckets(schema.numBuckets()));
     }
 }

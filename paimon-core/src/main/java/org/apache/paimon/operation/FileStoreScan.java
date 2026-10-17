@@ -69,6 +69,11 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
 
+    /**
+     * Clears the partition and bucket filters set by {@link #withPartitionBucket(BinaryRow, int)}.
+     */
+    FileStoreScan clearPartitionAndBucketFilters();
+
     FileStoreScan withSnapshot(long snapshotId);
 
     FileStoreScan withSnapshot(Snapshot snapshot);
