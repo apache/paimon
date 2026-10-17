@@ -52,6 +52,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from pypaimon.data.generic_variant import GenericVariant, _Type, _variant_get_type
+
 from pypaimon.data._variant_binary import (
     _OBJECT,
     _U8_MAX, _U32_SIZE,
@@ -856,6 +858,47 @@ def shredding_schema_to_arrow_type(obj_fields: List[ObjectField]) -> pa.StructTy
     ])
 
 
+def _try_shred_scalar(field_bytes: bytes, metadata: bytes, arrow_type: pa.DataType):
+    kind = _variant_get_type(field_bytes, 0)
+    if kind == _Type.DOUBLE:
+        compatible = pa.types.is_float64(arrow_type)
+    elif kind == _Type.FLOAT:
+        compatible = pa.types.is_float32(arrow_type)
+    elif kind == _Type.LONG:
+        compatible = pa.types.is_integer(arrow_type)
+    elif kind == _Type.BOOLEAN:
+        compatible = pa.types.is_boolean(arrow_type)
+    elif kind == _Type.STRING:
+        compatible = pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type)
+    elif kind == _Type.BINARY:
+        compatible = pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type)
+    elif kind == _Type.DATE:
+        compatible = pa.types.is_date32(arrow_type)
+    elif kind == _Type.DECIMAL:
+        compatible = pa.types.is_decimal(arrow_type)
+    elif kind in (_Type.TIMESTAMP, _Type.TIMESTAMP_NTZ):
+        compatible = (pa.types.is_timestamp(arrow_type)
+                      and bool(arrow_type.tz) == (kind == _Type.TIMESTAMP))
+    else:
+        # JSON null stays in residual; two null columns mean absent.
+        return None
+    if not compatible:
+        return None
+
+    value = GenericVariant(field_bytes, metadata).to_python()
+    if kind == _Type.LONG:
+        bits = arrow_type.bit_width
+        lower = 0 if pa.types.is_unsigned_integer(arrow_type) else -(1 << (bits - 1))
+        if not lower <= value < lower + (1 << bits):
+            return None
+    elif kind in (_Type.DECIMAL, _Type.TIMESTAMP, _Type.TIMESTAMP_NTZ):
+        # Keep Arrow validation for scale, timestamp precision and overflow.
+        value = pa.scalar(value, type=arrow_type).as_py()
+        if _encode_scalar_to_value_bytes(value, arrow_type) != field_bytes:
+            return None
+    return value
+
+
 def _decompose_field_bytes(
     field_bytes: bytes,
     schema: VariantSchema,
@@ -875,22 +918,12 @@ def _decompose_field_bytes(
         A Python dict ``{'value': bytes_or_none, 'typed_value': val_or_dict_or_none}``
         suitable for building a PyArrow struct array row.
     """
-    from pypaimon.data.generic_variant import GenericVariant
-
     if schema.scalar_arrow_type is not None:
         try:
-            py_val = GenericVariant(field_bytes, metadata).to_python()
-            # Preserve JSON null; two null columns mean absent.
-            if py_val is None:
-                return {'value': field_bytes, 'typed_value': None}
-            arrow_type = schema.scalar_arrow_type
-            typed_val = pa.scalar(py_val, type=arrow_type).as_py()
-            # Require lossless encoding; Python equality conflates True, 1 and 1.0.
-            if _encode_scalar_to_value_bytes(typed_val, arrow_type) != field_bytes:
-                return {'value': field_bytes, 'typed_value': None}
+            typed_val = _try_shred_scalar(field_bytes, metadata, schema.scalar_arrow_type)
         except Exception:
-            return {'value': field_bytes, 'typed_value': None}
-        return {'value': None, 'typed_value': typed_val}
+            typed_val = None
+        return {'value': field_bytes if typed_val is None else None, 'typed_value': typed_val}
 
     if schema.object_fields is not None:
         if not field_bytes or (field_bytes[0] & 0x3) != _OBJECT:

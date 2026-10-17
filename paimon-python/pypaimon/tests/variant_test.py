@@ -51,6 +51,7 @@ import unittest
 import datetime
 import uuid
 from decimal import Decimal
+from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -1172,6 +1173,11 @@ class TestShreddingWrite(unittest.TestCase):
             (1.25, pa.float32()), (Decimal('1.234'), pa.decimal128(4, 2)),
             (Decimal('123.45'), pa.decimal128(4, 2)),
             (datetime.datetime(2024, 1, 1, microsecond=1), pa.timestamp('ms')),
+            (datetime.datetime(2500, 1, 1), pa.timestamp('ns')),
+            (datetime.datetime(2024, 1, 1), pa.timestamp('us', tz='UTC')),
+            (datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc), pa.timestamp('us')),
+            (True, pa.decimal128(4, 0)), (1, pa.decimal128(4, 0)),
+            (Decimal('1'), pa.int64()),
         ]
         typed_cases = [
             (True, pa.bool_()), (-128, pa.int8()), (127, pa.int8()),
@@ -1187,7 +1193,10 @@ class TestShreddingWrite(unittest.TestCase):
                     gv = GenericVariant.from_python(value)
                     schema = VariantSchema(value_idx=0, typed_idx=1,
                                            scalar_arrow_type=arrow_type)
-                    row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
+                    with patch('pypaimon.data.variant_shredding.pa.scalar', wraps=pa.scalar) as scalar:
+                        row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
+                    if not (pa.types.is_decimal(arrow_type) or pa.types.is_timestamp(arrow_type)):
+                        scalar.assert_not_called()
                     self.assertEqual(row['value'], gv.value() if residual else None)
                     if residual:
                         self.assertIsNone(row['typed_value'])
