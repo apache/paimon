@@ -19,9 +19,6 @@
 
 import logging
 import os
-import re
-import time
-from email.message import Message
 
 import requests
 from requests.structures import CaseInsensitiveDict
@@ -40,15 +37,14 @@ logger = logging.getLogger(__name__)
 
 def _native_headers(api):
     session = api.client.session
-    if (type(session) is not requests.Session or session.cookies or session.auth is not None
+    if (type(session) is not requests.Session or session.auth is not None
             or session.cert is not None or session.verify is not True or session.proxies or session.params
             or not session.trust_env or any(session.hooks.values())
             or set(session.adapters) != {'http://', 'https://'}
             or any(type(adapter) is not requests.adapters.HTTPAdapter for adapter in session.adapters.values())
             or api.client._timeout != (180, 180)
             or os.environ.get('REQUESTS_CA_BUNDLE') or os.environ.get('CURL_CA_BUNDLE')):
-        # Keep cookie selection/expiry and custom transport credentials in their
-        # owning Session. Rebuilding a client cannot preserve those semantics.
+        # Keep custom transport credentials and policies in their owning client.
         return None
     headers = CaseInsensitiveDict(session.headers)
     # Let each HTTP transport advertise only the codecs it can decode and manage
@@ -113,33 +109,11 @@ def _native_catalog(catalog, operation):
             resolved.update({'token.provider': 'bear', 'token': provider.token})
         # Reuse the resolved configuration, as RESTCatalogLoader does. Keep no
         # opaque native state on the Python catalog across pickle or process fork.
-        return PaimonCatalog(resolved, config_required=False, _capture_response_cookies=True), CatalogError
+        return PaimonCatalog(resolved, config_required=False), CatalogError
     except Exception as error:
         _raise_if_native_fork_safety_error(error)
         logger.debug('Native branch preparation failed: %s', error)
         return None
-
-
-def _restore_response_cookies(session, updates):
-    for url, cookies, received_at in updates:
-        request = requests.cookies.MockRequest(requests.Request('GET', url).prepare())
-        for value in cookies:
-            # Max-Age is relative to receipt, not the end of GET retries or
-            # response-body reads. Keep invalid attributes for CookieJar to
-            # reject using its usual parser.
-            elapsed = int(time.time()) - received_at
-
-            def adjust_max_age(match):
-                try:
-                    age = int(match[2])
-                    return match[1] + str(age - elapsed if age > 0 else age)
-                except ValueError:
-                    return match[0]
-
-            headers = Message()
-            headers.add_header('Set-Cookie', re.sub(
-                r'(;\s*max-age\s*=\s*)([^;]*)', adjust_max_age, value, flags=re.IGNORECASE))
-            session.cookies.extract_cookies(requests.cookies.MockResponse(headers), request)
 
 
 def call_branch(catalog, operation, identifier, *args):
@@ -161,7 +135,3 @@ def call_branch(catalog, operation, identifier, *args):
         DefaultErrorHandler.get_instance().accept(ErrorResponse(
             resource_type=error.resource_type, resource_name=error.resource_name,
             message=error.message, code=error.code), HttpClient.DEFAULT_REQUEST_ID)
-    finally:
-        # A response may establish or revoke a resource-path session even when
-        # its status/body fails. Retain it without replaying the operation.
-        _restore_response_cookies(catalog.rest_api.client.session, native._take_response_cookies())
