@@ -18,8 +18,11 @@
 """Snapshot-pinned PyTorch Dataset for contiguous Paimon row windows."""
 
 import copy
+import hashlib
 import math
 import operator
+import pickle
+import random
 from functools import partial
 
 import numpy as np
@@ -41,7 +44,7 @@ from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import (
     is_array_blob_type, is_blob_file_type, is_map_blob_type,
 )
-from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 
@@ -205,6 +208,7 @@ class ContiguousWindowDataset(Dataset):
             for name in self._video_columns
         }
         self._build_index(index, anchor_row_ids)
+        self._checkpoint_identity = None
 
     @classmethod
     def from_query(cls, query, **kwargs):
@@ -255,6 +259,94 @@ class ContiguousWindowDataset(Dataset):
         state = self.__dict__.copy()
         state["_plans"] = {}
         return state
+
+    def state_dict(self):
+        """Return data identity and process state for StatefulDataLoader.
+
+        Rebuild this Dataset with the same retained snapshot, context, anchors,
+        and window settings before loading its state. The loader owns sampler
+        and batch progress; this Dataset never changes its index on restore.
+
+        Python, NumPy and Torch CPU global RNGs are saved for worker transforms.
+        Callbacks with private state must implement both ``state_dict`` and
+        ``load_state_dict``. Keep callback code and preprocessing configuration
+        unchanged; they cannot be inferred from a callable. The training loop
+        must also checkpoint its model, optimizer and main-process/CUDA RNGs.
+        Do not mutate the Dataset's configuration or index after checkpointing.
+        """
+        return {
+            "version": 1,
+            "identity": self._state_identity(),
+            "callbacks": {
+                name: copy.deepcopy(callback.state_dict())
+                for name, callback in self._stateful_callbacks().items()
+            },
+            "python_rng": random.getstate(),
+            "numpy_rng": np.random.get_state(),
+            "torch_rng": torch.get_rng_state(),
+        }
+
+    def load_state_dict(self, state_dict):
+        """Reject checkpoints made from a different CWD data contract."""
+        if state_dict.get("version") != 1:
+            raise ValueError("Unsupported CWD checkpoint version.")
+        if state_dict.get("identity") != self._state_identity():
+            raise ValueError(
+                "Cannot restore state from a different CWD: rebuild the same "
+                "table snapshot, context, anchors and window settings.")
+        callbacks = self._stateful_callbacks()
+        if callbacks.keys() != state_dict["callbacks"].keys():
+            raise ValueError("CWD checkpoint has different stateful callbacks.")
+        for name, callback in callbacks.items():
+            callback.load_state_dict(copy.deepcopy(state_dict["callbacks"][name]))
+        # Callback restoration may itself consume random numbers.
+        random.setstate(state_dict["python_rng"])
+        np.random.set_state(state_dict["numpy_rng"])
+        torch.set_rng_state(state_dict["torch_rng"])
+
+    def _stateful_callbacks(self):
+        callbacks = {"column:" + name: callback
+                     for name, callback in self.column_transforms.items()}
+        callbacks["adapter"] = self.adapter
+        stateful = {}
+        for name, callback in callbacks.items():
+            save = callable(getattr(callback, "state_dict", None))
+            restore = callable(getattr(callback, "load_state_dict", None))
+            if save != restore:
+                raise TypeError("CWD callback %s must implement both state_dict "
+                                "and load_state_dict." % name)
+            if save:
+                stateful[name] = callback
+        return stateful
+
+    def _state_identity(self):
+        if self._checkpoint_identity is None:
+            snapshot = (TimeTravelUtil.resolve_snapshot(self._table)
+                        if self.snapshot_id is not None else None)
+            masks = sorted(set(
+                tuple(sorted((split.auth_result.column_masking or {}).items()))
+                for split in self._splits if isinstance(split, QueryAuthSplit)))
+            metadata = (
+                self._table.table_path, self._table.current_branch(),
+                self.snapshot_id,
+                (snapshot.uuid, snapshot.base_manifest_list, snapshot.delta_manifest_list)
+                if snapshot is not None else None,
+                self._table.table_schema.id,
+                self.group_key, self.order_key, self._group_keys,
+                self.columns, tuple((name, self.frame_offsets[name]) for name in self.columns),
+                self.window_size, self.stride, self.boundary,
+                _checkpoint_padding(self.pad_values), self.video_backend, masks,
+            )
+            digest = hashlib.sha256()
+            for value in metadata:
+                digest.update(pickle.dumps(value, protocol=4))
+            for array in (self._row_ids, self._group_starts, self._group_lengths,
+                          self._group_first_orders, self._anchor_groups, self._anchor_starts):
+                digest.update(pickle.dumps((array.dtype.str, array.shape), protocol=4))
+                digest.update(memoryview(array))
+            # Worker snapshots are frequent; hash the immutable index only once.
+            self._checkpoint_identity = digest.hexdigest()
+        return self._checkpoint_identity
 
     def close(self):
         """Close video decoders opened by this Dataset process."""
@@ -496,6 +588,23 @@ class ContiguousWindowDataset(Dataset):
             )
             self._plans[key] = plan
         return plan
+
+
+def _checkpoint_padding(value):
+    # Tensor's default pickle includes storage identity, even for equal values.
+    if isinstance(value, torch.Tensor):
+        raw = value.detach().cpu().contiguous().reshape(-1).view(torch.uint8)
+        return ("tensor", str(value.dtype), tuple(value.shape), str(value.device),
+                value.requires_grad, raw.numpy().tobytes())
+    if type(value) is dict:
+        return ("dict", tuple(sorted(
+            (_checkpoint_padding(key), _checkpoint_padding(item))
+            for key, item in value.items())))
+    if type(value) in (list, tuple):
+        return (type(value).__name__, tuple(_checkpoint_padding(item) for item in value))
+    if type(value) is np.ndarray:
+        value = value.copy(order="C")
+    return ("pickle", pickle.dumps(value, protocol=4))
 
 
 class _PinnedRowIdPlan:
