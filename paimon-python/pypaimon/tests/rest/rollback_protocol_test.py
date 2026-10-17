@@ -75,6 +75,9 @@ def catalog(transport):
         'metastore': 'rest', 'uri': 'http://127.0.0.1:1', 'warehouse': 'warehouse',
         'prefix': 'rollback-test', 'token.provider': 'bear', 'token': 'test-token',
         'data-token.enabled': 'false',
+        # This suite spies on requests.Session.send. Native wire behavior is
+        # covered by the real HTTP Native version-management tests.
+        'read.native.enabled': 'false', 'write.native.enabled': 'false',
     })), config_required=False)
 
 
@@ -108,9 +111,9 @@ def test_request_serialization(table_uuid):
     assert json.loads(JSON.to_json(request)) == expected
 
 
-def test_legacy_request_constructor():
+def test_unguarded_request_omits_absent_guard():
     assert json.loads(JSON.to_json(RollbackTableRequest(Instant.snapshot(1), None))) == {
-        'instant': {'type': 'snapshot', 'snapshotId': 1}, 'fromSnapshot': None,
+        'instant': {'type': 'snapshot', 'snapshotId': 1},
     }
 
 
@@ -124,7 +127,7 @@ def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant)
     assert len(transport.requests) == 1
     assert transport.requests[0].method == 'POST'
     assert request_body(transport.requests[0]) == {
-        'instant': instant, 'fromSnapshot': None, 'tableId': 'loaded-table-uuid',
+        'instant': instant, 'tableId': 'loaded-table-uuid',
     }
 
 
@@ -185,8 +188,9 @@ def test_existing_calls_and_encoded_branch_url(catalog, transport):
     catalog.rollback_to(identifier, Instant.snapshot(1), 2)
     catalog.rollback_to('db.table', Instant.tag('v1'))
 
-    assert [request_body(request)['fromSnapshot'] for request in transport.requests] == [None, 2, None]
-    assert all(set(request_body(request)) == {'instant', 'fromSnapshot'} for request in transport.requests)
+    assert [request_body(request).get('fromSnapshot') for request in transport.requests] == [None, 2, None]
+    assert [set(request_body(request)) for request in transport.requests] == [
+        {'instant'}, {'instant', 'fromSnapshot'}, {'instant'}]
     path = urlsplit(transport.requests[0].url).path.split('/')
     assert len(path) == 8
     assert unquote_plus(path[4]) == identifier.get_database_name()
@@ -203,7 +207,7 @@ def test_table_rollback_without_uuid(catalog, transport):
 
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
-        'instant': {'type': 'snapshot', 'snapshotId': 1}, 'fromSnapshot': None,
+        'instant': {'type': 'snapshot', 'snapshotId': 1},
     }
 
 
@@ -293,7 +297,7 @@ def test_copied_branch_rollback_omits_source_identity(catalog, transport, compac
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
         'instant': {'type': 'snapshot', 'snapshotId': 2 if automatic else 1},
-        'fromSnapshot': 3 if automatic else None,
+        **({'fromSnapshot': 3} if automatic else {}),
     }
     object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
     assert object_name == Identifier('db', 'table', branch=target).get_object_name()
@@ -325,7 +329,7 @@ def test_same_branch_copy_and_independent_load_preserve_identity(table, catalog,
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
         'instant': {'type': 'snapshot', 'snapshotId': 2 if automatic else 1},
-        'fromSnapshot': 3 if automatic else None, 'tableId': 'loaded-dev-uuid',
+        **({'fromSnapshot': 3} if automatic else {}), 'tableId': 'loaded-dev-uuid',
     }
     object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
     assert object_name == Identifier('db', 'table', branch='dev').get_object_name()

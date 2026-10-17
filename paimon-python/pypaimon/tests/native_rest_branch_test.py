@@ -57,6 +57,7 @@ def transport_server():
             size = int(self.headers.get('Content-Length', 0))
             data = self.rfile.read(size).decode() if size else None
             self.server.requests.append((self.command, self.path, self.headers))
+            self.server.bodies.append(json.loads(data) if data else None)
             status = 200
             if self.path.startswith('/v1/config'):
                 body = json.dumps({'defaults': {'prefix': 'test'}})
@@ -66,6 +67,8 @@ def transport_server():
                 status = self.server.temporary_status
                 body = json.dumps({'message': 'temporary failure'})
                 self.server.branch_requests += 1
+            elif self.server.respond is not None:
+                status, body = self.server.respond(self.command, self.path, data)
             else:
                 body = json.dumps({'branches': ['dev']}) if self.command == 'GET' else 'OK'
             if self.server.require_v4:
@@ -73,7 +76,7 @@ def transport_server():
                                   if key.lower().startswith('x-acs-') or key.lower() in ('host', 'content-type')}
                 url = urlsplit(self.path)
                 expected = DLFOpenApiV4Signer('cn-hangzhou').authorization(
-                    RESTAuthParameter(self.command, url.path, data, dict(parse_qsl(url.query))),
+                    RESTAuthParameter(self.command, url.path, data, dict(parse_qsl(url.query, keep_blank_values=True))),
                     self.server.expected_token,
                     self.headers['Host'], signed_headers)
                 if self.headers.get('Authorization') != expected:
@@ -91,6 +94,8 @@ def transport_server():
 
     server = HTTPServer(('localhost', 0), Handler)
     server.requests = []
+    server.bodies = []
+    server.respond = None
     server.require_v4 = False
     server.temporary_status = server.branch_requests = 0
     server.expected_token = DLFToken('test-key', 'test-secret', 'test-sts', None)
@@ -347,7 +352,7 @@ def test_native_branch_errors_keep_public_python_types(tmp_path, catalog):
 @pytest.mark.parametrize('name', ['.', '..', '', ' '])
 def test_invalid_resource_paths_send_no_requests(catalog, operation, name):
     args = () if operation == 'list_branches' else ('dev',)
-    with patch('pypaimon.catalog.rest.native_branch._native_catalog',
+    with patch('pypaimon.catalog.rest.native_catalog._native_catalog',
                side_effect=AssertionError('Invalid paths must be rejected before preparing a backend')):
         for identifier in (Identifier(name, 't'), Identifier('default', name)):
             with pytest.raises(ValueError):
@@ -500,7 +505,7 @@ def test_native_errors_are_translated_without_python_retry(catalog, code, except
             raise error
 
     native = Native()
-    with patch('pypaimon.catalog.rest.native_branch._native_catalog', return_value=(native, CatalogError)), \
+    with patch('pypaimon.catalog.rest.native_catalog._native_catalog', return_value=(native, CatalogError)), \
             native_only(catalog):
         with pytest.raises(exception):
             catalog.create_branch('default.t', 'dev')

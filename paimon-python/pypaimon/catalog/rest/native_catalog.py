@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Transport REST branch operations and structured errors to/from Rust core."""
+"""Delegate REST catalog version management and structured errors to Rust core."""
 
 import logging
 import os
@@ -67,7 +67,8 @@ def _native_catalog(catalog, operation):
                 'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'))):
         return None
     options = CoreOptions(catalog.context.options)
-    enabled = options.native_read_enabled() if operation == 'list_branches' else options.native_write_enabled()
+    read = operation in ('list_branches', 'get_tag', 'list_tags_paged', 'load_snapshot')
+    enabled = options.native_read_enabled() if read else options.native_write_enabled()
     if not enabled:
         return None
     api = catalog.rest_api
@@ -81,6 +82,12 @@ def _native_catalog(catalog, operation):
         return None
     try:
         from pypaimon_rust.datafusion import CatalogError, PaimonCatalog
+        if not callable(getattr(PaimonCatalog, operation, None)):
+            return None
+        if operation == 'rollback_to':
+            from pypaimon_rust.datafusion import Instant
+            if not all(callable(getattr(Instant, name, None)) for name in ('snapshot', 'tag')):
+                return None
     except ImportError:
         return None
     from pypaimon.read.native_plan import _option_value_to_string, _raise_if_native_fork_safety_error
@@ -112,26 +119,47 @@ def _native_catalog(catalog, operation):
         return PaimonCatalog(resolved, config_required=False), CatalogError
     except Exception as error:
         _raise_if_native_fork_safety_error(error)
-        logger.debug('Native branch preparation failed: %s', error)
+        logger.debug('Native catalog preparation failed: %s', error)
         return None
 
 
-def call_branch(catalog, operation, identifier, *args):
+def call_catalog(catalog, operation, identifier, *args, **kwargs):
     # Both backends must reject a path that HTTP clients normalize to another
-    # resource. CREATE's branch is in JSON; only DROP/FORWARD put it in the URL.
-    path_branch = args[0] if operation in ('drop_branch', 'fast_forward') else None
-    RESTApi._validate_branch_path(identifier, path_branch)
+    # resource. Names in CREATE/ROLLBACK bodies are not URL components.
+    path_name = args[0] if operation in ('drop_branch', 'fast_forward', 'get_tag', 'delete_tag') else None
+    RESTApi._validate_resource_path(identifier, path_name)
     if operation == 'create_branch' and (not args[0] or not args[0].strip()):
         raise ValueError('Branch name cannot be empty')
     prepared = _native_catalog(catalog, operation)
     if prepared is None:
-        return getattr(catalog.rest_api, operation)(identifier, *args)
+        return getattr(catalog.rest_api, operation)(identifier, *args, **kwargs)
     native, error_type = prepared
+    if operation == 'rollback_to':
+        from pypaimon.table.instant import SnapshotInstant, TagInstant
+        from pypaimon_rust.datafusion import Instant
+        instant = args[0]
+        if isinstance(instant, SnapshotInstant):
+            instant = Instant.snapshot(instant.snapshot_id)
+        elif isinstance(instant, TagInstant):
+            instant = Instant.tag(instant.tag_name)
+        else:
+            raise TypeError('Rollback requires a snapshot or tag instant')
+        args = (instant,) + args[1:]
     try:
         # Once an operation starts, never execute it again through Python:
         # the REST server may have published it before returning an error.
-        return getattr(native, operation)((identifier.get_database_name(), identifier.get_object_name()), *args)
+        result = getattr(native, operation)(
+            (identifier.get_database_name(), identifier.get_object_name()), *args, **kwargs)
     except error_type as error:
         DefaultErrorHandler.get_instance().accept(ErrorResponse(
             resource_type=error.resource_type, resource_name=error.resource_name,
             message=error.message, code=error.code), HttpClient.DEFAULT_REQUEST_ID)
+    if operation in ('get_tag', 'load_snapshot') and result is not None:
+        from pypaimon.api.api_response import GetTagResponse
+        from pypaimon.snapshot.table_snapshot import TableSnapshot
+        from pypaimon.common.json_util import JSON
+        result = JSON.from_json(result.to_json(), GetTagResponse if operation == 'get_tag' else TableSnapshot)
+    elif operation == 'list_tags_paged':
+        from pypaimon.api.api_response import PagedList
+        result = PagedList(*result)
+    return result
