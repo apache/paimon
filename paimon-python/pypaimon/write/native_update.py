@@ -35,12 +35,16 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
 
+def _native_update_formats_supported(table):
+    return (table.options.file_format() == 'parquet'
+            and (not table.options.with_vector_format() or table.options.vector_file_format() == 'parquet'))
+
+
 def _native_update_table(table):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            or table.options.file_format() != 'parquet'
-            or table.options.with_vector_format()
+            or not _native_update_formats_supported(table)
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_write_available()):
@@ -154,6 +158,27 @@ def _supported_upsert_key_type(data_type):
     ))
 
 
+def _dictionary_value_type(data_type):
+    while pa.types.is_dictionary(data_type):
+        data_type = data_type.value_type
+    return data_type
+
+
+def _native_upsert_key_type_compatible(source, target):
+    """Qualify layouts; exact values and conversion bounds belong to core."""
+    source = _dictionary_value_type(source)
+    if pa.types.is_null(source):
+        return True
+    for family in (pa.types.is_integer, pa.types.is_decimal, pa.types.is_date, pa.types.is_time):
+        if family(source) and family(target):
+            return True
+    if pa.types.is_timestamp(source) and pa.types.is_timestamp(target):
+        return (source.tz is None) == (target.tz is None)
+    return arrow_schemas_compatible(
+        pa.schema([pa.field('key', source)]), pa.schema([pa.field('key', target)]),
+        check_top_level_nullability=False, allow_binary_compatibility=True)
+
+
 def _native_update_columns_supported(table, columns):
     """Core writes Parquet columns and Java-compatible sparse Blob deltas."""
     if type(table) is not FileStoreTable:
@@ -221,11 +246,8 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         # surviving payloads before applying row-ID update or append rules;
         # validating all payload types here would reject valid matched updates.
         key_names = list(dict.fromkeys(keys + table.partition_keys))
-        supplied = pa.schema([schema.field(name) for name in key_names])
-        actual_keys = pa.schema([data.schema.field(name) for name in key_names])
-        if not arrow_schemas_compatible(
-                actual_keys, supplied, check_top_level_nullability=False,
-                allow_binary_compatibility=True, check_nested_nullability=False):
+        if not all(_native_upsert_key_type_compatible(data.schema.field(name).type, schema.field(name).type)
+                   for name in key_names):
             return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)

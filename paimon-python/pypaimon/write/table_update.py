@@ -957,7 +957,9 @@ class ShardTableUpdator:
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
         read_builder = self.table.new_read_builder()
         read_builder.with_projection(self.projection)
-        return read_builder.new_read().to_arrow_batch_reader(self.splits)
+        # Updates consume row ranges in split order. Parallel native readers
+        # return batches in completion order, which would assign values to other rows.
+        return read_builder.new_read().to_arrow_batch_reader(self.splits, parallelism=1)
 
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []
