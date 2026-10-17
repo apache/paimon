@@ -25,26 +25,25 @@ tables produced by :class:`SystemSplit` — no manifest reads, no data
 files.
 """
 
+import re
 from typing import Any, Iterator, List, Optional, TYPE_CHECKING
 
 import pandas
 import pyarrow
 
-from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate import Like, Predicate
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import (
     AtomicType, DataField, PyarrowFieldParser)
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.system.system_table_scan import SystemSplit
 
 if TYPE_CHECKING:  # pragma: no cover - type-only import
     from pypaimon.table.system.system_table import SystemTable
 
 
-_PREDICATE_NOT_SUPPORTED = (
-    "string-match predicate pushdown (starts_with / ends_with / contains / "
-    "like) on system tables is not supported yet; filter the resulting "
-    "PyArrow / pandas table on the client side"
-)
+_PREDICATE_NOT_SUPPORTED = "This predicate is not supported on system tables"
+_STRING_PREDICATES = ("startsWith", "endsWith", "contains", "like")
 
 # Value comparisons (equal / greater-than / is-in / ...) have no PyArrow
 # compute kernel for nested columns such as ``$files.write_cols`` or
@@ -102,7 +101,8 @@ class SystemTableRead:
         return con
 
     def _materialise(self, splits: List[Split]) -> pyarrow.Table:
-        from pypaimon.read.push_down_utils import predicate_supports_arrow_filter
+        from pypaimon.read.push_down_utils import (
+            predicate_field_names, predicate_supports_arrow_filter, rewrite_predicate_indices)
 
         predicate = self.predicate
         if predicate is not None and not isinstance(predicate, Predicate):
@@ -111,19 +111,23 @@ class SystemTableRead:
             # arrow_filter dereferences ``.method`` and would otherwise leak
             # an internal AttributeError.
             raise NotImplementedError(_PREDICATE_NOT_SUPPORTED)
-        if predicate is not None and not predicate_supports_arrow_filter(
+        has_string_filter = self._validate_filter(predicate) if predicate is not None else False
+        if predicate is not None and not has_string_filter and not predicate_supports_arrow_filter(
             predicate
         ):
             raise NotImplementedError(_PREDICATE_NOT_SUPPORTED)
-        if predicate is not None:
-            self._reject_non_scalar_filter_fields(predicate)
 
         if not splits:
             return self._empty_table()
 
-        arrow_predicate = (
-            self.predicate.to_arrow() if self.predicate is not None else None
-        )
+        row_predicate = None
+        arrow_predicate = None
+        if has_string_filter:
+            predicate_fields = predicate_field_names(predicate)
+            filter_fields = [f for f in self.system_table.row_type().fields if f.name in predicate_fields]
+            row_predicate = rewrite_predicate_indices(predicate, filter_fields)
+        elif predicate is not None:
+            arrow_predicate = predicate.to_arrow()
 
         projected_names = [f.name for f in self.read_type]
         slices: List[pyarrow.Table] = []
@@ -136,7 +140,9 @@ class SystemTableRead:
             arrow_table = split.arrow_table()
             # Filter on the full schema before projection so a predicate may
             # reference columns that are not part of the projection.
-            if arrow_predicate is not None:
+            if row_predicate is not None:
+                arrow_table = self._filter_rows(arrow_table, row_predicate, filter_fields)
+            elif arrow_predicate is not None:
                 arrow_table = arrow_table.filter(arrow_predicate)
             if projected_names:
                 arrow_table = arrow_table.select(projected_names)
@@ -147,8 +153,45 @@ class SystemTableRead:
             combined = combined.slice(0, self.limit)
         return combined.cast(PyarrowFieldParser.from_paimon_schema(self.read_type))
 
-    def _reject_non_scalar_filter_fields(self, predicate: Predicate) -> None:
-        """Reject value comparisons on nested system-table columns.
+    def _filter_rows(
+        self, arrow_table: pyarrow.Table, predicate: Predicate, fields: List[DataField]
+    ) -> pyarrow.Table:
+        # String to_arrow() conversions may silently fall back to True or None.
+        # Evaluate the whole tree locally, including AND / OR.
+        columns = [arrow_table.column(f.name).to_pylist() for f in fields]
+        mask = pyarrow.array([
+            self._test_row(predicate, GenericRow(list(values), fields))
+            for values in zip(*columns)
+        ], type=pyarrow.bool_())
+        return arrow_table.filter(mask)
+
+    def _test_row(self, predicate: Predicate, row: GenericRow) -> bool:
+        if predicate.method in ("and", "or"):
+            results = (self._test_row(child, row) for child in predicate.literals)
+            return all(results) if predicate.method == "and" else any(results)
+        if predicate.method in (
+            "equal", "notEqual", "lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"
+        ) and predicate.literals[0] is None:
+            # Arrow comparisons with NULL never select a row.
+            return False
+        if predicate.method in ("between", "notBetween") and any(v is None for v in predicate.literals):
+            value = row.get_field(predicate.index)
+            if predicate.method == "between" or value is None:
+                return False
+            # NOT BETWEEN is an OR: a non-null bound can still match.
+            lower, upper = predicate.literals
+            return ((lower is not None and value < lower)
+                    or (upper is not None and value > upper))
+        if predicate.method == "like":
+            value = row.get_field(predicate.index)
+            # SQL '_' matches a newline too, as in Java's Like predicate.
+            return value is not None and re.fullmatch(
+                Like._sql_like_to_regex(predicate.literals[0]), value, flags=re.DOTALL
+            ) is not None
+        return predicate.test(row)
+
+    def _validate_filter(self, predicate: Predicate) -> bool:
+        """Validate operands and report whether exact row evaluation is needed.
 
         System tables expose list/map/row columns (e.g. ``$files.write_cols``,
         ``$table_indexes.dv_ranges``). PyArrow has no equality / comparison /
@@ -160,12 +203,15 @@ class SystemTableRead:
         field_types = {
             f.name: f.type for f in self.system_table.row_type().fields
         }
+        has_string_filter = False
         pending: List[Predicate] = [predicate]
         while pending:
             current = pending.pop()
             if current.method in ("and", "or"):
                 pending.extend(current.literals or [])
                 continue
+            if current.method not in Predicate.testers:
+                raise ValueError("Unsupported predicate method: " + current.method)
             if current.method in _COMPARISON_NEEDS_SCALAR:
                 continue
             field_type = field_types.get(current.field)
@@ -180,6 +226,20 @@ class SystemTableRead:
                     + ") is not supported; filter the resulting PyArrow / "
                     + "pandas table on the client side"
                 )
+            if current.method in _STRING_PREDICATES:
+                if field_type is None:
+                    raise ValueError("Unknown system-table column: " + repr(current.field))
+                if not pyarrow.types.is_string(PyarrowFieldParser.from_paimon_type(field_type)):
+                    raise NotImplementedError(
+                        "String predicates require a string system-table column: " + repr(current.field))
+                if (not current.literals or len(current.literals) != 1
+                        or not isinstance(current.literals[0], str)):
+                    raise ValueError("String predicates require a single string literal")
+                if current.method == "like":
+                    # Validate even when input is empty or another branch matches.
+                    Like._sql_like_to_regex(current.literals[0])
+                has_string_filter = True
+        return has_string_filter
 
     def _empty_table(self) -> pyarrow.Table:
         target_schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
