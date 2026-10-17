@@ -202,7 +202,9 @@ def test_one_authoritative_rest_snapshot_for_all_routes_without_retry(rest_catal
     first = table.snapshot_manager().get_latest_snapshot()
     indexes._append(table, _rows(8, 4), schema=SCHEMA)
     if response == 'error':
-        reply, code = ErrorResponse('TABLE', 'indexes', 'snapshot unavailable', 503), 503
+        # Use a non-retryable HTTP status to isolate repeated snapshot lookup
+        # by the search operation from the client's legitimate 503 retries.
+        reply, code = ErrorResponse('TABLE', 'indexes', 'snapshot unavailable', 500), 500
     else:
         reply = (GetTableSnapshotResponse(TableSnapshot(first, 1, 0, 7, first.time_millis))
                  if response == 'first' else GetTableSnapshotResponse())
