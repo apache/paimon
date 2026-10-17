@@ -117,6 +117,27 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.readRowType = rowType;
     }
 
+    /**
+     * Returns a reader with the same scan configuration but an empty format-reader mapping cache.
+     * Used so concurrent compaction workers do not share mutable cast state in cached mappings.
+     */
+    RawFileSplitRead copyWithFreshReaderMappings(CoreOptions coreOptions) {
+        RawFileSplitRead copy =
+                new RawFileSplitRead(
+                        fileIO,
+                        schemaManager,
+                        schema,
+                        readRowType,
+                        formatDiscover,
+                        pathFactory,
+                        coreOptions);
+        copy.filters = filters;
+        copy.topN = topN;
+        copy.limit = limit;
+        copy.readBatchSizer = readBatchSizer;
+        return copy;
+    }
+
     @Override
     public SplitRead<InternalRow> forceKeepDelete() {
         return this;
