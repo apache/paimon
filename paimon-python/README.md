@@ -139,6 +139,22 @@ table = table.copy({"parquet.filter.columnindex.enabled": "false"})
 Unsupported reads use the normal path. Reading fewer bytes may require more
 object-store requests.
 
+# Native REST branch management
+
+REST catalogs delegate `list_branches` to Rust when the catalog option
+`read.native.enabled=true`, and `create_branch`, `drop_branch` and `fast_forward`
+when `write.native.enabled=true`. Existing `table.branch_manager()` calls use
+the same route. Install the optional `pypaimon-rust` runtime to enable it.
+
+The bridge reuses the catalog's resolved prefix, endpoint, authentication and
+request headers, and preserves the public Python exception types. Custom clients,
+authentication providers or error handlers use Python. Once a Native operation
+starts, failures propagate without replaying the request through Python.
+
+As in Java, creation without a tag produces an empty branch; creation from a tag
+uses its snapshot. REST branch renaming is unsupported. Dropping branch metadata
+does not remove data files shared with another branch or tag.
+
 # Native write and commit
 
 PyPaimon can write Arrow batches through the optional `pypaimon-rust` runtime.

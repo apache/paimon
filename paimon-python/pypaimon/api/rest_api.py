@@ -27,7 +27,7 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
                                       CreateTableRequest, CreateTagRequest,
                                       DropPolicyRequest, ForwardBranchRequest,
                                       GrantPermissionRequest, PolicyRequest,
-                                      RenameBranchRequest, RenameTableRequest,
+                                      RenameTableRequest,
                                       RevokePermissionRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
@@ -101,6 +101,10 @@ class RESTApi:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(uri, user_agent.rest_user_agent(options))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
+        # Java retains the provider created before config merging. Preserve its
+        # input when delegating an operation to a separately constructed client.
+        self._auth_options = {key: value for key, value in options.to_map().items()
+                              if self._is_auth_option(key)}
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
         if config_required:
@@ -127,6 +131,10 @@ class RESTApi:
         self.rest_auth_function = RESTAuthFunction(base_headers, auth_provider)
         self.options = options
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
+
+    @staticmethod
+    def _is_auth_option(key):
+        return key in ('uri', 'token.provider', 'token') or key.startswith('dlf.')
 
     def __build_paged_query_params(
             self,
@@ -545,13 +553,24 @@ class RESTApi:
         )
 
     # Branch CRUD wrappers — mirror Java RESTApi branch methods.
+    @staticmethod
+    def _validate_branch_path(identifier, branch_name=None):
+        database_name, table_name = RESTApi.__validate_identifier(identifier)
+        components = [(database_name, 'Database name'), (table_name, 'Table name')]
+        if branch_name is not None:
+            components.append((branch_name, 'Branch name'))
+        for value, label in components:
+            if not value or not value.strip() or value in ('.', '..'):
+                raise ValueError('{} must be a non-empty resource path component'.format(label))
+        return database_name, table_name
+
     def create_branch(
             self,
             identifier: Identifier,
             branch_name: str,
             tag_name: Optional[str] = None,
     ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_branch_path(identifier)
         if not branch_name or not branch_name.strip():
             raise ValueError("Branch name cannot be empty")
         request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
@@ -562,30 +581,14 @@ class RESTApi:
         )
 
     def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_branch_path(identifier, branch_name)
         self.client.delete(
             self.resource_paths.branch(database_name, table_name, branch_name),
             self.rest_auth_function,
         )
 
-    def rename_branch(
-            self,
-            identifier: Identifier,
-            from_branch: str,
-            to_branch: str,
-    ) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
-        if not to_branch or not to_branch.strip():
-            raise ValueError("Target branch name cannot be empty")
-        request = RenameBranchRequest(to_branch=to_branch)
-        self.client.post(
-            self.resource_paths.rename_branch(database_name, table_name, from_branch),
-            request,
-            self.rest_auth_function,
-        )
-
     def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_branch_path(identifier, branch_name)
         self.client.post(
             self.resource_paths.forward_branch(database_name, table_name, branch_name),
             ForwardBranchRequest(),
@@ -593,7 +596,7 @@ class RESTApi:
         )
 
     def list_branches(self, identifier: Identifier) -> List[str]:
-        database_name, table_name = self.__validate_identifier(identifier)
+        database_name, table_name = self._validate_branch_path(identifier)
         response = self.client.get(
             self.resource_paths.branches(database_name, table_name),
             ListBranchesResponse,
