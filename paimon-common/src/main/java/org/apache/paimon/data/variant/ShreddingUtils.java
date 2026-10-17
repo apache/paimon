@@ -80,18 +80,19 @@ public class ShreddingUtils {
 
     // This `rebuild` function should only be called on the top-level schema, and that other private
     // implementation will be called on any recursively shredded sub-schema.
-    public static Variant rebuild(ShreddedRow row, VariantSchema schema) {
+    public static Variant rebuild(ShreddedRow row, VariantSchema schema, VariantMetadata metadata) {
         if (schema.topLevelMetadataIdx < 0 || row.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
-        ByteBuffer metadata = row.getBinaryBuffer(schema.topLevelMetadataIdx);
+        ByteBuffer metadataBuffer = row.getBinaryBuffer(schema.topLevelMetadataIdx);
         if (schema.isUnshredded()) {
             // `rebuild` is unnecessary for unshredded variant.
             if (row.isNullAt(schema.variantIdx)) {
                 throw malformedVariant();
             }
-            return new GenericVariant(row.getBinaryBuffer(schema.variantIdx), metadata);
+            return new GenericVariant(row.getBinaryBuffer(schema.variantIdx), metadataBuffer);
         }
+        metadata.adopt(metadataBuffer);
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
         rebuild(row, metadata, schema, builder);
         return builder.result();
@@ -101,13 +102,8 @@ public class ShreddingUtils {
     // https://github.com/apache/parquet-format/blob/master/VariantShredding.md.
     // Append the result to `builder`.
     public static void rebuild(
-            ShreddedRow row, byte[] metadata, VariantSchema schema, GenericVariantBuilder builder) {
-        rebuild(row, ByteBuffer.wrap(metadata).order(ByteOrder.LITTLE_ENDIAN), schema, builder);
-    }
-
-    public static void rebuild(
             ShreddedRow row,
-            ByteBuffer metadata,
+            VariantMetadata metadata,
             VariantSchema schema,
             GenericVariantBuilder builder) {
         int typedIdx = schema.typedIdx;
@@ -196,28 +192,30 @@ public class ShreddingUtils {
                 if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
                     // Add the leftover fields in the variant binary.
                     GenericVariant v =
-                            new GenericVariant(row.getBinaryBuffer(variantIdx), metadata);
+                            new GenericVariant(
+                                    row.getBinaryBuffer(variantIdx), metadata.metadataBuffer());
                     if (v.getType() != GenericVariantUtil.Type.OBJECT) {
                         throw malformedVariant();
                     }
                     for (int i = 0; i < v.objectSize(); ++i) {
-                        GenericVariant.ObjectField field = v.getFieldAtIndex(i);
+                        String key = metadata.get(v.getDictionaryIdAtIndex(i));
                         // `value` must not contain any shredded field.
-                        if (schema.objectSchemaMap.containsKey(field.key)) {
+                        if (schema.objectSchemaMap.containsKey(key)) {
                             throw malformedVariant();
                         }
-                        int id = builder.addKey(field.key);
+                        int id = builder.addKey(key);
                         fields.add(
                                 new GenericVariantBuilder.FieldEntry(
-                                        field.key, id, builder.getWritePos() - start));
-                        builder.appendVariant(field.value);
+                                        key, id, builder.getWritePos() - start));
+                        builder.appendVariant(v.getFieldValueAtIndex(i));
                     }
                 }
                 builder.finishWritingObject(start, fields);
             }
         } else if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
             // `typed_value` doesn't exist or is null. Read from `value`.
-            builder.appendVariant(new GenericVariant(row.getBinaryBuffer(variantIdx), metadata));
+            builder.appendVariant(
+                    new GenericVariant(row.getBinaryBuffer(variantIdx), metadata.metadataBuffer()));
         } else {
             // This means the variant is missing in a context where it must present, so the input
             // data is invalid.

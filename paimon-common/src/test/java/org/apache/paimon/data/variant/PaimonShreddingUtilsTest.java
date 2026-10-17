@@ -484,6 +484,36 @@ public class PaimonShreddingUtilsTest {
     }
 
     @Test
+    void testFullyTypedProjectionDoesNotDecodeMetadata() {
+        // The metadata dictionary is wide (many unprojected leftover keys), but the projection asks
+        // only for the fully shredded $.typed INT. The typed path must never decode the dictionary,
+        // so after the read the metadata stays undecoded.
+        StringBuilder json = new StringBuilder("{\"typed\": 42");
+        for (int i = 0; i < 2000; i++) {
+            json.append(",\"k").append(i).append("\":").append(i);
+        }
+        json.append("}");
+        GenericVariant v = GenericVariant.fromJson(json.toString());
+
+        RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"typed"});
+        RowType shreddingSchema = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
+
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+        FieldToExtract f1 =
+                buildFieldsToExtract(DataTypes.INT(), "$.typed", castArgs, variantSchema);
+        FieldToExtract[] fields = new FieldToExtract[] {f1};
+
+        InternalRow row = castShredded(v, variantSchema);
+        // The caller owns the decoded-dictionary cache; pass it in and assert on it directly.
+        VariantMetadata metadata = VariantMetadata.empty();
+        assertThat(assembleVariantStruct(row, variantSchema, fields, metadata))
+                .isEqualTo(GenericRow.of(42));
+        // The fully typed read must not have decoded the dictionary at all.
+        assertThat(metadata.isDecoded()).isFalse();
+    }
+
+    @Test
     void testVariantCastArgs() {
         // shreddedType: ROW<a INT, b STRING>
         RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});

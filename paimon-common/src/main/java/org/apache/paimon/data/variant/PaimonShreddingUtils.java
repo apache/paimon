@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
@@ -585,17 +586,44 @@ public class PaimonShreddingUtils {
     }
 
     /** Assemble a variant (binary format) from a variant value. */
+    @VisibleForTesting
     public static Variant assembleVariant(InternalRow row, VariantSchema schema) {
-        return ShreddingUtils.rebuild(new PaimonShreddedRow(row), schema);
+        return assembleVariant(row, schema, VariantMetadata.empty());
+    }
+
+    /**
+     * Assemble a variant (binary format) from a variant value, reusing the decoded metadata
+     * dictionary in {@code metadataCache} across rows. Callers reading many rows (e.g. one batch)
+     * should share a single cache instance.
+     */
+    public static Variant assembleVariant(
+            InternalRow row, VariantSchema schema, VariantMetadata metadata) {
+        return ShreddingUtils.rebuild(new PaimonShreddedRow(row), schema, metadata);
     }
 
     /** Assemble a variant struct, in which each field is extracted from the variant value. */
     public static InternalRow assembleVariantStruct(
             InternalRow inputRow, VariantSchema schema, FieldToExtract[] fields) {
+        return assembleVariantStruct(inputRow, schema, fields, VariantMetadata.empty());
+    }
+
+    /**
+     * Assemble a variant struct, in which each field is extracted from the variant value. {@code
+     * metadata} is the caller-owned decoded-dictionary cache; it is rebound to the current row's
+     * metadata bytes exactly once here, and readers only consume it lazily and never rebind it.
+     * Callers reading many rows should share a single cache instance across the batch so the
+     * dictionary is reparsed only when the bytes actually change.
+     */
+    public static InternalRow assembleVariantStruct(
+            InternalRow inputRow,
+            VariantSchema schema,
+            FieldToExtract[] fields,
+            VariantMetadata metadata) {
         if (inputRow.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
         ByteBuffer topLevelMetadata = binaryBuffer(inputRow, schema.topLevelMetadataIdx);
+        metadata.adopt(topLevelMetadata);
         int numFields = fields.length;
         GenericRow resultRow = new GenericRow(numFields);
         int fieldIdx = 0;
@@ -604,7 +632,7 @@ public class PaimonShreddingUtils {
                     fieldIdx,
                     extractField(
                             inputRow,
-                            topLevelMetadata,
+                            metadata,
                             schema,
                             fields[fieldIdx].path(),
                             fields[fieldIdx].reader()));
@@ -700,7 +728,7 @@ public class PaimonShreddingUtils {
      */
     private static Object extractField(
             InternalRow inputRow,
-            ByteBuffer topLevelMetadata,
+            VariantMetadata metadata,
             VariantSchema inputSchema,
             SchemaPathSegment[] pathList,
             BaseVariantReader reader) {
@@ -720,7 +748,8 @@ public class PaimonShreddingUtils {
                     return null;
                 }
                 GenericVariant v =
-                        new GenericVariant(binaryBuffer(row, variantIdx), topLevelMetadata);
+                        new GenericVariant(
+                                binaryBuffer(row, variantIdx), metadata.metadataBuffer());
                 while (pathIdx < pathLen) {
                     VariantPathSegment rowPath = pathList[pathIdx].rawPath();
                     if (rowPath instanceof ObjectExtraction && v.getType() == OBJECT) {
@@ -770,7 +799,7 @@ public class PaimonShreddingUtils {
             }
             pathIdx += 1;
         }
-        return reader.read(row, topLevelMetadata);
+        return reader.read(row, metadata);
     }
 
     /** Assemble a batch of variant (binary format) from a batch of variant values. */
@@ -781,11 +810,12 @@ public class PaimonShreddingUtils {
         output.reserve(numRows);
         WritableBytesVector valueChild = (WritableBytesVector) output.getChildren()[0];
         WritableBytesVector metadataChild = (WritableBytesVector) output.getChildren()[1];
+        VariantMetadata metadata = VariantMetadata.empty();
         for (int i = 0; i < numRows; ++i) {
             if (input.isNullAt(i)) {
                 output.setNullAt(i);
             } else {
-                Variant v = assembleVariant(input.getRow(i), variantSchema);
+                Variant v = assembleVariant(input.getRow(i), variantSchema, metadata);
                 valueChild.putByteBuffer(i, v.valueBuffer());
                 metadataChild.putByteBuffer(i, v.metadataBuffer());
             }
@@ -807,12 +837,13 @@ public class PaimonShreddingUtils {
         WritableColumnVector[] converterVectors = new WritableColumnVector[1];
         converterVectors[0] = output;
         GenericRow converterRow = new GenericRow(1);
+        VariantMetadata metadata = VariantMetadata.empty();
         for (int i = 0; i < numRows; ++i) {
             if (input.isNullAt(i)) {
                 converterRow.setField(0, null);
             } else {
                 converterRow.setField(
-                        0, assembleVariantStruct(input.getRow(i), variantSchema, fields));
+                        0, assembleVariantStruct(input.getRow(i), variantSchema, fields, metadata));
             }
             converter.convert(converterRow, converterVectors);
         }
