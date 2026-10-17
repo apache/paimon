@@ -186,6 +186,7 @@ public class SparkDataEvolutionVectorReadTest {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         options.set(CoreOptions.GLOBAL_INDEX_THREAD_NUM, 1);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
         Schema schema =
                 Schema.newBuilder()
                         .column("vec", new ArrayType(DataTypes.FLOAT()))

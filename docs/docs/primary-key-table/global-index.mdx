@@ -427,7 +427,26 @@ FROM vector_search(
 The query dimension must match the indexed vector dimension. Partition predicates are applied
 before ANN search. When `spark.paimon.vector-search.distribute.enabled` is `true`, Spark can
 distribute sufficiently large groups of bucket-local searches and merge task-local Top-K results
-on the driver.
+on the driver. Distributed LATERAL search collects query vectors on the driver. It accepts at most
+`vector-search.distribute.lateral-max-queries` vectors (default 1024) and
+`vector-search.distribute.lateral-max-limit` hits per vector (default 128).
+Each query is checked on the executor before collection against
+`vector-search.distribute.lateral-max-query-bytes` (default 64 KiB), counting the complete outer
+row and the separate float query vector. Collection reads one extra query to detect count overflow,
+so the collected input payload is bounded by `(max-queries + 1) * max-query-bytes`.
+
+Joined results are checked row by row before copying them into the driver result buffer, up to
+`vector-search.distribute.lateral-max-result-bytes` (default 64 MiB). Exceeding this budget fails
+the query immediately without consuming the rest of the batch or submitting another search batch.
+These limits bound retained payload, not total JVM heap usage: temporary row decoding, objects,
+and Spark transport require additional memory. Oversized inputs fail before any search job is
+submitted. Reduce the left input or projected columns, adjust the limits for the available driver
+memory, or disable distributed vector search to use executor-local LATERAL search.
+
+`vector-search.lateral-join.batch-size` sets only how many vectors one readBatch receives.
+At most `2 * ceil(query-count / batch-size)` distributed search jobs are submitted sequentially;
+indexed search and raw search can each submit one job per batch. This bound excludes jobs that
+produce the left input or consume the joined results.
 
 </TabItem>
 
