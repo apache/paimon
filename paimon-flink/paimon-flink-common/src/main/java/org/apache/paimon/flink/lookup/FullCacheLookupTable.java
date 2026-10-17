@@ -206,14 +206,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                             CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true"));
         }
 
-        this.reader =
-                new LookupStreamingReader(
-                        readerTable,
-                        context.projection,
-                        scanPredicate,
-                        context.requiredCachedBucketIds,
-                        cacheRowFilter,
-                        scanPartitions);
+        this.reader = createReader(readerTable, scanPredicate);
         if (!stateFactory.preferBulkLoad()) {
             doRefresh();
             return;
@@ -255,6 +248,17 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         bulkLoader.finish();
         bulkLoadSorter.clear();
+    }
+
+    protected LookupStreamingReader createReader(
+            LookupFileStoreTable readerTable, @Nullable Predicate scanPredicate) {
+        return new LookupStreamingReader(
+                readerTable,
+                context.projection,
+                scanPredicate,
+                context.requiredCachedBucketIds,
+                cacheRowFilter,
+                scanPartitions);
     }
 
     @Override

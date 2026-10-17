@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
@@ -67,6 +68,7 @@ public class LookupStreamingReader {
     private final ReadBuilder readBuilder;
     @Nullable private final Predicate projectedPredicate;
     private final StreamDataTableScan scan;
+    @Nullable private BiFilter<BinaryRow, Integer> partitionBucketFilter;
 
     public LookupStreamingReader(
             LookupFileStoreTable table,
@@ -123,8 +125,42 @@ public class LookupStreamingReader {
         }
     }
 
+    /** Restrict data reads to a query-service shard, including incremental compaction splits. */
+    public LookupStreamingReader withPartitionBucketFilter(BiFilter<BinaryRow, Integer> filter) {
+        this.partitionBucketFilter = filter;
+        return this;
+    }
+
     public List<Split> nextSplits() {
-        return scan.plan().splits();
+        while (true) {
+            List<Split> splits = scan.plan().splits();
+            if (partitionBucketFilter == null || splits.isEmpty()) {
+                return splits;
+            }
+            List<Split> selected = new ArrayList<>();
+            for (Split split : splits) {
+                BinaryRow partition;
+                int bucket;
+                if (split instanceof DataSplit) {
+                    partition = ((DataSplit) split).partition();
+                    bucket = ((DataSplit) split).bucket();
+                } else if (split instanceof IncrementalSplit) {
+                    partition = ((IncrementalSplit) split).partition();
+                    bucket = ((IncrementalSplit) split).bucket();
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Query Service sharding does not support "
+                                    + split.getClass().getName());
+                }
+                if (partitionBucketFilter.test(partition, bucket)) {
+                    selected.add(split);
+                }
+            }
+            if (!selected.isEmpty()) {
+                return selected;
+            }
+            // An unassigned snapshot must not hide later updates for this shard.
+        }
     }
 
     public RecordReader<InternalRow> toRecordReader(List<Split> splits, boolean useParallelism)

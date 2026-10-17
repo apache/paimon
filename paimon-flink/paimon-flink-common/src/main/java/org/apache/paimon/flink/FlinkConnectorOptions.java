@@ -276,6 +276,16 @@ public class FlinkConnectorOptions {
                     .defaultValue(LookupCacheMode.AUTO)
                     .withDescription("The cache mode of lookup join.");
 
+    public static final ConfigOption<QueryServiceCacheMode> QUERY_SERVICE_CACHE_MODE =
+            ConfigOptions.key("query-service.cache")
+                    .enumType(QueryServiceCacheMode.class)
+                    .defaultValue(QueryServiceCacheMode.PARTIAL)
+                    .withDescription(
+                            "The cache mode of Query Service. PARTIAL loads lookup files on demand. "
+                                    + "FULL materializes each executor's partition/bucket shard before "
+                                    + "registering the service and incrementally refreshes it. "
+                                    + "This option does not change the client's lookup.cache mode.");
+
     public static final ConfigOption<String> SCAN_PARTITIONS =
             ConfigOptions.key("scan.partitions")
                     .stringType()
@@ -623,6 +633,12 @@ public class FlinkConnectorOptions {
     public static String generateCustomUid(
             String uidPrefix, String tableName, String userDefinedSuffix) {
         return String.format("%s_%s_%s", uidPrefix, tableName, userDefinedSuffix);
+    }
+
+    /** Cache backend used by Query Service. */
+    public enum QueryServiceCacheMode {
+        PARTIAL,
+        FULL
     }
 
     /** The mode of lookup cache. */
