@@ -253,28 +253,31 @@ def test_new_rows_keep_ordinary_write_type_validation(tmp_path, native, stream):
         assert [row['_ROW_ID'] for row in rows] == row_ids
 
 
-@pytest.mark.parametrize('target_type,source_type,initial,value', [
-    (pa.binary(), pa.large_binary(), b'old', b'new'),
-    (pa.large_binary(), pa.binary(), b'old', b'new'),
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('target_type,source_type,initial,value,expected', [
+    (pa.binary(), pa.large_binary(), b'old', b'\xff\0new', b'\xff\0new'),
+    (pa.large_binary(), pa.binary(), b'old', b'\xff\0new', b'\xff\0new'),
+    (pa.binary(), pa.large_binary(), b'old', None, None),
+    (pa.large_binary(), pa.binary(), b'old', None, None),
     (pa.map_(pa.string(), pa.binary()),
      pa.map_(pa.field('k', pa.string(), nullable=False), pa.field('v', pa.large_binary())),
-     [('a', b'old')], [('a', b'new')]),
+     [('a', b'old')], [('a', b'new')], [('a', b'new')]),
     (pa.map_(pa.string(), pa.binary()), pa.struct([('a', pa.large_binary())]),
-     [('a', b'old')], {'a': b'new'}),
+     [('a', b'old')], {'a': b'new'}, [('a', b'new')]),
     (pa.struct([('a', pa.binary())]), pa.map_(pa.string(), pa.large_binary()),
-     {'a': b'old'}, [('a', b'new')]),
+     {'a': b'old'}, [('a', b'new')], {'a': b'new'}),
     (pa.map_(pa.string(), pa.binary()),
      pa.list_(pa.list_(pa.large_binary())),
-     [('a', b'old')], [[b'a', b'new']]),
+     [('a', b'old')], [[b'a', b'new']], [('a', b'new')]),
 ])
-def test_native_upsert_does_not_add_binary_width_conversions(
-        tmp_path, target_type, source_type, initial, value):
-    table, schema = _table(tmp_path, True, target_type)
+def test_matched_binary_values_use_existing_row_id_casts(
+        tmp_path, native, stream, target_type, source_type, initial, value, expected):
+    table, schema = _table(tmp_path, native, target_type)
     row_ids = _seed(table, schema, initial)
     source = pa.table({'key': pa.array([1], type=pa.int32()), 'pt': ['a'],
                        'value': pa.array([value], type=source_type)})
-    with pytest.raises(ValueError, match='Arrow write type .* is incompatible with table type'):
-        _upsert(table, source, True, False)
+    _upsert(table, source, native, stream)
     for rows in _rows(table):
-        assert [row['value'] for row in rows] == [initial] * 3
+        assert [row['value'] for row in rows] == [expected, expected, initial]
         assert [row['_ROW_ID'] for row in rows] == row_ids
