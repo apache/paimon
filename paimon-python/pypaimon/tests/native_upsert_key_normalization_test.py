@@ -219,3 +219,14 @@ def test_dictionary_null_values_and_null_indices_share_upsert_identity(tmp_path,
     _upsert(table, source, native, stream)
     for rows in _rows(table):
         assert [row['value'] for row in rows] == [42, 42, 0, 11]
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+def test_decimal_zero_and_null_keys_rescale_across_the_full_scale_range(tmp_path, native, stream):
+    table, _ = _table(tmp_path, native, pa.decimal128(38, 38), Decimal('0'), Decimal('1e-38'))
+    source = pa.table({'key': pa.array([Decimal('0'), None], type=pa.decimal128(38, -2)),
+                       'value': pa.array([42, 9], type=pa.int32())})
+    _upsert(table, source, native, stream)
+    for rows in _rows(table):
+        assert [row['value'] for row in rows] == [42, 42, 0, 9]
