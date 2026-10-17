@@ -195,6 +195,7 @@ dev = [
 torch = [
     {include-group = "dev"},
     "pypaimon[torch,lerobot]",
+    "torchdata>=0.11,<0.12; python_version >= '3.10'",
 ]
 legacy = [
     {include-group = "test"},
