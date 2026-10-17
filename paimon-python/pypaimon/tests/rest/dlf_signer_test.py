@@ -548,7 +548,7 @@ class DLFSignerTest(unittest.TestCase):
     def test_openapi_v4_unregistered_requests_have_no_action(self):
         paths = ResourcePaths("clg-paimon-1")
         self.assertIsNone(resolve_action("GET", paths.tables()))
-        self.assertIsNone(resolve_action("POST", paths.rename_branch("db", "t", "b")))
+        self.assertIsNone(resolve_action("POST", paths.branch("db", "t", "b") + "/rename"))
         self.assertIsNone(resolve_action("PUT", paths.table("db", "t")))
         self.assertIsNone(resolve_action("GET", ResourcePaths.config() + "/"))
         self.assertIsNone(resolve_action("GET", "/v1//databases"))

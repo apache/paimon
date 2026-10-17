@@ -213,13 +213,6 @@ class CreateBranchRequest(RESTRequest):
 
 
 @dataclass
-class RenameBranchRequest(RESTRequest):
-    FIELD_TO_BRANCH = "toBranch"
-
-    to_branch: str = json_field(FIELD_TO_BRANCH)
-
-
-@dataclass
 class ForwardBranchRequest(RESTRequest):
     """Empty body request; serializes to ``{}`` per Java ForwardBranchRequest."""
     pass

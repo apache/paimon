@@ -54,6 +54,11 @@ class TestCatalogBranchManager(unittest.TestCase):
             self.identifier, "test-branch", "tag-1"
         )
 
+    def test_strict_create_does_not_require_list_permission(self):
+        self.catalog.list_branches.side_effect = AssertionError('Strict create must not list branches')
+        self.branch_manager.create_branch('new-branch')
+        self.catalog.create_branch.assert_called_once_with(self.identifier, 'new-branch', None)
+
     def test_create_branch_ignore_if_exists(self):
         """Test creating branch with ignore_if_exists flag."""
         self.catalog.list_branches.return_value = ["existing-branch"]

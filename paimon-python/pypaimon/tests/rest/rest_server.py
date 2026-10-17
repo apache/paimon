@@ -35,7 +35,6 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
                                       CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
                                       GrantPermissionRequest,
-                                      RenameBranchRequest,
                                       RenameTableRequest,
                                       RevokePermissionRequest)
 from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
@@ -662,8 +661,6 @@ class RESTCatalogServer:
         elif len(path_parts) == 6 and path_parts[3] == ResourcePaths.BRANCHES:
             branch_name = RESTUtil.decode_string(path_parts[4])
             sub = path_parts[5]
-            if sub == ResourcePaths.RENAME:
-                return self._branch_rename_handle(method, data, lookup_identifier, branch_name)
             if sub == ResourcePaths.FORWARD:
                 return self._branch_forward_handle(method, lookup_identifier, branch_name)
             return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -1162,28 +1159,6 @@ class RESTCatalogServer:
             store.discard(branch_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-
-    def _branch_rename_handle(self, method: str, data: str, identifier: Identifier,
-                              from_branch: str) -> Tuple[str, int]:
-        if method != "POST":
-            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
-
-        store = self.branch_store.setdefault(identifier.get_full_name(), set())
-        if from_branch not in store:
-            raise BranchNotExistException(from_branch)
-        request = JSON.from_json(data, RenameBranchRequest)
-        self._validate_branch_name(from_branch)
-        self._validate_branch_name(request.to_branch)
-        if request.to_branch in store:
-            raise BranchAlreadyExistException(request.to_branch)
-        source = self._schema_manager(identifier, from_branch)
-        target = self._schema_manager(identifier, request.to_branch)
-        Path(source.branch_path).rename(target.branch_path)
-        store.discard(from_branch)
-        store.add(request.to_branch)
-        return self._mock_response("", 200)
 
     def _branch_forward_handle(self, method: str, identifier: Identifier,
                                branch_name: str) -> Tuple[str, int]:
