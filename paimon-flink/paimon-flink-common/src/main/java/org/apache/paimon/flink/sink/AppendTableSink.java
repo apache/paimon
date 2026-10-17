@@ -22,6 +22,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.AppendPreCommitCompactCoordinatorOperator;
 import org.apache.paimon.flink.compact.AppendPreCommitCompactWorkerOperator;
 import org.apache.paimon.flink.source.AppendBypassCoordinateOperatorFactory;
+import org.apache.paimon.flink.utils.OperatorUidAssigner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -54,6 +55,12 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
 
     private static final long serialVersionUID = 1L;
 
+    private static final String NEW_FILES_COMPACT_COORDINATOR_NAME =
+            "New Files Compact Coordinator";
+    private static final String NEW_FILES_COMPACT_WORKER_NAME = "New Files Compact Worker";
+    private static final String COMPACT_COORDINATOR_NAME = "Compact Coordinator";
+    private static final String COMPACT_WORKER_NAME = "Compact Worker";
+
     protected final FileStoreTable table;
 
     @Nullable protected final Integer parallelism;
@@ -73,24 +80,29 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
         DataStream<Committable> written = super.doWrite(input, initialCommitUser, this.parallelism);
 
         Options options = new Options(table.options());
+        OperatorUidAssigner uids = OperatorUidAssigner.forSink(table);
         if (options.get(FlinkConnectorOptions.PRECOMMIT_COMPACT)) {
             SingleOutputStreamOperator<Committable> newWritten =
-                    written.transform(
-                                    "New Files Compact Coordinator: " + table.name(),
-                                    new EitherTypeInfo<>(
-                                            new CommittableTypeInfo(),
-                                            new TupleTypeInfo<>(
-                                                    BasicTypeInfo.LONG_TYPE_INFO,
-                                                    new CompactionTaskTypeInfo())),
-                                    new AppendPreCommitCompactCoordinatorOperator(
-                                            table.coreOptions()))
-                            .startNewChain()
-                            .forceNonParallel()
+                    uids.assign(
+                                    written.transform(
+                                                    "New Files Compact Coordinator: "
+                                                            + table.name(),
+                                                    new EitherTypeInfo<>(
+                                                            new CommittableTypeInfo(),
+                                                            new TupleTypeInfo<>(
+                                                                    BasicTypeInfo.LONG_TYPE_INFO,
+                                                                    new CompactionTaskTypeInfo())),
+                                                    new AppendPreCommitCompactCoordinatorOperator(
+                                                            table.coreOptions()))
+                                            .startNewChain()
+                                            .forceNonParallel(),
+                                    NEW_FILES_COMPACT_COORDINATOR_NAME)
                             .transform(
                                     "New Files Compact Worker: " + table.name(),
                                     new CommittableTypeInfo(),
                                     new AppendPreCommitCompactWorkerOperator(table))
                             .startNewChain();
+            uids.assign(newWritten, NEW_FILES_COMPACT_WORKER_NAME);
             forwardParallelism(newWritten, written);
             written = newWritten;
         }
@@ -108,20 +120,24 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
         // if enable compaction, we need to add compaction topology to this job
         if (enableCompaction && isStreamingMode) {
             SingleOutputStreamOperator<Committable> newWritten =
-                    written.transform(
-                                    "Compact Coordinator: " + table.name(),
-                                    new EitherTypeInfo<>(
-                                            new CommittableTypeInfo(),
-                                            new CompactionTaskTypeInfo()),
-                                    new AppendBypassCoordinateOperatorFactory<>(table))
-                            .startNewChain()
-                            .forceNonParallel()
+                    uids.assign(
+                                    written.transform(
+                                                    "Compact Coordinator: " + table.name(),
+                                                    new EitherTypeInfo<>(
+                                                            new CommittableTypeInfo(),
+                                                            new CompactionTaskTypeInfo()),
+                                                    new AppendBypassCoordinateOperatorFactory<>(
+                                                            table))
+                                            .startNewChain()
+                                            .forceNonParallel(),
+                                    COMPACT_COORDINATOR_NAME)
                             .transform(
                                     "Compact Worker: " + table.name(),
                                     new CommittableTypeInfo(),
                                     new AppendBypassCompactWorkerOperator.Factory(
                                             table, initialCommitUser, true))
                             .startNewChain();
+            uids.assign(newWritten, COMPACT_WORKER_NAME);
             setParallelism(newWritten, written.getParallelism(), false);
             written = newWritten;
 

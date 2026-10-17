@@ -124,3 +124,7 @@ not automatically undo later table commits. For a tagged recovery point, match t
 
 Also check whether source topology or consumer mode changed. Dedicated split generation and
 switching consumer modes can make the existing Flink state incompatible.
+
+If the JobManager fails with `There is no operator for the state <id>` after a change elsewhere in
+the job, a Paimon operator without a UID has taken a new id. Set the `operator-uid` options and
+follow the [migration steps](./savepoint#migrate-a-running-job).
