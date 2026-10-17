@@ -37,7 +37,7 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
-import org.apache.flink.client.program.ClusterClient;
+import org.apache.flink.client.program.rest.RestClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.io.InputStatus;
@@ -45,6 +45,8 @@ import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.client.JobStatusMessage;
+import org.apache.flink.runtime.execution.ExecutionState;
+import org.apache.flink.runtime.rest.messages.job.JobDetailsInfo;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -63,6 +65,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,7 +94,7 @@ public class CoordinatorCommitITCase {
 
     @AfterEach
     public final void cleanupRunningJobs() throws Exception {
-        ClusterClient<?> clusterClient = MINI_CLUSTER_EXTENSION.createRestClusterClient();
+        RestClusterClient<?> clusterClient = MINI_CLUSTER_EXTENSION.createRestClusterClient();
         for (JobStatusMessage job : clusterClient.listJobs().get()) {
             if (!job.getJobState().isTerminalState()) {
                 try {
@@ -141,6 +145,112 @@ public class CoordinatorCommitITCase {
         runningJob.cancel();
 
         assertThat(readRowCount(runningJob.table)).isGreaterThan(0L);
+    }
+
+    @Timeout(value = 180, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCoordinatorCommitEndInputFinalizesAndFinishes() throws Exception {
+        String tableName = "T_COORDINATOR_END_INPUT";
+        TableEnvironment tEnv =
+                TableEnvironment.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        tEnv.executeSql(
+                "CREATE CATALOG endinputcat WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + tempPath
+                        + "' )");
+        tEnv.executeSql("USE CATALOG endinputcat");
+        tEnv.executeSql(
+                "CREATE TABLE "
+                        + tableName
+                        + " (id INT, data STRING) WITH ("
+                        + "'bucket' = '-1', 'write-only' = 'true', "
+                        + "'sink.coordinator-commit.enabled' = 'true')");
+        FileStoreTable table =
+                (FileStoreTable)
+                        ((FlinkCatalog) tEnv.getCatalog("endinputcat").get())
+                                .catalog()
+                                .getTable(Identifier.create("default", tableName));
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(SCRIPTED_PARALLELISM);
+        env.enableCheckpointing(200L);
+        DataStreamSource<RowData> source =
+                env.fromSource(
+                                new EndInputSource(),
+                                org.apache.flink.api.common.eventtime.WatermarkStrategy
+                                        .noWatermarks(),
+                                "coordinator-end-input-source")
+                        .setParallelism(SCRIPTED_PARALLELISM);
+        new FlinkSinkBuilder(table).forRowData(source).build();
+
+        JobClient client = env.executeAsync("coordinator-end-input");
+        try {
+            waitUntilRowsCommitted(new RunningJob(table, client));
+            assertThat(readRowCount(table)).isEqualTo(2L);
+            client.getJobExecutionResult().get(120, TimeUnit.SECONDS);
+            assertThat(client.getJobStatus().get()).isEqualTo(JobStatus.FINISHED);
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                    .isEqualTo(Long.MAX_VALUE);
+            assertThat(readRowCount(table)).isEqualTo(2L);
+        } finally {
+            if (!client.getJobStatus().get().isTerminalState()) {
+                client.cancel().get(30, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    @Timeout(value = 180, unit = TimeUnit.SECONDS)
+    @Test
+    public void testEarlyTerminalWriterFinishesWhileOtherWriterRemainsRunning() throws Exception {
+        String tableName = "T_COORDINATOR_EARLY_END_INPUT";
+        TableEnvironment tEnv =
+                TableEnvironment.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        tEnv.executeSql(
+                "CREATE CATALOG earlyendcat WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + tempPath
+                        + "' )");
+        tEnv.executeSql("USE CATALOG earlyendcat");
+        tEnv.executeSql(
+                "CREATE TABLE "
+                        + tableName
+                        + " (id INT, data STRING) WITH ("
+                        + "'bucket' = '-1', 'write-only' = 'true', "
+                        + "'sink.coordinator-commit.enabled' = 'true')");
+        FileStoreTable table =
+                (FileStoreTable)
+                        ((FlinkCatalog) tEnv.getCatalog("earlyendcat").get())
+                                .catalog()
+                                .getTable(Identifier.create("default", tableName));
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(SCRIPTED_PARALLELISM);
+        env.enableCheckpointing(200L);
+        DataStreamSource<RowData> source =
+                env.fromSource(
+                                new AsymmetricEndInputSource(),
+                                org.apache.flink.api.common.eventtime.WatermarkStrategy
+                                        .noWatermarks(),
+                                "coordinator-early-end-input-source")
+                        .setParallelism(SCRIPTED_PARALLELISM);
+        new FlinkSinkBuilder(table).forRowData(source).build();
+
+        JobClient client = env.executeAsync("coordinator-early-end-input");
+        try {
+            // Subtask 0 reaches EndInput earlier and can finish with early permission.
+            // Subtask 1 remains active, so the job stays RUNNING without global MAX
+            // finalization. Ordinary data is committed independently of writer completion.
+            waitUntilWriterTasks(client, 1, 1);
+            assertThat(client.getJobStatus().get()).isEqualTo(JobStatus.RUNNING);
+            waitUntilRowsCommitted(new RunningJob(table, client));
+            assertThat(readRowCount(table)).isEqualTo(1L);
+            assertThat(table.snapshotManager().latestSnapshot().commitIdentifier())
+                    .isLessThan(Long.MAX_VALUE);
+        } finally {
+            if (!client.getJobStatus().get().isTerminalState()) {
+                client.cancel().get(30, TimeUnit.SECONDS);
+            }
+        }
     }
 
     /**
@@ -426,6 +536,28 @@ public class CoordinatorCommitITCase {
         return builder.toString();
     }
 
+    private void waitUntilWriterTasks(JobClient client, int finished, int running)
+            throws Exception {
+        RestClusterClient<?> clusterClient = MINI_CLUSTER_EXTENSION.createRestClusterClient();
+        long deadline = System.currentTimeMillis() + WAIT_TIMEOUT_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            JobDetailsInfo details = clusterClient.getJobDetails(client.getJobID()).get();
+            Optional<JobDetailsInfo.JobVertexDetailsInfo> writer =
+                    details.getJobVertexInfos().stream()
+                            .filter(vertex -> vertex.getName().contains("Writer"))
+                            .findFirst();
+            if (writer.isPresent()) {
+                Map<ExecutionState, Integer> states = writer.get().getTasksPerState();
+                if (states.getOrDefault(ExecutionState.FINISHED, 0) == finished
+                        && states.getOrDefault(ExecutionState.RUNNING, 0) == running) {
+                    return;
+                }
+            }
+            Thread.sleep(200L);
+        }
+        throw new AssertionError("Writer tasks did not reach expected states");
+    }
+
     private long readRowCount(FileStoreTable table) throws Exception {
         RecordReader<InternalRow> reader =
                 table.newRead().createReader(table.newSnapshotReader().read());
@@ -442,10 +574,10 @@ public class CoordinatorCommitITCase {
     private void waitUntilRowsCommitted(RunningJob runningJob) throws Exception {
         long deadline = System.currentTimeMillis() + WAIT_TIMEOUT_MILLIS;
         while (System.currentTimeMillis() < deadline) {
-            runningJob.checkNotTerminated();
             if (readRowCount(runningJob.table) > 0) {
                 return;
             }
+            runningJob.checkNotTerminated();
             Thread.sleep(500);
         }
         assertThat(readRowCount(runningJob.table))
@@ -465,16 +597,104 @@ public class CoordinatorCommitITCase {
             this.jobId = client.getJobID();
         }
 
-        private void cancel() throws Exception {
-            client.cancel().get(30, TimeUnit.SECONDS);
-        }
-
         private void checkNotTerminated() throws Exception {
             JobStatus status = client.getJobStatus().get(30, TimeUnit.SECONDS);
             if (status == JobStatus.FAILED) {
                 client.getJobExecutionResult().get(30, TimeUnit.SECONDS);
             }
             assertThat(status.isTerminalState()).describedAs("job status: %s", status).isFalse();
+        }
+
+        private void cancel() throws Exception {
+            client.cancel().get(30, TimeUnit.SECONDS);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (!client.getJobStatus().get(5, TimeUnit.SECONDS).isTerminalState()) {
+                if (System.nanoTime() >= deadline) {
+                    throw new AssertionError("Canceled job did not reach a terminal state");
+                }
+                Thread.sleep(100L);
+            }
+        }
+    }
+
+    /** Ends subtask 0 while subtask 1 remains active for the assertion window. */
+    private static class AsymmetricEndInputSource extends AbstractNonCoordinatedSource<RowData> {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public Boundedness getBoundedness() {
+            return Boundedness.CONTINUOUS_UNBOUNDED;
+        }
+
+        @Override
+        public SourceReader<RowData, SimpleSourceSplit> createReader(
+                SourceReaderContext sourceReaderContext) {
+            return new Reader(sourceReaderContext.getIndexOfSubtask());
+        }
+
+        private static class Reader extends AbstractNonCoordinatedSourceReader<RowData> {
+
+            private final int subtask;
+            private boolean emitted;
+
+            private Reader(int subtask) {
+                this.subtask = subtask;
+            }
+
+            @Override
+            public InputStatus pollNext(ReaderOutput<RowData> output) throws InterruptedException {
+                if (subtask == 0 && !emitted) {
+                    output.collect(GenericRowData.of(0, StringData.fromString("early")));
+                    emitted = true;
+                    return InputStatus.MORE_AVAILABLE;
+                }
+                if (subtask == 0) {
+                    return InputStatus.END_OF_INPUT;
+                }
+                Thread.sleep(50L);
+                return InputStatus.MORE_AVAILABLE;
+            }
+        }
+    }
+
+    /** Emits one row per subtask, then delays END_INPUT until a checkpoint can be triggered. */
+    private static class EndInputSource extends AbstractNonCoordinatedSource<RowData> {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public Boundedness getBoundedness() {
+            return Boundedness.CONTINUOUS_UNBOUNDED;
+        }
+
+        @Override
+        public SourceReader<RowData, SimpleSourceSplit> createReader(
+                SourceReaderContext sourceReaderContext) {
+            return new Reader(sourceReaderContext.getIndexOfSubtask());
+        }
+
+        private static class Reader extends AbstractNonCoordinatedSourceReader<RowData> {
+
+            private final int subtask;
+            private boolean emitted;
+
+            private Reader(int subtask) {
+                this.subtask = subtask;
+            }
+
+            @Override
+            public InputStatus pollNext(ReaderOutput<RowData> output) throws InterruptedException {
+                if (!emitted) {
+                    output.collect(
+                            GenericRowData.of(
+                                    subtask, StringData.fromString("subtask-" + subtask)));
+                    emitted = true;
+                    return InputStatus.MORE_AVAILABLE;
+                }
+                Thread.sleep(1_000L);
+                return InputStatus.END_OF_INPUT;
+            }
         }
     }
 
