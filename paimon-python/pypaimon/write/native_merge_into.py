@@ -59,7 +59,9 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         if not _native_blob_view_supported(source, source.field_names):
             return None
         # Core resolves a full snapshot or PyPaimon's existing timestamp window.
-        if (source.options.scan_mode() not in ('default', 'from-snapshot', 'from-timestamp', 'incremental')
+        if (source.options.scan_mode() not in (
+                'default', 'latest', 'latest-full', 'from-snapshot',
+                'from-snapshot-full', 'from-timestamp', 'incremental')
                 or any(str(key).startswith('incremental-') and key != 'incremental-between-timestamp'
                        for key in source.table_schema.options)):
             return None

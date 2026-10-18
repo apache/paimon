@@ -419,6 +419,11 @@ reusable `InternalRow` view with its row kind, BLOB and VECTOR accessors. It
 visits splits serially and shares one row limit across them. Close the iterator
 when stopping before exhaustion to release its current Native reader.
 
+Batch reads support `scan.mode=latest` and `latest-full` for the latest complete
+snapshot, and `from-snapshot-full` with `scan.snapshot-id` for a selected complete
+snapshot. The same modes apply when a Paimon table is the source of `merge_into`.
+These batch semantics follow Java; streaming startup policies are separate.
+
 Native planning and reading require Rust's resolved-schema bindings:
 `Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and
 `Table.copy_with_resolved_schema()` for REST tables. The adapter passes the Python
