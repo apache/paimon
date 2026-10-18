@@ -177,8 +177,11 @@ class TableRead:
         self.predicate = predicate
         self.read_type = read_type
         self.output_projection = output_projection
-        self._adapter_read_type = (self._reader_adapter()[0]
-                                   if output_projection is not None else read_type)
+        adapter = (self._reader_adapter() if output_projection is not None
+                   else (read_type, [[field.name] for field in read_type]))
+        self._adapter_read_type = adapter[0]
+        physical_names = {field.name for field in self._table_read_fields()}
+        self.predicate = self._bind_predicate_to_adapter(self.predicate, *adapter, physical_names)
         # Split readers may need predicate-only columns that are absent from
         # the requested output. Read the widened schema internally, then use
         # ``_output_column_names`` to project batches back to ``read_type``.
@@ -460,22 +463,58 @@ class TableRead:
         if (self.predicate is None or self.output_projection is None
                 or self.output_projection.named):
             return adapter
-        # Keep complete source columns for authorization and result extraction.
-        # Only a predicate on a flat list-projection leaf needs an additional
-        # local leaf view, even when its parent ROW is requested in full.
-        projected = reader_adapter(self.read_type, self._table_read_fields(), self.output_projection)
-        extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
-        # A flat nested name may collide with a real top-level column. Match
-        # source paths as well as names so filtering a.b never reads a_b.
-        adapter_paths = {field.name: path for field, path in zip(*adapter)}
+        # Derive the flat working view for exact Python filtering, retaining
+        # requested whole columns and the additional top-level filter inputs.
+        columns = list(self.output_projection.columns)
+        paths = [path for _, path in columns]
+        physical_names = {field.name for field in self._table_read_fields()}
+        has_physical_path = False
+        # Predicates carrying physical paths were built against a flat view.
+        # Keep that layout stable when a projection change rebinds their
+        # aliases, including names which collide with top-level columns.
         pending = [self.predicate]
         while pending:
             predicate = pending.pop()
             if predicate.method in ('and', 'or'):
                 pending.extend(predicate.literals or [])
-            elif predicate.field_path and adapter_paths.get(predicate.field) != predicate.field_path:
-                return projected
+            else:
+                path = predicate.field_path or ([predicate.field] if predicate.field in physical_names else None)
+                if path:
+                    has_physical_path = True
+                    if len(path) == 1 and path[0] in physical_names and path not in paths:
+                        # Keep existing top-level filter-only columns in the
+                        # flat working view. Projection assigns their aliases
+                        # together with the user outputs, preventing collisions.
+                        columns.append((path[0], path))
+                        paths.append(path)
+        projected = reader_adapter(self.read_type, self._table_read_fields(), OutputProjection(columns))
+        extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
+        if has_physical_path:
+            return projected
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
+
+    @staticmethod
+    def _bind_predicate_to_adapter(predicate, fields, paths, physical_names):
+        if predicate is None:
+            return None
+        if predicate.method in ('and', 'or'):
+            return predicate.new_literals([
+                TableRead._bind_predicate_to_adapter(child, fields, paths, physical_names)
+                for child in predicate.literals or []])
+        path = predicate.field_path or ([predicate.field] if predicate.field in physical_names else None)
+        if not path:
+            return predicate
+        matches = [(index, field) for index, (field, candidate_path) in enumerate(zip(fields, paths))
+                   if candidate_path == path]
+        if matches:
+            index, field = matches[0]
+            bound_path = predicate.field_path or (path if field.name != predicate.field else None)
+            return Predicate(predicate.method, index, field.name, predicate.literals, bound_path)
+        if len(path) == 1 and path[0] not in {field.name for field in fields}:
+            # Existing top-level filter-only columns are appended separately.
+            return Predicate(predicate.method, predicate.index, path[0], predicate.literals, predicate.field_path)
+        raise ValueError("Predicate field %r with path %r is not in the reader projection"
+                         % (predicate.field, path))
 
     def _output_arrow_schema(self, splits=None):
         schema = read_arrow_schema(self.read_type)
@@ -864,8 +903,17 @@ class TableRead:
 
     def _flatten_native_nested_batch(self, batch, schema):
         _, paths = self._reader_adapter()
+        # Rust already evaluated the complete predicate and projected away
+        # filter-only fields. Flatten just the user output dependencies; the
+        # Python split reader retains the additional adapter inputs internally.
+        outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
+        needed = {path[0] for _, path in outputs}
+        fields_and_paths = [(field, path) for field, path in zip(self._adapter_read_type, paths)
+                            if field.name in needed]
+        adapter_fields = [field for field, _ in fields_and_paths]
+        paths = [path for _, path in fields_and_paths]
         arrays = [extract_array(batch, path) for path in paths]
-        fields = list(read_arrow_schema(self._adapter_read_type))
+        fields = list(read_arrow_schema(adapter_fields))
         # Authorization can mask a NOT NULL field. Keep the captured source
         # nullability when flattening, including whole-parent/MAP projections.
         projected = output_schema(batch.schema, OutputProjection([

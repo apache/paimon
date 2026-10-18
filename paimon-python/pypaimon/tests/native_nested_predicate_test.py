@@ -168,7 +168,9 @@ def test_nested_filter_composition_and_projection_changes(tmp_path, mode, projec
 @pytest.mark.parametrize('nested_filter', [False, True])
 @pytest.mark.parametrize('partitioned', [False, True])
 @pytest.mark.parametrize('compound', [None, 'and', 'or'])
-def test_nested_predicate_alias_collisions(tmp_path, mode, native, nested_first, nested_filter, partitioned, compound):
+@pytest.mark.parametrize('reorder_projection', [False, True])
+def test_nested_predicate_alias_collisions(
+        tmp_path, mode, native, nested_first, nested_filter, partitioned, compound, reorder_projection):
     import pickle
 
     schema = pa.schema([('id', pa.int32()), ('a', pa.struct([('b', pa.int32())])), ('a_b', pa.int32())])
@@ -218,6 +220,13 @@ def test_nested_predicate_alias_collisions(tmp_path, mode, native, nested_first,
         predicate = PredicateBuilder.or_predicates([
             predicate, builder.new_predicate_builder().equal('id', 13)])
     builder.with_filter(predicate)
+    if reorder_projection:
+        builder.with_projection([projection[1], projection[0], 'id'])
+    if mode == 'append' and partitioned and nested_filter:
+        # A nested alias may equal a partition name. Filtering after chunk
+        # generation would invalidate its declared merged row count.
+        with pytest.raises(ValueError, match='chunk_shuffle predicate must reference only partition keys'):
+            builder.new_scan().with_chunk_shuffle(1, 2).plan()
     scan, read = builder.new_scan(), builder.new_read()
     with ExitStack() as stack:
         if native:
@@ -232,6 +241,120 @@ def test_nested_predicate_alias_collisions(tmp_path, mode, native, nested_first,
     elif compound == 'or':
         expected |= {13}
     assert sorted(row['id'] for row in rows) == sorted(expected)
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+def test_removed_nested_filter_path_does_not_bind_to_colliding_column(tmp_path, native):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', True)
+    schema = pa.schema([('a', pa.struct([('b', pa.int32())])), ('a_b', pa.int32())])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(schema), False)
+    table = catalog.get_table('db.t').copy({'read.native.enabled': str(native).lower()})
+    builder = table.new_read_builder().with_projection(['a.b', 'a_b'])
+    predicate = builder.new_predicate_builder().equal('a_b', 7)
+    builder.with_filter(predicate).with_projection(['a_b'])
+    with pytest.raises(ValueError, match='Predicate field .* is not in the reader projection'):
+        builder.new_read()
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk'])
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('projected_predicate', [False, True], ids=['physical', 'projected'])
+@pytest.mark.parametrize('compound', [None, 'and', 'or'])
+@pytest.mark.parametrize('projection', [
+    ['a.b', 'id'], ['a.b', 'a.b', 'id'], ['a', 'a.b', 'id'],
+])
+def test_nested_projection_keeps_physical_filter_only_inputs(
+        tmp_path, mode, native, projected_predicate, compound, projection):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', True)
+    schema = pa.schema([('id', pa.int32()), ('a', pa.struct([('b', pa.int32())])), ('a_b', pa.int32())])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'] if mode == 'pk' else None,
+        options={'bucket': '1' if mode == 'pk' else '-1', 'write.native.enabled': 'false'}), False)
+    table = catalog.get_table('db.t')
+    for rows in [
+        [{'id': 1, 'a': {'b': 30}, 'a_b': 99}],
+        [{'id': 1, 'a': {'b': 7}, 'a_b': 99}, {'id': 2, 'a': {'b': 1}, 'a_b': 7},
+         {'id': 3, 'a': {'b': 9}, 'a_b': 99}, {'id': 4, 'a': None, 'a_b': 7}],
+    ]:
+        write_builder = table.new_batch_write_builder()
+        writer, commit = write_builder.new_write(), write_builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+    table = table.copy({'read.native.enabled': str(native).lower(),
+                        'scan.native-plan.enabled': str(native).lower()})
+    builder = table.new_read_builder().with_projection(['a_b', 'id'])
+    predicates = builder.new_predicate_builder() if projected_predicate else PredicateBuilder(table.fields)
+    physical = predicates.equal('a_b', 7)
+    assert physical.field_path == (['a_b'] if projected_predicate else None)
+    builder.with_projection(projection)
+    if compound:
+        nested_builder = builder.new_predicate_builder()
+        nested = (nested_builder.less_than('a_b', 10) if compound == 'and'
+                  else nested_builder.equal('a_b', 7))
+        combine = PredicateBuilder.and_predicates if compound == 'and' else PredicateBuilder.or_predicates
+        predicate = combine([nested, physical])
+    else:
+        predicate = physical
+    builder.with_filter(predicate)
+    scan, read = builder.new_scan(), builder.new_read()
+    schema_names = [field.name for field in builder._output_fields()]
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch.object(scan.file_scanner, 'scan',
+                                             side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch.object(read, '_create_split_read',
+                                             side_effect=AssertionError('Python read fallback')))
+        splits = scan.plan().splits()
+        for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+            assert result.schema.names == schema_names
+            assert sorted(result.column('id').to_pylist()) == (
+                [2] if compound == 'and' else [1, 2, 4] if compound == 'or' else [2, 4])
+    # Iterator reads exercise the same exact filter on Python record readers,
+    # including merged PK records and predicate-only alias collisions.
+    ids = [row.get_field(len(projection) - 1) for row in read.to_iterator(splits)]
+    assert sorted(ids) == (
+        [2] if compound == 'and' else [1, 2, 4] if compound == 'or' else [2, 4])
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+def test_nested_projection_keeps_synthesized_row_id_filter_input(tmp_path, native):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', True)
+    schema = pa.schema([('id', pa.int32()), ('_ROW', pa.struct([('ID', pa.int64())]))])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        schema, options={'bucket': '-1', 'row-tracking.enabled': 'true', 'write.native.enabled': 'false'}), False)
+    table = catalog.get_table('db.t')
+    write_builder = table.new_batch_write_builder()
+    writer, commit = write_builder.new_write(), write_builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pylist([
+            {'id': 1, '_ROW': {'ID': 100}}, {'id': 2, '_ROW': {'ID': 0}}], schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    table = table.copy({'read.native.enabled': str(native).lower(),
+                        'scan.native-plan.enabled': str(native).lower()})
+    builder = table.new_read_builder().with_projection(['_ROW_ID', 'id'])
+    predicate = builder.new_predicate_builder().equal('_ROW_ID', 0)
+    builder.with_filter(predicate).with_projection(['_ROW.ID', 'id'])
+    read, scan = builder.new_read(), builder.new_scan()
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch.object(scan.file_scanner, 'scan',
+                                             side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch.object(read, '_create_split_read',
+                                             side_effect=AssertionError('Python read fallback')))
+        splits = scan.plan().splits()
+        for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
+            assert result.to_pylist() == [{'_ROW_ID': 100, 'id': 1}]
+    assert [row.get_field(1) for row in read.to_iterator(splits)] == [1]
 
 
 @pytest.mark.parametrize('mode', ['append', 'pk'])

@@ -735,7 +735,7 @@ class FileScanner:
         if self._user_predicate is not None:
             partition_keys = set(self.table.partition_keys or [])
             non_partition_fields = _get_all_fields(self._user_predicate) - partition_keys
-            if non_partition_fields:
+            if non_partition_fields or not predicate_matches_physical_names(self._user_predicate):
                 raise ValueError(
                     "chunk_shuffle predicate must reference only partition keys; "
                     "got non-partition fields: "
