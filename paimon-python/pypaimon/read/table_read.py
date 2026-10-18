@@ -610,13 +610,6 @@ class TableRead:
         if not self._native_blob_view_supported():
             return self._native_fallback(
                 "the table uses an unsupported BLOB view")
-        # Only an opaque split from Rust's authorized plan retains the live
-        # grant. Python-planned/serialized rules remain on the Python reader;
-        # reconstructing a Rust split cannot mint authorization from bytes.
-        if any(isinstance(split, QueryAuthSplit) and getattr(split, '_native_split', None) is None
-               for split in splits):
-            return self._native_fallback(
-                "query authorization requires the original native plan")
         try:
             from pypaimon.read.native_plan import (
                 _prepare_native_read, _raise_if_native_fork_safety_error,

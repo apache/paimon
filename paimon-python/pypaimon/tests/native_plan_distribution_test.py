@@ -28,11 +28,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import (
-    native_method_available,
-    native_version_at_least,
-    native_runtime_available,
-)
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
@@ -176,7 +172,7 @@ class _DistributionFixture:
 
 @pytest.mark.native_plan
 @unittest.skipUnless(native_runtime_available(),
-                     'pypaimon_rust split-planning API required')
+                     'pypaimon-rust not installed')
 class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
 
     def test_append_shards_preserve_partition_file_order_and_cover_once(self):
@@ -258,7 +254,7 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self._assert_parity(table, [], 4, shard=(1, 3), limit=0)
 
     @unittest.skipUnless(
-        native_version_at_least(0, 4, 0),
+        native_runtime_available(),
         'pypaimon-rust>=0.4.0 required for native DV scans')
     def test_append_dv_slice_limit_uses_actual_surviving_positions(self):
         for deleted, expected_key in (((2, 3, 4, 5), 6), ((3, 4, 5), 2)):
@@ -354,8 +350,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                     old_rows.extend(expected)
                 self.assertCountEqual(old_rows, rows[:3])
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_slice'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_slice_positions_skip_row_id_gaps(self):
         schema = self.schema.append(pa.field('p', pa.string()))
         table = self._create('de_gaps', self._de_options(), schema, ['p'])
@@ -369,8 +365,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self._assert_parity(table, surviving[3:], 4, shard=(1, 2))
         self._assert_parity(table, [], 4, slice_=(10, 12))
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_shard'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_sharding_precedes_group_stats_pruning(self):
         table = self._create('de_filter', self._de_options())
         rows = [{'k': k, 'v': str(k)} for k in range(6)]
@@ -381,8 +377,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
         self._assert_parity(table, rows[3:], 2, shard=(1, 2), predicate=predicate)
         self._assert_parity(table, rows[3:4], 2, shard=(1, 2), predicate=predicate, limit=1)
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_slice'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_slice_intersects_explicit_ranges(self):
         table = self._create('de_intersection', self._de_options())
         rows = [{'k': k, 'v': str(k)} for k in range(6)]
@@ -395,8 +391,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                             shard=(1, 2), row_ranges=[Range(4, 4)])
         self._assert_parity(table, [], 2, shard=(0, 2), row_ranges=[])
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_shard'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_shards_count_positions_before_deletions(self):
         options = self._de_options(**{'deletion-vectors.enabled': 'true'})
         table = self._create('de_dv_shards', options)
@@ -414,9 +410,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                             shard=(0, 3))
 
     @unittest.skipUnless(
-        native_method_available('Plan', 'snapshot_id')
-        and native_method_available('TableScan', 'with_row_position_shard'),
-        'pypaimon_rust row-position selection and snapshot metadata required')
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_empty_distributed_plans_keep_snapshot_metadata(self):
         for de in (False, True):
             table = self._create('empty_' + str(de), self._de_options() if de else None)
@@ -425,8 +420,8 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
             self._write(table, [{'k': 1, 'v': 'a'}])
             self._assert_parity(table, [], 1, shard=(2, 3))
 
-    @unittest.skipUnless(native_method_available('TableScan', 'with_row_position_shard'),
-                         'pypaimon_rust row-position selection API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_updates_and_projection_do_not_multiply_positions(self):
         schema = self.schema.append(pa.field('payload', pa.large_binary()))
         table = self._create('de_projected_updates', self._de_options(), schema)

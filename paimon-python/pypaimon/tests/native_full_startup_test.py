@@ -277,7 +277,7 @@ def test_merge_authorized_source_failures_never_modify_target(rest_catalog, nati
             stack.enter_context(patch.object(server, '_table_query_auth_handle', return_value=denied))
         with pytest.raises(Exception) as caught:
             # No value column is used by this MERGE, but a mask on that column
-            # still prevents plan_for_write from exposing the source table.
+            # still prevents plan_all_files from exposing the source table.
             builder.new_update().merge_into(source, on=['id'], when_matched=[WhenMatched.delete()])
         assert not isinstance(caught.value, AssertionError)
     assert target.snapshot_manager().get_latest_snapshot().id == before

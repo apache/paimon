@@ -84,7 +84,7 @@ class FirstRowMergeEngineE2ETest(unittest.TestCase):
         rb = table.new_read_builder()
         scan = rb.new_scan()
         self.assertEqual(scan.plan().splits(), [])
-        splits = scan.plan_for_write().splits()
+        splits = scan.plan_all_files().splits()
         if not splits:
             return []
         return sorted(

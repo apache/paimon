@@ -80,7 +80,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                     or any(source.table_schema.options.get(key) is not None for key in SCAN_KEYS)):
                 return None
             # A source is a read, not a write. Core obtains a fresh REST grant
-            # and requires it to be unrestricted, as Python plan_for_write does.
+            # and requires it to be unrestricted, as Python plan_all_files does.
             native_source = _native_table(source)
         else:
             native_source = create_native_write_table(source)

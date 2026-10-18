@@ -77,7 +77,7 @@ from pypaimon.data.variant_shredding import (
     rebuild_value,
     shredding_schema_to_arrow_type,
 )
-from pypaimon.read.native_plan import native_split_bridge_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.data_types import (
     AtomicType,
     DataField,
@@ -106,7 +106,7 @@ def _variant_arrow_type() -> pa.StructType:
 
 
 def _native_variant_projection_available() -> bool:
-    if not native_split_bridge_available():
+    if not native_runtime_available():
         return False
     try:
         from pypaimon_rust.datafusion import ReadBuilder as NativeReadBuilder

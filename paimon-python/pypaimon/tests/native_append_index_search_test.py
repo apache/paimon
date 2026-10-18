@@ -23,7 +23,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
 from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
@@ -32,7 +32,7 @@ from pypaimon.tests.vector_search_filter_test import match_query
 
 rest_catalog = indexes.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_hybrid_search_builder'), reason='Rust search API required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 SCHEMA = pa.schema([
     ('id', pa.int32()), ('content', pa.string()), ('embedding', pa.list_(pa.float32())),

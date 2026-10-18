@@ -586,6 +586,9 @@ class FileStoreTable(Table):
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
+            from pypaimon.read.native_plan import _NativeRestTableCache
+            new_table._native_pinned_table_cache = vars(self).setdefault(
+                '_native_pinned_table_cache', _NativeRestTableCache())
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:

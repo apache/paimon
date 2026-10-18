@@ -129,9 +129,9 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
             writer.close()
             commit.close()
         scan = table.copy({'scan.native-plan.enabled': 'true'}).new_read_builder().new_scan()
-        with patch.object(scan.file_scanner, 'scan', wraps=scan.file_scanner.scan) as fallback:
+        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Native plan fell back')):
             plan = scan.plan()
-        fallback.assert_called_once_with()
+        assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
         assert any(file.level == 0 for split in plan.splits() for file in split.files)
 
 
@@ -296,3 +296,45 @@ def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merge
             assert any(deletion is not None
                        for split in plan.splits()
                        for deletion in split.data_deletion_files or [])
+
+
+@pytest.mark.parametrize('batch_size', [1, 1024])
+@pytest.mark.parametrize('target_size', ['1b', '1mb'])
+def test_first_row_sorted_materialized_and_l0_merge_natively(tmp_path, batch_size, target_size):
+    schema = pa.schema([('id', pa.int64()), ('value', pa.string())])
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, primary_keys=['id'], options={
+        'bucket': '1', 'merge-engine': 'first-row', 'file.format': 'parquet',
+        'deletion-vectors.enabled': 'true', 'deletion-vectors.merge-on-read': 'true',
+        'source.split.target-size': target_size, 'source.split.open-file-cost': '1b',
+        'read.batch-size': str(batch_size),
+    }), False)
+    table = catalog.get_table('default.t')
+    for level, rows in [(1, [{'id': 1, 'value': 'first'}, {'id': 2, 'value': 'second'}]),
+                        (0, [{'id': 1, 'value': 'later'}, {'id': 3, 'value': 'third'}])]:
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))
+            messages = writer.prepare_commit()
+            for message in messages:
+                message.new_files = [replace(file, level=level) for file in message.new_files]
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+    for native in [False, True]:
+        builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
+                              'read.native.enabled': str(native).lower()}).new_read_builder()
+        scan = builder.new_scan()
+        with ExitStack() as guards:
+            if native:
+                guards.enter_context(patch.object(scan.file_scanner, 'scan',
+                                                  side_effect=AssertionError('Native plan fell back')))
+                guards.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
+                                           side_effect=AssertionError('Native read fell back')))
+            plan = scan.plan()
+            assert any(not split.raw_convertible for split in plan.splits())
+            rows = builder.new_read().to_arrow(plan.splits()).sort_by([('id', 'ascending')]).to_pylist()
+        assert rows == [{'id': 1, 'value': 'first'}, {'id': 2, 'value': 'second'}, {'id': 3, 'value': 'third'}]

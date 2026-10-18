@@ -114,7 +114,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
         # Exercise native qualification even without an installed binding. A
         # schema-only table cannot delegate, but still selects the PK readers.
         with mock.patch(
-                "pypaimon.table.source.native_search_plan.native_method_available",
+                "pypaimon.table.source.native_search_plan.native_runtime_available",
                 return_value=True):
             self.assertIsInstance(vector.new_vector_search_scan(), PrimaryKeyVectorScan)
             self.assertIsInstance(vector.new_vector_search_read(), PrimaryKeyVectorRead)

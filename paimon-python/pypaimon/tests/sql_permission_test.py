@@ -40,16 +40,8 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
-def _rust_version():
-    if not native_runtime_available():
-        return 0, 0
-    from importlib.metadata import version
-    return tuple(int(part) for part in version('pypaimon-rust').split('.')[:2])
-
-
-RUST_VERSION = _rust_version()
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    RUST_VERSION < (0, 4), reason='pypaimon-rust 0.4 or later required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 TOKEN = 'test-token'
 ANALYST = 'analyst'
@@ -161,7 +153,6 @@ def test_sql_grants_are_seen_by_pypaimon_and_back(clients):
                          "database => 'default', table => 'orders')") == []
 
 
-@pytest.mark.skipif(RUST_VERSION < (0, 5), reason='pypaimon-rust 0.5 or later required')
 def test_column_grants_restrict_both_readers(clients):
     catalog, context, server = clients
     _create_orders(catalog, ROWS)
@@ -223,7 +214,6 @@ def test_sql_and_pypaimon_manage_the_same_policies(clients):
                       "policy_type => 'ROW_FILTER', principal => 'analyst', if_exists => 'true')")
 
 
-@pytest.mark.skipif(RUST_VERSION < (0, 5), reason='pypaimon-rust 0.5 or later required')
 def test_row_filter_restricts_both_readers_alike(clients):
     catalog, context, server = clients
     _create_orders(catalog, ROWS)
@@ -241,7 +231,6 @@ def test_row_filter_restricts_both_readers_alike(clients):
     assert _sql(context, 'SELECT count(*) AS n FROM paimon.default.orders') == [{'n': 2}]
 
 
-@pytest.mark.skipif(RUST_VERSION < (0, 5), reason='pypaimon-rust 0.5 or later required')
 def test_column_masks_mask_both_readers_alike(clients):
     catalog, context, server = clients
     _create_orders(catalog, ROWS)

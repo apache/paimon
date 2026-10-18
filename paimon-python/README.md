@@ -210,7 +210,7 @@ view or retained snapshot metadata. Current main-branch REST table sources
 with `query-auth.enabled=true` also use core when the catalog returns no row
 filter or column mask. Core requests authorization for every source column,
 even for a key-only DELETE, and refreshes it for each MERGE. A restricted or
-denied source fails before target actions, as with Python's `plan_for_write`.
+denied source fails before target actions, as with Python's `plan_all_files`.
 
 Python and native writers use Java's escaped partition directories for data,
 changelog, Blob and row sidecar files, including external locations. Both
@@ -379,8 +379,8 @@ explanation = builder.explain()
 print(explanation.native_planned)
 ```
 
-The adapter checks the installed binding's capabilities and falls back to the
-Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
+The adapter uses the companion Rust release when installed and falls back to
+the Python planner for unsupported scans. Native plans preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
 and split metadata plus counters for actual Native planning work, available in
 `explanation.planning_counters`. Statistics collection retains early manifest,
@@ -423,7 +423,7 @@ runs independent Rust readers. Splits stay in input order but contiguous groups
 are balanced by physical file bytes to reduce worker skew. An unfiltered row
 limit also caps reader fan-out to avoid speculative work.
 Streaming buffers at most one batch per reader and closing the batch reader
-interrupts native reads that are still in flight. A missing reader capability,
+interrupts native reads that are still in flight. An uninstalled extension,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
 
@@ -437,7 +437,10 @@ snapshot, and `from-snapshot-full` with `scan.snapshot-id` for a selected comple
 snapshot. The same modes apply when a Paimon table is the source of `merge_into`.
 These batch semantics follow Java; streaming startup policies are separate.
 
-Native planning and reading require Rust's resolved-schema bindings:
+Native planning, reading, writing, updating and committing use the matching
+`pypaimon-rust` release directly, without API probes or compatibility paths for
+older extensions. Install the companion release when upgrading PyPaimon.
+Native planning and reading use Rust's resolved-schema bindings:
 `Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and
 `Table.copy_with_resolved_schema()` for REST tables. The adapter passes the Python
 table's resolved schema and complete effective options without an option whitelist.
@@ -456,26 +459,28 @@ The native table retains REST credentials, token refresh and catalog snapshot
 resolution. Database and table names containing dots are passed as separate
 identifier components. REST snapshot results (including empty results) take precedence over
 filesystem snapshots. REST errors, including HTTP 501, are propagated as in Java.
-Custom catalog/FileIO contexts still fall back when they cannot be reproduced.
+Rust FileIO supports the existing REST FUSE options (`fuse.enabled`, `fuse.root`,
+`fuse.mode` and `fuse.validation-mode`). It resolves and validates the mount,
+including historical reads, without requesting cloud credentials for mounted data.
+A copied branch retains Python's bound FileIO; if its FUSE mount differs from the
+catalog-resolved mount, planning and reading retain Python execution.
+Custom catalog loaders and arbitrary FileIO implementations require an equivalent
+native provider; contexts that cannot be reproduced retain Python execution.
 
 Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_ranges()`.
-Watermark time travel requires Rust 0.4 or newer. Branch reads require the
-branch-aware binding exposing `Table.branch()`, and the resolved branch is
-checked before planning. Deletion-vector scans require `pypaimon-rust>=0.4.0`,
-which includes schema-aware decoding of index manifests. Index paths follow
+Watermark time travel and branch reads are supported; the resolved branch is
+checked before planning. Deletion-vector scans use schema-aware decoding of
+index manifests. Index paths follow
 Java: an explicit external path takes precedence; otherwise
 `index-file-in-data-file-dir` selects the bucket or table index directory.
 Bucket paths use the partition field types and `partition.legacy-name` to match
 Java formatting, including timestamp precision and different JVM float spellings.
 Python bucket-index writes use Java partition paths. Explicit paths identify
 external files and floating partition directories whose spelling depends on the
-JDK version. Missing bucket indexes fail instead of searching Python layouts. Older releases and prereleases
-before 0.4.0 use the Python planner for deletion vectors.
-When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
-package version checks cannot distinguish local builds with identical versions.
+JDK version. Missing bucket indexes fail instead of searching Python layouts.
 
-Append scans support `with_shard()` and `with_slice()` with Rust 0.4 or newer,
-which plans positional selection directly into native-readable splits; primary-key
+Append scans support `with_shard()` and `with_slice()`, which plan positional
+selection directly into native-readable splits; primary-key
 scans support bucket-based `with_shard()`. Both append and data-evolution position
 selection require the binding's `TableScan.with_row_position_slice()` and
 `with_row_position_shard()`. Ordinary append positions follow the stats-pruned
@@ -512,15 +517,15 @@ use native planning. With deletion vectors, batch scans exclude level 0 unless
 `deletion-vectors.merge-on-read=true`, in which case overlapping key ranges stay
 together when they include L0 and require reader-side merging. Fully materialized
 DV files across levels use raw splits, including first-row clustering tables.
-First-row L0 runs can use native planning, including plans with materialized files
-in separate raw splits. Plans that require merging clustered materialized files
-still fall back to Python. Readers preserve physical row positions until deletion
+First-row L0 runs and ordered materialized files can use native planning and
+merge reads together. As in Java, files entering the PK merge reader must be
+ordered by primary key. Readers preserve physical row positions until deletion
 vectors are applied, then evaluate residual predicates after merging.
 Write scans and incremental scans retain level 0.
 
 Append and data-evolution chunk shuffle use Rust file and deletion-vector planning.
-Python retains live-row chunk sizing, seeded shuffle order and balanced worker
-assignment, so the same seed selects the same chunks with either planner.
+Rust also performs live-row chunk sizing, seeded shuffle order and balanced
+worker assignment, so the same seed selects the same chunks with either planner.
 Projection does not remove aligned column files before chunk construction.
 Chunk shuffle supports partition predicates, deletion vectors and timestamp
 incremental scans; its existing restrictions on limits, slices, row ranges and
@@ -528,14 +533,22 @@ global-index results still apply.
 
 Scored global-index results on data-evolution append tables use native row-range
 planning; Python attaches scores to the selected ranges and reads the data.
-Primary-key sorted indexes refine native batch splits through Python's existing
-index reader, preserving merge-required splits and the selected snapshot.
+Primary-key sorted indexes refine native batch splits in Rust core, preserving
+merge-required splits and the selected snapshot.
 
-Query authorization, first-row plans mixing L0 with merge-required materialized files,
-and precomputed primary-key global-index results still use the Python planner.
-Continuous streaming retains Python polling and resume handling, while its
-initial, delta and physical-changelog frames can use native planning and reads.
-Write planning retains its Python entrypoint.
+Standard REST query authorization, historical and branch reads, and precomputed
+primary-key global-index results use Rust planning. Rules are validated against
+the current catalog schema and bound to the historical field IDs and names.
+Older data files may retain statistics for dropped columns, as in Java.
+Python-planned and transported authorized splits can use the native reader after
+live REST authorization and snapshot-file, deletion-vector and merge-group
+validation. Transported metadata never supplies a live grant. If restrictions
+changed incompatibly, the captured plan retains Python execution.
+Continuous streaming delegates planning and resume state to Rust core.
+`TableScan.plan_all_files()` includes L0 and every data-evolution column file,
+retaining scan filters and limits and requiring unrestricted query authorization.
+Writer restore, overwrite and index construction use this entrypoint and delegate
+planning to Rust core when Native planning is enabled.
 Native planning remains optional and is disabled by default.
 
 # Coalesced BLOB reads
@@ -866,8 +879,8 @@ predicates; equality and prefix retain the underlying index's exactness.
 Filtering keeps the complete shard or raw corpus for BM25 scoring.
 
 A full-text index definition must exist even in `full` or `detail` mode.
-Tables outside the supported route, or Rust versions without the full-text
-builder, use the Python implementation. Once native execution starts,
+Tables outside the supported route, or environments without the Rust
+extension, use the Python implementation. Once native execution starts,
 errors propagate without retrying the search through Python. PK and distributed
 searches retain their existing Python scan/read path.
 

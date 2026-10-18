@@ -25,7 +25,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 from pypaimon.tests import native_plan_rest_test, primary_key_global_index_golden_test
 
@@ -33,7 +33,7 @@ rest_catalog = native_plan_rest_test.rest_catalog
 golden_catalog = primary_key_global_index_golden_test.catalog
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_vector_search_builder'), reason='Rust vector API required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 
 def _write(table, rows):

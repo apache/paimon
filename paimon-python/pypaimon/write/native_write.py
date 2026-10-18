@@ -16,11 +16,10 @@
 
 """Optional Rust data writer behind PyPaimon's batch and stream builders."""
 
-from importlib import import_module
-
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.arrow_schema import (
     arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
@@ -29,15 +28,6 @@ from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
 from pypaimon.write.row_utils import require_columns, row_to_named_values, row_values_to_arrow_table
-
-
-def native_write_available() -> bool:
-    """Whether the optional Rust bindings are installed."""
-    try:
-        import_module('pypaimon_rust.datafusion')
-    except ImportError:
-        return False
-    return True
 
 
 def _native_partition_types_supported(schema, partition_keys, legacy_partition_name=True):
@@ -56,7 +46,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     # DV tables flush normal level-0 files using the configured merge engine.
     # Batch visibility is controlled by deletion-vectors.merge-on-read.
-    if (not native_write_available()
+    if (not native_runtime_available()
             or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
                                            BucketMode.BUCKET_UNAWARE,
                                            BucketMode.CROSS_PARTITION,

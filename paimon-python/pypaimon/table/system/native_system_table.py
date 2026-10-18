@@ -20,7 +20,7 @@
 import pyarrow
 
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.read.native_plan import _native_table, native_method_available
+from pypaimon.read.native_plan import _native_table, native_runtime_available
 from pypaimon.write.native_commit import _rest_catalog_supported
 
 _NATIVE_TABLES = frozenset((
@@ -33,7 +33,7 @@ def try_read_native_system_table(system_table):
     base = system_table.base_table
     name = system_table.system_table_name()
     if (name not in _NATIVE_TABLES or not base.options.native_read_enabled()
-            or not native_method_available('Table', 'new_system_read')
+            or not native_runtime_available()
             or not _rest_catalog_supported(base)):
         return None
     # Capture the full result for the existing in-memory SystemSplit. Reading

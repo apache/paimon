@@ -394,7 +394,7 @@ class HashBucketAssigner:
             )
         return {
             split.bucket
-            for split in read_builder.new_scan().plan_for_write().splits()
+            for split in read_builder.new_scan().plan_all_files().splits()
             if split.files
         }
 

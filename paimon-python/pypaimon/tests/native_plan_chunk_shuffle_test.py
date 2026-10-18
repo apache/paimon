@@ -24,19 +24,15 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import (
-    native_method_available,
-    native_reader_available,
-    native_runtime_available,
-)
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
     not native_runtime_available()
-    or not native_method_available('TableScan', 'with_chunk_shuffle'),
-    reason='Rust native chunk planner required')]
+    or not native_runtime_available(),
+    reason='pypaimon-rust not installed')]
 
 
 def _create_chunk_table(kind, tmp_path):
@@ -162,7 +158,7 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
             if native_plan_enabled:
                 assert getattr(split, '_native_split', None) is not None
             if native_read_enabled:
-                assert native_reader_available()
+                assert native_runtime_available()
                 with patch(
                         'pypaimon.read.table_read.TableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):

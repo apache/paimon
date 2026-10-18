@@ -376,7 +376,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
             ['age'],
         )
-        splits = table.new_read_builder().new_scan().plan_for_write().splits()
+        splits = table.new_read_builder().new_scan().plan_all_files().splits()
         self.assertEqual(1, len(splits))
 
         group_sizes = []
