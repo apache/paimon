@@ -142,13 +142,21 @@ jobs:
             python paimon-python/dev/install.py legacy
           else
             python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-            dependency_group=dev
+            dependency_group=python-tests
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
               dependency_group=torch
             fi
             python -m pip install -e ./paimon-python --group "./paimon-python/pyproject.toml:${dependency_group}"
           fi
           python -m pip check
+
+      - name: Verify Python test environment
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          assert importlib.util.find_spec('pypaimon_rust') is None, 'Rust is tested in Native CI'
+          PY
 
       - name: Run lint-python.sh
         shell: bash
@@ -284,6 +292,14 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ./paimon-python --group ./paimon-python/pyproject.toml:torch
           python -m pip check
+      - name: Verify Python test environment
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          assert importlib.util.find_spec('pypaimon_rust') is None, 'Rust is tested in Native CI'
+          PY
+
       - name: Run lint-python.sh
         shell: bash
         run: |
