@@ -465,6 +465,16 @@ class TableRead:
         # local leaf view, even when its parent ROW is requested in full.
         projected = reader_adapter(self.read_type, self._table_read_fields(), self.output_projection)
         extra_names = {field.name for field in projected[0]} - {field.name for field in adapter[0]}
+        # A flat nested name may collide with a real top-level column. Match
+        # source paths as well as names so filtering a.b never reads a_b.
+        adapter_paths = {field.name: path for field, path in zip(*adapter)}
+        pending = [self.predicate]
+        while pending:
+            predicate = pending.pop()
+            if predicate.method in ('and', 'or'):
+                pending.extend(predicate.literals or [])
+            elif predicate.field_path and adapter_paths.get(predicate.field) != predicate.field_path:
+                return projected
         return projected if predicate_field_names(self.predicate) & extra_names else adapter
 
     def _output_arrow_schema(self, splits=None):

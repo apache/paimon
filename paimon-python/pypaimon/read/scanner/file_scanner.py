@@ -36,6 +36,8 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            exclude_predicate_with_fields,
+                                           predicate_for_physical_fields,
+                                           predicate_matches_physical_names,
                                            remove_row_id_filter,
                                            rewrite_predicate_indices,
                                            trim_and_transform_predicate,
@@ -275,16 +277,17 @@ class FileScanner:
 
     def _set_predicate(self, predicate):
         self.predicate = predicate
-        row_ranges = _row_ranges_from_predicate(predicate) if predicate else None
+        physical = predicate_for_physical_fields(predicate, self.table.fields)
+        row_ranges = _row_ranges_from_predicate(physical) if physical else None
         self.predicate_for_stats = (
-            remove_row_id_filter(predicate) if row_ranges is not None else predicate)
+            remove_row_id_filter(physical) if row_ranges is not None else physical)
         self.predicate_for_stats = exclude_predicate_with_fields(
             self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES | set(self.table.partition_keys))
         self.primary_key_predicate = trim_and_transform_predicate(
-            predicate, self.table.field_names, self.table.trimmed_primary_keys)
+            physical, self.table.field_names, self.table.trimmed_primary_keys)
         if self._partition_predicate is None:
             self.partition_key_predicate = trim_and_transform_predicate(
-                predicate, self.table.field_names, self.table.partition_keys)
+                physical, self.table.field_names, self.table.partition_keys)
         else:
             self.partition_key_predicate = rewrite_predicate_indices(
                 trim_predicate_by_fields(self._partition_predicate, self.table.partition_keys),
@@ -418,8 +421,9 @@ class FileScanner:
 
     def _apply_primary_key_sorted_indexes(self, splits, snapshot=None):
         snapshot = snapshot if snapshot is not None else self._scanned_snapshot
+        predicate = predicate_for_physical_fields(self.predicate, self.table.fields)
         if (not self.table.options.global_index_enabled()
-                or self.predicate is None
+                or predicate is None
                 or snapshot is None
                 or not splits):
             return splits
@@ -449,7 +453,7 @@ class FileScanner:
         evaluated = primary_key_sorted_index_scan.evaluate(
             index_plan,
             self.table.fields,
-            self.predicate,
+            predicate,
             definitions,
             primary_key_sorted_index_scan.reader_factory(self.table),
         )
@@ -482,7 +486,8 @@ class FileScanner:
                 if isinstance(global_index_result, ScoredGlobalIndexResult):
                     score_getter = global_index_result.score_getter()
         if row_ranges is None and self.predicate is not None:
-            row_ranges = _row_ranges_from_predicate(self.predicate)
+            row_ranges = _row_ranges_from_predicate(
+                predicate_for_physical_fields(self.predicate, self.table.fields))
 
         if row_ranges is not None and not row_ranges:
             return [], DataEvolutionSplitGenerator(
@@ -545,7 +550,8 @@ class FileScanner:
 
     def _eval_global_index(self, snapshot=None):
         # Snapshot indexes describe current state, not historical change events.
-        if self.is_streaming or self.predicate is None:
+        predicate = predicate_for_physical_fields(self.predicate, self.table.fields)
+        if self.is_streaming or predicate is None:
             return None
 
         # Check if global index is enabled
@@ -558,20 +564,20 @@ class FileScanner:
             scanner = DataEvolutionGlobalIndexScanner.create(
                 self.table,
                 partition_filter=self.partition_key_predicate,
-                predicate=self.predicate,
+                predicate=predicate,
                 snapshot=snapshot,
             )
             if scanner is None:
                 return None
             with scanner:
-                evaluation = scanner.scan_with_coverage(self.predicate)
+                evaluation = scanner.scan_with_coverage(predicate)
                 if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
                 return _GlobalIndexPlanningResult(
                     evaluation.result,
                     scanner.unindexed_ranges(
-                        self.predicate,
+                        predicate,
                         search_mode=scalar_mode,
                         contributing_field_ids=(
                             evaluation.contributing_field_ids),
@@ -768,6 +774,8 @@ class FileScanner:
         """Mirror Java ``SnapshotReaderImpl.hasNonPartitionFilter``."""
         if self.predicate is None:
             return False
+        if not predicate_matches_physical_names(self.predicate):
+            return True
         partition_keys = set(self.table.partition_keys or [])
         return not _get_all_fields(self.predicate).issubset(partition_keys)
 
@@ -805,6 +813,9 @@ class FileScanner:
         which can vary between manifest entries after a bucket rescale.
         """
         if self.predicate is None:
+            return None
+        predicate = predicate_for_physical_fields(self.predicate, self.table.fields)
+        if predicate is None:
             return None
         # ``bucket_mode()`` returns HASH_FIXED only when ``options.bucket()
         # > 0``; other modes (DYNAMIC / POSTPONE / UNAWARE / CROSS_PARTITION)
@@ -845,7 +856,7 @@ class FileScanner:
                 if name in self.table.field_dict
             ]
         return create_bucket_selector(
-            self.predicate, bucket_key_fields,
+            predicate, bucket_key_fields,
             partition_fields=partition_fields,
         )
 

@@ -40,6 +40,8 @@ from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
     predicate_field_names,
+    predicate_for_physical_fields,
+    predicate_matches_physical_names,
     predicate_supports_arrow_filter,
     rewrite_predicate_indices,
     trim_predicate_by_fields,
@@ -195,6 +197,7 @@ class SplitRead(ABC):
         if (
                 self.predicate is not None
                 and predicate_field_names(self.predicate).issubset(read_type_names)
+                and predicate_matches_physical_names(self.predicate)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
                 self.predicate, read_type
@@ -260,12 +263,13 @@ class SplitRead(ABC):
             # see missing/NULL versions and renumber positional row IDs.
             return None
         elif self.table.is_primary_key_table:
-            pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
+            physical = predicate_for_physical_fields(self.predicate, self.table.fields)
+            pk_predicate = trim_predicate_by_fields(physical, self.table.primary_keys)
             if not pk_predicate:
                 return None
             return pk_predicate
         else:
-            return self.predicate
+            return predicate_for_physical_fields(self.predicate, self.table.fields)
 
     def _has_row_tracking_predicate(self) -> bool:
         return (self.table.options.row_tracking_enabled()

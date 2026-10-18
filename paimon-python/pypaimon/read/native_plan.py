@@ -243,11 +243,16 @@ def _predicate_to_native(predicate: Predicate) -> dict:
             'method': predicate.method,
             'children': [_predicate_to_native(child) for child in children],
         }
-    return {
+    result = {
         'method': predicate.method,
         'field': predicate.field,
         'literals': list(predicate.literals or []),
     }
+    if predicate.field_path:
+        result['field'] = predicate.field_path[0]
+        if len(predicate.field_path) > 1:
+            result['nested_path'] = list(predicate.field_path[1:])
+    return result
 
 
 def _resolved_rest_table_response(table):
