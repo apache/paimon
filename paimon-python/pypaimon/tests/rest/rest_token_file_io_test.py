@@ -22,6 +22,7 @@ import signal
 import tempfile
 import threading
 import time
+import types
 import unittest
 import warnings
 import weakref
@@ -243,6 +244,110 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
                          "the forked child blocked on a lock held by a parent thread")
         self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
+
+    def _touch_with_summary_stats(self, cache, stats, clock, open_files, steps):
+        # Each step sets the clock and open files, then reads through a FileIO with that token name.
+        module = 'pypaimon.catalog.rest.rest_token_file_io'
+        with patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', cache), \
+                patch.object(RESTTokenFileIO, '_FILE_IO_STATS', stats), \
+                patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(module + '.time', types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO), \
+                self.assertLogs(module, level='INFO') as logs:
+            for now, files, name in steps:
+                clock[0] = now
+                if files is not None:
+                    open_files[0] = files
+                if name is None:
+                    cache.clear()
+                    continue
+                self._file_io_with_token(
+                    self.warehouse_path, self.catalog_options, self._valid_token(name)).exists("x")
+        return logs.records
+
+    def test_cache_misses_log_one_summary_per_interval(self):
+        cache = TTLCache(maxsize=3, ttl=1e9)
+        stats = dict(RESTTokenFileIO._FILE_IO_STATS, created=0, evicted=0, warned=False, next_log=0.0,
+                     fds=None, next_scan=0.0)
+        open_files = [(10, 1000)]
+        scan = MagicMock(side_effect=lambda: open_files[0])
+        with patch('pypaimon.catalog.rest.rest_token_file_io._open_files', scan):
+            records = self._touch_with_summary_stats(cache, stats, [0.0], open_files, [
+                (1000, None, "a"),
+                (1100, None, "b"),
+                # Crowded descriptors warn at once, even within the interval of an INFO summary.
+                (1200, (900, 1000), "c"),
+                # After a warning, misses neither log nor list descriptors until the interval ends.
+                (1300, None, "d"),
+                (1801, (10, 1000), "e"),
+                (2402, None, None),
+                (2402, None, "f"),
+            ])
+
+        self.assertEqual(['INFO', 'WARNING', 'WARNING', 'INFO'], [r.levelname for r in records])
+        messages = [r.getMessage() for r in records]
+        self.assertIn("holds 1/3 FileIOs", messages[0])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[0])
+        self.assertIn("open files 10/1000", messages[0])
+        self.assertIn("holds 3/3 FileIOs", messages[1])
+        self.assertIn("2 FileIOs created and 0 evicted", messages[1])
+        self.assertIn("open files 900/1000", messages[1])
+        self.assertIn("2 FileIOs created and 2 evicted", messages[2])
+        self.assertIn("open files 10/1000", messages[2])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[3])
+        self.assertEqual(5, scan.call_count)
+
+    def test_open_files_are_listed_at_most_one_percent_of_the_time(self):
+        clock = [100.0]
+        stats = {"fds": None, "next_scan": 0.0}
+
+        def scan():
+            clock[0] += 0.002
+            return 10, 1000
+
+        module = 'pypaimon.catalog.rest.rest_token_file_io'
+        with patch(module + '._open_files', side_effect=scan) as open_files, \
+                patch(module + '.time', types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)):
+            for now in (100.0, 100.1, 100.19, 100.21):
+                clock[0] = now
+                self.assertEqual((10, 1000), RESTTokenFileIO._sample_open_files(stats, now))
+        # A 2 ms scan at 100.0 defers the next one to 100.2.
+        self.assertEqual(2, open_files.call_count)
+
+    def test_cache_miss_reports_unknown_open_files_when_they_cannot_be_listed(self):
+        real_listdir = os.listdir
+
+        def listdir(path="."):
+            if path == "/proc/self/fd":
+                raise OSError("not listable")
+            return real_listdir(path)
+
+        stats = dict(RESTTokenFileIO._FILE_IO_STATS, created=0, evicted=0, warned=False, next_log=0.0,
+                     fds=None, next_scan=0.0)
+        with patch('os.listdir', side_effect=listdir):
+            records = self._touch_with_summary_stats(
+                TTLCache(maxsize=3, ttl=1e9), stats, [0.0], [None], [(1000, None, "a")])
+        self.assertEqual(1, len(records))
+        self.assertEqual('INFO', records[0].levelname)
+        self.assertIn("open files unknown", records[0].getMessage())
+
+    def test_short_lived_token_warns_once_per_interval(self):
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        file_io.api_instance = MagicMock()
+        now = int(time.time() * 1000)
+        lifetimes = [7_200_000, 1_800_000, 1_800_000, 1_800_000]
+        responses = [MagicMock(token={'ak': 'test-ak'}, expires_at_millis=now + lifetime)
+                     for lifetime in lifetimes]
+        file_io.api_instance.load_table_token.side_effect = responses
+
+        with patch.object(RESTTokenFileIO, '_SHORT_TOKEN_STATS', {"count": 0, "next_log": 0.0}), \
+                self.assertLogs('pypaimon.catalog.rest.rest_token_file_io', level='WARNING') as logs:
+            for _ in lifetimes:
+                file_io.refresh_token()
+
+        self.assertEqual(1, len(logs.records))
+        self.assertIn("within the 3600 s refresh margin", logs.records[0].getMessage())
+        self.assertIn("1 such tokens", logs.records[0].getMessage())
 
     @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
     def test_fork_while_another_thread_creates_file_io(self):
