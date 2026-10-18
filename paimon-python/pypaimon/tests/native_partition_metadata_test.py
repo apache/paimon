@@ -27,7 +27,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
@@ -40,7 +40,7 @@ from pypaimon.tests.native_system_table_test import _canonical, _read, _system
 rest_catalog = native_plan_rest_test.rest_catalog
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_system_read'), reason='Native system-table reader required')]
+    not native_runtime_available(), reason='Native system-table reader required')]
 
 
 def _create(catalog, schema, partition_keys, options=None):

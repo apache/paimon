@@ -336,7 +336,7 @@ def test_same_branch_copy_and_independent_load_preserve_identity(table, catalog,
 
 
 def test_copied_branch_rejects_source_read_metadata(table, monkeypatch):
-    monkeypatch.setattr('pypaimon.read.native_plan.native_method_available', lambda *args: True)
+    monkeypatch.setattr('pypaimon.read.native_plan.native_runtime_available', lambda *args: True)
 
     assert _resolved_rest_table_response(table) == table.catalog_environment.rest_table_response
     assert _resolved_rest_table_response(table.copy({'branch': 'main'})) is not None

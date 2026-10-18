@@ -25,7 +25,7 @@ from unittest.mock import patch
 import pytest
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
 from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
 from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
@@ -44,7 +44,7 @@ golden_catalog = text.golden_catalog
 source = text.source
 pk_vector_table = vectors.pk_vector_table
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('VectorScanPlan', '_metadata'), reason='Rust search plan metadata required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 
 @pytest.fixture

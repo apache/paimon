@@ -94,8 +94,8 @@ class TableScan:
             return True
         if not self.table.options.native_read_enabled():
             return False
-        from pypaimon.read.native_plan import native_reader_available
-        return native_reader_available()
+        from pypaimon.read.native_plan import native_runtime_available
+        return native_runtime_available()
 
     def _native_plan_supported(self) -> bool:
         # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
@@ -141,10 +141,6 @@ class TableScan:
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-        if self.partition_predicate is not None:
-            from pypaimon.read.native_plan import native_method_available
-            if not native_method_available('ReadBuilder', 'with_partition_filter'):
-                return False
         if self.table.options.query_auth_enabled:
             # The filesystem path has no catalog-issued authorization session.
             loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
@@ -167,9 +163,6 @@ class TableScan:
         result = self.file_scanner._global_index_result
         if result is None:
             return True
-        from pypaimon.read.native_plan import native_method_available
-        if not native_method_available('TableScan', 'with_global_index_result'):
-            return False
         if self.table.is_primary_key_table:
             from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
             return isinstance(result, GlobalIndexSplitResult)
@@ -274,9 +267,8 @@ class TableScan:
         Existing filters and limits still apply. Query authorization must be
         unrestricted, as required by writer restore, overwrite and indexing.
         """
-        from pypaimon.read.native_plan import _native_query_auth_supported, native_method_available
-        if (self._native_requested() and _native_query_auth_supported(self.table) and self._native_plan_supported()
-                and native_method_available('TableScan', 'plan_all_files')):
+        from pypaimon.read.native_plan import _native_query_auth_supported
+        if self._native_requested() and _native_query_auth_supported(self.table) and self._native_plan_supported():
             plan = self._try_native_plan(all_files=True)
             if plan is not None:
                 return plan

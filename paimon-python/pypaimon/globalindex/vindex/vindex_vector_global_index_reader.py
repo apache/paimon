@@ -291,11 +291,11 @@ def _read_parallelism(options, file_path):
 
 
 def _native_reader_type():
-    try:
-        from pypaimon_rust import datafusion
-    except ImportError:
+    from pypaimon.read.native_plan import native_runtime_available
+    if not native_runtime_available():
         return None
-    return getattr(datafusion, 'VindexVectorGlobalIndexReader', None)
+    from pypaimon_rust.datafusion import VindexVectorGlobalIndexReader as NativeReader
+    return NativeReader
 
 
 def _filter_bytes(include_row_ids):

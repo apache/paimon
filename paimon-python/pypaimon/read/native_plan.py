@@ -24,11 +24,10 @@ still applies them while reading, so pushdown remains an optimization.
 
 import json
 import os
+from importlib import import_module
 from threading import Lock
 from types import SimpleNamespace
 from typing import List, Optional, Tuple
-
-from packaging.version import InvalidVersion, Version
 
 from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptions
 from pypaimon.common.options.options_utils import OptionsUtils
@@ -41,10 +40,9 @@ from pypaimon.schema.data_types import DataField, RowType
 
 def _raise_if_native_fork_safety_error(error):
     """Propagate native fork errors instead of using inherited SDK state."""
-    try:
-        from pypaimon_rust import ForkSafetyError
-    except ImportError:
+    if not native_runtime_available():
         return
+    from pypaimon_rust import ForkSafetyError
 
     current = error
     seen = set()
@@ -56,24 +54,15 @@ def _raise_if_native_fork_safety_error(error):
 
 
 def native_runtime_available() -> bool:
-    """Whether an installed pypaimon-rust exposes the full split-planning API.
+    """Whether the optional companion Rust extension is installed.
 
-    Both entry points used by :func:`native_plan` are probed: ``PaimonCatalog.
-    get_table`` (0.3.0) and ``Split.serialize`` (the split wire format). An
-    intermediate build missing either must fall back, not fail mid-plan.
+    Native paths require this release's APIs; they do not probe older builds.
     """
     try:
-        from pypaimon_rust.datafusion import PaimonCatalog, Split
+        import_module('pypaimon_rust.datafusion')
     except ImportError:
         return False
-    return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
-
-
-def native_reader_available() -> bool:
-    """Whether pypaimon-rust exposes the batch-read API used by PyPaimon."""
-    return (native_runtime_available()
-            and native_method_available('ReadBuilder', 'new_read')
-            and native_method_available('TableRead', 'read'))
+    return True
 
 
 def _native_blob_view_supported(table, read_names) -> bool:
@@ -86,12 +75,6 @@ def _native_blob_view_supported(table, read_names) -> bool:
     return loader is None or _catalog_metastore(loader) == 'rest'
 
 
-def native_split_bridge_available() -> bool:
-    """Whether Rust accepts Java-compatible split bytes from Python plans."""
-    return native_reader_available() and native_method_available(
-        'Split', 'deserialize')
-
-
 def native_split_from_python(split):
     """Convert a Python-planned DataSplit/IndexedSplit for the Rust reader.
 
@@ -101,34 +84,6 @@ def native_split_from_python(split):
     from pypaimon_rust.datafusion import Split as NativeSplit
     return NativeSplit.deserialize(
         serialize_split_v1(split, include_scores=False))
-
-
-def native_family_search_modes_available() -> bool:
-    """Whether Rust supports family-specific global-index search modes."""
-    return native_version_at_least(0, 4)
-
-
-def native_version_at_least(major: int, minor: int, patch: int = 0) -> bool:
-    """Compare complete package versions, including patch and pre-release ordering."""
-    if not native_runtime_available():
-        return False
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-    except ImportError:
-        return False
-    try:
-        rust_version = Version(version('pypaimon-rust'))
-    except (PackageNotFoundError, InvalidVersion):
-        return False
-    return rust_version >= Version('%d.%d.%d' % (major, minor, patch))
-
-
-def native_method_available(type_name: str, method: str) -> bool:
-    try:
-        from pypaimon_rust import datafusion
-        return callable(getattr(getattr(datafusion, type_name, None), method, None))
-    except ImportError:
-        return False
 
 
 def _partition_fields(table):
@@ -272,8 +227,7 @@ def _resolved_rest_table_response(table):
     response = getattr(environment, 'rest_table_response', None)
     if (type(environment) is not CatalogEnvironment
             or type(environment.catalog_loader) is not RESTCatalogLoader
-            or not isinstance(response, str)
-            or not native_method_available('Table', 'from_rest_response')):
+            or not isinstance(response, str)):
         return None
     metadata = json.loads(response)
     if (metadata.get('path') != table.table_path
@@ -313,12 +267,11 @@ class _NativeRestTableCache:
         from pypaimon_rust.datafusion import Table
 
         def create():
-            reuse_token = getattr(Table, 'from_rest_response_with_token', None)
-            token = token_loader() if callable(reuse_token) and token_loader else None
+            token = token_loader() if token_loader else None
             if token is None:
                 return Table.from_rest_response(
                     response, database=database, table=table, rest_options=options)
-            return reuse_token(
+            return Table.from_rest_response_with_token(
                 response, database=database, table=table, rest_options=options,
                 data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
 
@@ -420,8 +373,7 @@ def _load_native_table(table):
             raise RuntimeError('Native catalog resolved a different table location')
         rt = _with_native_resolved_schema(table, rt)
     if table.current_branch() != 'main':
-        branch = getattr(rt, 'branch', None)
-        if not callable(branch) or branch() != table.current_branch():
+        if rt.branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
     return _with_native_read_snapshot(table, rt)
 
@@ -485,9 +437,9 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
                          read_type: Optional[List[DataField]] = None,
                          include_row_kind: bool = False):
     """Create one Rust reader reusable across split groups."""
-    if not native_reader_available():
+    if not native_runtime_available():
         raise RuntimeError(
-            "read.native.enabled needs the pypaimon-rust native reader API")
+            "read.native.enabled needs the pypaimon-rust extension")
     if not _native_query_auth_supported(table):
         raise RuntimeError('Native reads cannot reconstruct custom query authorization')
     if read_type is None:
@@ -503,8 +455,7 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
     if blob_parallelism is not None:
         builder = builder.with_blob_parallelism(blob_parallelism)
     reader = builder.new_read()
-    read_arrow = getattr(reader, 'read_arrow', None)
-    return read_arrow if callable(read_arrow) else reader.read
+    return reader.read_arrow
 
 
 def native_read(table, splits, predicate: Optional[Predicate] = None,
@@ -551,7 +502,7 @@ def native_plan(
         raise ValueError('incremental_mode requires incremental_range')
     if not native_runtime_available():
         raise RuntimeError(
-            "scan.native-plan.enabled needs pypaimon-rust>=0.3.0 (split planning API)")
+            "scan.native-plan.enabled needs the pypaimon-rust extension")
     builder = _configure_native_read_builder(
         _native_read_builder(table), predicate, limit, projection)
     if partition_predicate is not None:
@@ -654,13 +605,5 @@ def _from_native_plan(table, rust_plan) -> Plan:
         # time from its current fields.
         for split, rust_split in zip(splits, rust_splits):
             split._native_split = rust_split
-    snapshot_id = getattr(rust_plan, 'snapshot_id', None)
-    if callable(snapshot_id):
-        snapshot_id = snapshot_id()
-    elif splits:
-        snapshot_id = splits[0].snapshot_id
-    else:
-        # Older bindings cannot distinguish an empty committed snapshot from a
-        # table without snapshots. Let the Python scanner recover the metadata.
-        raise RuntimeError("Native runtime cannot report an empty plan's snapshot")
+    snapshot_id = rust_plan.snapshot_id()
     return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())

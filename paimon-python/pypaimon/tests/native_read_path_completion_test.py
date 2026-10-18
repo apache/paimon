@@ -32,8 +32,7 @@ from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.read.native_plan import (
-    _NativeRestTableCache, _catalog_context_options, _with_native_resolved_schema, native_method_available,
-)
+    _NativeRestTableCache, _catalog_context_options, _with_native_resolved_schema, native_runtime_available)
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_query_auth_test
@@ -45,7 +44,7 @@ _read = native_query_auth_test._read
 
 pytestmark = pytest.mark.native_plan
 completion_api = pytest.mark.skipif(
-    not native_method_available('Table', 'copy'), reason='Native resolved read completion API required')
+    not native_runtime_available(), reason='pypaimon-rust not installed')
 
 
 @pytest.mark.parametrize('schema_id', [0, 1])
@@ -272,7 +271,7 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
     scan = table.new_read_builder().new_scan()
     from pypaimon.read.plan import Plan
     with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([])) as planner, \
-            patch('pypaimon.read.native_plan.native_method_available', return_value=True):
+            patch('pypaimon.read.native_plan.native_runtime_available', return_value=True):
         with pytest.raises(TableNoPermissionException):
             scan.plan_all_files()
         planner.assert_not_called()

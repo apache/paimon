@@ -24,13 +24,13 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.tests import native_sorted_index_build_test as index_tests
 from pypaimon.write.native_commit import from_native_commit_messages
 
 rest_catalog = index_tests.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_global_index_build_builder'),
+    not native_runtime_available(),
     reason='Common Rust global index builder required')]
 
 KINDS = ['full-text', 'ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann']

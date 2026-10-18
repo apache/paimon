@@ -379,8 +379,8 @@ explanation = builder.explain()
 print(explanation.native_planned)
 ```
 
-The adapter checks the installed binding's capabilities and falls back to the
-Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
+The adapter uses the companion Rust release when installed and falls back to
+the Python planner for unsupported scans. Native plans preserve `plan.snapshot_id`
 even when pruning removes every split. Native explain output includes snapshot
 and split metadata plus counters for actual Native planning work, available in
 `explanation.planning_counters`. Statistics collection retains early manifest,
@@ -423,7 +423,7 @@ runs independent Rust readers. Splits stay in input order but contiguous groups
 are balanced by physical file bytes to reduce worker skew. An unfiltered row
 limit also caps reader fan-out to avoid speculative work.
 Streaming buffers at most one batch per reader and closing the batch reader
-interrupts native reads that are still in flight. A missing reader capability,
+interrupts native reads that are still in flight. An uninstalled extension,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
 
@@ -437,7 +437,10 @@ snapshot, and `from-snapshot-full` with `scan.snapshot-id` for a selected comple
 snapshot. The same modes apply when a Paimon table is the source of `merge_into`.
 These batch semantics follow Java; streaming startup policies are separate.
 
-Native planning and reading require Rust's resolved-schema bindings:
+Native planning, reading, writing, updating and committing use the matching
+`pypaimon-rust` release directly, without API probes or compatibility paths for
+older extensions. Install the companion release when upgrading PyPaimon.
+Native planning and reading use Rust's resolved-schema bindings:
 `Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and
 `Table.copy_with_resolved_schema()` for REST tables. The adapter passes the Python
 table's resolved schema and complete effective options without an option whitelist.
@@ -465,23 +468,19 @@ Custom catalog loaders and arbitrary FileIO implementations require an equivalen
 native provider; contexts that cannot be reproduced retain Python execution.
 
 Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_ranges()`.
-Watermark time travel requires Rust 0.4 or newer. Branch reads require the
-branch-aware binding exposing `Table.branch()`, and the resolved branch is
-checked before planning. Deletion-vector scans require `pypaimon-rust>=0.4.0`,
-which includes schema-aware decoding of index manifests. Index paths follow
+Watermark time travel and branch reads are supported; the resolved branch is
+checked before planning. Deletion-vector scans use schema-aware decoding of
+index manifests. Index paths follow
 Java: an explicit external path takes precedence; otherwise
 `index-file-in-data-file-dir` selects the bucket or table index directory.
 Bucket paths use the partition field types and `partition.legacy-name` to match
 Java formatting, including timestamp precision and different JVM float spellings.
 Python bucket-index writes use Java partition paths. Explicit paths identify
 external files and floating partition directories whose spelling depends on the
-JDK version. Missing bucket indexes fail instead of searching Python layouts. Older releases and prereleases
-before 0.4.0 use the Python planner for deletion vectors.
-When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
-package version checks cannot distinguish local builds with identical versions.
+JDK version. Missing bucket indexes fail instead of searching Python layouts.
 
-Append scans support `with_shard()` and `with_slice()` with Rust 0.4 or newer,
-which plans positional selection directly into native-readable splits; primary-key
+Append scans support `with_shard()` and `with_slice()`, which plan positional
+selection directly into native-readable splits; primary-key
 scans support bucket-based `with_shard()`. Both append and data-evolution position
 selection require the binding's `TableScan.with_row_position_slice()` and
 `with_row_position_shard()`. Ordinary append positions follow the stats-pruned
@@ -880,8 +879,8 @@ predicates; equality and prefix retain the underlying index's exactness.
 Filtering keeps the complete shard or raw corpus for BM25 scoring.
 
 A full-text index definition must exist even in `full` or `detail` mode.
-Tables outside the supported route, or Rust versions without the full-text
-builder, use the Python implementation. Once native execution starts,
+Tables outside the supported route, or environments without the Rust
+extension, use the Python implementation. Once native execution starts,
 errors propagate without retrying the search through Python. PK and distributed
 searches retain their existing Python scan/read path.
 

@@ -138,13 +138,13 @@ class GlobalIndexDropper:
         ]
 
     def _native_build(self, partition_filter):
-        from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+        from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
         from pypaimon.write.native_commit import _rest_catalog_supported, from_native_commit_messages
 
         table = self._table
         if (not table.options.native_write_enabled()
                 or table.options.query_auth_enabled
-                or not native_method_available('Table', 'new_global_index_drop_builder')
+                or not native_runtime_available()
                 or not _rest_catalog_supported(table)):
             return None
         from pypaimon_rust.datafusion import GlobalIndexDropBuilder

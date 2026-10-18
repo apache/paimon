@@ -33,15 +33,8 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.read.native_plan import (
-    _catalog_options,
-    _configure_native_read_builder,
-    _native_read_builder,
-    _predicate_to_native,
-    _resolved_schema_json,
-    native_family_search_modes_available,
-    native_plan,
-    native_version_at_least,
-)
+    _catalog_options, _configure_native_read_builder, _native_read_builder,
+    _predicate_to_native, _resolved_schema_json, native_plan, native_runtime_available)
 from pypaimon.read.plan import Plan
 from pypaimon.read.table_scan import TableScan
 from pypaimon.read.variant_read_type import with_variant_extractions
@@ -210,9 +203,8 @@ class NativePlanTest(unittest.TestCase):
         builder.with_projection.assert_not_called()
 
     def setUp(self):
-        # Make the real capability probe see a split-API-capable pypaimon-rust so
-        # gate tests route natively. Tests that call native_plan() directly override
-        # sys.modules within their own block.
+        # Model an installed companion extension. Individual tests supply the
+        # API objects they call through this module.
         fake_df = ModuleType('pypaimon_rust.datafusion')
         fake_df.PaimonCatalog = type(
             'PaimonCatalog', (), {'get_table': lambda self, name: None})
@@ -220,15 +212,12 @@ class NativePlanTest(unittest.TestCase):
         fake_df.TableScan = type('TableScan', (), {'with_global_index_result': lambda self, result: self})
         fake_mod = ModuleType('pypaimon_rust')
         fake_mod.datafusion = fake_df
+        fake_mod.ForkSafetyError = type('ForkSafetyError', (RuntimeError,), {})
         patcher = patch.dict(
             sys.modules,
             {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df})
         patcher.start()
         self.addCleanup(patcher.stop)
-        if sys.version_info >= (3, 8):
-            version_patcher = patch('importlib.metadata.version', return_value='0.3.0')
-            version_patcher.start()
-            self.addCleanup(version_patcher.stop)
 
     def test_resolved_schema_json_uses_canonical_nested_collection_types(self):
         schema = TableSchema(id=7, highest_field_id=3, time_millis=0, fields=[
@@ -332,7 +321,7 @@ class NativePlanTest(unittest.TestCase):
         scan = _scan(native_enabled=False, file_scanner=fs)
         scan.table.options.native_read_enabled.return_value = True
         expected = Plan([], 1)
-        with patch('pypaimon.read.native_plan.native_reader_available',
+        with patch('pypaimon.read.native_plan.native_runtime_available',
                    return_value=True), \
                 patch('pypaimon.read.native_plan.native_plan',
                       return_value=expected) as np:
@@ -864,21 +853,6 @@ class NativePlanTest(unittest.TestCase):
                 self.assertEqual(resolved, {key: str(value)})
                 self.assertEqual(table.table_schema.options, options)
 
-    @unittest.skipIf(sys.version_info < (3, 8),
-                     "importlib.metadata requires Python 3.8")
-    def test_family_search_mode_version_gate(self):
-        cases = {
-            '0.3.0': False,
-            '0.4.0': True,
-            '0.4.0.dev20260808': False,
-            '1.0.0': True,
-        }
-        for version, expected in cases.items():
-            with self.subTest(version=version), patch(
-                    'importlib.metadata.version', return_value=version):
-                self.assertEqual(
-                    native_family_search_modes_available(), expected)
-
     def test_rest_catalog_retains_response_for_native_reads(self):
         from pypaimon.api.api_response import GetTableResponse
         from pypaimon.catalog.rest.rest_catalog import RESTCatalog
@@ -901,22 +875,22 @@ class NativePlanTest(unittest.TestCase):
         self.assertEqual(saved['schemaId'], 3)
         self.assertEqual(saved['schema']['fields'][0]['id'], 4)
 
-    def test_rest_response_requires_native_support_and_matching_path(self):
+    def test_rest_response_requires_matching_path(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.identifier import Identifier
         from pypaimon.read.native_plan import _resolved_rest_table_response
 
-        table = Mock(table_path='/warehouse/t')
+        table = Mock(table_path='/warehouse/t', identifier=Identifier('db', 't'))
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({})))
+        response = '{"path": "/warehouse/t", "name": "t"}'
         table.catalog_environment = CatalogEnvironment(
-            catalog_loader=loader, rest_table_response='{"path": "/warehouse/t"}')
-        with patch('pypaimon.read.native_plan.native_method_available', return_value=False):
-            self.assertIsNone(_resolved_rest_table_response(table))
-        with patch('pypaimon.read.native_plan.native_method_available', return_value=True):
-            table.table_path = '/another/table'
-            self.assertIsNone(_resolved_rest_table_response(table))
-            table.table_path = '/warehouse/t'
-            table.catalog_environment.rest_table_response = None
-            self.assertIsNone(_resolved_rest_table_response(table))
+            catalog_loader=loader, rest_table_response=response)
+        self.assertEqual(_resolved_rest_table_response(table), response)
+        table.table_path = '/another/table'
+        self.assertIsNone(_resolved_rest_table_response(table))
+        table.table_path = '/warehouse/t'
+        table.catalog_environment.rest_table_response = None
+        self.assertIsNone(_resolved_rest_table_response(table))
 
     def test_rest_response_requires_matching_identity(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -932,8 +906,7 @@ class NativePlanTest(unittest.TestCase):
                 ({'name': 't$branch_dev'}, True),
                 ({'name': 't$branch_dev', 'database': 'db'}, True),
                 ({'name': 't$branch_dev', 'database': 'other'}, False)]:
-            with self.subTest(identity=identity), patch(
-                    'pypaimon.read.native_plan.native_method_available', return_value=True):
+            with self.subTest(identity=identity):
                 response = json.dumps(dict(identity, path=table.table_path))
                 table.catalog_environment.rest_table_response = response
                 self.assertEqual(_resolved_rest_table_response(table), response if matches else None)
@@ -1254,25 +1227,20 @@ class NativePlanTest(unittest.TestCase):
         builder.with_row_ranges.assert_called_once_with([(1, 2)])
         des.assert_called_once_with(b'bytes', [], kfields)
 
-    def test_native_plan_empty_snapshot_and_legacy_runtime(self):
-        for snapshot_id, legacy in ((None, False), (7, False), (None, True)):
-            with self.subTest(snapshot_id=snapshot_id, legacy=legacy):
+    def test_native_plan_empty_snapshot_reports_snapshot_id(self):
+        for snapshot_id in (None, 7):
+            with self.subTest(snapshot_id=snapshot_id):
                 table = _scan(True, Mock()).table
                 table.table_schema = Mock(fields=[], partition_keys=[])
-                rust_plan = SimpleNamespace(splits=lambda: [], stats=lambda: None)
-                if not legacy:
-                    rust_plan.snapshot_id = lambda: snapshot_id
+                rust_plan = SimpleNamespace(
+                    splits=lambda: [], stats=lambda: None, snapshot_id=lambda: snapshot_id)
                 scan = SimpleNamespace(plan=lambda: rust_plan)
                 builder = Mock()
                 builder.new_scan.return_value = scan
                 with patch('pypaimon.read.native_plan._native_read_builder', return_value=builder):
-                    if legacy:
-                        with self.assertRaisesRegex(RuntimeError, "empty plan's snapshot"):
-                            native_plan(table)
-                    else:
-                        plan = native_plan(table)
-                        self.assertEqual(plan.snapshot_id, snapshot_id)
-                        self.assertEqual(plan.splits(), [])
+                    plan = native_plan(table)
+                self.assertEqual(plan.snapshot_id, snapshot_id)
+                self.assertEqual(plan.splits(), [])
 
     def test_native_plan_branch_resolution(self):
         table = _scan(True, Mock()).table
@@ -1303,14 +1271,14 @@ class NativePlanTest(unittest.TestCase):
                 table.options = CoreOptions(Options(table.table_schema.options))
                 table.catalog_environment.catalog_loader = loader_type(
                     CatalogContext.create_from_options(Options({})))
-                legacy_table = SimpleNamespace(
+                incomplete_table = SimpleNamespace(
                     location=lambda: table.table_path, new_read_builder=Mock())
                 with patch('pypaimon_rust.datafusion.Table', type('Table', (), {}), create=True), \
                         patch('pypaimon_rust.datafusion.PaimonCatalog') as catalog:
-                    catalog.return_value.get_table.return_value = legacy_table
+                    catalog.return_value.get_table.return_value = incomplete_table
                     with self.assertRaises(AttributeError):
                         _native_read_builder(table)
-                legacy_table.new_read_builder.assert_not_called()
+                incomplete_table.new_read_builder.assert_not_called()
 
     def test_explicit_row_ranges_are_forwarded(self):
         for ranges in ([], [Range(1, 2), Range(5, 8)]):
@@ -1367,26 +1335,6 @@ class NativePlanTest(unittest.TestCase):
                         self.assertEqual(scan.plan().snapshot_id, 1)
                     native.assert_called_once()
                     fs.scan.assert_not_called()
-
-    @unittest.skipIf(sys.version_info < (3, 8),
-                     "importlib.metadata requires Python 3.8")
-    def test_runtime_version_comparison_preserves_patch_and_release_order(self):
-        cases = [
-            ('0.3.99', (0, 4, 0), False),
-            ('0.4.0.dev1', (0, 4, 0), False),
-            ('0.4.0rc1', (0, 4, 0), False),
-            ('0.4.0', (0, 4, 0), True),
-            ('0.4.0+local', (0, 4, 0), True),
-            ('0.4.0.post1', (0, 4, 0), True),
-            ('0.4.0', (0, 4, 1), False),
-            ('0.4.1', (0, 4, 1), True),
-            ('1.0.0', (0, 4, 0), True),
-            ('unknown', (0, 4, 0), False),
-        ]
-        for version, minimum, expected in cases:
-            with self.subTest(version=version, minimum=minimum), patch(
-                    'importlib.metadata.version', return_value=version):
-                self.assertEqual(native_version_at_least(*minimum), expected)
 
     def test_incremental_range_is_forwarded_without_timestamp_reinterpretation(self):
         fs = Mock(partition_key_predicate=None)
@@ -1470,27 +1418,37 @@ class NativePlanTest(unittest.TestCase):
         fs._apply_push_down_limit.assert_not_called()
         fs.scan.assert_not_called()
 
-    def test_native_plan_requires_split_api(self):
-        # An intermediate pypaimon-rust missing either get_table or Split.serialize
-        # must raise a clear error, not an AttributeError mid-plan.
-        split_ok = type('Split', (), {'serialize': lambda self: b''})
-        catalog_ok = type('PaimonCatalog', (), {'get_table': lambda self, name: None})
-        cases = {
-            'no get_table': (type('PaimonCatalog', (), {}), split_ok),
-            'no serialize': (catalog_ok, type('Split', (), {})),
-        }
-        for label, (catalog_cls, split_cls) in cases.items():
-            with self.subTest(case=label):
-                fake_df = ModuleType('pypaimon_rust.datafusion')
-                fake_df.PaimonCatalog = catalog_cls
-                fake_df.Split = split_cls
-                fake_mod = ModuleType('pypaimon_rust')
-                fake_mod.datafusion = fake_df
-                with patch.dict(
-                        sys.modules,
-                        {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}):
-                    with self.assertRaisesRegex(RuntimeError, '0.3.0'):
-                        native_plan(Mock())
+    def test_native_runtime_availability_handles_uninstalled_extension(self):
+        with patch('pypaimon.read.native_plan.import_module', side_effect=ImportError('not installed')):
+            self.assertFalse(native_runtime_available())
+
+    def test_installed_extension_requires_companion_data_apis(self):
+        from pypaimon.casting.schema_evolution import _native_schema_cast, read_arrow_schema
+        from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
+
+        array = pyarrow.array([1], type=pyarrow.int32())
+        data = pyarrow.table({'id': array})
+        field = DataField(0, 'id', AtomicType('INT'))
+        operations = (
+            lambda: _native_schema_cast(array, pyarrow.int64(), field.type, AtomicType('BIGINT')),
+            lambda: read_arrow_schema([field]),
+            lambda: normalize_arrow_write_nullability(data, data.schema),
+        )
+        # Missing symbols in an installed extension are packaging errors. They
+        # must not silently disable core casts or NULL validation.
+        with patch.dict(sys.modules, {'pypaimon_rust.data': ModuleType('pypaimon_rust.data')}):
+            for operation in operations:
+                with self.subTest(operation=operation), self.assertRaises(ImportError):
+                    operation()
+
+    def test_native_runtime_availability_does_not_probe_versioned_apis(self):
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_mod = ModuleType('pypaimon_rust')
+        fake_mod.datafusion = fake_df
+        with patch.dict(sys.modules, {
+                'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}):
+            self.assertTrue(native_runtime_available())
+
 
 if __name__ == '__main__':
     unittest.main()

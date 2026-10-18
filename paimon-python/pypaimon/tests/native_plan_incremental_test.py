@@ -26,7 +26,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
@@ -36,8 +36,8 @@ from pypaimon.utils.range import Range
 
 @pytest.fixture(params=[False, pytest.param(
     True, marks=[pytest.mark.native_plan, pytest.mark.skipif(
-        not native_method_available('Split', 'is_streaming'),
-        reason='pypaimon_rust combined incremental planning API required')])],
+        not native_runtime_available(),
+        reason='pypaimon-rust not installed')])],
     ids=['python', 'native'])
 def native(request):
     return request.param

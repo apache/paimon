@@ -17,25 +17,14 @@
 
 """Optional native commits using the Java CommitMessage v14 bridge."""
 
-from importlib import import_module
-
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
-    _catalog_context_options, _catalog_metastore, _option_value_to_string,
+    native_runtime_available, _catalog_context_options, _catalog_metastore, _option_value_to_string,
     _resolved_schema_file_io_options)
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 from pypaimon.write.commit_message_serializer import (
     deserialize_commit_message, serialize_commit_message,
 )
-
-
-def native_commit_available() -> bool:
-    """Whether the optional Rust bindings are installed."""
-    try:
-        import_module('pypaimon_rust.datafusion')
-    except ImportError:
-        return False
-    return True
 
 
 def native_messages_supported(table, messages) -> bool:
@@ -58,7 +47,7 @@ def native_messages_supported(table, messages) -> bool:
 
 def create_native_commit(table, commit_user, overwrite_partition=None):
     """Return a native committer only when its publication protocol matches Python."""
-    if not _rest_catalog_supported(table) or not native_commit_available():
+    if not _rest_catalog_supported(table) or not native_runtime_available():
         return None
     from pypaimon.common.options.core_options import CoreOptions
     from pypaimon.schema.data_types import PyarrowFieldParser
@@ -112,7 +101,7 @@ def _native_rest_table(table, schema_json):
 
     catalog_options = _catalog_context_options(table)
     catalog_options['metastore'] = 'rest'
-    native_table = NativeCatalog(catalog_options).get_table((
+    native_table = NativeCatalog(catalog_options, config_required=False).get_table((
         table.identifier.get_database_name(), table.identifier.get_object_name()))
     if (native_table.location() != table.table_path
             or native_table.rest_table_uuid() != table.catalog_environment.uuid
