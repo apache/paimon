@@ -401,7 +401,9 @@ Native reads return PyArrow batches through the Arrow C Data interface. Native
 planner handles are used directly when available; splits refined by Python
 index or shuffle logic are serialized through the stable split contract and
 reconstructed by Rust. Nested projection and row-kind output are supported.
-Query authorization retains the Python reader. For both materialized
+Authorization captured by an original Native plan is evaluated in Rust;
+Python-planned or serialized authorization rules retain the Python reader.
+For both materialized
 `to_arrow()` and streaming `to_arrow_batch_reader()` reads, the effective split
 parallelism (the method argument, `read.parallelism`, or the automatic default)
 runs independent Rust readers. Splits stay in input order but contiguous groups
@@ -411,6 +413,11 @@ Streaming buffers at most one batch per reader and closing the batch reader
 interrupts native reads that are still in flight. A missing reader capability,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
+
+`to_iterator()` also uses Native reads when enabled, yielding the existing
+reusable `InternalRow` view with its row kind, BLOB and VECTOR accessors. It
+visits splits serially and shares one row limit across them. Close the iterator
+when stopping before exhaustion to release its current Native reader.
 
 Native planning and reading require Rust's resolved-schema bindings:
 `Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and

@@ -52,6 +52,7 @@ def _table_read(limit=None):
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
+    read._row_kind_column = '_row_kind'
     read.output_projection = None
     read.table.options.row_tracking_enabled.return_value = False
     read.table.fields = read.read_type
