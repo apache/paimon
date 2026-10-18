@@ -838,6 +838,18 @@ class NativePlanTest(unittest.TestCase):
         })
         self.assertEqual(table.table_schema.options, options)
 
+    def test_resolved_schema_preserves_effective_query_auth_flag(self):
+        for value, expected in [
+                ('true', 'true'), ('TRUE', 'true'), ('on', 'true'), ('yes', 'true'),
+                ('1', 'true'), (' true ', 'true'), (True, 'true'), (2, 'true'),
+                ('false', 'false'), ('off', 'false'), ('0', 'false'), (False, 'false')]:
+            with self.subTest(value=value):
+                options = {'query-auth.enabled': value}
+                table = SimpleNamespace(table_schema=TableSchema(0, [], options=options))
+                resolved = json.loads(_resolved_schema_json(table))['options']
+                self.assertEqual(resolved, {'query-auth.enabled': expected})
+                self.assertEqual(table.table_schema.options, options)
+
     def test_resolved_schema_preserves_timestamp_selectors(self):
         for key, value in (('scan.timestamp', '2026-09-22T00:00:00'),
                            ('scan.timestamp-millis', 1790035200000)):

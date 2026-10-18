@@ -284,3 +284,37 @@ def test_merge_authorized_source_failures_never_modify_target(rest_catalog, nati
     reader = target.new_read_builder()
     assert reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist() == [
         {'id': 1, 'value': 'old'}]
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('enabled', ['on', 'yes', '1', ' true '])
+def test_merge_source_preserves_enabled_authorization(rest_catalog, native, enabled):
+    import json
+    from pypaimon.api.api_response import AuthTableQueryResponse
+    from pypaimon.schema.schema_change import SchemaChange
+
+    catalog, server = rest_catalog
+    source = _create(catalog, 'source', 'append')
+    _write(source, [{'id': 1, 'value': 'restricted'}])
+    catalog.alter_table(source.identifier, [SchemaChange.set_option('query-auth.enabled', enabled)])
+    source = catalog.get_table(source.identifier)
+    assert source.options.query_auth_enabled
+    server.table_query_auth_store[source.identifier.get_full_name()] = AuthTableQueryResponse(filter=[json.dumps({
+        'kind': 'LEAF', 'transform': {
+            'name': 'FIELD_REF', 'fieldRef': {'index': 0, 'name': 'id', 'type': 'INT'}},
+        'function': 'GREATER_THAN', 'literals': [1]})])
+    target = _create(catalog, 'target', 'de')
+    _write(target, [{'id': 1, 'value': 'old'}])
+    before = target.snapshot_manager().get_latest_snapshot().id
+    builder = target.copy({'write.native.enabled': str(native).lower()}).new_batch_write_builder()
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+                                      side_effect=AssertionError('Python source materialization')))
+        with pytest.raises(Exception) as caught:
+            builder.new_update().merge_into(source, on=['id'], when_matched=[WhenMatched.delete()])
+        assert not isinstance(caught.value, AssertionError)
+    assert target.snapshot_manager().get_latest_snapshot().id == before
+    reader = target.new_read_builder()
+    assert reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist() == [
+        {'id': 1, 'value': 'old'}]

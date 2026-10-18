@@ -300,3 +300,23 @@ def test_explain_uses_the_authorized_native_plan(guarded_table):
     with patch('pypaimon.read.scanner.file_scanner.FileScanner.scan_with_stats',
                side_effect=AssertionError('Native explain fell back')):
         assert table.new_read_builder().with_projection(['value']).explain().native_planned
+
+
+@pytest.mark.parametrize('enabled', ['on', ' true '])
+def test_native_read_preserves_effective_authorization_flag(guarded_table, rest_catalog, enabled):
+    table, server = guarded_table
+    catalog, _ = rest_catalog
+    catalog.alter_table(table.identifier, [SchemaChange.set_option('query-auth.enabled', enabled)])
+    table = catalog.get_table(table.identifier)
+    calls = []
+
+    def authorize(select):
+        calls.append(select)
+        return AuthTableQueryResponse(filter=[json.dumps({
+            'kind': 'LEAF', 'transform': {'name': 'FIELD_REF', 'fieldRef': _field('id', 'INT')},
+            'function': 'GREATER_THAN', 'literals': [2]})])
+
+    server.table_query_auth_store[table.identifier.get_full_name()] = authorize
+    assert _read(table, True).column('id').to_pylist() == [3, 4]
+    assert len(calls) == 1
+    assert table.table_schema.options['query-auth.enabled'] == enabled

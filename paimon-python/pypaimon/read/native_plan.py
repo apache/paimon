@@ -230,6 +230,11 @@ def _resolved_schema_json(table) -> str:
     from pypaimon.common.json_util import JSON
     options = {str(key): _option_value_to_string(value)
                for key, value in table.table_schema.options.items() if value is not None}
+    if 'query-auth.enabled' in options:
+        # Preserve Python's effective policy. Forwarding an enabled spelling
+        # such as "on" unchanged would disable authorization in Rust.
+        options['query-auth.enabled'] = _option_value_to_string(OptionsUtils.convert_to_boolean(
+            table.table_schema.options['query-auth.enabled']))
     return JSON.to_json(table.table_schema.copy(new_options=options))
 
 
