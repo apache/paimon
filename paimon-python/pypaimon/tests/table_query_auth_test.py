@@ -82,7 +82,7 @@ class _FakeScan:
     def _native_requested(self):
         return False
 
-    def _TableScan__auth_query(self):
+    def _TableScan__auth_query(self, all_columns=False):
         return self._auth_result
 
 

@@ -976,6 +976,8 @@ class NativePlanTest(unittest.TestCase):
             # Capturing empty uses a read-view copy, keeping the cached base
             # reusable when a later caller has no captured snapshot.
             pinned_table = native_table.copy_with_pinned_snapshot.return_value
+            pinned_table.copy_with_resolved_schema.return_value = pinned_table
+            pinned_table.copy_with_pinned_snapshot.return_value = pinned_table
             table._read_snapshot = None
             self.assertIs(_native_read_builder(table), pinned_table.new_read_builder.return_value)
             native_table.copy_with_pinned_snapshot.assert_called_once_with(None)

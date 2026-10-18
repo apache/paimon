@@ -285,7 +285,7 @@ def _resolved_rest_table_response(table):
 
 
 class _NativeRestTableCache:
-    """One native environment per Python environment, never sent to workers."""
+    """One process-local native table, discarded during worker serialization."""
 
     def __init__(self):
         self._states = {}
@@ -296,9 +296,7 @@ class _NativeRestTableCache:
     def __setstate__(self, state):
         self.__init__()
 
-    def get(self, response, database, table, options, token_loader=None):
-        from pypaimon_rust.datafusion import Table
-
+    def get_or_create(self, key, create):
         pid = os.getpid()
         # Publish a complete state atomically; never touch an inherited lock.
         states = self._states
@@ -306,21 +304,26 @@ class _NativeRestTableCache:
         if state is None:
             state = states.setdefault(pid, SimpleNamespace(lock=Lock(), entry=None))
             self._states = {pid: state}
-        key = (response, database, table, tuple(sorted(options.items())))
         with state.lock:
             if state.entry is None or state.entry[0] != key:
-                reuse_token = getattr(Table, 'from_rest_response_with_token', None)
-                token = token_loader() if callable(reuse_token) and token_loader else None
-                if token is None:
-                    native_table = Table.from_rest_response(
-                        response, database=database, table=table, rest_options=options)
-                else:
-                    native_table = reuse_token(
-                        response, database=database, table=table, rest_options=options,
-                        data_token=dict(token.token),
-                        expires_at_millis=token.expire_at_millis)
-                state.entry = (key, native_table)
+                state.entry = (key, create())
             return state.entry[1]
+
+    def get(self, response, database, table, options, token_loader=None):
+        from pypaimon_rust.datafusion import Table
+
+        def create():
+            reuse_token = getattr(Table, 'from_rest_response_with_token', None)
+            token = token_loader() if callable(reuse_token) and token_loader else None
+            if token is None:
+                return Table.from_rest_response(
+                    response, database=database, table=table, rest_options=options)
+            return reuse_token(
+                response, database=database, table=table, rest_options=options,
+                data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
+
+        key = (response, database, table, tuple(sorted(options.items())))
+        return self.get_or_create(key, create)
 
 
 def _rest_data_token(table):
@@ -339,8 +342,52 @@ def _rest_data_token(table):
     return file_io._existing_valid_token()
 
 
+def _validate_native_fuse_binding(table):
+    """Catalog options must reconstruct the FileIO already bound to the view."""
+    from pypaimon.catalog.rest.fuse_support import FusePathResolver
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
+
+    file_io = table.file_io
+    if type(file_io) is CachingFileIO:
+        file_io = file_io._delegate
+    if not isinstance(file_io, FuseLocalFileIO):
+        return
+    loader = table.catalog_environment.catalog_loader
+    if type(file_io) is not FuseLocalFileIO or _catalog_metastore(loader) != 'rest':
+        raise RuntimeError('Native reads cannot reconstruct custom FUSE FileIO')
+    options = loader.context().options
+    if not options.get(FuseOptions.FUSE_ENABLED):
+        raise RuntimeError('Native catalog would disable the bound FUSE mount')
+    expected = FusePathResolver(options, None).resolve_local_path(table.table_path, table.identifier)
+    local = LocalFileIO()
+    if (file_io.path.rstrip('/') != table.table_path.rstrip('/')
+            or local._to_file(file_io.fuse_path).absolute() != local._to_file(expected).absolute()):
+        # In pvfs mode, copy(branch=...) retains Python's original FileIO;
+        # loading the decorated identifier would bind a different directory.
+        raise RuntimeError('Native catalog would resolve a different FUSE mount')
+
+
 def _native_table(table):
     """Transport the resolved schema, shared FileIO and captured read view."""
+    _validate_native_fuse_binding(table)
+    if ('_read_snapshot' in vars(table)
+            and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
+        from pypaimon.common.json_util import JSON
+        environment = table.catalog_environment
+        cache = vars(table).setdefault('_native_pinned_table_cache', _NativeRestTableCache())
+        key = (table.table_path, table.identifier.get_full_name(), table.file_io,
+               environment.uuid, environment.rest_table_response,
+               tuple(sorted(_catalog_options(table).items())),
+               JSON.to_json(table._read_snapshot) if table._read_snapshot is not None else None)
+        # Keep core's verified snapshot alive for this captured view, including
+        # ordinary read-option copies. Pickling/forking starts a fresh cache.
+        native = cache.get_or_create(key, lambda: _load_native_table(table))
+        return _with_native_read_snapshot(table, _with_native_resolved_schema(table, native))
+    return _load_native_table(table)
+
+
+def _load_native_table(table):
     rest_response = _resolved_rest_table_response(table)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
@@ -362,7 +409,9 @@ def _native_table(table):
             branch=table.current_branch(), options=file_io_options)
     else:
         from pypaimon_rust.datafusion import PaimonCatalog
-        catalog = PaimonCatalog(_catalog_options(table))
+        # The Python loader has already resolved /config, including typed
+        # FUSE options. Match RESTCatalogLoader.load() and reuse that context.
+        catalog = PaimonCatalog(_catalog_options(table), config_required=False)
         # REST may keep branch schemas in the catalog only. Load the base
         # environment, then attach the schema/branch already resolved here.
         rt = catalog.get_table((
@@ -388,7 +437,10 @@ def _with_native_resolved_schema(table, native_table):
     snapshot = vars(table).get('_read_snapshot')
     if historical and snapshot is not None:
         from pypaimon.common.json_util import JSON
-        native_table = native_table.copy_with_pinned_snapshot(JSON.to_json(snapshot), with_schema=True)
+        # A captured view can intentionally retain the current read schema
+        # while its files were written under an older snapshot schema.
+        native_table = native_table.copy_with_pinned_snapshot(
+            JSON.to_json(snapshot), with_schema=snapshot.schema_id == table.table_schema.id)
     elif historical:
         native_table = native_table.copy(options)
     return native_table.copy_with_resolved_schema(resolved, branch=table.current_branch())

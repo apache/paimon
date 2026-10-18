@@ -280,7 +280,7 @@ class TableScan:
             plan = self._try_native_plan(all_files=True)
             if plan is not None:
                 return plan
-        if self.__auth_query() is not None:
+        if self.__auth_query(all_columns=True) is not None:
             raise TableNoPermissionException(self.table.identifier)
         if self._query_auth_fn is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, None)
@@ -292,8 +292,8 @@ class TableScan:
         finally:
             self.file_scanner.skip_level0 = skip_level0
 
-    def __auth_query(self):
-        return authorize(self.table, self._query_auth_fn, self._read_type,
+    def __auth_query(self, all_columns=False):
+        return authorize(self.table, self._query_auth_fn, None if all_columns else self._read_type,
                          self.predicate, self.partition_predicate)
 
     def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:

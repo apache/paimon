@@ -157,6 +157,25 @@ def test_limit_is_applied_after_masked_filter(table):
     assert read(table, predicate, projection=['id'], limit=1) == [{'id': 2}]
 
 
+def test_plan_all_files_authorizes_every_column_before_exposing_inventory(table):
+    from pypaimon.catalog.catalog_exception import TableNoPermissionException
+    table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'})
+    selected = []
+
+    def auth(select):
+        selected.append(select)
+        if select is None:
+            raise TableNoPermissionException(table.identifier)
+        return TableQueryAuthResult(None, None)
+
+    table.catalog_environment.table_query_auth = lambda options, identifier: auth
+    scan = table.new_read_builder().with_projection(['id']).new_scan()
+    assert scan.plan().splits()
+    with pytest.raises(TableNoPermissionException):
+        scan.plan_all_files()
+    assert selected == [['id'], None]
+
+
 def test_filter_columns_are_authorized(table):
     selected = []
 

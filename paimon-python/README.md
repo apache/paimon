@@ -459,6 +459,8 @@ filesystem snapshots. REST errors, including HTTP 501, are propagated as in Java
 Rust FileIO supports the existing REST FUSE options (`fuse.enabled`, `fuse.root`,
 `fuse.mode` and `fuse.validation-mode`). It resolves and validates the mount,
 including historical reads, without requesting cloud credentials for mounted data.
+A copied branch retains Python's bound FileIO; if its FUSE mount differs from the
+catalog-resolved mount, planning and reading retain Python execution.
 Custom catalog loaders and arbitrary FileIO implementations require an equivalent
 native provider; contexts that cannot be reproduced retain Python execution.
 
