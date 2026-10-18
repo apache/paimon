@@ -177,6 +177,12 @@ propagate without retrying that batch through Python.
 
 For primary-key Row writes, `rowkind.field` takes precedence over the object's `RowKind`; otherwise the object event is preserved. Plain Arrow input defaults to INSERT. Both Python and native writers apply `ignore-delete` and `ignore-update-before` before routing object rows.
 
+Set `primary-key.nullable=true` when creating a primary-key table to allow NULL
+keys, including keys declared NOT NULL in the input schema. Both writers merge
+NULL keys using null-safe equality and restore their dynamic bucket assignments
+across restarts. SQL `MERGE ON` retains ordinary equality: a NULL in any join-key
+column does not match another NULL.
+
 Batch and stream `merge_into` also use Rust core for eligible data-evolution
 Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
 `WhenNotMatched` clauses accept Arrow/pandas input, Paimon table sources, or
@@ -198,6 +204,13 @@ windows are resolved and read by core. Non-REST Blob views
 requiring catalog resolution and packed-video inserts use the Python path
 selected before native execution starts. Native failures propagate without
 Python retry or deleting files from earlier prepared actions.
+
+A source object's captured snapshot is preserved, including a fixed empty
+view or retained snapshot metadata. Current main-branch REST table sources
+with `query-auth.enabled=true` also use core when the catalog returns no row
+filter or column mask. Core requests authorization for every source column,
+even for a key-only DELETE, and refreshes it for each MERGE. A restricted or
+denied source fails before target actions, as with Python's `plan_for_write`.
 
 Python and native writers use Java's escaped partition directories for data,
 changelog, Blob and row sidecar files, including external locations. Both
@@ -418,6 +431,11 @@ I/O and data errors raised after streaming starts surface to the caller.
 reusable `InternalRow` view with its row kind, BLOB and VECTOR accessors. It
 visits splits serially and shares one row limit across them. Close the iterator
 when stopping before exhaustion to release its current Native reader.
+
+Batch reads support `scan.mode=latest` and `latest-full` for the latest complete
+snapshot, and `from-snapshot-full` with `scan.snapshot-id` for a selected complete
+snapshot. The same modes apply when a Paimon table is the source of `merge_into`.
+These batch semantics follow Java; streaming startup policies are separate.
 
 Native planning and reading require Rust's resolved-schema bindings:
 `Table.from_resolved_schema()` for filesystem, JDBC and path-based tables, and

@@ -395,7 +395,10 @@ class FileStoreWrite:
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):
-            sub_predicates.append(predicate_builder.equal(key, value))
+            # Java PartitionPredicate uses IS NULL for null partition values.
+            # Equality to NULL cannot locate the files whose sequence we restore.
+            sub_predicates.append(predicate_builder.is_null(key) if value is None
+                                  else predicate_builder.equal(key, value))
         partition_filter = predicate_builder.and_predicates(sub_predicates)
 
         scan = read_builder.with_filter(partition_filter).new_scan()
