@@ -384,16 +384,28 @@ def test_large_binary_key_slice_after_two_gib_matches_visible_bytes(tmp_path, na
 @pytest.mark.skipif(os.name != 'posix' or sys.maxsize <= 2 ** 32, reason='Requires 64-bit POSIX mmap')
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
 @pytest.mark.parametrize('mixed', [False, True], ids=['all_null', 'mixed'])
-def test_binary_match_keys_ignore_storage_owned_by_null_values(tmp_path, native, mixed):
-    table, _ = _table(tmp_path, native, pa.binary(), b'ab', b'other')
+@pytest.mark.parametrize('kind', ['binary', 'string'])
+@pytest.mark.parametrize('encoded', [False, True], ids=['plain', 'dictionary'])
+@pytest.mark.parametrize('payload', [b'ab', '中文'.encode(), b''], ids=['ascii', 'utf8', 'empty'])
+@pytest.mark.parametrize('sliced', [False, True], ids=['zero_offset', 'sliced'])
+def test_byte_match_keys_ignore_storage_owned_by_null_values(tmp_path, native, mixed, kind, encoded, payload, sliced):
+    text = kind == 'string'
+    key_type, input_type = (pa.string(), pa.large_string()) if text else (pa.binary(), pa.large_binary())
+    table, _ = _table(tmp_path, native, key_type, payload.decode() if text else payload, 'other' if text else b'other')
     before = next(_rows(table))
     start = 2 ** 31 + 17
-    memory = mmap.mmap(-1, start + 2)
-    memory[start:start + 2] = b'ab'
-    offsets = [0, start, start + 2] if mixed else [0, start]
-    keys = pa.Array.from_buffers(pa.large_binary(), len(offsets) - 1, [
-        pa.py_buffer(b'\x02'), pa.array(offsets, type=pa.int64()).buffers()[1], pa.py_buffer(memory)],
-        null_count=1)
+    memory = mmap.mmap(-1, start + len(payload))
+    memory[start:start + len(payload)] = payload
+    offsets = [0, start, start + len(payload)] if mixed else [0, start]
+    length = len(offsets) - 1
+    if sliced:
+        offsets.insert(0, 0)
+    keys = pa.Array.from_buffers(input_type, length, [
+        pa.py_buffer(b'\x05' if sliced else b'\x02'),
+        pa.array(offsets, type=pa.int64()).buffers()[1], pa.py_buffer(memory)],
+        null_count=1, offset=int(sliced))
+    if encoded:
+        keys = pa.DictionaryArray.from_arrays(pa.array(range(len(keys)), type=pa.int8()), keys)
     source = pa.table({'key': keys, 'value': pa.array([9, 42] if mixed else [9], type=pa.int32())})
     _upsert(table, source, native, False)
     for rows in _rows(table):
