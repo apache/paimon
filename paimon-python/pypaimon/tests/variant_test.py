@@ -51,6 +51,7 @@ import unittest
 import datetime
 import uuid
 from decimal import Decimal
+from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -60,6 +61,7 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_shredding import (
     VARIANT_ARROW_TYPE,
     VariantSchema,
+    _decompose_field_bytes,
     _NULL_VALUE_BYTES,
     _build_array_value,
     _build_object_value,
@@ -1161,6 +1163,57 @@ class TestShreddingWrite(unittest.TestCase):
             overflow_py = GenericVariant(overflow, result['metadata']).to_python()
             self.assertIn('extra', overflow_py)
 
+    def test_scalar_shredding_preserves_types_and_values(self):
+        residual_cases = [
+            (0, pa.float64()), (2.5, pa.int64()), (2.0, pa.int64()),
+            (True, pa.int64()), (False, pa.float64()), (1, pa.bool_()),
+            (None, pa.int64()), ('12', pa.int64()), ([], pa.string()),
+            ({'x': 1}, pa.string()), (128, pa.int8()), (-129, pa.int8()),
+            (2 ** 31, pa.int32()), (2 ** 63 - 1, pa.float64()),
+            (1.25, pa.float32()), (Decimal('1.234'), pa.decimal128(4, 2)),
+            (Decimal('123.45'), pa.decimal128(4, 2)),
+            (datetime.datetime(2024, 1, 1, microsecond=1), pa.timestamp('ms')),
+            (datetime.datetime(2500, 1, 1), pa.timestamp('ns')),
+            (datetime.datetime(2024, 1, 1), pa.timestamp('us', tz='UTC')),
+            (datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc), pa.timestamp('us')),
+            (True, pa.decimal128(4, 0)), (1, pa.decimal128(4, 0)),
+            (Decimal('1'), pa.int64()),
+        ]
+        typed_cases = [
+            (True, pa.bool_()), (-128, pa.int8()), (127, pa.int8()),
+            (2 ** 63 - 1, pa.int64()), (1.25, pa.float64()),
+            (-0.0, pa.float64()), ('hello', pa.string()), (b'abc', pa.binary()),
+            (Decimal('12.34'), pa.decimal128(4, 2)),
+            (datetime.date(2024, 1, 1), pa.date32()),
+            (datetime.datetime(2024, 1, 1, microsecond=1), pa.timestamp('us')),
+        ]
+        for residual, cases in ((True, residual_cases), (False, typed_cases)):
+            for value, arrow_type in cases:
+                with self.subTest(value=value, arrow_type=arrow_type):
+                    gv = GenericVariant.from_python(value)
+                    schema = VariantSchema(value_idx=0, typed_idx=1,
+                                           scalar_arrow_type=arrow_type)
+                    with patch('pypaimon.data.variant_shredding.pa.scalar', wraps=pa.scalar) as scalar:
+                        row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
+                    if not (pa.types.is_decimal(arrow_type) or pa.types.is_timestamp(arrow_type)):
+                        scalar.assert_not_called()
+                    self.assertEqual(row['value'], gv.value() if residual else None)
+                    if residual:
+                        self.assertIsNone(row['typed_value'])
+                    self.assertEqual(rebuild_value(row, schema, {}), gv.value())
+
+    def test_float_wire_type_is_preserved(self):
+        metadata = GenericVariant.from_python(0).metadata()
+        for source in (pa.float32(), pa.float64()):
+            for target in (pa.float32(), pa.float64()):
+                with self.subTest(source=source, target=target):
+                    raw = _encode_scalar_to_value_bytes(1.25, source)
+                    schema = VariantSchema(value_idx=0, typed_idx=1,
+                                           scalar_arrow_type=target)
+                    row = _decompose_field_bytes(raw, schema, metadata)
+                    self.assertEqual(row['value'], None if source == target else raw)
+                    self.assertEqual(rebuild_value(row, schema, {}), raw)
+
 
 # ===========================================================================
 # 8. Full-chain via Paimon API
@@ -1423,6 +1476,97 @@ class TestVariantPaimonTable(unittest.TestCase):
             'x': "variant_get(payload, '$.x', 'float')"})
         with self.assertRaisesRegex(Exception, 'Cannot cast Variant'):
             strict.new_read().to_arrow(strict.new_scan().plan().splits())
+
+    def _check_shredding_type_preservation(self, native):
+        def typed(value):
+            if isinstance(value, dict):
+                return ('object', sorted((k, typed(v)) for k, v in value.items()))
+            if isinstance(value, list):
+                return ('array', [typed(v) for v in value])
+            return (type(value).__name__, value)
+
+        values = [
+            {'score': 1.5, 'count': 2, 'small': 127, 'nested': {'x': 3.25}},
+            {'score': 0, 'count': 2.5, 'small': 128, 'nested': {'x': 0}},
+            {'score': True, 'count': False, 'small': -129, 'nested': {'x': False}},
+            {'score': None, 'count': None, 'nested': {'x': None}},
+            {}, {'nested': {}}, {'nested': None}, {'nested': [1, None]},
+            [1, None], 42, None, {'count': 2 ** 63 - 1},
+        ]
+        gvs = [GenericVariant.from_python(value) for value in values] + [None]
+        expected = {i: ('sql-null',) if gv is None else typed(gv.to_python())
+                    for i, gv in enumerate(gvs)}
+        shredding = _schema_json('payload', [
+            ('score', 'DOUBLE'), ('count', 'BIGINT'), ('small', 'TINYINT'),
+            ('nested', {'type': 'ROW', 'fields': [{'name': 'x', 'type': 'DOUBLE'}]}),
+        ])
+        for shredded in (False, True):
+            name = 'default.type_preservation_{}_{}'.format(native, shredded)
+            options = {'bucket': '-1', 'file.format': 'parquet',
+                       'write.native.enabled': str(native).lower(),
+                       'read.native.enabled': 'false'}
+            if shredded:
+                options['parquet.variant.shreddingSchema'] = shredding
+            schema = Schema.from_pyarrow_schema(self._pa_schema())
+            schema.options.update(options)
+            self.catalog.create_table(name, schema, False)
+            table = self.catalog.get_table(name)
+            builder = table.new_batch_write_builder()
+            writer = builder.new_write()
+            self.assertEqual(type(writer).__name__,
+                             'NativeTableWrite' if native else 'BatchTableWrite')
+            commit = builder.new_commit()
+            try:
+                for start in range(0, len(gvs), 3):
+                    batch = pa.RecordBatch.from_arrays([
+                        pa.array(range(start, min(start + 3, len(gvs))), type=pa.int64()),
+                        GenericVariant.to_arrow_array(gvs[start:start + 3]),
+                    ], schema=self._pa_schema())
+                    writer.write_arrow_batch(batch)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+            reader = table.new_read_builder()
+            rows = reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist()
+            actual = {row['id']: ('sql-null',) if row['payload'] is None else
+                      typed(GenericVariant.from_arrow_struct(row['payload']).to_python())
+                      for row in rows}
+            self.assertEqual(actual, expected)
+            if not shredded:
+                continue
+            physical = {}
+            for root, _, files in os.walk(table.table_path):
+                for filename in files:
+                    if filename.endswith('.parquet'):
+                        for row in pq.read_table(os.path.join(root, filename)).to_pylist():
+                            physical[row['id']] = row['payload']
+            self.assertEqual(len(physical), len(gvs))
+            for index, field in ((1, 'score'), (1, 'count'), (1, 'small'),
+                                 (2, 'score'), (2, 'count'), (2, 'small'), (3, 'score')):
+                leaf = physical[index]['typed_value'][field]
+                self.assertIsNone(leaf['typed_value'])
+                self.assertEqual(leaf['value'], GenericVariant.from_python(values[index][field]).value())
+            missing = physical[4]['typed_value']['score']
+            self.assertEqual(missing, {'value': None, 'typed_value': None})
+            self.assertEqual(physical[3]['typed_value']['nested']['typed_value']['x']['value'],
+                             _NULL_VALUE_BYTES)
+            self.assertEqual(physical[10]['value'], _NULL_VALUE_BYTES)
+            self.assertIsNone(physical[12])
+            self.assertEqual(physical[0]['typed_value']['score']['typed_value'], 1.5)
+            self.assertIsNone(physical[0]['typed_value']['score']['value'])
+
+    def test_python_writer_preserves_shredded_variant_types(self):
+        self._check_shredding_type_preservation(native=False)
+
+    def test_native_writer_preserves_shredded_variant_types(self):
+        try:
+            import pypaimon_rust  # noqa: F401
+            from pypaimon.write.native_write import NativeTableWrite  # noqa: F401
+        except ImportError:
+            self.skipTest('native writer is not available')
+        self._check_shredding_type_preservation(native=True)
 
     def test_plain_variant_write_and_read(self):
         """Plain VARIANT: GenericVariant → write_arrow → to_arrow → GenericVariant."""
