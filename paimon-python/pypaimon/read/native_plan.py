@@ -217,8 +217,7 @@ def _resolved_schema_file_io_options(table) -> Optional[dict]:
         # REST tables must retain catalog snapshot loading and token refresh.
         return None
     context = loader.context()
-    if context.options is None or any(getattr(context, attr, None) is not None for attr in (
-            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
+    if context.options is None:
         return None
     # JDBC, like filesystem catalogs, uses on-disk snapshots. Its already
     # resolved table does not need another database connection during planning.
@@ -272,10 +271,6 @@ def _resolved_rest_table_response(table):
             or not isinstance(response, str)
             or not native_method_available('Table', 'from_rest_response')):
         return None
-    context = environment.catalog_loader.context()
-    if any(getattr(context, attr, None) is not None for attr in (
-            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
-        return None
     metadata = json.loads(response)
     if (metadata.get('path') != table.table_path
             or metadata.get('name') != table.identifier.get_object_name()
@@ -297,7 +292,7 @@ class _NativeRestTableCache:
     def __setstate__(self, state):
         self.__init__()
 
-    def get(self, response, database, table, options, token_loader=None):
+    def get(self, response, database, table, options, token_loader=None, path_mapping=None):
         from pypaimon_rust.datafusion import Table
 
         pid = os.getpid()
@@ -307,14 +302,15 @@ class _NativeRestTableCache:
         if state is None:
             state = states.setdefault(pid, SimpleNamespace(lock=Lock(), entry=None))
             self._states = {pid: state}
-        key = (response, database, table, tuple(sorted(options.items())))
+        key = (response, database, table, tuple(sorted(options.items())), path_mapping)
         with state.lock:
             if state.entry is None or state.entry[0] != key:
                 reuse_token = getattr(Table, 'from_rest_response_with_token', None)
-                token = token_loader() if callable(reuse_token) and token_loader else None
+                token = token_loader() if path_mapping is None and callable(reuse_token) and token_loader else None
                 if token is None:
+                    extra = {'path_mapping': path_mapping} if path_mapping is not None else {}
                     native_table = Table.from_rest_response(
-                        response, database=database, table=table, rest_options=options)
+                        response, database=database, table=table, rest_options=options, **extra)
                 else:
                     native_table = reuse_token(
                         response, database=database, table=table, rest_options=options,
@@ -352,8 +348,9 @@ def _native_table(table):
             database=table.identifier.get_database_name(),
             table=table.identifier.get_object_name(),
             options=_catalog_options(table),
-            token_loader=lambda: _rest_data_token(table))
-        rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
+            token_loader=lambda: _rest_data_token(table),
+            path_mapping=_native_file_io_mapping(table))
+        rt = _with_native_resolved_schema(table, rt, file_io_resolved=True)
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(
@@ -367,15 +364,47 @@ def _native_table(table):
         # REST may keep branch schemas in the catalog only. Load the base
         # environment, then attach the schema/branch already resolved here.
         rt = catalog.get_table((
-            table.identifier.get_database_name(), table.identifier.get_table_name()))
+            table.identifier.get_database_name(), table.identifier.get_object_name()))
         if rt.location() != table.table_path:
             raise RuntimeError('Native catalog resolved a different table location')
-        rt = rt.copy_with_resolved_schema(_resolved_schema_json(table), branch=table.current_branch())
+        rt = _with_native_resolved_schema(table, rt)
     if table.current_branch() != 'main':
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
     return _with_native_read_snapshot(table, rt)
+
+
+def _with_native_resolved_schema(table, native_table, file_io_resolved=False):
+    # Resolve time travel through core before replacing options. Caller-supplied
+    # fields cannot acquire the catalog's authorization session.
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+    resolved = _resolved_schema_json(table)
+    options = json.loads(resolved)['options']
+    mapping = _native_file_io_mapping(table)
+    historical = (options.get('query-auth.enabled') == 'true'
+                  and any(key in options for key in SCAN_KEYS))
+    snapshot = vars(table).get('_read_snapshot')
+    if mapping is not None and not file_io_resolved:
+        native_table = native_table.copy({}, path_mapping=mapping)
+    if historical and snapshot is not None:
+        from pypaimon.common.json_util import JSON
+        native_table = native_table.copy_with_pinned_snapshot(JSON.to_json(snapshot), with_schema=True)
+    elif historical:
+        native_table = native_table.copy(options)
+    return native_table.copy_with_resolved_schema(resolved, branch=table.current_branch())
+
+
+def _native_file_io_mapping(table):
+    """Carry the already validated FUSE mapping, preserving original REST paths."""
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO
+    file_io = table.file_io
+    if type(file_io) is CachingFileIO:
+        file_io = file_io._delegate
+    if type(file_io) is FuseLocalFileIO:
+        return file_io.path, file_io.fuse_path
+    return None
 
 
 def _with_native_read_snapshot(table, native_table):
@@ -420,6 +449,8 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
     if not native_reader_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust native reader API")
+    if not _native_query_auth_supported(table):
+        raise RuntimeError('Native reads cannot reconstruct custom query authorization')
     if read_type is None:
         from pypaimon.read.read_builder import ReadBuilder
         resolved = ReadBuilder(table)
@@ -468,12 +499,15 @@ def native_plan(
         chunk_shuffle: Optional[Tuple[int, int]] = None,
         shard: Optional[Tuple[int, int]] = None,
         partition_predicate: Optional[Predicate] = None,
-        global_index_result=None) -> Plan:
+        global_index_result=None,
+        for_write: bool = False) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
     falls back to the Python planner.
     """
+    if for_write and incremental_range is not None:
+        raise ValueError('write planning does not accept incremental ranges')
     if incremental_range is None and incremental_mode != 'delta':
         raise ValueError('incremental_mode requires incremental_range')
     if not native_runtime_available():
@@ -529,7 +563,7 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    rust_plan = scan.plan()
+    rust_plan = scan.plan_for_write() if for_write else scan.plan()
     return _from_native_plan(table, rust_plan)
 
 
@@ -548,9 +582,7 @@ def _native_query_auth_supported(table):
             or not table.options.query_auth_enabled
             or _catalog_metastore(environment.catalog_loader) != 'rest'):
         return False
-    context = environment.catalog_loader.context()
-    return not any(getattr(context, attr, None) is not None for attr in (
-        'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'))
+    return True
 
 
 def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):

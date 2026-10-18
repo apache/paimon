@@ -456,7 +456,10 @@ The native table retains REST credentials, token refresh and catalog snapshot
 resolution. Database and table names containing dots are passed as separate
 identifier components. REST snapshot results (including empty results) take precedence over
 filesystem snapshots. REST errors, including HTTP 501, are propagated as in Java.
-Custom catalog/FileIO contexts still fall back when they cannot be reproduced.
+REST FUSE reads carry the already resolved remote-to-local path mapping into
+Rust FileIO, including historical schemas, without requesting cloud credentials.
+Custom catalog loaders and arbitrary FileIO implementations require an equivalent
+native provider; contexts that cannot be reproduced retain Python execution.
 
 Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_ranges()`.
 Watermark time travel requires Rust 0.4 or newer. Branch reads require the
@@ -512,15 +515,15 @@ use native planning. With deletion vectors, batch scans exclude level 0 unless
 `deletion-vectors.merge-on-read=true`, in which case overlapping key ranges stay
 together when they include L0 and require reader-side merging. Fully materialized
 DV files across levels use raw splits, including first-row clustering tables.
-First-row L0 runs can use native planning, including plans with materialized files
-in separate raw splits. Plans that require merging clustered materialized files
-still fall back to Python. Readers preserve physical row positions until deletion
+First-row L0 runs and ordered materialized files can use native planning and
+merge reads together. As in Java, files entering the PK merge reader must be
+ordered by primary key. Readers preserve physical row positions until deletion
 vectors are applied, then evaluate residual predicates after merging.
 Write scans and incremental scans retain level 0.
 
 Append and data-evolution chunk shuffle use Rust file and deletion-vector planning.
-Python retains live-row chunk sizing, seeded shuffle order and balanced worker
-assignment, so the same seed selects the same chunks with either planner.
+Rust also performs live-row chunk sizing, seeded shuffle order and balanced
+worker assignment, so the same seed selects the same chunks with either planner.
 Projection does not remove aligned column files before chunk construction.
 Chunk shuffle supports partition predicates, deletion vectors and timestamp
 incremental scans; its existing restrictions on limits, slices, row ranges and
@@ -528,14 +531,20 @@ global-index results still apply.
 
 Scored global-index results on data-evolution append tables use native row-range
 planning; Python attaches scores to the selected ranges and reads the data.
-Primary-key sorted indexes refine native batch splits through Python's existing
-index reader, preserving merge-required splits and the selected snapshot.
+Primary-key sorted indexes refine native batch splits in Rust core, preserving
+merge-required splits and the selected snapshot.
 
-Query authorization, first-row plans mixing L0 with merge-required materialized files,
-and precomputed primary-key global-index results still use the Python planner.
-Continuous streaming retains Python polling and resume handling, while its
-initial, delta and physical-changelog frames can use native planning and reads.
-Write planning retains its Python entrypoint.
+Standard REST query authorization, historical and branch reads, and precomputed
+primary-key global-index results use Rust planning. Rules are validated against
+the current catalog schema and bound to the historical field IDs and names.
+Older data files may retain statistics for dropped columns, as in Java.
+Python-planned and transported authorized splits can use the native reader after
+live REST authorization and snapshot-file, deletion-vector and merge-group
+validation. Transported metadata never supplies a live grant. If restrictions
+changed incompatibly, the captured plan retains Python execution.
+Continuous streaming delegates planning and resume state to Rust core.
+The Python write-planning entrypoint delegates to `TableScan.plan_for_write()`,
+including L0 and retaining the unrestricted-authorization requirement.
 Native planning remains optional and is disabled by default.
 
 # Coalesced BLOB reads

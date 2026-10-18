@@ -293,7 +293,7 @@ class NativePlanTest(unittest.TestCase):
                 context = CatalogContext.create_from_options(Options({}))
                 setattr(context, attr, object())
                 table.catalog_environment.catalog_loader = loader_type(context)
-                self.assertIsNone(_resolved_schema_file_io_options(table))
+                self.assertEqual(_resolved_schema_file_io_options(table), {})
 
     def test_switch_defaults_off(self):
         defaults = CoreOptions(Options({}))
@@ -514,9 +514,12 @@ class NativePlanTest(unittest.TestCase):
         check(unknown_rest_database)
         check(lambda s, fs: setattr(
             s.table.catalog_environment, 'catalog_loader', object()))   # no context()
+        # These context markers are not consumed by Python FileIO either.
         for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
-            check(lambda s, fs, attr=attr: setattr(
-                s.table.catalog_environment.catalog_loader.context(), attr, object()))
+            fs = Mock(partition_key_predicate=None)
+            scan = _scan(True, fs)
+            setattr(scan.table.catalog_environment.catalog_loader.context(), attr, object())
+            self.assertTrue(scan._native_plan_supported())
 
     def test_plan_native_empty_preserves_snapshot_without_fallback(self):
         for snapshot_id in (None, 7):
