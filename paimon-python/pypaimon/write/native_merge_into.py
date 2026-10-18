@@ -30,6 +30,15 @@ from pypaimon.write.native_update import (
 from pypaimon.write.native_write import _native_partition_types_supported
 
 
+def _callable_assignment(function, on_pairs):
+    from pypaimon.ray.data_evolution_merge_transform import _merge_callable_input
+
+    def evaluate(batch):
+        return function(_merge_callable_input(batch, on_pairs))
+
+    return evaluate
+
+
 def create_native_merge_into(table, source, on, matched, not_matched, commit_user, commit_identifier):
     from pypaimon.table.data_evolution_merge_into import _is_self_merge, _is_table_like, _prepare
     from pypaimon.ray.data_evolution_merge_into import _normalize_on, _union_update_cols
@@ -90,8 +99,6 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
             native_source = _with_native_read_snapshot(source, native_source)
     source, matched, not_matched, context = _prepare(
         table, source, list(matched), list(not_matched), on, source_schema=source_schema)
-    if any(callable(value) for clause in matched + not_matched for value in clause.spec.values()):
-        return None
     if not _native_update_columns_supported(table, _union_update_cols(matched)):
         return None
     for target, origin in zip(target_keys, source_keys):
@@ -109,6 +116,9 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                 values.append((name, 'target', value.column))
             elif isinstance(value, LiteralValue):
                 values.append((name, 'literal', value.value))
+            elif callable(value) and not isinstance(value, type):
+                values.append((name, 'callable', _callable_assignment(
+                    value, list(zip(source_keys, target_keys)))))
             else:
                 return None
         condition = None if clause.condition is None else dict(sql=rewrite_condition(clause.condition))

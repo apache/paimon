@@ -88,11 +88,12 @@ def test_copied_branch_does_not_rebind_an_existing_fuse_mount(tmp_path):
     native_table = module.PaimonCatalog.return_value.get_table.return_value
     native_table.location.return_value = location
     native_table.branch.return_value = 'dev'
+    native_table._copy_with_fuse_file_io.return_value = native_table
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
             patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
-        with pytest.raises(RuntimeError, match='different FUSE mount'):
-            _native_table(branch)
-    module.PaimonCatalog.assert_not_called()
+        assert _native_table(branch) is native_table
+    native_table._copy_with_fuse_file_io.assert_called_once_with(str(tmp_path / 'default/t'))
+    module.PaimonCatalog.return_value.get_table.assert_called_once_with(('default', 't$branch_dev'))
 
 
 @pytest.mark.parametrize('mode,branch', [('pvfs', 'main'), ('pvfs', 'dev'), ('raw', 'dev')])
@@ -127,6 +128,7 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     native_table = module.PaimonCatalog.return_value.get_table.return_value
     native_table.location.return_value = location
     native_table.branch.return_value = branch
+    native_table._copy_with_fuse_file_io.return_value = native_table
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
             patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
         assert _native_table(table) is native_table

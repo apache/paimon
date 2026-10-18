@@ -104,6 +104,7 @@ class NativeTableWrite:
         self._blob_uri_reader_factory = None
         self._restore_snapshot_id = restore_snapshot_id
         self._blob_rows = None
+        self._defer_blob_input = False
         if any(is_blob_file_field(field) for field in table.table_schema.fields):
             from pypaimon.write.native_blob_rows import NativeBlobRows
             self._blob_rows = NativeBlobRows()
@@ -260,7 +261,9 @@ class NativeTableWrite:
             # Core externalizes Blob values during write, before buffering PK
             # records. Their live Python objects need not survive the call.
             if self._blob_rows is not None:
-                self._blob_rows.readers.clear()
+                self._blob_rows.release_consumed()
+                if not self._defer_blob_input:
+                    self._blob_rows.clear()
 
     def prepare_commit(self, commit_identifier=None):
         if self._python_writer is not None:
@@ -274,7 +277,11 @@ class NativeTableWrite:
         else:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
-            messages = self._native_writer.prepare_commit()
+            try:
+                messages = self._native_writer.prepare_commit()
+            finally:
+                if self._blob_rows is not None and self._defer_blob_input:
+                    self._blob_rows.clear()
         return from_native_commit_messages(self.table, messages)
 
     def close(self):
@@ -284,7 +291,7 @@ class NativeTableWrite:
             self._native_writer.close()
             self._native_writer = None
         if self._blob_rows is not None:
-            self._blob_rows.readers.clear()
+            self._blob_rows.clear()
 
     def abort(self):
         if self._python_writer is not None:
@@ -306,6 +313,9 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
     def __init__(self, table, commit_user, static_partition, bucket_plan, native_writer):
         super().__init__(table, commit_user, static_partition, False, native_writer)
         self._bucket_plan = bucket_plan
+        # Automatic planning stages input until all partition sizes are known.
+        self._defer_blob_input = (bucket_plan is None
+                                  and table.options.postpone_default_bucket_num() is None)
 
     def _new_python_writer(self):
         from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite

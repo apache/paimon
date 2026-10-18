@@ -346,9 +346,6 @@ def write_paimon_dataset(
             )
             plan = planner.plan(
                 partition_stats,
-                include_postpone_rows=not (
-                    overwrite or static_partition is not None
-                ),
             )
         return _write_primary_key_groups(
             dataset,

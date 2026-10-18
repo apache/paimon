@@ -220,7 +220,6 @@ class PostponeBucketPlanner:
         self,
         table,
         known_num_buckets=None,
-        postpone_row_counts=None,
     ):
         options = table.options
         if options.bucket() != BucketMode.POSTPONE_BUCKET.value:
@@ -273,13 +272,8 @@ class PostponeBucketPlanner:
         self._partition_keys = list(table.partition_keys)
         self._field_dict = dict(table.field_dict)
         if known_num_buckets is None:
-            known_num_buckets, loaded_postpone_counts = (
-                self._load_bucket_metadata(table)
-            )
-            if postpone_row_counts is None:
-                postpone_row_counts = loaded_postpone_counts
+            known_num_buckets = self._load_bucket_metadata(table)
         self._known_num_buckets = dict(known_num_buckets)
-        self._postpone_row_counts = dict(postpone_row_counts or {})
 
     @staticmethod
     def _load_bucket_metadata(table):
@@ -291,14 +285,9 @@ class PostponeBucketPlanner:
         )
 
         known = {}
-        postpone_counts = {}
         for entry in entries:
             partition = tuple(entry.partition.values)
-            if entry.bucket == BucketMode.POSTPONE_BUCKET.value:
-                postpone_counts[partition] = (
-                    postpone_counts.get(partition, 0) + entry.file.row_count
-                )
-            elif entry.bucket >= 0 and entry.total_buckets > 0:
+            if entry.bucket >= 0 and entry.total_buckets > 0:
                 previous = known.get(partition)
                 if previous is not None and previous != entry.total_buckets:
                     raise RuntimeError(
@@ -306,7 +295,7 @@ class PostponeBucketPlanner:
                         .format(partition, previous, entry.total_buckets)
                     )
                 known[partition] = entry.total_buckets
-        return known, postpone_counts
+        return known
 
     def current_plan(self) -> PostponeBucketPlan:
         return PostponeBucketPlan(self._known_num_buckets)
@@ -340,7 +329,6 @@ class PostponeBucketPlanner:
     def plan(
         self,
         partition_stats: Dict[Tuple, Tuple[int, int]],
-        include_postpone_rows: bool = True,
     ) -> PostponeBucketPlan:
         for partition, (row_count, data_size) in partition_stats.items():
             partition = tuple(partition)
@@ -349,13 +337,8 @@ class PostponeBucketPlanner:
             if self.default_bucket_num is not None:
                 self._known_num_buckets[partition] = self.default_bucket_num
                 continue
-            postpone_rows = (
-                self._postpone_row_counts.get(partition, 0)
-                if include_postpone_rows
-                else 0
-            )
             if self.target_row_num_per_bucket is not None:
-                total_rows = row_count + postpone_rows
+                total_rows = row_count
                 num_buckets = max(
                     1,
                     _ceil_div(
@@ -363,15 +346,12 @@ class PostponeBucketPlanner:
                 )
             else:
                 estimated_size = data_size
-                if postpone_rows and row_count:
-                    estimated_size = _ceil_div(
-                        data_size * (row_count + postpone_rows), row_count)
                 num_buckets = max(
                     1,
                     _ceil_div(
                         estimated_size, self.target_size_per_bucket),
                 )
             self._known_num_buckets[partition] = min(
-                num_buckets, self.max_num_buckets
+                1 << (num_buckets - 1).bit_length(), self.max_num_buckets
             )
         return self.current_plan()

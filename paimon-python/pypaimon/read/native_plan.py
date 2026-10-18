@@ -296,8 +296,7 @@ def _rest_data_token(table):
 
 
 def _validate_native_fuse_binding(table):
-    """Catalog options must reconstruct the FileIO already bound to the view."""
-    from pypaimon.catalog.rest.fuse_support import FusePathResolver
+    """Validate and return the FUSE directory already bound to the view."""
     from pypaimon.filesystem.caching_file_io import CachingFileIO
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
 
@@ -312,13 +311,18 @@ def _validate_native_fuse_binding(table):
     options = loader.context().options
     if not options.get(FuseOptions.FUSE_ENABLED):
         raise RuntimeError('Native catalog would disable the bound FUSE mount')
-    expected = FusePathResolver(options, None).resolve_local_path(table.table_path, table.identifier)
-    local = LocalFileIO()
-    if (file_io.path.rstrip('/') != table.table_path.rstrip('/')
-            or local._to_file(file_io.fuse_path).absolute() != local._to_file(expected).absolute()):
-        # In pvfs mode, copy(branch=...) retains Python's original FileIO;
-        # loading the decorated identifier would bind a different directory.
-        raise RuntimeError('Native catalog would resolve a different FUSE mount')
+    if file_io.path.rstrip('/') != table.table_path.rstrip('/'):
+        raise RuntimeError('The bound FUSE FileIO belongs to a different table path')
+    return str(LocalFileIO()._to_file(file_io.fuse_path).absolute())
+
+
+def _with_native_bound_file_io(table, native):
+    mount = _validate_native_fuse_binding(table)
+    if mount is not None:
+        # Java Table.copy retains FileIO while changing the branch publication
+        # identity. Transport that binding rather than re-resolving its mount.
+        return native._copy_with_fuse_file_io(mount)
+    return native
 
 
 def _native_table(table):
@@ -352,7 +356,7 @@ def _load_native_table(table):
             table=table.identifier.get_object_name(),
             options=_catalog_options(table),
             token_loader=lambda: _rest_data_token(table))
-        rt = _with_native_resolved_schema(table, rt)
+        rt = _with_native_resolved_schema(table, _with_native_bound_file_io(table, rt))
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(
@@ -371,7 +375,7 @@ def _load_native_table(table):
             table.identifier.get_database_name(), table.identifier.get_object_name()))
         if rt.location() != table.table_path:
             raise RuntimeError('Native catalog resolved a different table location')
-        rt = _with_native_resolved_schema(table, rt)
+        rt = _with_native_resolved_schema(table, _with_native_bound_file_io(table, rt))
     if table.current_branch() != 'main':
         if rt.branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")

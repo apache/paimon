@@ -91,6 +91,12 @@ def merge_into(
 
     The returned messages must be committed by the caller's matching
     ``TableCommit``.
+
+    SET and INSERT mappings may contain callables accepting an Arrow table
+    with qualified ``t.`` target and ``s.`` source columns (INSERT has only
+    source columns). Each callable evaluates the rows selected by its clause
+    and returns an Arrow Array or ChunkedArray of the same length. Empty
+    clauses do not invoke callbacks; callback errors propagate to the caller.
     """
     if target_table.options.native_write_enabled():
         from pypaimon.write.native_merge_into import create_native_merge_into
@@ -182,6 +188,7 @@ def _prepare(
                 c.update,
                 settable_field_names,
                 on_map,
+                allow_callables=True,
             )
         matched_specs.append(
             _NormalizedClause(
@@ -230,6 +237,7 @@ def _prepare(
             settable_field_names,
             on_map,
             allow_target_refs=False,
+            allow_callables=True,
         )
         for tk, sk in on_map.items():
             if tk in settable_field_names and tk not in spec:

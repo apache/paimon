@@ -935,7 +935,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=pa_schema)
 
         planner = PostponeBucketPlanner(
-            table, known_num_buckets={}, postpone_row_counts={})
+            table, known_num_buckets={})
         stats = planner.input_partition_stats(data)
         self.assertEqual((1000, 32000), stats[()])
         self.assertEqual(2, planner.plan(stats).num_buckets(()))
@@ -956,8 +956,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=self.postpone_pa_schema)
         planner = PostponeBucketPlanner(
             table,
-            known_num_buckets={('known',): 2},
-            postpone_row_counts={},
+            known_num_buckets={('known',): 2}
         )
 
         self.assertEqual(
@@ -997,7 +996,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=pa_schema)
 
         planner = PostponeBucketPlanner(
-            table, known_num_buckets={}, postpone_row_counts={})
+            table, known_num_buckets={})
         self.assertEqual((1, 176), planner.input_partition_stats(data)[()])
 
     def test_postpone_size_inference_supports_nested_vector(self):
@@ -1018,7 +1017,7 @@ class TableWriteTest(unittest.TestCase):
         }, schema=pa_schema)
 
         planner = PostponeBucketPlanner(
-            table, known_num_buckets={}, postpone_row_counts={})
+            table, known_num_buckets={})
         self.assertEqual((1, 80), planner.input_partition_stats(data)[()])
 
     def test_postpone_default_bucket_function_matches_java(self):
@@ -1243,7 +1242,7 @@ class TableWriteTest(unittest.TestCase):
 
         self.assertEqual(16, self._read_sorted(table, 'id').num_rows)
 
-    def test_postpone_target_row_num_counts_existing_postpone_rows(self):
+    def test_postpone_target_row_num_uses_only_new_input(self):
         from pypaimon.write.postpone_bucket import (
             PostponeBucketPlanner,
         )
@@ -1257,21 +1256,22 @@ class TableWriteTest(unittest.TestCase):
                 'postpone.batch-write-fixed-bucket.max-parallelism': 8,
             },
         )
-        append_planner = PostponeBucketPlanner(
-            table,
-            known_num_buckets={},
-            postpone_row_counts={('p',): 3},
-        )
+        # Old staged rows must not influence the current batch's bucket count.
+        staged = self.pk_expected.set_column(
+            self.pk_expected.schema.get_field_index('dt'), self.pk_expected.schema.field('dt'),
+            pa.array(['p'] * self.pk_expected.num_rows))
+        pending = self._commit_arrow(table, staged)
+        self.assertEqual({-2}, {message.bucket for message in pending})
+        append_planner = PostponeBucketPlanner(table)
         append_plan = append_planner.plan({('p',): (1, 10)})
-        self.assertEqual(2, append_plan.num_buckets(('p',)))
+        self.assertEqual(1, append_plan.num_buckets(('p',)))
 
         overwrite_planner = PostponeBucketPlanner(
             table,
-            known_num_buckets={},
-            postpone_row_counts={('p',): 3},
+            known_num_buckets={}
         )
         overwrite_plan = overwrite_planner.plan(
-            {('p',): (1, 10)}, include_postpone_rows=False
+            {('p',): (1, 10)}
         )
         self.assertEqual(1, overwrite_plan.num_buckets(('p',)))
 
