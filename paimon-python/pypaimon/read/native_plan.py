@@ -370,13 +370,18 @@ def _native_table(table):
         branch = getattr(rt, 'branch', None)
         if not callable(branch) or branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")
+    return _with_native_read_snapshot(table, rt)
+
+
+def _with_native_read_snapshot(table, native_table):
+    """Attach a captured read view, including a fixed empty snapshot."""
     # Only explicitly stored state captures a view; None means a fixed empty view.
     table_state = vars(table)
     if '_read_snapshot' in table_state:
         from pypaimon.common.json_util import JSON
         snapshot = table_state['_read_snapshot']
-        rt = rt.copy_with_pinned_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
-    return rt
+        native_table = native_table.copy_with_pinned_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
+    return native_table
 
 
 def _native_read_builder(table):
@@ -523,7 +528,7 @@ def native_plan(
     return _from_native_plan(table, rust_plan)
 
 
-def _native_stream_auth_supported(table):
+def _native_query_auth_supported(table):
     """Only reproduce authorization owned by the standard REST environment."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment, _TableQueryAuthFn
 

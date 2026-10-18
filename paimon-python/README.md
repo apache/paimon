@@ -199,6 +199,13 @@ requiring catalog resolution and packed-video inserts use the Python path
 selected before native execution starts. Native failures propagate without
 Python retry or deleting files from earlier prepared actions.
 
+A source object's captured snapshot is preserved, including a fixed empty
+view or retained snapshot metadata. Current main-branch REST table sources
+with `query-auth.enabled=true` also use core when the catalog returns no row
+filter or column mask. Core requests authorization for every source column,
+even for a key-only DELETE, and refreshes it for each MERGE. A restricted or
+denied source fails before target actions, as with Python's `plan_for_write`.
+
 Python and native writers use Java's escaped partition directories for data,
 changelog, Blob and row sidecar files, including external locations. Both
 planners, file-range metadata, commit callbacks and explicit aborts use the same

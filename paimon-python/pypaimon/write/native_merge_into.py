@@ -71,9 +71,23 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                 source_schema, source.partition_keys,
                 source.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
             return None
-        native_source = create_native_write_table(source)
-        if native_source is None:
-            return None
+        if source.options.query_auth_enabled:
+            from pypaimon.read.native_plan import _native_query_auth_supported, _native_table
+            from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+            from pypaimon.write.native_commit import _rest_catalog_supported
+            if (not _rest_catalog_supported(source) or not _native_query_auth_supported(source)
+                    or source.current_branch() != 'main' or '_read_snapshot' in vars(source)
+                    or any(source.table_schema.options.get(key) is not None for key in SCAN_KEYS)):
+                return None
+            # A source is a read, not a write. Core obtains a fresh REST grant
+            # and requires it to be unrestricted, as Python plan_for_write does.
+            native_source = _native_table(source)
+        else:
+            native_source = create_native_write_table(source)
+            if native_source is None:
+                return None
+            from pypaimon.read.native_plan import _with_native_read_snapshot
+            native_source = _with_native_read_snapshot(source, native_source)
     source, matched, not_matched, context = _prepare(
         table, source, list(matched), list(not_matched), on, source_schema=source_schema)
     if any(callable(value) for clause in matched + not_matched for value in clause.spec.values()):

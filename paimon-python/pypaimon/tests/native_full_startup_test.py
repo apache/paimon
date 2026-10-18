@@ -159,3 +159,128 @@ def test_full_startup_empty_table(rest_catalog, native, mode):
         assert plan.splits() == []
         assert read.to_arrow(plan.splits()).num_rows == 0
         assert list(read.to_iterator(plan.splits())) == []
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('view', ['empty', 'snapshot', 'retained-snapshot', 'latest'])
+def test_merge_keeps_captured_source_view(source, native, view):
+    catalog, original, first = source
+    snapshot = original.snapshot_manager().get_snapshot_by_id(first)
+    selected = (original._copy_with_snapshot(None if view == 'empty' else snapshot)
+                if view != 'latest' else original)
+    selected = selected.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+    if view == 'retained-snapshot':
+        original.file_io.delete(original.snapshot_manager().get_snapshot_path(first))
+    target = _create(catalog, 'target', 'de')
+    _write(target, [{'id': 1, 'value': 'old'}])
+    target = target.copy({'write.native.enabled': str(native).lower()})
+    builder = target.new_batch_write_builder()
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+                                      side_effect=AssertionError('Python source materialization')))
+            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+                                      side_effect=AssertionError('Python merge')))
+        messages = builder.new_update().merge_into(selected, on=['id'], when_matched=[
+            WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    reader = target.new_read_builder()
+    rows = reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist()
+    expected = [{'id': 1, 'value': 'old' if view == 'empty' else 'first'}]
+    if view == 'latest':
+        expected.append({'id': 2, 'value': 'second'})
+    assert sorted(rows, key=lambda row: row['id']) == expected
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('empty', [False, True])
+def test_merge_unrestricted_authorized_source(source, rest_catalog, native, empty):
+    from pypaimon.api.api_response import AuthTableQueryResponse
+    from pypaimon.schema.schema_change import SchemaChange
+
+    catalog, original, _ = source
+    if empty:
+        original = _create(catalog, 'empty_source', 'append')
+    catalog.alter_table(original.identifier, [SchemaChange.set_option('query-auth.enabled', 'true')])
+    original = catalog.get_table(original.identifier)
+    selections = []
+
+    def authorize(select):
+        selections.append(select)
+        return AuthTableQueryResponse()
+
+    rest_catalog[1].table_query_auth_store[original.identifier.get_full_name()] = authorize
+    target = _create(catalog, 'target', 'de')
+    _write(target, [{'id': 1, 'value': 'old'}])
+    target = target.copy({'write.native.enabled': str(native).lower()})
+    builder = target.new_batch_write_builder()
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+                                      side_effect=AssertionError('Python source materialization')))
+        messages = builder.new_update().merge_into(original, on=['id'], when_matched=[
+            WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    reader = target.new_read_builder()
+    assert reader.new_read().to_arrow(reader.new_scan().plan().splits()).sort_by('id').to_pylist() == (
+        [{'id': 1, 'value': 'old'}] if empty else
+        [{'id': 1, 'value': 'first'}, {'id': 2, 'value': 'second'}])
+    assert selections and all(select is None or set(select) == set(original.field_names) for select in selections)
+
+
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+@pytest.mark.parametrize('restriction', ['filter', 'mask', 'malformed', 'denied'])
+@pytest.mark.parametrize('empty', [False, True])
+def test_merge_authorized_source_failures_never_modify_target(rest_catalog, native, restriction, empty):
+    import json
+    from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
+    from pypaimon.schema.schema_change import SchemaChange
+
+    catalog, server = rest_catalog
+    source = _create(catalog, 'source', 'append')
+    if not empty:
+        _write(source, [{'id': 1, 'value': 'source'}])
+    catalog.alter_table(source.identifier, [SchemaChange.set_option('query-auth.enabled', 'true')])
+    source = catalog.get_table(source.identifier)
+    target = _create(catalog, 'target', 'de')
+    _write(target, [{'id': 1, 'value': 'old'}])
+    target = target.copy({'write.native.enabled': str(native).lower()})
+    before = target.snapshot_manager().get_latest_snapshot().id
+    if restriction == 'mask':
+        response = AuthTableQueryResponse(column_masking={'value': json.dumps({
+            'name': 'UPPER', 'inputs': [{'index': 1, 'name': 'value', 'type': 'STRING'}]})})
+    elif restriction == 'filter':
+        response = AuthTableQueryResponse(filter=[json.dumps({
+            'kind': 'LEAF', 'transform': {
+                'name': 'FIELD_REF', 'fieldRef': {'index': 0, 'name': 'id', 'type': 'INT'}},
+            'function': 'GREATER_THAN', 'literals': [1]})])
+    elif restriction == 'malformed':
+        response = AuthTableQueryResponse(filter=['not-json'])
+    else:
+        response = AuthTableQueryResponse()
+    server.table_query_auth_store[source.identifier.get_full_name()] = response
+    builder = target.new_batch_write_builder()
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+                                      side_effect=AssertionError('Python source materialization')))
+        if restriction == 'denied':
+            denied = server._mock_response(ErrorResponse('TABLE', 'source', 'permission denied', 403), 403)
+            stack.enter_context(patch.object(server, '_table_query_auth_handle', return_value=denied))
+        with pytest.raises(Exception) as caught:
+            # No value column is used by this MERGE, but a mask on that column
+            # still prevents plan_for_write from exposing the source table.
+            builder.new_update().merge_into(source, on=['id'], when_matched=[WhenMatched.delete()])
+        assert not isinstance(caught.value, AssertionError)
+    assert target.snapshot_manager().get_latest_snapshot().id == before
+    reader = target.new_read_builder()
+    assert reader.new_read().to_arrow(reader.new_scan().plan().splits()).to_pylist() == [
+        {'id': 1, 'value': 'old'}]
