@@ -177,6 +177,12 @@ propagate without retrying that batch through Python.
 
 For primary-key Row writes, `rowkind.field` takes precedence over the object's `RowKind`; otherwise the object event is preserved. Plain Arrow input defaults to INSERT. Both Python and native writers apply `ignore-delete` and `ignore-update-before` before routing object rows.
 
+Set `primary-key.nullable=true` when creating a primary-key table to allow NULL
+keys, including keys declared NOT NULL in the input schema. Both writers merge
+NULL keys using null-safe equality and restore their dynamic bucket assignments
+across restarts. SQL `MERGE ON` retains ordinary equality: a NULL in any join-key
+column does not match another NULL.
+
 Batch and stream `merge_into` also use Rust core for eligible data-evolution
 Parquet tables when `write.native.enabled=true`. Existing `WhenMatched` and
 `WhenNotMatched` clauses accept Arrow/pandas input, Paimon table sources, or
