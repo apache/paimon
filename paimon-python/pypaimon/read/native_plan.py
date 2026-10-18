@@ -500,14 +500,14 @@ def native_plan(
         shard: Optional[Tuple[int, int]] = None,
         partition_predicate: Optional[Predicate] = None,
         global_index_result=None,
-        for_write: bool = False) -> Plan:
+        all_files: bool = False) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
     falls back to the Python planner.
     """
-    if for_write and incremental_range is not None:
-        raise ValueError('write planning does not accept incremental ranges')
+    if all_files and incremental_range is not None:
+        raise ValueError('planning all files does not accept incremental ranges')
     if incremental_range is None and incremental_mode != 'delta':
         raise ValueError('incremental_mode requires incremental_range')
     if not native_runtime_available():
@@ -563,7 +563,7 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    rust_plan = scan.plan_for_write() if for_write else scan.plan()
+    rust_plan = scan.plan_all_files() if all_files else scan.plan()
     return _from_native_plan(table, rust_plan)
 
 

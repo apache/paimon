@@ -359,7 +359,7 @@ class BlobStore:
         read_builder = read_builder.with_projection(projection)
         read_builder = read_builder.with_filter(self._keys_predicate(keys))
         scan = read_builder.new_scan()
-        plan = scan.plan_for_write()
+        plan = scan.plan_all_files()
         table = read_builder.new_read().to_arrow(plan.splits())
 
         targets = {}

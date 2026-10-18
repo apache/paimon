@@ -184,7 +184,7 @@ class TableScan:
             return [(range_.from_, range_.to) for range_ in row_ranges]
         return None
 
-    def _try_native_plan(self, for_write=False) -> Optional[Plan]:
+    def _try_native_plan(self, all_files=False) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
         Predicate and limit are pushed into Rust planning and are still enforced
@@ -231,8 +231,8 @@ class TableScan:
             # Append positions still precede LIMIT. Rust owns PK shards and
             # source-backed sorted-index refinement before applying LIMIT.
             defer_limit = has_distribution and not self.table.is_primary_key_table
-            if for_write:
-                extra_options['for_write'] = True
+            if all_files:
+                extra_options['all_files'] = True
             plan = native_plan(
                 self.table,
                 predicate=self.predicate,
@@ -268,11 +268,16 @@ class TableScan:
                 "Native plan failed, falling back to the Python scanner: %s", e)
             return None
 
-    def plan_for_write(self) -> Plan:
+    def plan_all_files(self) -> Plan:
+        """Plan matching files including L0 and all data-evolution column files.
+
+        Existing filters and limits still apply. Query authorization must be
+        unrestricted, as required by writer restore, overwrite and indexing.
+        """
         from pypaimon.read.native_plan import _native_query_auth_supported, native_method_available
         if (self._native_requested() and _native_query_auth_supported(self.table) and self._native_plan_supported()
-                and native_method_available('TableScan', 'plan_for_write')):
-            plan = self._try_native_plan(for_write=True)
+                and native_method_available('TableScan', 'plan_all_files')):
+            plan = self._try_native_plan(all_files=True)
             if plan is not None:
                 return plan
         if self.__auth_query() is not None:

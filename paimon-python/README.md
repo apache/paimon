@@ -210,7 +210,7 @@ view or retained snapshot metadata. Current main-branch REST table sources
 with `query-auth.enabled=true` also use core when the catalog returns no row
 filter or column mask. Core requests authorization for every source column,
 even for a key-only DELETE, and refreshes it for each MERGE. A restricted or
-denied source fails before target actions, as with Python's `plan_for_write`.
+denied source fails before target actions, as with Python's `plan_all_files`.
 
 Python and native writers use Java's escaped partition directories for data,
 changelog, Blob and row sidecar files, including external locations. Both
@@ -543,8 +543,10 @@ live REST authorization and snapshot-file, deletion-vector and merge-group
 validation. Transported metadata never supplies a live grant. If restrictions
 changed incompatibly, the captured plan retains Python execution.
 Continuous streaming delegates planning and resume state to Rust core.
-The Python write-planning entrypoint delegates to `TableScan.plan_for_write()`,
-including L0 and retaining the unrestricted-authorization requirement.
+`TableScan.plan_all_files()` includes L0 and every data-evolution column file,
+retaining scan filters and limits and requiring unrestricted query authorization.
+Writer restore, overwrite and index construction use this entrypoint and delegate
+planning to Rust core when Native planning is enabled.
 Native planning remains optional and is disabled by default.
 
 # Coalesced BLOB reads

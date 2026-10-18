@@ -139,7 +139,7 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
     with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([])) as planner, \
             patch('pypaimon.read.native_plan.native_method_available', return_value=True):
         with pytest.raises(TableNoPermissionException):
-            scan.plan_for_write()
+            scan.plan_all_files()
         planner.assert_not_called()
 
 

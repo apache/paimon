@@ -81,7 +81,7 @@ def _validate_arguments(rows_per_commit, processor) -> None:
 
 
 def _file_group_ranges(table) -> List[Range]:
-    plan = table.new_read_builder().new_scan().plan_for_write()
+    plan = table.new_read_builder().new_scan().plan_all_files()
     files = [data_file for split in plan.splits() for data_file in split.files]
     file_groups = RangeHelper(
         lambda data_file: data_file.non_null_row_id_range()

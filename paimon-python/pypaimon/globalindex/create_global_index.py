@@ -185,7 +185,7 @@ class GlobalIndexBuilder:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
         scan = read_builder.new_scan()
-        plan = scan.plan_for_write()
+        plan = scan.plan_all_files()
         splits = plan.splits()
         if not splits:
             return []

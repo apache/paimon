@@ -92,7 +92,7 @@ def _read(table, native, null_field=None, all_files=False):
             if not all_files:
                 stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
             stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
-        splits = (scan.plan_for_write() if all_files else scan.plan()).splits()
+        splits = (scan.plan_all_files() if all_files else scan.plan()).splits()
         rows = read.to_arrow(splits).to_pylist()
     # All values in these fixtures are non-negative except the seeded MERGE target.
     return sorted((tuple(row[name] for name in _SCHEMA.names) for row in rows),

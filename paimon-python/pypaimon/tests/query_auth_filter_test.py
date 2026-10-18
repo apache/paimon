@@ -303,7 +303,7 @@ def test_write_scan_restores_filter_after_rules_are_removed(table):
     scan = builder.new_scan()
     scan.plan()
     state[0] = None
-    splits = scan.plan_for_write().splits()
+    splits = scan.plan_all_files().splits()
     assert scan.file_scanner.predicate == predicate
     assert not scan.file_scanner.auth_has_non_partition_filter
     assert arrow_rows(builder.new_read().to_arrow(splits)) == []
