@@ -208,20 +208,54 @@ class TableRead:
             if self.table.options.data_evolution_enabled() else set()
         )
         self.include_row_kind = include_row_kind
+        self._row_kind_column = ROW_KIND_COLUMN
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
         self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        """Lazily read InternalRows, using native reads when available.
+
+        Rows retain their kind separately from projected fields. Like the
+        Python split reader, the iterator reuses its row view and visits splits
+        in order. Close the iterator when stopping before exhaustion.
+        """
         if self.output_projection is not None and self.output_projection.named:
             raise RuntimeError(
                 "Projection expressions are not supported by to_iterator(); "
                 "use to_arrow() or to_arrow_batch_reader()")
-        self._check_python_merge_supported()
         self._begin_auth_read(splits)
         limit = self.limit
 
         def _record_generator():
+            if limit is not None and limit <= 0:
+                return
+            from copy import copy
+            from pypaimon.read.native_row_iterator import native_rows
+            from pypaimon.read.read_type import output_fields
+
+            # InternalRow carries row kind separately from its fields. Keep it
+            # in the native transport even when the Arrow API did not request
+            # the extra column, without changing this reader's public schema.
+            read = copy(self)
+            read.include_row_kind = True
+            # Keep Rust's reserved metadata name in this private transport.
+            # A user field named _row_kind is legal and must remain projectable.
+            read._row_kind_column = 'rowkind'
+            schema = read._add_row_kind_to_schema(read._output_arrow_schema(splits), read._row_kind_column)
+            fields = output_fields(self.read_type, self.output_projection)
+            batches = read._try_native_batches(splits, schema, parallelism=1, streaming=True,
+                                               preserve_split_order=True)
+            if batches is not None:
+                try:
+                    yield from native_rows(batches, self.table, fields)
+                finally:
+                    close = getattr(batches, 'close', None)
+                    if close is not None:
+                        close()
+                return
+
+            self._check_python_merge_supported()
             count = 0
             for split in splits:
                 if limit is not None and count >= limit:
@@ -328,9 +362,9 @@ class TableRead:
         return reader, batch_iterator
 
     @staticmethod
-    def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
-        """Add _row_kind column to the schema as the first column."""
-        row_kind_field = pyarrow.field(ROW_KIND_COLUMN, pyarrow.string())
+    def _add_row_kind_to_schema(schema: pyarrow.Schema, column_name=ROW_KIND_COLUMN) -> pyarrow.Schema:
+        """Prepend the row-kind transport column, normally named _row_kind."""
+        row_kind_field = pyarrow.field(column_name, pyarrow.string())
         return pyarrow.schema([row_kind_field] + list(schema))
 
     @staticmethod
@@ -350,10 +384,13 @@ class TableRead:
 
         columns = []
         num_rows = batch.num_rows
+        same_order = batch.schema.names == target_schema.names
 
-        for field in target_schema:
+        for index, field in enumerate(target_schema):
             if field.name in batch.schema.names:
-                col = batch.column(field.name)
+                # Result projections may repeat a column. A name lookup is
+                # ambiguous even when the batch already has the correct order.
+                col = batch.column(index if same_order else field.name)
                 if col.type != field.type:
                     if not allow_type_cast:
                         raise TypeError(
@@ -560,7 +597,8 @@ class TableRead:
             schema: pyarrow.Schema,
             parallelism: Optional[int] = None,
             blob_parallelism: Optional[int] = None,
-            streaming: bool = False):
+            streaming: bool = False,
+            preserve_split_order: bool = False):
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
             return self._native_fallback("read.native.enabled is false")
@@ -602,6 +640,15 @@ class TableRead:
                         log=True)
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
+        if preserve_split_order:
+            read_kwargs = self._native_read_kwargs(blob_parallelism)
+            try:
+                read_splits = _prepare_native_read(self.table, **read_kwargs)
+            except Exception as e:
+                _raise_if_native_fork_safety_error(e)
+                return self._native_fallback(str(e), e, log=True)
+            return self._convert_native_batches(
+                self._native_batches_ordered(read_splits, rust_splits, read_kwargs), schema)
         if (parallelism is not None
                 and self._should_run_parallel(splits, parallelism)):
             read_kwargs = self._native_read_kwargs(blob_parallelism)
@@ -647,6 +694,30 @@ class TableRead:
             _raise_if_native_fork_safety_error(e)
             return self._native_fallback(str(e), e, log=True)
         return self._convert_native_batches(batches, schema)
+
+    def _native_batches_ordered(self, read_splits, splits, read_kwargs):
+        from pypaimon.read.native_plan import _prepare_native_read
+
+        remaining = self.limit
+        for index, split in enumerate(splits):
+            if remaining is not None and remaining <= 0:
+                break
+            if index and remaining is not None:
+                # BLOB readers must see the remaining quota before opening any
+                # payload, including when earlier splits already spent it.
+                read_splits = _prepare_native_read(self.table, **dict(read_kwargs, limit=remaining))
+            batches = read_splits([split])
+            try:
+                for batch in batches:
+                    yield batch
+                    if remaining is not None:
+                        remaining -= batch.num_rows
+                        if remaining <= 0:
+                            break
+            finally:
+                close = getattr(batches, 'close', None)
+                if close is not None:
+                    close()
 
     def _native_read_kwargs(self, blob_parallelism=None):
         kwargs = {
@@ -894,7 +965,7 @@ class TableRead:
         if self.include_row_kind and 'rowkind' in batch.schema.names:
             index = batch.schema.get_field_index('rowkind')
             batch = batch.rename_columns([
-                ROW_KIND_COLUMN if position == index else name
+                self._row_kind_column if position == index else name
                 for position, name in enumerate(batch.schema.names)
             ])
         if self.nested_name_paths:
@@ -920,8 +991,8 @@ class TableRead:
             (field.name, path) for field, path in zip(fields, paths)]))
         fields = [field.with_nullable(field.nullable or projected[i].nullable) for i, field in enumerate(fields)]
         if self.include_row_kind:
-            arrays.insert(0, batch.column(ROW_KIND_COLUMN))
-            fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
+            arrays.insert(0, batch.column(self._row_kind_column))
+            fields.insert(0, batch.schema.field(self._row_kind_column))
         return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
@@ -1739,9 +1810,9 @@ class TableRead:
             actual = output_schema(batch.schema, adapted_projection)
             declared = output_schema(read_arrow_schema(self.read_type), self.output_projection)
             fields = [field.with_nullable(field.nullable or actual[i].nullable) for i, field in enumerate(declared)]
-            if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
-                arrays.insert(0, batch.column(ROW_KIND_COLUMN))
-                fields.insert(0, batch.schema.field(ROW_KIND_COLUMN))
+            if self.include_row_kind and self._row_kind_column in batch.schema.names:
+                arrays.insert(0, batch.column(self._row_kind_column))
+                fields.insert(0, batch.schema.field(self._row_kind_column))
             if not arrays:
                 return zero_column_batch(batch.num_rows, batch.schema.metadata)
             return pyarrow.RecordBatch.from_arrays(
@@ -1749,8 +1820,8 @@ class TableRead:
         if not self._needs_output_projection():
             return batch
         output_names = list(self._output_column_names)
-        if self.include_row_kind and ROW_KIND_COLUMN in batch.schema.names:
-            output_names.insert(0, ROW_KIND_COLUMN)
+        if self.include_row_kind and self._row_kind_column in batch.schema.names:
+            output_names.insert(0, self._row_kind_column)
         if batch.schema.names == output_names:
             return batch
         name_to_pos = {name: i for i, name in enumerate(batch.schema.names)}
