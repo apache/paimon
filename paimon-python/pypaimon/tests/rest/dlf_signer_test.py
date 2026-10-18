@@ -18,6 +18,7 @@
 import unittest
 import hashlib
 import locale
+import os
 import re
 import threading
 from datetime import datetime, timedelta, timezone
@@ -476,9 +477,9 @@ class DLFSignerTest(unittest.TestCase):
 
         self.assertEqual(
             "ACS4-HMAC-SHA256 Credential=TestAKId/20250416/cn-hangzhou/DlfNext/aliyun_v4_request,"
-            "SignedHeaders=host;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;"
-            "x-acs-version,"
-            "Signature=9812bacd92dd1152e7ea32aacfad0545835d6a18543852364f1a1ea0cba6219a",
+            "SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;"
+            "x-acs-signature-nonce;x-acs-version,"
+            "Signature=2d5fdb5201901a5cdceee97318366666a88504eeae0b1ce534dbf86889cc00fb",
             signer.authorization(rest_param, token, host, headers))
 
     def test_openapi_v4_percent_encode(self):
@@ -501,7 +502,19 @@ class DLFSignerTest(unittest.TestCase):
             path = re.sub(r"\{[^}]+\}", "x1", template)
             self.assertEqual(action, resolve_action(method, path), path)
             actions.add(action)
-        self.assertEqual(53, len(actions))
+        self.assertEqual(74, len(actions))
+
+    def test_openapi_v4_operations_match_java(self):
+        """pypaimon registers Java's operations, in Java's order, under the same actions."""
+        source = os.path.join(os.path.dirname(os.path.abspath(__file__)), *[os.pardir] * 4, "paimon-api",
+                              "src/main/java/org/apache/paimon/rest/auth/DLFOpenApiActions.java")
+        with open(source, encoding="utf-8") as f:
+            java = re.findall(r'\{\s*"(\w+)",\s*"([^"]+)",\s*"(\w+)"\s*\}', f.read())
+        self.assertEqual(java, list(OPERATIONS))
+
+    def test_openapi_v4_action_names_are_unique(self):
+        names = [action for _, _, action in OPERATIONS]
+        self.assertEqual([], sorted({name for name in names if names.count(name) > 1}))
 
     def test_openapi_v4_client_paths_resolve_to_registered_actions(self):
         paths = ResourcePaths("clg-paimon-1")
@@ -524,6 +537,8 @@ class DLFSignerTest(unittest.TestCase):
             ("GetTableSnapshot", "GET", paths.table_snapshot("db", "t")),
             ("ListPartitions", "GET", paths.partitions("db", "t")),
             ("ListFunctions", "GET", paths.functions("db")),
+            ("ListFunctionDetails", "GET", paths.function_details("db")),
+            ("ListFunctionsGlobally", "GET", paths.functions()),
             ("GetFunction", "GET", paths.function("db", "f")),
             ("ListTags", "GET", paths.tags("db", "t")),
             ("GetTag", "GET", paths.tag("db", "t", "tag")),
@@ -547,7 +562,7 @@ class DLFSignerTest(unittest.TestCase):
 
     def test_openapi_v4_unregistered_requests_have_no_action(self):
         paths = ResourcePaths("clg-paimon-1")
-        self.assertIsNone(resolve_action("GET", paths.tables()))
+        self.assertIsNone(resolve_action("GET", paths.rename_table()))
         self.assertIsNone(resolve_action("POST", paths.branch("db", "t", "b") + "/rename"))
         self.assertIsNone(resolve_action("PUT", paths.table("db", "t")))
         self.assertIsNone(resolve_action("GET", ResourcePaths.config() + "/"))
@@ -582,7 +597,7 @@ class DLFSignerTest(unittest.TestCase):
         token = DLFToken("TestAKId", "TestAKSecret", None, None)
         host = "dlfnext.cn-hangzhou.aliyuncs.com"
         now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
-        rest_param = RESTAuthParameter("GET", "/v1/clg-paimon-1/tables", "", {})
+        rest_param = RESTAuthParameter("GET", "/v1/clg-paimon-1/databases/db/tables/t/unknown", "", {})
         headers = signer.sign_headers(None, now, None, host)
 
         authorization = signer.authorization(rest_param, token, host, headers)
