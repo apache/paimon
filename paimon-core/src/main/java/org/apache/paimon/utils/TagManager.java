@@ -39,12 +39,14 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -172,8 +174,8 @@ public class TagManager {
             if (beforeCommit != null) {
                 beforeCommit.run();
             }
-            ensureSnapshotRetained(snapshot, tagName);
-            createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
+            ensureSnapshotRetained(snapshot, tagName, false);
+            createOrReplaceTag(snapshot, tagName, timeRetained, callbacks, true);
         } finally {
             coordinationLock.unlock();
         }
@@ -185,22 +187,90 @@ public class TagManager {
 
     /**
      * Reject a tag whose snapshot was removed while this creation waited behind expiration, unless
-     * an existing tag still retains that snapshot's files.
+     * an existing tag still retains that snapshot's files. The post-write check ({@code
+     * excludeSelf}) does not treat another tag as protection: that tag may be an in-flight creator
+     * that will roll back. It requires the snapshot file or its manifest list to still exist, and
+     * honors {@link #createExpirationMarker(long)}.
      */
-    private void ensureSnapshotRetained(Snapshot snapshot, String tagName) {
+    private void ensureSnapshotRetained(Snapshot snapshot, String tagName, boolean excludeSelf) {
+        if (excludeSelf) {
+            if (expirationMarkerExists(snapshot.id()) || !snapshotFilesExist(snapshot)) {
+                throw missingSnapshot(tagName, snapshot);
+            }
+            return;
+        }
         if (new SnapshotManager(fileIO, tablePath, branch, null, null)
                 .snapshotExists(snapshot.id())) {
             return;
         }
-        for (Snapshot tagged : taggedSnapshots()) {
-            if (tagged.id() == snapshot.id()) {
+        for (Map.Entry<Snapshot, List<String>> entry : tags().entrySet()) {
+            if (entry.getKey().id() == snapshot.id() && !entry.getValue().isEmpty()) {
                 return;
             }
         }
-        throw new SnapshotNotExistException(
+        throw missingSnapshot(tagName, snapshot);
+    }
+
+    private SnapshotNotExistException missingSnapshot(String tagName, Snapshot snapshot) {
+        return new SnapshotNotExistException(
                 String.format(
                         "Cannot create tag '%s' because snapshot #%s doesn't exist.",
                         tagName, snapshot.id()));
+    }
+
+    /**
+     * Cross-process fence written before the final tag scan. A creator that still sees it missed
+     * that scan and must roll the tag back. Snapshot files stay in place until the usual deletion
+     * step; the marker is what later creators observe.
+     */
+    public void createExpirationMarker(long snapshotId) {
+        try {
+            Path path = expirationMarkerPath(snapshotId);
+            if (!fileIO.tryToWriteAtomic(path, "1") && !fileIO.exists(path)) {
+                throw new IOException("Failed to write expiration marker " + path);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public void deleteExpirationMarker(long snapshotId) {
+        fileIO.deleteQuietly(expirationMarkerPath(snapshotId));
+    }
+
+    private boolean expirationMarkerExists(long snapshotId) {
+        try {
+            return fileIO.exists(expirationMarkerPath(snapshotId));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private Path expirationMarkerPath(long snapshotId) {
+        return new Path(branchPath(tablePath, branch) + "/expire-marker/" + snapshotId);
+    }
+
+    /** Snapshot metadata, or the manifest list a previous tag retained after metadata expired. */
+    private boolean snapshotFilesExist(Snapshot snapshot) {
+        if (new SnapshotManager(fileIO, tablePath, branch, null, null)
+                .snapshotExists(snapshot.id())) {
+            return true;
+        }
+        return manifestExists(snapshot.deltaManifestList())
+                || manifestExists(snapshot.baseManifestList());
+    }
+
+    private boolean manifestExists(@Nullable String manifestList) {
+        if (manifestList == null) {
+            return false;
+        }
+        try {
+            return fileIO.exists(
+                    new Path(
+                            new Path(tablePath, FileStorePathFactory.MANIFEST_PATH), manifestList));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** Replace a tag from given snapshot and save it in the storage. */
@@ -214,14 +284,16 @@ public class TagManager {
                 timeRetained,
                 callbacks.stream()
                         .filter(callback -> callback instanceof IcebergCommitCallback)
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                false);
     }
 
     private void createOrReplaceTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
-            @Nullable List<TagCallback> callbacks) {
+            @Nullable List<TagCallback> callbacks,
+            boolean rollbackIfSnapshotExpired) {
         validateNoAutoTag(tagName, snapshot);
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
@@ -243,6 +315,15 @@ public class TagManager {
                                     + "Cannot clean up because we can't determine the success.",
                             tagName, tagPath),
                     e);
+        }
+
+        if (rollbackIfSnapshotExpired) {
+            try {
+                ensureSnapshotRetained(snapshot, tagName, true);
+            } catch (SnapshotNotExistException e) {
+                fileIO.deleteQuietly(tagPath);
+                throw e;
+            }
         }
 
         if (callbacks != null) {

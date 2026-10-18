@@ -1765,6 +1765,195 @@ public class ExpireSnapshotsTest {
         assertThat(lock.isLocked()).isFalse();
     }
 
+    @Test
+    public void testSeparateJvmTagCreatedDuringExpirationKeepsFiles() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(4, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        assertThat(latestSnapshotId).isGreaterThanOrEqualTo(3);
+        Path taggedManifestList =
+                store.pathFactory()
+                        .toManifestListPath(snapshotManager.snapshot(2).deltaManifestList());
+
+        CountDownLatch tagsCollected = new CountDownLatch(1);
+        CountDownLatch releaseExpire = new CountDownLatch(1);
+        AtomicReference<Throwable> expireFailure = new AtomicReference<>();
+        ExpireSnapshotsImpl expire = newExpire(store.newTagManager());
+        expire.setAfterTagCollection(
+                () -> {
+                    tagsCollected.countDown();
+                    awaitLatch(releaseExpire, "snapshot expiration");
+                });
+        Thread expireThread =
+                daemonThread(
+                        "expire-snapshots",
+                        () ->
+                                expireFailure.set(
+                                        runUnchecked(
+                                                () -> expire.expireUntil(1, latestSnapshotId))));
+        java.nio.file.Path childLog = tempDir.resolve("separate-jvm-tag.log");
+        Process child = null;
+        try {
+            expireThread.start();
+            assertThat(tagsCollected.await(10, TimeUnit.SECONDS)).isTrue();
+            child =
+                    new ProcessBuilder(
+                                    System.getProperty("java.home") + "/bin/java",
+                                    "-cp",
+                                    testClasspath(),
+                                    ExpireSnapshotsTest.class.getName(),
+                                    store.options().path().toString())
+                            .redirectErrorStream(true)
+                            .redirectOutput(childLog.toFile())
+                            .start();
+            if (!child.waitFor(30, TimeUnit.SECONDS)) {
+                throw new AssertionError(
+                        "Separate JVM did not create the tag while expiration was paused.");
+            }
+            assertThat(child.exitValue()).as(new String(Files.readAllBytes(childLog))).isZero();
+            assertThat(newTagManager().tagExists("kept")).isTrue();
+            assertThat(fileIO.exists(taggedManifestList)).isTrue();
+
+            releaseExpire.countDown();
+            joinThread(expireThread);
+        } finally {
+            releaseExpire.countDown();
+            if (child != null) {
+                child.destroyForcibly();
+            }
+            joinQuietly(expireThread);
+        }
+
+        assertThat(expireFailure.get()).isNull();
+        assertThat(newTagManager().tagExists("kept")).isTrue();
+        assertThat(snapshotManager.snapshotExists(2)).isFalse();
+        assertThat(fileIO.exists(taggedManifestList)).isTrue();
+        for (ManifestFileMeta meta :
+                store.manifestListFactory()
+                        .create()
+                        .readDataManifests(newTagManager().getOrThrow("kept").trimToSnapshot())) {
+            assertThat(fileIO.exists(store.pathFactory().toManifestFilePath(meta.fileName())))
+                    .isTrue();
+        }
+        assertSnapshot(
+                newTagManager().getOrThrow("kept").trimToSnapshot(), allData, snapshotPositions);
+    }
+
+    @Test
+    public void testConcurrentCreatorsAfterFinalTagScanRollBack() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(4, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        Path manifestList =
+                store.pathFactory()
+                        .toManifestListPath(snapshotManager.snapshot(2).deltaManifestList());
+        Path marker = new Path(store.options().path() + "/expire-marker/2");
+
+        CountDownLatch scanned = new CountDownLatch(1);
+        CountDownLatch releaseExpire = new CountDownLatch(1);
+        AtomicReference<Throwable> expireFailure = new AtomicReference<>();
+        ExpireSnapshotsImpl expire = newExpire(store.newTagManager());
+        expire.setAfterFinalTagScan(
+                () -> {
+                    scanned.countDown();
+                    awaitLatch(releaseExpire, "final tag scan");
+                });
+        Thread expireThread =
+                daemonThread(
+                        "expire-snapshots",
+                        () ->
+                                expireFailure.set(
+                                        runUnchecked(
+                                                () -> expire.expireUntil(1, latestSnapshotId))));
+        java.nio.file.Path logA = tempDir.resolve("creator-a.log");
+        java.nio.file.Path logB = tempDir.resolve("creator-b.log");
+        Process creatorA = null;
+        Process creatorB = null;
+        try {
+            expireThread.start();
+            assertThat(scanned.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(snapshotManager.snapshotExists(2)).isTrue();
+            assertThat(fileIO.exists(marker)).isTrue();
+            assertThat(fileIO.exists(manifestList)).isTrue();
+            creatorA = startTagProcess("creator-a", logA);
+            creatorB = startTagProcess("creator-b", logB);
+            assertThat(creatorA.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(creatorB.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(creatorA.exitValue()).as(new String(Files.readAllBytes(logA))).isNotZero();
+            assertThat(creatorB.exitValue()).as(new String(Files.readAllBytes(logB))).isNotZero();
+            assertThat(new String(Files.readAllBytes(logA))).contains("snapshot #2");
+            assertThat(new String(Files.readAllBytes(logB))).contains("snapshot #2");
+            assertThat(newTagManager().tagExists("creator-a")).isFalse();
+            assertThat(newTagManager().tagExists("creator-b")).isFalse();
+
+            releaseExpire.countDown();
+            joinThread(expireThread);
+        } finally {
+            releaseExpire.countDown();
+            if (creatorA != null) {
+                creatorA.destroyForcibly();
+            }
+            if (creatorB != null) {
+                creatorB.destroyForcibly();
+            }
+            joinQuietly(expireThread);
+        }
+
+        assertThat(expireFailure.get()).isNull();
+        assertThat(newTagManager().tagExists("creator-a")).isFalse();
+        assertThat(newTagManager().tagExists("creator-b")).isFalse();
+        assertThat(snapshotManager.snapshotExists(2)).isFalse();
+        assertThat(fileIO.exists(manifestList)).isFalse();
+        assertThat(fileIO.exists(marker)).isFalse();
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    public static void main(String[] args) throws Exception {
+        FileIO fileIO = new LocalFileIO();
+        Path tablePath = new Path(args[0]);
+        String tagName = args.length > 1 ? args[1] : "kept";
+        Snapshot snapshot = new SnapshotManager(fileIO, tablePath, null, null, null).snapshot(2);
+        new TagManager(fileIO, tablePath)
+                .createTag(snapshot, tagName, Duration.ofDays(1), Collections.emptyList(), false);
+    }
+
+    private Process startTagProcess(String tagName, java.nio.file.Path log) throws Exception {
+        return new ProcessBuilder(
+                        System.getProperty("java.home") + "/bin/java",
+                        "-cp",
+                        testClasspath(),
+                        ExpireSnapshotsTest.class.getName(),
+                        store.options().path().toString(),
+                        tagName)
+                .redirectErrorStream(true)
+                .redirectOutput(log.toFile())
+                .start();
+    }
+
+    private static String testClasspath() throws Exception {
+        StringBuilder classpath = new StringBuilder();
+        ClassLoader loader = ExpireSnapshotsTest.class.getClassLoader();
+        while (loader != null) {
+            if (loader instanceof java.net.URLClassLoader) {
+                for (java.net.URL url : ((java.net.URLClassLoader) loader).getURLs()) {
+                    if (!"file".equals(url.getProtocol())) {
+                        continue;
+                    }
+                    if (classpath.length() > 0) {
+                        classpath.append(java.io.File.pathSeparator);
+                    }
+                    classpath.append(new java.io.File(url.toURI()).getAbsolutePath());
+                }
+            }
+            loader = loader.getParent();
+        }
+        return classpath.length() == 0
+                ? System.getProperty("java.class.path")
+                : classpath.toString();
+    }
+
     private TagManager newTagManager() {
         return new TagManager(store.fileIO(), store.options().path(), store.options().branch());
     }

@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -77,6 +78,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
     @Nullable private volatile Runnable afterTagCollection;
+    @Nullable private volatile Runnable afterFinalTagScan;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
@@ -110,6 +112,15 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     @VisibleForTesting
     public void setAfterTagCollection(@Nullable Runnable afterTagCollection) {
         this.afterTagCollection = afterTagCollection;
+    }
+
+    /**
+     * Test hook invoked after the final tag scan and expiration markers are in place, before
+     * snapshot files are deleted.
+     */
+    @VisibleForTesting
+    public void setAfterFinalTagScan(@Nullable Runnable afterFinalTagScan) {
+        this.afterFinalTagScan = afterFinalTagScan;
     }
 
     @Override
@@ -244,62 +255,101 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (collectedTags != null) {
             collectedTags.run();
         }
-
-        // delete merge tree files
-        // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
-        // id should be (beginInclusiveId, endExclusiveId]
-        cleanDataFiles(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId);
-
-        // delete changelog files
-        if (!expireConfig.isChangelogDecoupled()) {
-            cleanChangelogFiles(snapshotsExcludingEnd);
-        }
-
-        // data files and changelog files in bucket directories has been deleted
-        // then delete changed bucket directories if they are empty
-        snapshotDeletion.cleanEmptyDirectories();
-
-        // delete manifests and indexFiles
-        List<Snapshot> skippingSnapshots =
-                findSkippingTags(taggedSnapshots, beginInclusiveId, endExclusiveId);
-
-        Snapshot lastSnapshot = snapshotsIncludingEnd.get(snapshotsIncludingEnd.size() - 1);
-        if (lastSnapshot.id() != endExclusiveId) {
-            // the end exclusive snapshot is gone
-            // there is no need to proceed
-            return 0;
-        }
-        skippingSnapshots.add(lastSnapshot);
-
-        Set<String> skippingSet = null;
+        // Another JVM can create a tag without this process's lock. Mark untagged snapshots, scan
+        // tags again, and keep any snapshot that published a tag before the marker. Snapshot files
+        // are still deleted at the end, same as before.
+        List<Long> marked = new ArrayList<>();
         try {
-            Set<String> builtSkippingSet = ConcurrentHashMap.newKeySet();
-            builtSkippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
-            skippingSet = builtSkippingSet;
-        } catch (Exception e) {
-            LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
-        }
-        if (skippingSet != null) {
-            snapshotDeletion.executeAll(
-                    collectManifestDeletionTasks(snapshotsExcludingEnd, skippingSet));
-        }
+            retainTagsCreatedDuringExpiration(snapshotsExcludingEnd, taggedSnapshots, marked);
 
-        // delete snapshot file finally
-        for (Snapshot snapshot : snapshotsExcludingEnd) {
-            if (expireConfig.isChangelogDecoupled()) {
-                commitChangelog(new Changelog(snapshot));
+            // delete merge tree files
+            // deleted merge tree files in a snapshot are not used by the next snapshot, so the
+            // range of id should be (beginInclusiveId, endExclusiveId]
+            cleanDataFiles(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId);
+
+            // delete changelog files
+            if (!expireConfig.isChangelogDecoupled()) {
+                cleanChangelogFiles(snapshotsExcludingEnd);
             }
-            snapshotManager.deleteSnapshot(snapshot.id());
-        }
 
-        writeEarliestHint(endExclusiveId);
-        long duration = currentTimeMillis.get() - startTime;
-        LOG.info(
-                "Finished expire snapshots, duration {} ms, range is [{}, {})",
-                duration,
-                beginInclusiveId,
-                endExclusiveId);
-        return snapshotsExcludingEnd.size();
+            // data files and changelog files in bucket directories has been deleted
+            // then delete changed bucket directories if they are empty
+            snapshotDeletion.cleanEmptyDirectories();
+
+            // delete manifests and indexFiles
+            List<Snapshot> skippingSnapshots =
+                    findSkippingTags(taggedSnapshots, beginInclusiveId, endExclusiveId);
+
+            Snapshot lastSnapshot = snapshotsIncludingEnd.get(snapshotsIncludingEnd.size() - 1);
+            if (lastSnapshot.id() != endExclusiveId) {
+                // the end exclusive snapshot is gone
+                // there is no need to proceed
+                return 0;
+            }
+            skippingSnapshots.add(lastSnapshot);
+
+            Set<String> skippingSet = null;
+            try {
+                Set<String> builtSkippingSet = ConcurrentHashMap.newKeySet();
+                builtSkippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+                skippingSet = builtSkippingSet;
+            } catch (Exception e) {
+                LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
+            }
+            if (skippingSet != null) {
+                snapshotDeletion.executeAll(
+                        collectManifestDeletionTasks(snapshotsExcludingEnd, skippingSet));
+            }
+
+            // delete snapshot file finally
+            for (Snapshot snapshot : snapshotsExcludingEnd) {
+                if (expireConfig.isChangelogDecoupled()) {
+                    commitChangelog(new Changelog(snapshot));
+                }
+                snapshotManager.deleteSnapshot(snapshot.id());
+            }
+
+            writeEarliestHint(endExclusiveId);
+            long duration = currentTimeMillis.get() - startTime;
+            LOG.info(
+                    "Finished expire snapshots, duration {} ms, range is [{}, {})",
+                    duration,
+                    beginInclusiveId,
+                    endExclusiveId);
+            return snapshotsExcludingEnd.size();
+        } finally {
+            for (Long snapshotId : marked) {
+                tagManager.deleteExpirationMarker(snapshotId);
+            }
+        }
+    }
+
+    private void retainTagsCreatedDuringExpiration(
+            List<Snapshot> expiring, List<Snapshot> taggedSnapshots, List<Long> marked)
+            throws ExecutionException, InterruptedException {
+        Set<Long> taggedIds = new HashSet<>();
+        for (Snapshot tagged : taggedSnapshots) {
+            taggedIds.add(tagged.id());
+        }
+        for (Snapshot snapshot : expiring) {
+            if (taggedIds.contains(snapshot.id())) {
+                tagManager.deleteExpirationMarker(snapshot.id());
+            } else {
+                tagManager.createExpirationMarker(snapshot.id());
+                marked.add(snapshot.id());
+            }
+        }
+        for (Snapshot tagged : collectTaggedSnapshots()) {
+            if (taggedIds.add(tagged.id())) {
+                taggedSnapshots.add(tagged);
+                tagManager.deleteExpirationMarker(tagged.id());
+            }
+        }
+        taggedSnapshots.sort(Comparator.comparingLong(Snapshot::id));
+        Runnable finalScan = afterFinalTagScan;
+        if (finalScan != null) {
+            finalScan.run();
+        }
     }
 
     private void cleanDataFiles(
