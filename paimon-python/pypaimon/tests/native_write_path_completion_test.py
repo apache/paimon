@@ -360,7 +360,8 @@ def test_automatic_postpone_plan_counts_all_batches_per_partition(tmp_path, use_
 
 
 @native
-@pytest.mark.parametrize('kind', ['boolean', 'date', 'time', 'timestamp', 'decimal', 'float'])
+@pytest.mark.parametrize('kind', ['boolean', 'date', 'time', 'timestamp', 'decimal', 'float',
+                                  'unicode_int', 'decimal_overflow'])
 def test_native_truncate_partition_specs_use_java_typed_strings(tmp_path, native_rest_catalog, kind):
     from datetime import date, datetime, time
     from decimal import Decimal
@@ -372,6 +373,8 @@ def test_native_truncate_partition_specs_use_java_typed_strings(tmp_path, native
                       '2024-01-02 12:34:00'),
         'decimal': (pa.decimal128(6, 2), [Decimal('12.35'), Decimal('13.00')], '12.345'),
         'float': (pa.float32(), [1.2, 2.0], '1.2'),
+        'unicode_int': (pa.int32(), [12, 13], '１２'),
+        'decimal_overflow': (pa.decimal128(3, 0), [None, Decimal('12')], '1000'),
     }
     data_type, values, text = cases[kind]
     schema = pa.schema([('id', pa.int64()), ('pt', data_type)])

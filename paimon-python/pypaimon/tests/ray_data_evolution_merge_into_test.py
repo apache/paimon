@@ -2537,6 +2537,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_rebases_staged_updates_after_compaction(self):
         from pypaimon.data.generic_variant import GenericVariant
         from pypaimon.data.variant_path import variant_get, variant_replace
