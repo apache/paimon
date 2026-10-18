@@ -30,7 +30,7 @@ from typing import List, Optional, Tuple
 
 from packaging.version import InvalidVersion, Version
 
-from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.plan import Plan
@@ -179,12 +179,16 @@ def _catalog_options(table) -> dict:
 def _catalog_context_options(table) -> dict:
     """Normalize catalog storage properties without rebuilding the metastore."""
     loader = table.catalog_environment.catalog_loader
-    options = loader.context().options.to_map()
+    context_options = loader.context().options
+    options = context_options.to_map()
     normalized = {
         str(key): _option_value_to_string(value)
         for key, value in options.items()
         if value is not None
     }
+    if FuseOptions.FUSE_ENABLED.key() in normalized:
+        normalized[FuseOptions.FUSE_ENABLED.key()] = _option_value_to_string(
+            context_options.get(FuseOptions.FUSE_ENABLED))
     if str(getattr(table, 'table_path', '')).startswith('oss://'):
         from pypaimon.filesystem.jindo_file_system_handler import (
             JINDO_AVAILABLE,
@@ -292,7 +296,7 @@ class _NativeRestTableCache:
     def __setstate__(self, state):
         self.__init__()
 
-    def get(self, response, database, table, options, token_loader=None, path_mapping=None):
+    def get(self, response, database, table, options, token_loader=None):
         from pypaimon_rust.datafusion import Table
 
         pid = os.getpid()
@@ -302,15 +306,14 @@ class _NativeRestTableCache:
         if state is None:
             state = states.setdefault(pid, SimpleNamespace(lock=Lock(), entry=None))
             self._states = {pid: state}
-        key = (response, database, table, tuple(sorted(options.items())), path_mapping)
+        key = (response, database, table, tuple(sorted(options.items())))
         with state.lock:
             if state.entry is None or state.entry[0] != key:
                 reuse_token = getattr(Table, 'from_rest_response_with_token', None)
-                token = token_loader() if path_mapping is None and callable(reuse_token) and token_loader else None
+                token = token_loader() if callable(reuse_token) and token_loader else None
                 if token is None:
-                    extra = {'path_mapping': path_mapping} if path_mapping is not None else {}
                     native_table = Table.from_rest_response(
-                        response, database=database, table=table, rest_options=options, **extra)
+                        response, database=database, table=table, rest_options=options)
                 else:
                     native_table = reuse_token(
                         response, database=database, table=table, rest_options=options,
@@ -348,9 +351,8 @@ def _native_table(table):
             database=table.identifier.get_database_name(),
             table=table.identifier.get_object_name(),
             options=_catalog_options(table),
-            token_loader=lambda: _rest_data_token(table),
-            path_mapping=_native_file_io_mapping(table))
-        rt = _with_native_resolved_schema(table, rt, file_io_resolved=True)
+            token_loader=lambda: _rest_data_token(table))
+        rt = _with_native_resolved_schema(table, rt)
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(
@@ -375,36 +377,21 @@ def _native_table(table):
     return _with_native_read_snapshot(table, rt)
 
 
-def _with_native_resolved_schema(table, native_table, file_io_resolved=False):
+def _with_native_resolved_schema(table, native_table):
     # Resolve time travel through core before replacing options. Caller-supplied
     # fields cannot acquire the catalog's authorization session.
     from pypaimon.snapshot.time_travel_util import SCAN_KEYS
     resolved = _resolved_schema_json(table)
     options = json.loads(resolved)['options']
-    mapping = _native_file_io_mapping(table)
     historical = (options.get('query-auth.enabled') == 'true'
                   and any(key in options for key in SCAN_KEYS))
     snapshot = vars(table).get('_read_snapshot')
-    if mapping is not None and not file_io_resolved:
-        native_table = native_table.copy({}, path_mapping=mapping)
     if historical and snapshot is not None:
         from pypaimon.common.json_util import JSON
         native_table = native_table.copy_with_pinned_snapshot(JSON.to_json(snapshot), with_schema=True)
     elif historical:
         native_table = native_table.copy(options)
     return native_table.copy_with_resolved_schema(resolved, branch=table.current_branch())
-
-
-def _native_file_io_mapping(table):
-    """Carry the already validated FUSE mapping, preserving original REST paths."""
-    from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.filesystem.local_file_io import FuseLocalFileIO
-    file_io = table.file_io
-    if type(file_io) is CachingFileIO:
-        file_io = file_io._delegate
-    if type(file_io) is FuseLocalFileIO:
-        return file_io.path, file_io.fuse_path
-    return None
 
 
 def _with_native_read_snapshot(table, native_table):

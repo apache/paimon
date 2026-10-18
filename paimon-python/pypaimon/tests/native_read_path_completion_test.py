@@ -31,9 +31,8 @@ from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
-from pypaimon.filesystem.local_file_io import FuseLocalFileIO
 from pypaimon.read.native_plan import (
-    _NativeRestTableCache, _with_native_resolved_schema, native_method_available,
+    _NativeRestTableCache, _catalog_context_options, _with_native_resolved_schema, native_method_available,
 )
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.schema.schema_change import SchemaChange
@@ -49,10 +48,9 @@ completion_api = pytest.mark.skipif(
     not native_method_available('Table', 'copy'), reason='Native resolved read completion API required')
 
 
-def test_resolved_mount_is_installed_before_historical_schema_resolution():
+def test_historical_schema_resolution_reuses_the_captured_snapshot():
     table = Mock()
     table.current_branch.return_value = 'main'
-    table.file_io = FuseLocalFileIO('oss://bucket/table', '/mnt/table')
     table._read_snapshot = object()
     native = Mock()
     native.copy.return_value = native
@@ -61,23 +59,32 @@ def test_resolved_mount_is_installed_before_historical_schema_resolution():
     with patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved), \
             patch('pypaimon.common.json_util.JSON.to_json', return_value='captured'):
         _with_native_resolved_schema(table, native)
-    assert native.method_calls[0].kwargs == {'path_mapping': ('oss://bucket/table', '/mnt/table')}
-    native.copy.assert_called_once_with({}, path_mapping=('oss://bucket/table', '/mnt/table'))
+    native.copy.assert_not_called()
     native.copy_with_pinned_snapshot.assert_called_once_with('captured', with_schema=True)
 
 
-def test_mount_cache_does_not_request_cloud_token_and_keys_by_mapping():
+def test_mount_cache_is_keyed_by_catalog_fuse_options():
     module = ModuleType('pypaimon_rust.datafusion')
     module.Table = Mock()
-    tokens = Mock(side_effect=AssertionError('FUSE must not fetch cloud credentials'))
+    tokens = Mock(return_value=None)
     cache = _NativeRestTableCache()
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}):
         for mount in ['/mnt/one', '/mnt/one', '/mnt/two']:
-            cache.get('response', 'db', 't', {}, token_loader=tokens,
-                      path_mapping=('oss://bucket/t', mount))
+            cache.get('response', 'db', 't', {'fuse.enabled': 'true', 'fuse.root': mount}, token_loader=tokens)
     assert module.Table.from_rest_response.call_count == 2
-    assert module.Table.from_rest_response.call_args.kwargs['path_mapping'] == ('oss://bucket/t', '/mnt/two')
-    tokens.assert_not_called()
+    module.Table.from_rest_response.assert_called_with(
+        'response', database='db', table='t', rest_options={'fuse.enabled': 'true', 'fuse.root': '/mnt/two'})
+
+
+@pytest.mark.parametrize('enabled,expected', [
+    (True, 'true'), ('on', 'true'), (' true ', 'true'), (2, 'true'),
+    (False, 'false'), ('off', 'false'), (0, 'false'),
+])
+def test_fuse_enabled_preserves_python_typed_boolean_options(enabled, expected):
+    from pypaimon.common.options.options import Options
+    table = Mock(table_path='file:///warehouse/db/t')
+    table.catalog_environment.catalog_loader.context().options = Options({'fuse.enabled': enabled})
+    assert _catalog_context_options(table)['fuse.enabled'] == expected
 
 
 @completion_api
@@ -143,21 +150,36 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
         planner.assert_not_called()
 
 
-@completion_api
-def test_fuse_native_reader_uses_mount_without_cloud_credentials(guarded_table, tmp_path):
+@pytest.mark.parametrize('mode', ['pvfs', 'raw'])
+@pytest.mark.parametrize('enabled', ['true', 'on'])
+@pytest.mark.parametrize('native', [False, pytest.param(True, marks=completion_api)])
+def test_fuse_reader_uses_mount_without_cloud_credentials(guarded_table, tmp_path, mode, enabled, native):
     table, server = guarded_table
     source = Path(urlparse(table.table_path).path)
     mounted = tmp_path / 'mount'
-    shutil.copytree(source, mounted)
+    remote = 'oss://bucket/warehouse/default/t'
+    destination = mounted / ('default/t' if mode == 'pvfs' else 'warehouse/default/t')
+    shutil.copytree(source, destination)
     # The original data path is unreadable; REST can still serve its snapshot.
     for file in source.rglob('*.parquet'):
         file.unlink()
-    table.file_io = FuseLocalFileIO(table.table_path, str(mounted))
-    table.catalog_environment.catalog_loader.context().options.set('data-token.enabled', 'true')
+    from pypaimon import CatalogFactory
+    options = table.catalog_environment.catalog_loader.context().options.to_map()
+    options.update({'fuse.enabled': enabled, 'fuse.root': str(mounted),
+                    'fuse.mode': mode, 'fuse.validation-mode': 'none', 'data-token.enabled': 'true'})
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
         filter=[_filter('id', 'EQUAL', [2])])
-    with patch.object(server, '_table_token_handle', side_effect=AssertionError('FUSE must not request tokens')):
-        assert _read(table, True, ['id']).to_pylist() == [{'id': 2}]
+    original_response = server.mock_table
+
+    def mounted_response(*args, **kwargs):
+        response = original_response(*args, **kwargs)
+        response.path = remote
+        return response
+
+    with patch.object(server, 'mock_table', side_effect=mounted_response), \
+            patch.object(server, '_table_token_handle', side_effect=AssertionError('FUSE must not request tokens')):
+        table = CatalogFactory.create(options).get_table(table.identifier)
+        assert _read(table, native, ['id']).to_pylist() == [{'id': 2}]
 
 
 @pytest.mark.parametrize('native', [False, pytest.param(True, marks=completion_api)])

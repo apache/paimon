@@ -456,8 +456,9 @@ The native table retains REST credentials, token refresh and catalog snapshot
 resolution. Database and table names containing dots are passed as separate
 identifier components. REST snapshot results (including empty results) take precedence over
 filesystem snapshots. REST errors, including HTTP 501, are propagated as in Java.
-REST FUSE reads carry the already resolved remote-to-local path mapping into
-Rust FileIO, including historical schemas, without requesting cloud credentials.
+Rust FileIO supports the existing REST FUSE options (`fuse.enabled`, `fuse.root`,
+`fuse.mode` and `fuse.validation-mode`). It resolves and validates the mount,
+including historical reads, without requesting cloud credentials for mounted data.
 Custom catalog loaders and arbitrary FileIO implementations require an equivalent
 native provider; contexts that cannot be reproduced retain Python execution.
 
