@@ -27,6 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.table.system.system_table import metadata_local_millis
 from pypaimon.table.system.tags_table import TagsTable
 
 
@@ -118,7 +119,7 @@ class TagsTableTest(unittest.TestCase):
             self.assertIsInstance(ts, datetime.datetime)
             ms = int(ts.replace(
                 tzinfo=datetime.timezone.utc).timestamp() * 1000)
-            self.assertEqual(_TAG_COMMIT_MS, ms)
+            self.assertEqual(metadata_local_millis(_TAG_COMMIT_MS), ms)
 
         # Tags created without a retention carry no create-time / TTL.
         for value in arrow_table.column("create_time").to_pylist():

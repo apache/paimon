@@ -22,7 +22,6 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex.data_evolution_global_index_scanner import _PaddingGlobalIndexReader
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
 from pypaimon.globalindex.global_index_reader import FieldRef, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -178,8 +177,6 @@ def test_exactness_follows_predicate_tree_and_reader_wrappers(method):
     assert candidate.and_(GlobalIndexResult.create_empty()).is_exact()
     reader = UnionGlobalIndexReader([OffsetGlobalIndexReader(StubGlobalIndexReader(candidate), 10, 13)])
     assert not reader.visit_equal(FieldRef(0, "a", "INT"), 1).result().is_exact()
-    padded = _PaddingGlobalIndexReader(StubGlobalIndexReader(exact), GlobalIndexResult.from_range(Range(5, 6)))
-    assert not padded.visit_equal(FieldRef(0, "a", "INT"), 1).result().is_exact()
 
     class PartialReader(StubGlobalIndexReader):
         def visit_greater_than(self, field_ref, literal):

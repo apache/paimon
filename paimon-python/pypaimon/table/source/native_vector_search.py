@@ -19,21 +19,19 @@
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import (
-    _catalog_metastore, _native_table, _predicate_to_native,
-    native_method_available)
+from pypaimon.read.native_plan import _catalog_metastore, _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 
 
-def try_native_vector_search(builder, queries, batch=False):
-    """Return existing Python result types, or None to use the Python reader.
+def _native_vector_builder(builder, batch=False):
+    """Configure a native builder, or return None before execution.
 
     Search, scalar filtering, refinement and physical-position selection all
-    belong to Rust core. Python only converts the scored result metadata.
+    belong to Rust core. Python only translates options and typed predicates.
     """
     table = builder._table
     reject_search_under_query_auth(table)
-    native_enabled = getattr(table.options, 'native_read_enabled', None)
+    native_enabled = getattr(getattr(table, 'options', None), 'native_read_enabled', None)
     if not callable(native_enabled) or not native_enabled():
         return None
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
@@ -49,10 +47,11 @@ def try_native_vector_search(builder, queries, batch=False):
     # Python's batch reader currently supports only global row-ID results.
     if batch and builder._is_primary_key_vector_search():
         return None
-    method = 'new_batch_vector_search_builder' if batch else 'new_vector_search_builder'
-    if not native_method_available('Table', method):
+    if not native_runtime_available():
         return None
-    native = getattr(_native_table(table), method)()
+    native_table = _native_table(table)
+    native = (native_table.new_batch_vector_search_builder() if batch else
+              native_table.new_vector_search_builder())
     if builder._vector_column is not None:
         native.with_vector_column(builder._vector_column.name)
     native.with_limit(builder._limit).with_options(builder._options)
@@ -64,6 +63,14 @@ def try_native_vector_search(builder, queries, batch=False):
     except ValueError:
         # Qualify unsupported typed literals before searching.
         return None
+    return native
+
+
+def try_native_vector_search(builder, queries, batch=False):
+    native = _native_vector_builder(builder, batch)
+    if native is None:
+        return None
+    table = builder._table
     # Once the Native route is chosen, errors must not trigger another search
     # against a potentially newer snapshot.
     if batch:

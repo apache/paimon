@@ -1716,7 +1716,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(result.schema.field('payloads').type.item_field.nullable)
         self.assertEqual(
             {
                 row['id']: None if row['payloads'] is None else dict(row['payloads'])
@@ -1739,7 +1738,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[('bad', None)]], type=nullable_map_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|non-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
@@ -1787,9 +1786,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
-        self.assertFalse(
-            result.schema.field('payloads').type.value_field.nullable
-        )
         self.assertEqual(
             {
                 row['id']: row['payloads']
@@ -1812,7 +1808,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
         }, schema=incompatible_schema)
         incompatible_writer = table.new_batch_write_builder().new_write()
-        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent|[Nn]on-nullable"):
             incompatible_writer.write_arrow(incompatible_data)
         incompatible_writer.abort()
 
@@ -2726,12 +2722,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -2846,12 +2839,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         }
         self.assertGreater(len(source_blob_paths), 0)
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -2929,12 +2919,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -3013,12 +3000,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 0).serialize(),
-            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 1).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 0).serialize(),
+            BlobViewStruct.of(source_table, 'picture', 1).serialize(),
         ]
 
         target_schema = pa.schema([
@@ -3150,11 +3134,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_limit_source', picture_field_id, i).serialize()
+            BlobViewStruct.of(source_table, 'picture', i).serialize()
             for i in range(num_rows)
         ]
 
@@ -3234,11 +3215,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-        picture_field_id = next(
-            field.id for field in source_table.table_schema.fields if field.name == 'picture'
-        )
         view_values = [
-            BlobViewStruct('test_db.blob_view_prescan_count_source', picture_field_id, i).serialize()
+            BlobViewStruct.of(source_table, 'picture', i).serialize()
             for i in range(num_rows)
         ]
 

@@ -15,11 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import base64
+import decimal
 import logging
+import math
 import re
+import struct
 import threading
 import time
 import uuid
+from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import json
@@ -34,8 +39,10 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
                                       CreateDatabaseRequest,
                                       CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
-                                      RenameBranchRequest,
-                                      RenameTableRequest)
+                                      DropPolicyRequest,
+                                      GrantPermissionRequest, PolicyRequest,
+                                      RenameTableRequest,
+                                      RevokePermissionRequest)
 from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
                                        GetDatabaseResponse,
                                        GetFunctionResponse,
@@ -45,7 +52,9 @@ from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
-                                       ListPartitionsResponse, ListTablesResponse,
+                                       ListPartitionsResponse,
+                                       ListPermissionsResponse,
+                                       ListPoliciesResponse, ListTablesResponse,
                                        ListTagsResponse,
                                        PagedList, Partition,
                                        RESTResponse, ErrorResponse)
@@ -64,11 +73,26 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
                                                 TagAlreadyExistException)
+from pypaimon.casting import data_type_casts as casts
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.common.json_util import JSON
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.management.column_mask import ColumnMask
+from pypaimon.management.data_policy import DataPolicy
+from pypaimon.management.list_permissions_request import ListPermissionsRequest
+from pypaimon.management.permission_access import PermissionAccess
+from pypaimon.management.permission_assignment import (PermissionAssignment, _INSTANT,
+                                                       _days_from_civil, _days_in_month,
+                                                       _parse_instant as _instant_nanos)
+from pypaimon.management.permission_columns import PermissionColumns
+from pypaimon.management.permission_resource import PermissionResource
+from pypaimon.management.resource_type import ResourceType
+from pypaimon.management.row_filter import RowFilter
 from pypaimon import Schema
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField, DataType, DataTypeParser, MapType,
+                                        MultisetType, RowType, VectorType)
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -198,6 +222,667 @@ def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
         raise ValueError(f"Unknown schema change action: {action}")
 
 
+def _cursor_key(*parts: Optional[str]) -> str:
+    return "".join("-1:" if part is None else "{}:{}".format(len(part), part) for part in parts)
+
+
+def _permission_key(resource: PermissionResource, access: str, principal: str) -> str:
+    return _cursor_key(resource.get_type().name, resource.get_database(), resource.get_table(),
+                       resource.get_function(), resource.get_view(),
+                       PermissionAccess.canonicalize_for(resource, access), principal)
+
+
+def _assignment_key(assignment: PermissionAssignment) -> str:
+    return _permission_key(
+        assignment.get_resource(), assignment.get_access(), assignment.get_principal())
+
+
+def _resource_name(resource: PermissionResource) -> str:
+    name = resource.get_table() or resource.get_function() or resource.get_view()
+    return ".".join(part for part in (resource.get_database(), name) if part) or "catalog"
+
+
+def _policy_identity(policy: DataPolicy) -> Tuple[str, str, Optional[str]]:
+    mask = policy.get_column_mask()
+    return policy.type().name, policy.get_principal(), None if mask is None else mask.get_on_column()
+
+
+def _policy_key(policy: DataPolicy) -> str:
+    return _cursor_key(*_policy_identity(policy))
+
+
+def _policy_name(policy_type: str, principal: str, column: Optional[str]) -> str:
+    return ":".join(part for part in (policy_type, principal, column) if part is not None)
+
+
+def _field_refs(transform: Dict[str, Any]) -> List[Dict[str, Any]]:
+    refs = list(transform.get("inputs") or []) + [transform.get("fieldRef")]
+    return [ref for ref in refs if isinstance(ref, dict)]
+
+
+def _leaves(predicate: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if predicate["kind"] == "COMPOUND":
+        children = predicate.get("children")
+        if predicate.get("function") not in ("AND", "OR") or not children or None in children:
+            raise ValueError("Compound predicate needs AND or OR and at least one predicate.")
+        return [leaf for child in children for leaf in _leaves(child)]
+    if predicate["kind"] != "LEAF" or not isinstance(predicate.get("transform"), dict):
+        raise ValueError("Unknown predicate {}.".format(json.dumps(predicate)))
+    return [predicate]
+
+
+def _reject_constant(token: str) -> None:
+    raise ValueError("Non-standard JSON token {}.".format(token))
+
+
+def _policy_json(text: str) -> Any:
+    return json.loads(text, parse_constant=_reject_constant)
+
+
+def _policy_transforms(policy: DataPolicy) -> List[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]]:
+    mask = policy.get_column_mask()
+    if mask is not None:
+        return [(_policy_json(mask.get_transform()), None)]
+    return [(leaf["transform"], leaf) for leaf in _leaves(_policy_json(policy.get_row_filter().get_predicate()))]
+
+
+def _policy_columns(policy: DataPolicy) -> set:
+    mask = policy.get_column_mask()
+    columns = {ref["name"] for transform, _ in _policy_transforms(policy) for ref in _field_refs(transform)}
+    return columns | ({mask.get_on_column()} if mask is not None else set())
+
+
+_DATE_PARTS = ("YEAR", "QUARTER", "MONTH", "WEEK", "YEAR_OF_WEEK", "DAY", "DAY_OF_WEEK", "ISO_DAY_OF_WEEK",
+               "WEEKDAY", "DAY_OF_YEAR", "HOUR", "MINUTE", "SECOND")
+_TRANSFORM_INPUTS = {
+    "CONCAT": ("s", 0, None, "STRING"), "CONCAT_WS": ("s", 2, None, "STRING"),
+    "UPPER": ("s", 1, 1, "STRING"), "LOWER": ("s", 1, 1, "STRING"), "TRIM": ("s", 1, 2, "STRING"),
+    "TRANSLATE": ("s", 3, 3, "STRING"), "SUBSTRING": ("ra", 2, 3, "STRING"),
+    "OVERLAY": ("ssii", 3, 4, "STRING"), "PAD": ("sis", 3, 3, "STRING"),
+    "LENGTH": ("s", 1, 1, "INT"), "BIT_LENGTH": ("s", 1, 1, "INT"),
+    "DATE_ADD": ("di", 2, 2, "DATE"), "DATE_DIFF": ("dd", 2, 2, "INT"), "DATE_TRUNC": ("ds", 2, 2, "DATE"),
+}
+_TRANSFORM_FLAGS = {"TRIM": ("trimFlag", ("LEADING", "TRAILING", "BOTH")), "PAD": ("direction", ("LEFT", "RIGHT"))}
+_INPUT_ROOTS = {"s": casts.CHARACTER_STRING, "i": casts.INTEGER_NUMERIC, "d": {casts.DATE}}
+_TYPE_DEFAULTS = {casts.CHAR: (1,), casts.VARCHAR: (1,), casts.BINARY: (1,), casts.VARBINARY: (1,),
+                  casts.DECIMAL: (10, 0), casts.TIME: (0,), casts.TIMESTAMP: (6,), casts.TIMESTAMP_LTZ: (6,)}
+_LEAF_FUNCTIONS = {
+    "EQUAL", "NOT_EQUAL", "LESS_THAN", "LESS_OR_EQUAL", "GREATER_THAN", "GREATER_OR_EQUAL", "IS_NULL",
+    "IS_NOT_NULL", "STARTS_WITH", "NOT_STARTS_WITH", "ENDS_WITH", "NOT_ENDS_WITH", "CONTAINS", "NOT_CONTAINS",
+    "ARRAY_CONTAINS", "ARRAYS_OVERLAP", "ARRAY_CONTAINS_ALL", "LIKE", "NOT_LIKE", "IN", "NOT_IN", "BETWEEN",
+    "NOT_BETWEEN", "TRUE", "FALSE"}
+_ARRAY_FUNCTIONS = ("ARRAY_CONTAINS", "ARRAYS_OVERLAP", "ARRAY_CONTAINS_ALL")
+_PRIMITIVES = casts.INTEGER_NUMERIC | {casts.FLOAT, casts.DOUBLE}
+_CAST_RULES = (
+    (casts.CHARACTER_STRING, casts.CHARACTER_STRING | casts.BINARY_STRING | _PRIMITIVES | casts.TIMESTAMP_FAMILY
+     | {casts.BOOLEAN, casts.DATE, casts.DECIMAL, casts.TIME, casts.ARRAY, casts.MAP, casts.ROW}),
+    (casts.BINARY_STRING, casts.BINARY_STRING | casts.CHARACTER_STRING),
+    ({casts.BOOLEAN}, casts.NUMERIC | casts.CHARACTER_STRING),
+    ({casts.DATE}, casts.CHARACTER_STRING | casts.TIMESTAMP_FAMILY),
+    ({casts.DECIMAL}, _PRIMITIVES | {casts.DECIMAL}),
+    (_PRIMITIVES, _PRIMITIVES | {casts.DECIMAL}),
+    (casts.INTEGER_NUMERIC, {casts.BOOLEAN}),
+    (casts.NUMERIC, casts.CHARACTER_STRING),
+    ({casts.INTEGER, casts.BIGINT}, casts.TIMESTAMP_FAMILY),
+    ({casts.ARRAY, casts.MAP, casts.ROW}, casts.CHARACTER_STRING),
+    (casts.TIMESTAMP_FAMILY, casts.CHARACTER_STRING | casts.TIMESTAMP_FAMILY
+     | {casts.DATE, casts.TIME, casts.BIGINT, casts.INTEGER}),
+    ({casts.TIME}, casts.CHARACTER_STRING | casts.TIMESTAMP_FAMILY),
+)
+_DECIMAL_LITERAL = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+_LOCAL_DATE = re.compile(r"([0-9]{4}|\+[0-9]{5,9}|-[0-9]{4,9})-([0-9]{2})-([0-9]{2})")
+_LOCAL_TIME = re.compile(r"([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]{0,9}))?)?")
+_INTEGER_BITS = {casts.TINYINT: 8, casts.SMALLINT: 16, casts.INTEGER: 32, casts.BIGINT: 64}
+
+
+def _type_root(data_type: Optional[DataType]) -> Optional[str]:
+    if isinstance(data_type, AtomicType) and "LOCAL TIME ZONE" in data_type.type.upper():
+        return casts.TIMESTAMP_LTZ
+    return casts._root(data_type)
+
+
+def _logical_type(data_type: Optional[DataType]) -> Any:
+    if isinstance(data_type, RowType):
+        return "ROW", tuple((field.id, field.name, _logical_type(field.type), field.description, field.default_value)
+                            for field in data_type.fields), data_type.nullable
+    if isinstance(data_type, MapType):
+        return "MAP", _logical_type(data_type.key), _logical_type(data_type.value), data_type.nullable
+    if isinstance(data_type, (ArrayType, MultisetType, VectorType)):
+        return type(data_type).__name__, _logical_type(data_type.element), getattr(data_type, "length", None), \
+            data_type.nullable
+    if not isinstance(data_type, AtomicType):
+        return data_type
+    spelling = data_type.type.upper()
+    root = _type_root(data_type)
+    found = (2147483647,) if spelling in ("STRING", "BYTES") else tuple(map(int, re.findall(r"\d+", spelling)))
+    return root, found + _TYPE_DEFAULTS.get(root, ())[len(found):], data_type.nullable
+
+
+def _castable(source: DataType, target: DataType) -> bool:
+    if not any(_type_root(source) in inputs and _type_root(target) in targets for inputs, targets in _CAST_RULES):
+        return False
+    if _type_root(source) not in casts.CHARACTER_STRING or not isinstance(target, (ArrayType, MapType, RowType)):
+        return True
+    children = [field.type for field in target.fields] if isinstance(target, RowType) else \
+        [target.key, target.value] if isinstance(target, MapType) else [target.element]
+    return all(_castable(source, child) for child in children)
+
+
+def _java_integer(value: Any, bits: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Not a number: {!r}".format(value))
+    if isinstance(value, float):
+        limit = 2 ** (63 if bits == 64 else 31)
+        value = 0 if math.isnan(value) else int(max(-limit, min(limit - 1, value)))
+    value &= (1 << bits) - 1
+    return value - (1 << bits) if value >> (bits - 1) else value
+
+
+class _JavaFloat(float):
+    pass
+
+
+def _float32(value: float) -> float:
+    return struct.unpack("f", struct.pack("f", value))[0]
+
+
+def _java_float(value: Any, single: bool) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Not a number: {!r}".format(value))
+    try:
+        value = float(value)
+        return _JavaFloat(_float32(value)) if single else value
+    except OverflowError:
+        return (_JavaFloat if single else float)(math.inf if value > 0 else -math.inf)
+
+
+def _java_number_string(value: float, single: bool = False) -> str:
+    if math.isnan(value) or math.isinf(value):
+        return "NaN" if math.isnan(value) else "Infinity" if value > 0 else "-Infinity"
+    if value == 0:
+        return "-0.0" if math.copysign(1, value) < 0 else "0.0"
+    fits = (lambda text: _float32(float(text)) == value) if single else (lambda text: float(text) == value)
+    digits = next(digits for digits in range(1, 18) if fits("{:.{}e}".format(value, digits - 1)))
+    number = decimal.Decimal("{:.{}e}".format(value, max(digits, 2) - 1)).normalize()
+    if 1e-3 <= abs(value) < 1e7:
+        text = "{:f}".format(number)
+        return text if "." in text else text + ".0"
+    sign, digits, exponent = number.as_tuple()
+    mantissa = "".join(map(str, digits))
+    return "{}{}.{}E{}".format("-" if sign else "", mantissa[0], mantissa[1:] or "0", exponent + len(digits) - 1)
+
+
+class _UnsupportedConversion(ValueError):
+    pass
+
+
+def _java_string(value: Any) -> str:
+    if isinstance(value, (float, list, dict)):
+        raise _UnsupportedConversion("Policy literal {} cannot be compared as a string.".format(json.dumps(value)))
+    if isinstance(value, _Binary):
+        return value.text
+    if isinstance(value, _Decimal):
+        return "{:f}".format(value.value)
+    if isinstance(value, _Timestamp):
+        return _java_local_date_time(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool) or value is None:
+        return {True: "true", False: "false", None: "null"}[value]
+    if isinstance(value, float):
+        return _java_number_string(value, isinstance(value, _JavaFloat))
+    if isinstance(value, list):
+        return "[" + ", ".join(map(_java_string, value)) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join("{}={}".format(key, _java_string(item)) for key, item in value.items()) + "}"
+    return str(value)
+
+
+_Binary = namedtuple("_Binary", "text")
+_Decimal = namedtuple("_Decimal", "value precision")
+_Timestamp = namedtuple("_Timestamp", "millisecond nano_of_millisecond")
+
+
+def _java_decimal(value: Any, literal_type: DataType) -> Optional[_Decimal]:
+    if not isinstance(value, str) or _DECIMAL_LITERAL.fullmatch(value) is None:
+        raise ValueError("Not a decimal: {!r}".format(value))
+    precision, scale = _logical_type(literal_type)[1]
+    with decimal.localcontext() as context:
+        context.prec, context.Emax, context.Emin = 10 ** 6, decimal.MAX_EMAX, decimal.MIN_EMIN
+        try:
+            value = decimal.Decimal(value).quantize(decimal.Decimal(1).scaleb(-scale), rounding=decimal.ROUND_HALF_UP)
+        except decimal.InvalidOperation:
+            return None
+    if len(value.as_tuple().digits) > precision:
+        return None
+    return _Decimal(abs(value) if value.is_zero() else value, precision)
+
+
+def _java_date(year: int, month: int, day: int) -> str:
+    return "{}{:04d}-{:02d}-{:02d}".format("-" if year < 0 else "+" if year > 9999 else "", abs(year), month, day)
+
+
+def _java_time(hour: int, minute: int, second: int, nanos: int, seconds: bool = False) -> str:
+    text = "{:02d}:{:02d}".format(hour, minute)
+    if second or nanos or seconds:
+        text += ":{:02d}".format(second)
+    if nanos:
+        fraction = "{:09d}".format(nanos)
+        text += "." + (fraction[:3] if nanos % 10 ** 6 == 0 else fraction[:6] if nanos % 1000 == 0 else fraction)
+    return text
+
+
+def _parse_date(text: str) -> Tuple[int, int, int]:
+    match = _LOCAL_DATE.fullmatch(text)
+    year, month, day = map(int, match.groups()) if match else (0, 0, 0)
+    if not 1 <= month <= 12 or not 1 <= day <= _days_in_month(year, month) or (year == 0 and text[0] == "-"):
+        raise ValueError("Not a date: {!r}".format(text))
+    return year, month, day
+
+
+def _parse_time(text: str) -> Tuple[int, int, int, int]:
+    match = _LOCAL_TIME.fullmatch(text)
+    if match is None or int(match.group(1)) > 23 or int(match.group(2)) > 59 or int(match.group(3) or 0) > 59:
+        raise ValueError("Not a time: {!r}".format(text))
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0), int((match.group(4) or "").ljust(9, "0"))
+
+
+def _civil_from_days(days: int) -> Tuple[int, int, int]:
+    days += 719468
+    era = days // 146097
+    day_of_era = days - era * 146097
+    year_of_era = (day_of_era - day_of_era // 1460 + day_of_era // 36524 - day_of_era // 146096) // 365
+    day_of_year = day_of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
+    shifted_month = (5 * day_of_year + 2) // 153
+    month = shifted_month + 3 if shifted_month < 10 else shifted_month - 9
+    return year_of_era + era * 400 + (month <= 2), month, day_of_year - (153 * shifted_month + 2) // 5 + 1
+
+
+def _timestamp(days: int, hour: int, minute: int, second: int, nanos: int) -> _Timestamp:
+    nano_of_day = ((hour * 60 + minute) * 60 + second) * 10 ** 9 + nanos
+    millisecond = days * 86400000 + nano_of_day // 10 ** 6
+    if not -2 ** 63 <= millisecond < 2 ** 63:
+        raise _UnsupportedConversion("Timestamp literal overflows the epoch milliseconds Java keeps in a long.")
+    return _Timestamp(millisecond, nano_of_day % 10 ** 6)
+
+
+def _parse_instant(text: str) -> _Timestamp:
+    nanos = _instant_nanos(text)
+    if nanos is None:
+        raise ValueError("Not an instant: {!r}".format(text))
+    sign, digits, month, day, hour, minute, second, _ = _INSTANT.fullmatch(text).groups()
+    hour, minute, second = int(hour), int(minute), int(second)
+    next_day = hour == 24
+    hour, second = 0 if next_day else hour, 59 if (hour, minute, second) == (23, 59, 60) else second
+    return _timestamp(_days_from_civil(int(sign + digits), int(month), int(day)) + next_day, hour, minute, second,
+                      nanos)
+
+
+def _date_time_parts(timestamp: _Timestamp) -> Tuple[str, int, int, int, int]:
+    days, millis = divmod(timestamp.millisecond, 86400000)
+    seconds, nanos = divmod(millis * 10 ** 6 + timestamp.nano_of_millisecond, 10 ** 9)
+    return _java_date(*_civil_from_days(days)), seconds // 3600, seconds // 60 % 60, seconds % 60, nanos
+
+
+def _java_local_date_time(timestamp: _Timestamp) -> str:
+    if not -2 ** 31 <= timestamp.millisecond // 86400000 < 2 ** 31:
+        raise _UnsupportedConversion("Timestamp literal overflows the epoch days Java keeps in an int.")
+    date, hour, minute, second, nanos = _date_time_parts(timestamp)
+    return date + "T" + _java_time(hour, minute, second, nanos)
+
+
+def _java_instant(timestamp: _Timestamp) -> str:
+    date, hour, minute, second, nanos = _date_time_parts(timestamp)
+    return date + "T" + _java_time(hour, minute, second, nanos, seconds=True) + "Z"
+
+
+def _internal_literal(literal_type: DataType, literal: Any) -> Any:
+    root = _type_root(literal_type)
+    if literal is None or root == casts.BOOLEAN:
+        return literal
+    if root in _INTEGER_BITS:
+        return _java_integer(literal, _INTEGER_BITS[root])
+    if root in (casts.FLOAT, casts.DOUBLE):
+        return _java_float(literal, root == casts.FLOAT)
+    if root in casts.CHARACTER_STRING:
+        return _Binary(_java_string(literal))
+    if not isinstance(literal, str):
+        raise ValueError("{} literal must be a string: {!r}".format(root, literal))
+    if root == casts.DECIMAL:
+        return _java_decimal(literal, literal_type)
+    if root == casts.DATE:
+        return _days_from_civil(*_parse_date(literal))
+    if root == casts.TIME:
+        hour, minute, second, nanos = _parse_time(literal)
+        return ((hour * 60 + minute) * 60 + second) * 1000 + nanos // 10 ** 6
+    if root == casts.TIMESTAMP:
+        parts = re.split("[Tt]", literal, maxsplit=1)
+        if len(parts) != 2:
+            raise ValueError("Not a timestamp: {!r}".format(literal))
+        return _timestamp(_days_from_civil(*_parse_date(parts[0])), *_parse_time(parts[1]))
+    if root == casts.TIMESTAMP_LTZ:
+        return _parse_instant(literal)
+    raise ValueError("Unsupported literal type {}.".format(literal_type))
+
+
+def _json_literal(literal_type: DataType, value: Any) -> Any:
+    root = _type_root(literal_type)
+    single = isinstance(value, _JavaFloat)
+    if isinstance(value, float) and root != (casts.FLOAT if single else casts.DOUBLE) \
+            and (root in _INTEGER_BITS or root in (casts.FLOAT, casts.DOUBLE)) \
+            and decimal.Decimal(_java_number_string(value, single)) != decimal.Decimal(value):
+        raise _UnsupportedConversion("Policy literal {} cannot be written as {} because JDK versions write it "
+                                     "differently.".format(_java_number_string(value, single), literal_type))
+    if value is None or root == casts.BOOLEAN or root in _INTEGER_BITS or root in (casts.FLOAT, casts.DOUBLE):
+        return value
+    if root in casts.CHARACTER_STRING:
+        return _java_string(value)
+    if root in (casts.DATE, casts.TIME):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError("{!r} cannot be cast to a Number.".format(value))
+        number = _java_integer(value, 32)
+        if root == casts.DATE:
+            return _java_date(*_civil_from_days(number))
+        if not 0 <= number < 86400000:
+            raise RuntimeError("Invalid time of day {}.".format(number))
+        return _java_time(number // 3600000, number // 60000 % 60, number // 1000 % 60, number % 1000 * 10 ** 6)
+    if root == casts.DECIMAL and isinstance(value, _Decimal):
+        return _java_string(value)
+    if root in (casts.TIMESTAMP, casts.TIMESTAMP_LTZ) and isinstance(value, _Timestamp):
+        return _java_local_date_time(value) if root == casts.TIMESTAMP else _java_instant(value)
+    raise RuntimeError("{!r} cannot be written as {}.".format(value, literal_type))
+
+
+def _literal_type(function: str, output: DataType, error: type = ValueError) -> DataType:
+    if function not in _ARRAY_FUNCTIONS:
+        return output
+    if not isinstance(output, ArrayType):
+        raise error("{} needs an ARRAY field.".format(function))
+    return output.element
+
+
+def _leaf_literals(leaf: Dict[str, Any], output: DataType) -> Optional[List[Any]]:
+    function, literals = leaf.get("function"), leaf.get("literals")
+    if function not in _LEAF_FUNCTIONS or not isinstance(literals, (list, type(None))):
+        raise ValueError("Unknown leaf function {} or literals {}.".format(function, literals))
+    literal_type = _literal_type(function, output)
+    return None if literals is None else [_internal_literal(literal_type, literal) for literal in literals]
+
+
+def _ref_type(ref: Dict[str, Any], columns: Optional[Dict[str, DataType]]) -> DataType:
+    return _declared_type(ref["type"]) if columns is None else columns[ref["name"]]
+
+
+def _input_fits(kind: str, value: Any, columns: Optional[Dict[str, DataType]]) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, dict):
+        return kind in "ra" or _type_root(_ref_type(value, columns)) in _INPUT_ROOTS[kind]
+    if isinstance(value, str):
+        return kind in "sra"
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    return kind in "ia" or (kind == "d" and -2 ** 31 <= value < 2 ** 31)
+
+
+def _transform_type(transform: Dict[str, Any],
+                    columns: Optional[Dict[str, DataType]] = None) -> Optional[DataType]:
+    name = transform["name"]
+    if "fieldRef" in transform:
+        source = _ref_type(transform["fieldRef"], columns)
+        if name == "CAST":
+            target = _declared_type(transform["type"])
+            return target if columns is not None or _castable(source, target) else None
+        if name in _DATE_PARTS:
+            return AtomicType("INT") if _type_root(source) in (casts.DATE, casts.TIMESTAMP) else None
+        for part in transform.get("path") or []:
+            source = next((field.type for field in getattr(source, "fields", ()) if field.name == part), None)
+        nested = name == "NESTED_FIELD_REF" and transform.get("path")
+        return source if name == "FIELD_REF" or nested else None
+    if name == "NULL":
+        return AtomicType("BOOLEAN")
+    if name in _TRANSFORM_FLAGS:
+        flag, values = _TRANSFORM_FLAGS[name]
+        if transform.get(flag) not in values:
+            return None
+    kinds, low, high, output = _TRANSFORM_INPUTS.get(name, ("", 1, 0, None))
+    inputs = transform.get("inputs")
+    if not isinstance(inputs, list) or not low <= len(inputs) <= (len(inputs) if high is None else high):
+        return None
+    fits = all(_input_fits(kinds[min(position, len(kinds) - 1)], value, columns)
+               for position, value in enumerate(inputs))
+    return AtomicType(output) if fits else None
+
+
+def _policy_type_error(policy: DataPolicy, schema: TableSchema) -> Optional[str]:
+    columns = {field.name: field.type for field in schema.fields}
+    output = None
+    for transform, leaf in _policy_transforms(policy):
+        declared_types = _declared_types(transform)
+        declared = _transform_type(transform)
+        output = _transform_type(transform, columns)
+        if declared is None or output is None:
+            return "Policy transform {} does not fit the table schema.".format(transform["name"])
+        if transform["name"] == "NESTED_FIELD_REF":
+            name, path = transform["fieldRef"]["name"], transform["path"]
+            if _path_ids(declared_types[name], path) != _path_ids(columns[name], path):
+                return "Nested field {}.{} changed identity.".format(name, ".".join(path))
+        try:
+            if leaf is not None:
+                _leaf_literals(leaf, declared)
+        except ValueError as e:
+            return "Row filter function {} does not accept {}: {}".format(
+                leaf.get("function"), leaf.get("literals"), e)
+    mask = policy.get_column_mask()
+    if mask is not None and _logical_type(output) != _logical_type(columns[mask.get_on_column()]):
+        return "Column mask output type {} does not match target column {} type {}.".format(
+            output, mask.get_on_column(), columns[mask.get_on_column()])
+    return None
+
+
+def _java_spelling(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _java_spelling(item) for key, item in value.items() if key != "nullable" and item is not None}
+    if isinstance(value, list):
+        return [_java_spelling(item) for item in value]
+    if isinstance(value, str):
+        return re.sub(r"^TIMESTAMP_LTZ\(([0-9]+)\)", r"TIMESTAMP(\1) WITH LOCAL TIME ZONE", value)
+    return value
+
+
+_TYPE_RANGES = {casts.CHAR: ((1, 2147483647),), casts.VARCHAR: ((1, 2147483647),),
+                casts.BINARY: ((1, 2147483647),), casts.VARBINARY: ((1, 2147483647),), casts.DECIMAL: ((1, 38),),
+                casts.TIME: ((0, 9),), casts.TIMESTAMP: ((0, 9),), casts.TIMESTAMP_LTZ: ((0, 9),)}
+
+
+def _valid_type(data_type: DataType) -> bool:
+    if not isinstance(data_type, AtomicType):
+        children = [field.type for field in getattr(data_type, "fields", ())] + [
+            getattr(data_type, name) for name in ("element", "key", "value") if hasattr(data_type, name)]
+        return all(map(_valid_type, children))
+    root, parameters, _ = _logical_type(data_type)
+    ranges = _TYPE_RANGES.get(root, ())
+    if root == casts.DECIMAL and len(parameters) == 2 and not 0 <= parameters[1] <= parameters[0]:
+        return False
+    return all(low <= value <= high for value, (low, high) in zip(parameters, ranges))
+
+
+def _declared_type(value: Any) -> DataType:
+    data_type = DataTypeParser.parse_data_type(value)
+    if _java_spelling(value) != _java_type(data_type) or not _valid_type(data_type):
+        raise ValueError("Policy type {} is not written as Java writes it.".format(json.dumps(value)))
+    return data_type
+
+
+def _declared_types(transform: Dict[str, Any]) -> Dict[str, DataType]:
+    return {ref["name"]: _declared_type(ref["type"]) for ref in _field_refs(transform)}
+
+
+def _canonical_transform(transform: Dict[str, Any], schema: TableSchema) -> Dict[str, Any]:
+    names = [field.name for field in schema.fields]
+
+    def remap(value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        index = names.index(value["name"])
+        return {"index": index, "name": value["name"], "type": _java_type(schema.fields[index].type)}
+
+    canonical = {"name": transform["name"]}
+    if "fieldRef" in transform:
+        canonical["fieldRef"] = remap(transform["fieldRef"])
+        if transform["name"] == "NESTED_FIELD_REF":
+            canonical["path"] = transform["path"]
+        if transform["name"] == "CAST":
+            canonical["type"] = _java_type(_declared_type(transform["type"]))
+    elif transform["name"] != "NULL":
+        canonical["inputs"] = [remap(value) for value in transform.get("inputs") or []]
+    if transform["name"] in _TRANSFORM_FLAGS:
+        flag = _TRANSFORM_FLAGS[transform["name"]][0]
+        canonical[flag] = transform[flag]
+    return canonical
+
+
+def _canonical_predicate(predicate: Dict[str, Any], schema: TableSchema) -> Dict[str, Any]:
+    if predicate["kind"] == "COMPOUND":
+        children = [_canonical_predicate(child, schema) for child in predicate["children"]]
+        return children[0] if len(children) == 1 else {
+            "kind": "COMPOUND", "function": predicate["function"], "children": children}
+    transform = predicate["transform"]
+    literals = _leaf_literals(predicate, _transform_type(transform))
+    output = _transform_type(transform, {field.name: field.type for field in schema.fields})
+    literal_type = _literal_type(predicate["function"], output, RuntimeError)
+    return {"kind": "LEAF", "transform": _canonical_transform(transform, schema), "function": predicate["function"],
+            "literals": None if literals is None else [_json_literal(literal_type, value) for value in literals]}
+
+
+def _canonical_policy(policy: DataPolicy, schema: TableSchema) -> DataPolicy:
+    mask = policy.get_column_mask()
+    if mask is None:
+        predicate = _canonical_predicate(_policy_json(policy.get_row_filter().get_predicate()), schema)
+        return DataPolicy.row_filter(policy.get_resource(), RowFilter(_flat_json(predicate)), policy.get_principal())
+    transform = _canonical_transform(_policy_json(mask.get_transform()), schema)
+    return DataPolicy.column_mask(policy.get_resource(), ColumnMask(mask.get_on_column(), _flat_json(transform)),
+                                  policy.get_principal())
+
+
+def _flat_json(value: Any) -> str:
+    if isinstance(value, _Binary):
+        data = value.text.encode("utf-8")
+        encoded = base64.b64encode(data).decode("ascii")
+        value = {"segments": [{"heapMemory": encoded, "array": encoded, "offHeap": False}],
+                 "offset": 0, "sizeInBytes": len(data)}
+    elif isinstance(value, _Decimal):
+        value = {"compact": value.precision <= 18}
+    elif isinstance(value, _Timestamp):
+        value = {"millisecond": value.millisecond, "nanoOfMillisecond": value.nano_of_millisecond}
+    if isinstance(value, dict):
+        return "{" + ",".join(_flat_json(key) + ":" + _flat_json(item) for key, item in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(map(_flat_json, value)) + "]"
+    if isinstance(value, float):
+        text = _java_number_string(value, isinstance(value, _JavaFloat))
+        return json.dumps(text) if math.isnan(value) or math.isinf(value) else text
+    return json.dumps(value, ensure_ascii=False)
+
+
+_JAVA_TYPE_FORMATS = {
+    casts.CHAR: "CHAR({})", casts.VARCHAR: "VARCHAR({})", casts.BINARY: "BINARY({})",
+    casts.VARBINARY: "VARBINARY({})", casts.INTEGER: "INT", casts.DECIMAL: "DECIMAL({}, {})",
+    casts.TIME: "TIME({})", casts.TIMESTAMP: "TIMESTAMP({})", casts.TIMESTAMP_LTZ: "TIMESTAMP({}) WITH LOCAL TIME ZONE"}
+
+
+def _java_type(data_type: DataType) -> Any:
+    suffix = "" if data_type.nullable else " NOT NULL"
+    if isinstance(data_type, AtomicType):
+        root, parameters, _ = _logical_type(data_type)
+        if parameters == (2147483647,) and root in (casts.VARCHAR, casts.VARBINARY):
+            return ("STRING" if root == casts.VARCHAR else "BYTES") + suffix
+        return _JAVA_TYPE_FORMATS.get(root, root).format(*parameters) + suffix
+    if isinstance(data_type, RowType):
+        return {"type": "ROW" + suffix, "fields": [_java_field(field) for field in data_type.fields]}
+    if isinstance(data_type, MapType):
+        return {"type": "MAP" + suffix, "key": _java_type(data_type.key), "value": _java_type(data_type.value)}
+    name = {ArrayType: "ARRAY", MultisetType: "MULTISET", VectorType: "VECTOR"}[type(data_type)]
+    java = {"type": name + suffix, "element": _java_type(data_type.element)}
+    if isinstance(data_type, VectorType):
+        java["length"] = data_type.length
+    return java
+
+
+def _java_field(field: DataField) -> Dict[str, Any]:
+    java = {"id": field.id, "name": field.name, "type": _java_type(field.type)}
+    if field.description is not None:
+        java["description"] = field.description
+    if field.default_value is not None:
+        java["defaultValue"] = field.default_value
+    return java
+
+
+def _path_ids(data_type: Optional[DataType], path: List[str]) -> Optional[List[int]]:
+    ids = []
+    for part in path:
+        field = next((field for field in getattr(data_type, "fields", ()) if field.name == part), None)
+        if field is None:
+            return None
+        ids.append(field.id)
+        data_type = field.type
+    return ids
+
+
+def _moved_columns(policy: DataPolicy, previous: TableSchema, current: TableSchema) -> List[str]:
+    previous_ids = {field.name: field.id for field in previous.fields}
+    current_ids = {field.name: field.id for field in current.fields}
+    return sorted(column for column in _policy_columns(policy) if current_ids.get(column) != previous_ids.get(column))
+
+
+def _granted_columns(assignment: PermissionAssignment) -> List[str]:
+    columns = assignment.get_columns()
+    names = columns.get_column_names()
+    return list(names if names is not None else columns.get_excluded_column_names())
+
+
+def _expired(assignment: PermissionAssignment) -> bool:
+    expire_time = assignment.get_expire_time()
+    if expire_time is None:
+        return False
+    sign, digits, month, day, hour, minute, second, fraction = _INSTANT.fullmatch(expire_time).groups()
+    hour, minute, second = int(hour), int(minute), int(second)
+    days = _days_from_civil(-int(digits) if sign == "-" else int(digits), int(month), int(day))
+    if hour == 24:
+        days, hour = days + 1, 0
+    second = min(second, 59)
+    epoch_millis = ((days * 86400 + hour * 3600 + minute * 60 + second) * 1000
+                    + int((fraction or "").ljust(9, "0")) // 1000000)
+    return epoch_millis <= int(time.time() * 1000)
+
+
+def _renamed_columns(previous: TableSchema, current: TableSchema) -> Dict[str, Optional[str]]:
+    current_names = {field.id: field.name for field in current.fields}
+    return {field.name: current_names.get(field.id) for field in previous.fields}
+
+
+def _query_auth_enabled(schema: TableSchema) -> bool:
+    return CoreOptions.from_dict(schema.options).query_auth_enabled
+
+
+def _on_table(resource: PermissionResource, identifier: Identifier) -> bool:
+    return resource.get_type() in (ResourceType.TABLE, ResourceType.COLUMN) \
+        and resource.get_database() == identifier.get_database_name() \
+        and resource.get_table() == identifier.get_table_name()
+
+
+def _matches(parameters: Dict[str, str], name: str, value: Optional[str]) -> bool:
+    return name not in parameters or parameters[name] == value
+
+
+def _matches_policy(policy: DataPolicy, parameters: Dict[str, str]) -> bool:
+    mask = policy.get_column_mask()
+    if "column" in parameters and (mask is None or mask.get_on_column() != parameters["column"]):
+        return False
+    return _matches(parameters, "type", policy.type().name) \
+        and _matches(parameters, "principal", policy.get_principal())
+
+
 class RESTCatalogServer:
     """Mock REST server for testing"""
 
@@ -226,6 +911,12 @@ class RESTCatalogServer:
         self.no_permission_tables: List[str] = []
         self.table_token_store: Dict[str, "RESTToken"] = {}
         self.table_query_auth_store = {}
+        self.permission_store: Dict[str, PermissionAssignment] = {}
+        self.policy_store: Dict[str, Dict[str, DataPolicy]] = {}
+        self.table_identifiers: Dict[str, Identifier] = {}
+        self.query_principals: set = set()
+        self.management_principals: set = set()
+        self.no_management_permission_resources: set = set()
 
         # Initialize mock catalog (simplified)
         self.data_path = data_path
@@ -399,11 +1090,17 @@ class RESTCatalogServer:
                               self.table_latest_snapshot_store, self.table_partitions_store):
                     if source_name in store:
                         store[destination_name] = store.pop(source_name)
+                self._rename_table_access(source_table, destination_table)
                 return self._mock_response("", 200)
 
             # Global functions endpoint (catalog-scoped)
             if resource_path == self.resource_paths.functions() and method == "GET":
                 return self._functions_globally_handle(parameters)
+
+            if resource_path in (self.resource_paths.permissions(),
+                                 self.resource_paths.grant_permission(),
+                                 self.resource_paths.revoke_permission()):
+                return self._permissions_handle(method, resource_path, data, parameters)
 
             database = resource_path.split("/")[4]
             # Database-specific endpoints
@@ -412,6 +1109,12 @@ class RESTCatalogServer:
                 # Extract database name and resource path
                 path_parts = resource_path[len(self.database_uri) + 1:].split('/')
                 database_name = RESTUtil.decode_string(path_parts[0])
+
+                if len(path_parts) in (4, 5) and path_parts[1] == ResourcePaths.TABLES \
+                        and path_parts[3] == ResourcePaths.POLICIES and path_parts[4:] in ([], ['drop']):
+                    return self._policies_handle(
+                        method, data, Identifier.create(database_name, RESTUtil.decode_string(path_parts[2])),
+                        parameters, len(path_parts) == 5)
 
                 # Check database permissions
                 if database_name in self.no_permission_databases:
@@ -561,6 +1264,8 @@ class RESTCatalogServer:
             elif operation == "token":
                 return self._table_token_handle(method, lookup_identifier)
             elif operation == "auth":
+                if branch_part is not None:
+                    self._branch_table_metadata(lookup_identifier, branch_part)
                 return self._table_query_auth_handle(method, data, lookup_identifier)
             elif operation == "rollback":
                 return self._table_rollback_handle(method, data, lookup_identifier)
@@ -584,12 +1289,266 @@ class RESTCatalogServer:
         elif len(path_parts) == 6 and path_parts[3] == ResourcePaths.BRANCHES:
             branch_name = RESTUtil.decode_string(path_parts[4])
             sub = path_parts[5]
-            if sub == ResourcePaths.RENAME:
-                return self._branch_rename_handle(method, data, lookup_identifier, branch_name)
             if sub == ResourcePaths.FORWARD:
                 return self._branch_forward_handle(method, lookup_identifier, branch_name)
             return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+
+    def set_query_principals(self, *principals: str) -> None:
+        self.query_principals = set(principals)
+
+    def register_management_principal(self, *principals: str) -> None:
+        self.management_principals.update(principals)
+
+    def deny_management_permission(self, resource: PermissionResource) -> None:
+        self.no_management_permission_resources.add(resource)
+
+    def _denied_management(self, resource: PermissionResource) -> Optional[Tuple[str, int]]:
+        if resource not in self.no_management_permission_resources:
+            return None
+        return self._mock_response(ErrorResponse(
+            resource.get_type().name, _resource_name(resource),
+            "The caller cannot manage permissions on this resource.", 403), 403)
+
+    def _missing_principal(self, principal: str) -> Optional[Tuple[str, int]]:
+        if principal in self.management_principals:
+            return None
+        return self._mock_response(ErrorResponse(
+            "PRINCIPAL", principal, "Permission principal does not exist.", 404), 404)
+
+    def _permissions_handle(self, method: str, resource_path: str, data: str,
+                            parameters: Dict[str, str]) -> Tuple[str, int]:
+        if method == "GET" and resource_path == self.resource_paths.permissions():
+            target = PermissionResource(
+                parameters.get("resourceType"), parameters.get("database"),
+                parameters.get("table"), parameters.get("function"), parameters.get("view"))
+            error = self._denied_management(target) or self._missing_permission_resource(target) \
+                or (self._missing_principal(parameters["principal"]) if "principal" in parameters else None)
+            if error is not None:
+                return error
+            matched = [assignment for assignment in self.permission_store.values()
+                       if assignment.get_resource() == target
+                       and _matches(parameters, "principal", assignment.get_principal())
+                       and _matches(parameters, "access", assignment.get_access())]
+            return self._mock_response(ListPermissionsResponse(
+                *self._management_page({_assignment_key(grant): grant for grant in matched}, parameters)), 200)
+        if method == "POST" and resource_path == self.resource_paths.grant_permission():
+            assignment = JSON.from_json(data, GrantPermissionRequest).assignment()
+            error = self._denied_management(assignment.get_resource()) \
+                or self._missing_permission_resource(assignment.get_resource()) \
+                or self._missing_principal(assignment.get_principal()) or self._invalid_column_grant(assignment)
+            if error is not None:
+                return error
+            self.permission_store[_assignment_key(assignment)] = assignment
+            return self._mock_response("", 200)
+        if method == "POST" and resource_path == self.resource_paths.revoke_permission():
+            request = JSON.from_json(data, RevokePermissionRequest)
+            error = self._denied_management(request.get_resource()) \
+                or self._missing_permission_resource(request.get_resource()) \
+                or self._missing_principal(request.get_principal())
+            if error is not None:
+                return error
+            self.permission_store.pop(_permission_key(
+                request.get_resource(), request.get_access(), request.get_principal()), None)
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+
+    def _missing_permission_resource(
+            self, resource: PermissionResource) -> Optional[Tuple[str, int]]:
+        resource_type = resource.get_type()
+        database = resource.get_database()
+        if resource_type in (ResourceType.CATALOG, ResourceType.CATALOG_ALL):
+            return None
+        exists = database in self.database_store
+        if resource_type in (ResourceType.TABLE, ResourceType.COLUMN):
+            exists = exists and Identifier.create(
+                database, resource.get_table()).get_full_name() in self.table_metadata_store
+        elif resource_type == ResourceType.FUNCTION:
+            exists = exists and "{}.{}".format(
+                database, resource.get_function()) in self.function_store
+        elif resource_type == ResourceType.VIEW:
+            exists = False
+        if exists:
+            return None
+        return self._mock_response(ErrorResponse(
+            resource_type.name, _resource_name(resource),
+            "Permission resource does not exist.", 404), 404)
+
+    def _invalid_column_grant(self, assignment: PermissionAssignment) -> Optional[Tuple[str, int]]:
+        resource = assignment.get_resource()
+        if resource.get_type() != ResourceType.COLUMN:
+            return None
+        identifier = Identifier.create(resource.get_database(), resource.get_table())
+        schema = self.table_metadata_store[identifier.get_full_name()].schema
+        if self.branch_store.get(identifier.get_full_name()):
+            return self._mock_response(ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE, _resource_name(resource),
+                "Column permissions are not supported on tables with branches.", 400), 400)
+        if not _query_auth_enabled(schema):
+            return self._mock_response(ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE, _resource_name(resource),
+                "Column permissions require query-auth.enabled=true.", 409), 409)
+        names = {field.name for field in schema.fields}
+        for column in _granted_columns(assignment):
+            if column not in names:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_COLUMN, column,
+                    "Permission column does not exist.", 404), 404)
+        return None
+
+    def _restricted(self, identifier: Identifier, metadata: TableMetadata) -> bool:
+        return bool(self.policy_store.get(metadata.uuid or identifier.get_full_name())
+                    or self._column_grants(identifier))
+
+    def _column_grants(self, identifier: Identifier) -> List[PermissionAssignment]:
+        return [assignment for assignment in self.permission_store.values()
+                if assignment.get_resource().get_type() == ResourceType.COLUMN
+                and _on_table(assignment.get_resource(), identifier)]
+
+    def _policies_handle(self, method: str, data: str, identifier: Identifier,
+                         parameters: Dict[str, str], drop: bool) -> Tuple[str, int]:
+        resource = PermissionResource(
+            ResourceType.TABLE, identifier.get_database_name(), identifier.get_object_name())
+        denied = self._denied_management(resource)
+        if denied is not None:
+            return denied
+        metadata = self.table_metadata_store.get(identifier.get_full_name())
+        if metadata is None:
+            return self._missing_permission_resource(resource)
+        policies = self._table_policies(identifier, metadata)
+        if method == "GET" and not drop:
+            unknown = self._missing_principal(parameters["principal"]) if "principal" in parameters else None
+            if unknown is not None:
+                return unknown
+            matched = [DataPolicy(resource, policy.get_row_filter(), policy.get_column_mask(),
+                                  policy.get_principal())
+                       for policy in policies.values() if _matches_policy(policy, parameters)]
+            return self._mock_response(ListPoliciesResponse(
+                *self._management_page({_policy_key(policy): policy for policy in matched}, parameters)), 200)
+        if method == "POST" and not drop:
+            policy = JSON.from_json(data, PolicyRequest).policy(resource)
+            if self.branch_store.get(identifier.get_full_name()):
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_TABLE, identifier.get_full_name(),
+                    "Data policies are not supported on tables with branches.", 400), 400)
+            if not _query_auth_enabled(metadata.schema):
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_TABLE, identifier.get_full_name(),
+                    "Data policies require the target table option query-auth.enabled=true.",
+                    409), 409)
+            unknown = self._missing_principal(policy.get_principal())
+            if unknown is not None:
+                return unknown
+            identity = _policy_identity(policy)
+            try:
+                missing = sorted(_policy_columns(policy) - {field.name for field in metadata.schema.fields})
+                error = "Policy column {} does not exist in table {}.".format(
+                    missing[0], identifier.get_full_name()) if missing else _policy_type_error(policy, metadata.schema)
+            except Exception as e:
+                error = "Invalid policy: {}".format(e)
+            if error:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity), error, 400), 400)
+            try:
+                canonical = _canonical_policy(policy, metadata.schema)
+            except _UnsupportedConversion as e:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity), str(e), 400), 400)
+            if _cursor_key(*identity) in policies:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity),
+                    "Policy already exists.", 409), 409)
+            policies[_cursor_key(*identity)] = canonical
+            return self._mock_response("", 200)
+        if method == "POST" and drop:
+            request = JSON.from_json(data, DropPolicyRequest)
+            identity = (request.get_type().name, request.get_principal(), request.get_column())
+            if policies.pop(_cursor_key(*identity), None) is None:
+                return self._mock_response(ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_POLICY, _policy_name(*identity),
+                    "Policy does not exist.", 404), 404)
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+
+    def _remove_permissions(self, matches) -> None:
+        for key in [key for key, assignment in self.permission_store.items()
+                    if matches(assignment.get_resource())]:
+            del self.permission_store[key]
+
+    def _drop_table_access(self, identifier: Identifier, metadata: TableMetadata) -> None:
+        for branch in self.branch_store.pop(identifier.get_full_name(), ()):
+            manager = self._schema_manager(identifier, branch)
+            manager.file_io.delete(manager.branch_path, recursive=True)
+        if not metadata.is_external:
+            manager = self._schema_manager(identifier)
+            manager.file_io.delete(manager.table_path, recursive=True)
+        self.policy_store.pop(metadata.uuid or identifier.get_full_name(), None)
+        self.table_identifiers.pop(identifier.get_full_name(), None)
+        self._remove_permissions(lambda resource: _on_table(resource, identifier))
+
+    def _table_identifier(self, name: str) -> Identifier:
+        return self.table_identifiers.get(name) or Identifier.from_string(name)
+
+    def _rename_table_access(self, source: Identifier, destination: Identifier) -> None:
+        self.table_identifiers.pop(source.get_full_name(), None)
+        self.table_identifiers[destination.get_full_name()] = destination
+        moved = [assignment for assignment in self.permission_store.values()
+                 if _on_table(assignment.get_resource(), source)]
+        self._remove_permissions(lambda resource: _on_table(resource, source))
+        for assignment in moved:
+            renamed = PermissionAssignment(
+                PermissionResource(assignment.get_resource().get_type(),
+                                   destination.get_database_name(), destination.get_table_name()),
+                assignment.get_access(), assignment.get_principal(),
+                assignment.get_columns(), assignment.get_expire_time())
+            self.permission_store[_assignment_key(renamed)] = renamed
+        metadata = self.table_metadata_store[destination.get_full_name()]
+        source_key = metadata.uuid or source.get_full_name()
+        if source_key in self.policy_store:
+            policies = self.policy_store.pop(source_key)
+            self._table_policies(destination, metadata).update(policies)
+
+    def _table_policies(self, identifier: Identifier,
+                        metadata: TableMetadata) -> Dict[str, DataPolicy]:
+        return self.policy_store.setdefault(metadata.uuid or identifier.get_full_name(), {})
+
+    def _check_column_grants(self, identifier: Identifier, select: Optional[List[str]]) -> None:
+        fields = [field.name for field in self.table_metadata_store[identifier.get_full_name()].schema.fields]
+        grants = [grant for grant in self._column_grants(identifier)
+                  if grant.get_principal() in self.query_principals and not _expired(grant)]
+        if grants:
+            included = set(fields)
+            for grant in grants:
+                columns = set(_granted_columns(grant))
+                if grant.get_columns().get_column_names() is not None:
+                    included &= columns
+                else:
+                    included -= columns
+            if any(column not in included for column in (fields if select is None else select)):
+                raise TableNoPermissionException(identifier)
+
+    def _policy_rules(self, identifier: Identifier) -> Tuple[Optional[List[str]], Optional[Dict[str, str]]]:
+        metadata = self.table_metadata_store[identifier.get_full_name()]
+        policies = self._table_policies(identifier, metadata)
+        names = {field.name for field in metadata.schema.fields}
+        applied, masked = [], set()
+        for key in sorted(policies):
+            policy = policies[key]
+            if policy.get_principal() not in self.query_principals:
+                continue
+            try:
+                invalid = _policy_columns(policy) - names or _policy_type_error(policy, metadata.schema)
+            except Exception:
+                invalid = True
+            mask = policy.get_column_mask()
+            if invalid or (mask is not None and mask.get_on_column() in masked):
+                raise TableNoPermissionException(identifier)
+            masked |= {mask.get_on_column()} if mask is not None else set()
+            applied.append(_canonical_policy(policy, metadata.schema))
+        filters = [policy.get_row_filter().get_predicate() for policy in applied if policy.get_row_filter()]
+        masks = {policy.get_column_mask().get_on_column(): policy.get_column_mask().get_transform()
+                 for policy in applied if policy.get_column_mask()}
+        return filters or None, masks or None
 
     # ======================= Function Handlers ===============================
 
@@ -651,6 +1610,10 @@ class RESTCatalogServer:
             if key not in self.function_store:
                 raise FunctionNotExistException(identifier)
             del self.function_store[key]
+            self._remove_permissions(
+                lambda resource: resource.get_type() == ResourceType.FUNCTION
+                and resource.get_database() == identifier.get_database_name()
+                and resource.get_function() == identifier.get_object_name())
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
@@ -910,17 +1873,19 @@ class RESTCatalogServer:
             if request.branch in store:
                 raise BranchAlreadyExistException(request.branch)
 
-            schema_id = self.table_metadata_store[identifier.get_full_name()].schema.id
+            metadata = self.table_metadata_store[identifier.get_full_name()]
+            schema_id, snapshot = metadata.schema.id, None
             if request.from_tag is not None:
                 tags = self.tag_store.get(identifier.get_full_name(), {})
                 if request.from_tag not in tags:
                     raise TagNotExistException(request.from_tag)
                 snapshot = tags[request.from_tag].snapshot
-                if snapshot is not None:
-                    schema_id = snapshot.schema_id
-                    self._write_snapshot_files(
-                        identifier, snapshot, None, request.branch)
+                schema_id = schema_id if snapshot is None else snapshot.schema_id
+            if self._restricted(identifier, metadata):
+                raise ValueError("Tables with data policies or column permissions cannot have branches.")
             manager = self._schema_manager(identifier)
+            if snapshot is not None:
+                self._write_snapshot_files(identifier, snapshot, None, request.branch)
             target = manager.copy_with_branch(request.branch)
             for schema in manager.list_all():
                 if schema.id <= schema_id:
@@ -951,28 +1916,6 @@ class RESTCatalogServer:
             store.discard(branch_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-
-    def _branch_rename_handle(self, method: str, data: str, identifier: Identifier,
-                              from_branch: str) -> Tuple[str, int]:
-        if method != "POST":
-            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-        if identifier.get_full_name() not in self.table_metadata_store:
-            raise TableNotExistException(identifier)
-
-        store = self.branch_store.setdefault(identifier.get_full_name(), set())
-        if from_branch not in store:
-            raise BranchNotExistException(from_branch)
-        request = JSON.from_json(data, RenameBranchRequest)
-        self._validate_branch_name(from_branch)
-        self._validate_branch_name(request.to_branch)
-        if request.to_branch in store:
-            raise BranchAlreadyExistException(request.to_branch)
-        source = self._schema_manager(identifier, from_branch)
-        target = self._schema_manager(identifier, request.to_branch)
-        Path(source.branch_path).rename(target.branch_path)
-        store.discard(from_branch)
-        store.add(request.to_branch)
-        return self._mock_response("", 200)
 
     def _branch_forward_handle(self, method: str, identifier: Identifier,
                                branch_name: str) -> Tuple[str, int]:
@@ -1033,6 +1976,12 @@ class RESTCatalogServer:
 
         elif method == "DELETE":
             del self.database_store[database_name]
+            for name in [name for name in self.table_metadata_store
+                         if self._table_identifier(name).get_database_name() == database_name]:
+                self._drop_table_access(self._table_identifier(name), self.table_metadata_store.pop(name))
+                self.table_latest_snapshot_store.pop(name, None)
+                self.table_partitions_store.pop(name, None)
+            self._remove_permissions(lambda resource: resource.get_database() == database_name)
             return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
@@ -1055,6 +2004,7 @@ class RESTCatalogServer:
                     create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
+                self.table_identifiers[create_table.identifier.get_full_name()] = create_table.identifier
                 table_dir = (
                     Path(self.data_path) / self.warehouse / database_name /
                     create_table.identifier.get_object_name() / 'schema'
@@ -1087,10 +2037,12 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
         elif method == "DELETE":
             # Drop table
-            if identifier.get_full_name() not in self.table_metadata_store:
-                raise TableNotExistException(identifier)
+            if identifier.get_full_name() not in self.table_metadata_store \
+                    or (response_identifier or identifier).get_branch_name() is not None:
+                raise TableNotExistException(response_identifier or identifier)
             else:
-                del self.table_metadata_store[identifier.get_full_name()]
+                self._drop_table_access(
+                    identifier, self.table_metadata_store.pop(identifier.get_full_name()))
             if identifier.get_full_name() in self.table_latest_snapshot_store:
                 del self.table_latest_snapshot_store[identifier.get_full_name()]
             if identifier.get_full_name() in self.table_partitions_store:
@@ -1105,10 +2057,14 @@ class RESTCatalogServer:
             return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
         if identifier.get_full_name() not in self.table_metadata_store:
             raise TableNotExistException(identifier)
+        select = json.loads(data).get('select')
+        self._check_column_grants(identifier, select)
         from pypaimon.api.api_response import AuthTableQueryResponse
-        response = self.table_query_auth_store.get(identifier.get_full_name(), AuthTableQueryResponse())
-        if callable(response):
-            response = response(json.loads(data).get('select'))
+        response = self.table_query_auth_store.get(identifier.get_full_name())
+        if response is None:
+            response = AuthTableQueryResponse(*self._policy_rules(identifier))
+        elif callable(response):
+            response = response(select)
         return self._mock_response(response, 200)
 
     def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
@@ -1439,6 +2395,14 @@ class RESTCatalogServer:
                 raise ValueError(f"Invalid maxResults value: {max_results_str}")
         return DEFAULT_MAX_RESULTS
 
+    def _management_page(self, entities: Dict[str, Any],
+                         parameters: Dict[str, str]) -> Tuple[List[Any], Optional[str]]:
+        token = parameters.get(PAGE_TOKEN)
+        keys = sorted(key for key in entities if not token or key > token)
+        size = int(parameters[MAX_RESULTS]) if parameters.get(MAX_RESULTS) else DEFAULT_MAX_RESULTS
+        page = keys[:max(1, min(size, ListPermissionsRequest.MAX_PAGE_SIZE))]
+        return [entities[key] for key in page], page[-1] if len(keys) > len(page) else None
+
     def _build_paged_entities(self, entities: List[Any], max_results: int,
                               page_token: Optional[str], desc: bool = False) -> PagedList:
         """Build paged entities"""
@@ -1537,6 +2501,11 @@ class RESTCatalogServer:
                 schema_changes.append(change)
 
         schema_manager = self._schema_manager(identifier, branch)
+        main = branch is None or branch == 'main'
+        base = Identifier.create(identifier.get_database_name(), identifier.get_table_name())
+        if main:
+            self._validate_access_for_schema(
+                base, table_metadata, schema_manager._generate_table_schema(table_metadata.schema, schema_changes))
         new_schema = schema_manager.commit_changes(schema_changes)
 
         updated_metadata = TableMetadata(
@@ -1544,9 +2513,55 @@ class RESTCatalogServer:
             is_external=table_metadata.is_external,
             uuid=table_metadata.uuid
         )
-        if branch is None or branch == 'main':
-            base = Identifier.create(identifier.get_database_name(), identifier.get_table_name())
+        if main:
+            self._evolve_column_grants(base, table_metadata.schema, new_schema)
             self.table_metadata_store[base.get_full_name()] = updated_metadata
+
+    def _validate_access_for_schema(self, identifier: Identifier, metadata: TableMetadata,
+                                    schema: TableSchema) -> None:
+        name = identifier.get_full_name()
+        policies = self.policy_store.get(metadata.uuid or name, {})
+        if policies and not _query_auth_enabled(schema):
+            raise ValueError(
+                "Cannot disable query-auth.enabled while table {} has data policies.".format(name))
+        for policy in policies.values():
+            missing = _moved_columns(policy, metadata.schema, schema)
+            if missing:
+                raise ValueError("Cannot remove or rename policy column {} from table {}.".format(missing[0], name))
+            mismatch = _policy_type_error(policy, schema)
+            if mismatch:
+                raise ValueError(mismatch)
+            try:
+                _canonical_policy(policy, schema)
+            except Exception as e:
+                raise ValueError(str(e)) from e
+        grants = self._column_grants(identifier)
+        if grants and not _query_auth_enabled(schema):
+            raise ValueError(
+                "Cannot disable query-auth.enabled while table {} has column permissions.".format(name))
+        renamed = _renamed_columns(metadata.schema, schema)
+        for grant in grants:
+            if grant.get_columns().get_column_names() is not None \
+                    and not any(renamed.get(column) for column in _granted_columns(grant)):
+                raise ValueError(
+                    "Cannot drop every allowed column while table {} has column permissions."
+                    .format(name))
+
+    def _evolve_column_grants(self, identifier: Identifier, previous: TableSchema,
+                              current: TableSchema) -> None:
+        renamed = _renamed_columns(previous, current)
+        for grant in self._column_grants(identifier):
+            del self.permission_store[_assignment_key(grant)]
+            evolved = [renamed[column] for column in _granted_columns(grant) if renamed.get(column)]
+            if not evolved:
+                continue
+            columns = (PermissionColumns(column_names=evolved)
+                       if grant.get_columns().get_column_names() is not None
+                       else PermissionColumns(excluded_column_names=evolved))
+            evolved_grant = PermissionAssignment(
+                grant.get_resource(), grant.get_access(), grant.get_principal(),
+                columns, grant.get_expire_time())
+            self.permission_store[_assignment_key(evolved_grant)] = evolved_grant
 
     def _get_file_io(self):
         """Get FileIO instance for SchemaManager"""
@@ -1593,7 +2608,7 @@ class RESTCatalogServer:
         tables = []
 
         for full_name, metadata in self.table_metadata_store.items():
-            identifier = Identifier.from_string(full_name)
+            identifier = self._table_identifier(full_name)
             metadata_table_type = (
                 metadata.schema.options.get(TYPE, "table")
                 if metadata and metadata.schema and metadata.schema.options

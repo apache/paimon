@@ -19,10 +19,12 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -77,6 +79,15 @@ public interface Blob {
 
     static BlobView fromView(BlobViewStruct viewStruct) {
         return new BlobView(viewStruct);
+    }
+
+    static BlobView fromView(Identifier identifier, int fieldId, long rowId) {
+        return fromView(new BlobViewStruct(identifier, fieldId, rowId));
+    }
+
+    static BlobView fromView(
+            Identifier identifier, RowType upstreamRowType, String fieldName, long rowId) {
+        return fromView(BlobViewStruct.of(identifier, upstreamRowType, fieldName, rowId));
     }
 
     static Blob fromBytes(

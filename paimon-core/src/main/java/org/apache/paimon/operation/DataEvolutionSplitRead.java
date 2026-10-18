@@ -19,10 +19,14 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
+import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
@@ -30,6 +34,7 @@ import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.bitmap.ApplyBitmapIndexRecordReader;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FileMetadataCache;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
@@ -61,10 +66,15 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
+import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RoaringBitmap32;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -100,10 +110,12 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * A union {@link SplitRead} to read multiple inner files to merge columns.
  *
  * <p>Filters can only be pushed down where they can not interfere with the column merging: a file
- * read without merging gets both the file index and the format level push down, while an eligible
- * merged group shares one bitmap selection across all aligned field readers. Other merged groups
- * only use the file index to skip the whole group, as dropping rows in one reader would break the
- * positional alignment between them.
+ * read without merging gets both the file index and the format level push down. Dropping rows in
+ * only one of the merged readers of a group would break the positional alignment between them, so
+ * an eligible merged group instead shares one selection across all its aligned field readers: the
+ * rows of the bitmap file indexes, and the rows which may match according to the file metadata of
+ * the files winning the filtered fields, see {@link #candidateRanges}. Other merged groups only use
+ * the file index to skip the whole group.
  *
  * <p>Only a filter whose every field belongs to the read type is pushed down, see {@link
  * #readTypeFilters}, and only to the files that wrote those fields, see {@link #fileFilters}.
@@ -111,6 +123,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * <p>TODO: Optimize implementation of this class.
  */
 public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionSplitRead.class);
 
     private static final String ROW_SIDECAR_FORMAT = "row";
 
@@ -122,9 +136,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     // Kept apart from formatReaderMappings: the single file path pushes per file filters into the
     // mapping, so it must not share entries with the merge path, which pushes none.
     private final Map<SingleFileKey, FormatReaderMapping> singleFileReaderMappings;
+    // Mappings computing candidate rows of a merged group, they carry the filters as well.
+    private final Map<SingleFileKey, FormatReaderMapping> candidateReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
     private final CoreOptions coreOptions;
     private final boolean fileIndexReadEnabled;
+    private final boolean statsPushDownEnabled;
 
     protected RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -147,7 +164,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.singleFileReaderMappings = new HashMap<>();
+        this.candidateReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
+        this.statsPushDownEnabled = coreOptions.dataEvolutionMergedReadStatsPushdownEnabled();
         this.readRowType = rowType;
     }
 
@@ -174,6 +193,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             // the single file mappings carry the filters they were built with, and a read can be
             // reconfigured after it created readers, see AppendTableRead#innerWithFilter
             singleFileReaderMappings.clear();
+            candidateReaderMappings.clear();
         }
         return this;
     }
@@ -212,7 +232,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     private RecordReader<InternalRow> createReader(
-            DataSplit dataSplit, List<Range> rowRanges, RowType readRowType) throws IOException {
+            DataSplit dataSplit, List<Range> rowRanges, RowType outputRowType) throws IOException {
+        // Partition values belong to the split and may be absent from every physical file.
+        // Plan and merge only data columns, then restore partitions in the requested order.
+        Pair<Pair<int[], RowType>, List<DataField>> partitionMapping =
+                PartitionUtils.getPartitionMapping2fieldsWithoutPartition(
+                        schema.partitionKeys(),
+                        outputRowType.getFields(),
+                        schema.logicalPartitionType());
+        RowType readRowType = new RowType(partitionMapping.getRight());
         List<DataFileMeta> files = dataSplit.dataFiles();
 
         List<DeletionFile> deletionFiles = dataSplit.deletionFiles().orElse(null);
@@ -228,7 +256,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         // the suppliers below run lazily, so take the filters now, the same way the read type is
         // already taken by the caller
-        List<Predicate> filters = readTypeFilters(this.filters, readRowType);
+        List<Predicate> filters = readTypeFilters(this.filters, outputRowType);
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
@@ -305,6 +333,27 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                 groupSelection =
                                         buildGroupSelection(needMergeFiles, fileIndexResults);
                             }
+                            FileMetadataCache metadataCache = new FileMetadataCache();
+                            List<Range> candidates =
+                                    candidateRanges(
+                                            filters,
+                                            needMergeFiles,
+                                            dataFilePathFactory,
+                                            metadataCache);
+                            // Candidates restrict the group selection, which every file of the
+                            // group reads.
+                            if (candidates != null) {
+                                if (candidates.isEmpty()) {
+                                    return new EmptyFileRecordReader<>();
+                                }
+                                groupSelection =
+                                        restrictToCandidates(
+                                                groupSelection, needMergeFiles.get(0), candidates);
+                                if (isSelectionEmpty(
+                                        needMergeFiles.get(0), rowRanges, groupSelection)) {
+                                    return new EmptyFileRecordReader<>();
+                                }
+                            }
                             return createUnionReader(
                                     needMergeFiles,
                                     partition,
@@ -312,12 +361,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     rowRanges,
                                     readRowType,
                                     deletionVector,
-                                    groupSelection);
+                                    groupSelection,
+                                    metadataCache);
                         });
             }
         }
 
-        return ConcatRecordReader.create(suppliers);
+        RecordReader<InternalRow> reader = ConcatRecordReader.create(suppliers);
+        PartitionInfo partitionInfo = PartitionUtils.create(partitionMapping.getLeft(), partition);
+        if (partitionInfo != null) {
+            PartitionSettedRow partitionRow = PartitionSettedRow.from(partitionInfo);
+            return reader.transform(partitionRow::replaceRow);
+        }
+        return reader;
     }
 
     private RecordReader<InternalRow> createReader(IndexedSplit indexedSplit) throws IOException {
@@ -336,7 +392,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         List<DataEvolutionVectorReadPlanner.ReadRange> vectorRanges =
                 DataEvolutionVectorReadPlanner.plan(
@@ -383,6 +440,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         readRanges,
                                         readRowType,
                                         deletionVector,
+                                        null,
                                         null));
             }
             return ConcatRecordReader.create(suppliers);
@@ -408,7 +466,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 deletionVector,
-                groupSelection);
+                groupSelection,
+                metadataCache);
     }
 
     private RecordReader<InternalRow> createUnionReader(
@@ -419,7 +478,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
 
         long rowCount = fieldsFiles.get(0).rowCount();
@@ -465,11 +525,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     fieldsFiles.get(0),
                     bunchDataSchemas[0],
                     dataFilePathFactory,
-                    formatBuilder,
+                    nestedFieldEnabled,
                     rowRanges,
                     readRowType,
                     deletionVector,
-                    groupSelection);
+                    groupSelection,
+                    metadataCache);
         }
 
         // Build the per-bunch readers from the planned partial read row types.
@@ -481,20 +542,23 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
             FieldBunch bunch = fieldsFiles.get(i);
             DataFileMeta firstFile = bunch.files().get(0);
-            FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
+            FileReadTarget readTarget =
+                    readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
             String formatIdentifier = readTarget.formatIdentifier;
+            Builder targetFormatBuilder =
+                    readTarget.isPositionalRowFormat()
+                            ? positionalRowFormatBuilder(readRowType, null, nestedFieldEnabled)
+                            : formatBuilder;
             long schemaId = firstFile.schemaId();
             TableSchema dataSchema = bunchDataSchemas[i];
             RowType partialReadRowType = new RowType(readFields);
             List<String> cacheKey =
-                    nestedFieldEnabled
-                            ? readerCacheKey(readFields, dataSchema.fields(), true)
-                            : readFields.stream().map(DataField::name).collect(Collectors.toList());
+                    readerCacheKey(readFields, dataSchema.fields(), nestedFieldEnabled);
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(
                             new FormatKey(schemaId, formatIdentifier, cacheKey),
                             key ->
-                                    formatBuilder.build(
+                                    targetFormatBuilder.build(
                                             formatIdentifier,
                                             schema,
                                             dataSchema,
@@ -510,7 +574,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     rowRanges,
                                     partialReadRowType,
                                     deletionVector,
-                                    groupSelection));
+                                    groupSelection,
+                                    metadataCache));
         }
 
         return nestedFieldEnabled
@@ -525,17 +590,24 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FieldBunch bunch,
             TableSchema dataSchema,
             DataFilePathFactory dataFilePathFactory,
-            Builder formatBuilder,
+            boolean nestedFieldEnabled,
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         DataFileMeta firstFile = bunch.files().get(0);
+        FileReadTarget readTarget =
+                readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
+        Builder formatBuilder =
+                readTarget.isPositionalRowFormat()
+                        ? positionalRowFormatBuilder(readRowType, null, nestedFieldEnabled)
+                        : formatBuilder(readRowType, null, nestedFieldEnabled);
         // Use the physical schema: the full table schema may declare columns this file never wrote.
         FormatReaderMapping mapping =
                 formatBuilder.build(
-                        readTarget(firstFile, dataFilePathFactory, rowRanges).formatIdentifier,
+                        readTarget.formatIdentifier,
                         schema,
                         dataSchema,
                         readRowType.getFields(),
@@ -548,7 +620,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 deletionVector,
-                groupSelection);
+                groupSelection,
+                metadataCache);
     }
 
     private boolean nestedFieldEnabledFor(List<DataFileMeta> files) {
@@ -614,7 +687,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         if (bunch instanceof DataBunch) {
             // for data bunch, directly read the single file
@@ -626,7 +700,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     rowRanges,
                     readRowType,
                     deletionVector,
-                    groupSelection);
+                    groupSelection,
+                    metadataCache);
         } else if (bunch instanceof VectorFileBunch) {
             // for vector bunch, sequential read all data files and concat them
             return sequentialReadFiles(
@@ -688,7 +763,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             dataFilePathFactory.toPath(file),
                                             file.fileSize()),
                                     deletionVector,
-                                    groupSelection));
+                                    groupSelection,
+                                    null));
         }
         return ConcatRecordReader.create(readerSuppliers);
     }
@@ -732,27 +808,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable DeletionVectorWithRange deletionVector,
             @Nullable FileIndexResult precomputedFileIndexResult)
             throws IOException {
-        FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
-        String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
-        TableSchema dataSchema = schemaId == schema.id() ? schema : schemaFetcher.apply(schemaId);
+        TableSchema fileSchema = schemaId == schema.id() ? schema : schemaFetcher.apply(schemaId);
+        TableSchema physicalDataSchema = fileSchema.dataFileSchema(file.writeCols());
         boolean nestedFieldEnabled = nestedFieldEnabledFor(Collections.singletonList(file));
 
         // no column merge here, so the filters this file can answer reach both the file index and
         // the format reader
         List<Predicate> fileFilters = fileFilters(filters, file);
-        FormatReaderMapping formatReaderMapping =
-                singleFileReaderMappings.computeIfAbsent(
-                        new SingleFileKey(
-                                schemaId,
-                                formatIdentifier,
-                                file.writeCols(),
-                                readRowType,
-                                nestedFieldEnabled),
-                        key ->
-                                formatBuilder(readRowType, fileFilters, nestedFieldEnabled)
-                                        .build(formatIdentifier, schema, dataSchema));
-
         FileIndexResult fileIndexResult = precomputedFileIndexResult;
         if (fileIndexResult == null && fileIndexReadEnabled) {
             DeletionVector dv = deletionVector == null ? null : deletionVector.deletionVector;
@@ -764,8 +827,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
-                            dataSchema,
-                            devolveFilters(fileFilters, dataSchema),
+                            physicalDataSchema,
+                            devolveFilters(fileFilters, physicalDataSchema),
                             null,
                             null,
                             dataFilePathFactory,
@@ -777,6 +840,27 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
+        FileReadTarget readTarget =
+                readTarget(file, dataFilePathFactory, rowRanges, fileIndexResult);
+        String formatIdentifier = readTarget.formatIdentifier;
+        boolean positionalRowFormat = readTarget.isPositionalRowFormat();
+        Builder targetFormatBuilder =
+                positionalRowFormat
+                        ? positionalRowFormatBuilder(readRowType, fileFilters, nestedFieldEnabled)
+                        : formatBuilder(readRowType, fileFilters, nestedFieldEnabled);
+        TableSchema readerDataSchema = positionalRowFormat ? physicalDataSchema : fileSchema;
+        FormatReaderMapping formatReaderMapping =
+                singleFileReaderMappings.computeIfAbsent(
+                        new SingleFileKey(
+                                schemaId,
+                                formatIdentifier,
+                                file.writeCols(),
+                                readRowType,
+                                nestedFieldEnabled),
+                        key ->
+                                targetFormatBuilder.build(
+                                        formatIdentifier, schema, readerDataSchema));
+
         return createFileReader(
                 partition,
                 file,
@@ -785,7 +869,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType,
                 readTarget,
                 deletionVector,
-                fileIndexResult);
+                fileIndexResult,
+                null);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -805,6 +890,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 deletionVector,
+                null,
                 null);
     }
 
@@ -816,7 +902,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable BitmapIndexResult groupSelection)
+            @Nullable BitmapIndexResult groupSelection,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         return createFileReader(
                 partition,
@@ -824,9 +911,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 formatReaderMapping,
                 rowRanges,
                 readRowType,
-                readTarget(file, dataFilePathFactory, rowRanges),
+                readTarget(file, dataFilePathFactory, rowRanges, groupSelection),
                 deletionVector,
-                groupSelection);
+                groupSelection,
+                metadataCache);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -837,7 +925,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             RowType readRowType,
             FileReadTarget readTarget,
             @Nullable DeletionVectorWithRange deletionVector,
-            @Nullable FileIndexResult fileIndexResult)
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable FileMetadataCache metadataCache)
             throws IOException {
         RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         BitmapIndexResult bitmapIndexResult =
@@ -857,7 +946,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
-                        fileIO, readTarget.path, readTarget.fileSize, selection, readBatchSizer);
+                        fileIO,
+                        readTarget.path,
+                        readTarget.fileSize,
+                        selection,
+                        readBatchSizer,
+                        metadataCache);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,
@@ -866,7 +960,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         coreOptions.scanIgnoreCorruptFile(),
                         coreOptions.scanIgnoreLostFile(),
                         formatReaderMapping.getIndexMapping(),
-                        formatReaderMapping.getCastMapping(),
+                        trackingCastMapping(readTarget, formatReaderMapping),
                         PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
                         true,
                         file.firstRowId(),
@@ -880,6 +974,32 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         return applyDeletionVector(
                 fileRecordReader, file.nonNullRowIdRange(), rowRanges, deletionVector);
+    }
+
+    @Nullable
+    private CastFieldGetter[] trackingCastMapping(
+            FileReadTarget target, FormatReaderMapping mapping) {
+        CastFieldGetter[] casts = mapping.getCastMapping();
+        if (!target.isPositionalRowFormat()
+                || casts == null
+                || mapping.getSystemFields().isEmpty()) {
+            return casts;
+        }
+        // The physical schema omits tracking fields, but DataFileRecordReader supplies them
+        // before casting. Preserve those values without changing the cached cast mapping.
+        CastFieldGetter[] result = casts.clone();
+        for (DataField field :
+                new DataField[] {SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER}) {
+            Integer index = mapping.getSystemFields().get(field.name());
+            if (index != null) {
+                result[index] =
+                        new CastFieldGetter(
+                                InternalRowUtils.createNullCheckingFieldGetter(field.type(), index),
+                                CastExecutors.identityCastExecutor(),
+                                field.name());
+            }
+        }
+        return result;
     }
 
     private FileRecordReader<InternalRow> applyDeletionVector(
@@ -956,9 +1076,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      *
      * <p>Only normal data files are considered. Blob and vector-store files can cover only a subset
      * of the group range, so their indexes cannot prove that the whole group has no match. Files
-     * are visited newest first; {@code claimedFieldIds} prevents an older copy of an overwritten
-     * field from vetoing the group. The returned results are retained so a later deletion-vector
-     * pass can intersect them without reopening file-index sidecars.
+     * are visited newest first; only the fields a file wins may veto, see {@link #winningFieldIds},
+     * so an older copy of an overwritten field can not. The returned results are retained so a
+     * later deletion-vector pass can intersect them without reopening file-index sidecars.
      */
     private List<FileIndexResultEntry> evaluateFileIndexes(
             @Nullable List<Predicate> filters,
@@ -970,18 +1090,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         List<FileIndexResultEntry> results = new ArrayList<>();
-        Set<Integer> claimedFieldIds = new HashSet<>();
-        for (DataFileMeta file : files) {
-            if (isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())) {
-                continue;
-            }
-
+        for (Pair<DataFileMeta, Set<Integer>> winning : winningFieldIds(files)) {
+            DataFileMeta file = winning.getKey();
             TableSchema dataSchema =
                     schemaFetcher.apply(file.schemaId()).dataFileSchema(file.writeCols());
             // columns this file wrote but a newer file already won: their values here are stale
             Set<String> overwrittenCols = new HashSet<>();
             for (DataField field : dataSchema.fields()) {
-                if (!claimedFieldIds.add(field.id())) {
+                if (!winning.getValue().contains(field.id())) {
                     overwrittenCols.add(field.name());
                 }
             }
@@ -1002,6 +1118,171 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         return results;
+    }
+
+    /**
+     * The normal files of a merged group, newest first, each with the ids of the fields it wins,
+     * those no newer file of the group wrote. Blob and vector-store files are skipped, they can
+     * cover only a subset of the group range.
+     */
+    private List<Pair<DataFileMeta, Set<Integer>>> winningFieldIds(List<DataFileMeta> files) {
+        List<Pair<DataFileMeta, Set<Integer>>> result = new ArrayList<>();
+        Set<Integer> claimedFieldIds = new HashSet<>();
+        for (DataFileMeta file : files) {
+            if (isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())) {
+                continue;
+            }
+            Set<Integer> won = new HashSet<>();
+            for (DataField field :
+                    schemaFetcher
+                            .apply(file.schemaId())
+                            .dataFileSchema(file.writeCols())
+                            .fields()) {
+                if (claimedFieldIds.add(field.id())) {
+                    won.add(field.id());
+                }
+            }
+            result.add(Pair.of(file, won));
+        }
+        return result;
+    }
+
+    /**
+     * Row id ranges of a merged group which may satisfy the filters, or null when none can be
+     * excluded.
+     *
+     * <p>Each filter is evaluated against the metadata of the single file winning all of its
+     * fields, such as Parquet row group statistics and page indexes: an older copy of a field is
+     * stale and would exclude rows that do match. The ranges of the files are intersected and added
+     * to the selection shared by all files of the group, see {@link #restrictToCandidates}, so
+     * every file reads only these rows, which keeps the readers aligned.
+     *
+     * <p>Only a group of normal files sharing one row id range qualifies. The file metadata read
+     * here is cached in {@code metadataCache}, which the caller passes to the readers of the group
+     * so that they do not read it again.
+     */
+    @Nullable
+    private List<Range> candidateRanges(
+            @Nullable List<Predicate> filters,
+            List<DataFileMeta> files,
+            DataFilePathFactory dataFilePathFactory,
+            FileMetadataCache metadataCache) {
+        try {
+            return computeCandidateRanges(filters, files, dataFilePathFactory, metadataCache);
+        } catch (Exception e) {
+            // Pruning is only an optimization, any failure reads the whole group. Opening the files
+            // then reports a lost or corrupt one, respecting scan.ignore-lost-file and
+            // scan.ignore-corrupt-file, which the exceptions of the format are not meant for.
+            LOG.warn(
+                    "Failed to compute candidate rows of the group {}, reading the whole group.",
+                    files.get(0).nonNullRowIdRange(),
+                    e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private List<Range> computeCandidateRanges(
+            @Nullable List<Predicate> filters,
+            List<DataFileMeta> files,
+            DataFilePathFactory dataFilePathFactory,
+            FileMetadataCache metadataCache)
+            throws IOException {
+        if (!statsPushDownEnabled
+                || isNullOrEmpty(filters)
+                || !isNormalGroup(files)
+                || nestedFieldEnabledFor(files)) {
+            return null;
+        }
+
+        List<Range> candidates = null;
+        for (Pair<DataFileMeta, Set<Integer>> winning : winningFieldIds(files)) {
+            DataFileMeta file = winning.getKey();
+            Set<String> wonFields = new HashSet<>();
+            for (DataField field : schema.fields()) {
+                if (winning.getValue().contains(field.id())) {
+                    wonFields.add(field.name());
+                }
+            }
+            List<Predicate> fileFilters = filtersWithin(filters, wonFields);
+            if (isNullOrEmpty(fileFilters)) {
+                continue;
+            }
+
+            Set<String> filterFields = new HashSet<>();
+            fileFilters.forEach(filter -> filterFields.addAll(collectFieldNames(filter)));
+            RowType readType =
+                    new RowType(
+                            schema.fields().stream()
+                                    .filter(field -> filterFields.contains(field.name()))
+                                    .collect(Collectors.toList()));
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+            // The filters of the mapping are those of this read whose fields are all within the
+            // read type. They are determined by the key: the read type is the union of the fields
+            // of the file filters, and any filter within it is also within the fields the file
+            // wins, so it is one of the file filters, whatever read type the split was planned
+            // with. withFilter clears the mappings when the filters change.
+            FormatReaderMapping mapping =
+                    candidateReaderMappings.computeIfAbsent(
+                            new SingleFileKey(
+                                    file.schemaId(),
+                                    formatIdentifier,
+                                    file.writeCols(),
+                                    readType,
+                                    false),
+                            key ->
+                                    formatBuilder(readType, fileFilters, false)
+                                            .build(
+                                                    formatIdentifier,
+                                                    schema,
+                                                    schemaFetcher
+                                                            .apply(file.schemaId())
+                                                            .dataFileSchema(file.writeCols())));
+            List<Range> fileRanges =
+                    mapping.getReaderFactory()
+                            .candidateRowRanges(
+                                    new FormatReaderContext(
+                                            fileIO,
+                                            dataFilePathFactory.toPath(file),
+                                            file.fileSize(),
+                                            null,
+                                            null,
+                                            metadataCache));
+            if (fileRanges == null) {
+                continue;
+            }
+
+            long firstRowId = file.nonNullFirstRowId();
+            List<Range> rowIdRanges = new ArrayList<>(fileRanges.size());
+            for (Range range : fileRanges) {
+                rowIdRanges.add(new Range(firstRowId + range.from, firstRowId + range.to));
+            }
+            rowIdRanges = Range.sortAndMergeOverlap(rowIdRanges, true);
+            candidates = candidates == null ? rowIdRanges : Range.and(candidates, rowIdRanges);
+            if (candidates.isEmpty()) {
+                return candidates;
+            }
+        }
+
+        if (candidates == null
+                || (candidates.size() == 1
+                        && candidates.get(0).equals(files.get(0).nonNullRowIdRange()))) {
+            return null;
+        }
+        return candidates;
+    }
+
+    /** Whether all files are normal data files of the same row id range. */
+    private static boolean isNormalGroup(List<DataFileMeta> files) {
+        Range range = files.get(0).nonNullRowIdRange();
+        for (DataFileMeta file : files) {
+            if (isBlobFile(file.fileName())
+                    || isVectorStoreFile(file.fileName())
+                    || !range.equals(file.nonNullRowIdRange())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1059,6 +1340,25 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return selection;
     }
 
+    /**
+     * Restricts the selection shared by the files of a merged group to its candidate rows. The
+     * files share one row id range, so a row has the same position in all of them.
+     */
+    private static BitmapIndexResult restrictToCandidates(
+            @Nullable BitmapIndexResult selection, DataFileMeta file, List<Range> candidates) {
+        long firstRowId = file.nonNullFirstRowId();
+        RoaringBitmap32 positions = new RoaringBitmap32();
+        for (Range range : candidates) {
+            positions.or(
+                    RoaringBitmap32.bitmapOfRange(
+                            range.from - firstRowId, range.to - firstRowId + 1));
+        }
+        BitmapIndexResult candidateSelection = new BitmapIndexResult(() -> positions);
+        return selection == null
+                ? candidateSelection
+                : (BitmapIndexResult) selection.and(candidateSelection);
+    }
+
     /** Returns whether exact bitmap candidates and the requested row ranges are disjoint. */
     private static boolean isSelectionEmpty(
             DataFileMeta file,
@@ -1097,6 +1397,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType.getFields(),
                 // file has no row id and sequence number, they are in manifest entry
                 schema -> rowTypeWithRowTracking(schema.logicalRowType(), true, true).getFields(),
+                filters,
+                null,
+                null,
+                nestedFieldEnabled);
+    }
+
+    // Row sidecars and ordinary row-format data files decode against the physical write schema.
+    // Row tracking fields are supplied by DataFileRecordReader from the manifest entry.
+    private Builder positionalRowFormatBuilder(
+            RowType readRowType, @Nullable List<Predicate> filters, boolean nestedFieldEnabled) {
+        return new Builder(
+                formatDiscover,
+                readRowType.getFields(),
+                TableSchema::fields,
                 filters,
                 null,
                 null,
@@ -1198,13 +1512,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     private FileReadTarget readTarget(
-            DataFileMeta file, DataFilePathFactory dataFilePathFactory, List<Range> rowRanges)
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult)
             throws IOException {
         String rowSidecar = rowSidecarFileName(file);
         if (rowSidecar != null
                 && shouldReadRowSidecar(
                         file,
                         rowRanges,
+                        fileIndexResult,
                         coreOptions.dataEvolutionRowSidecarMaxSelectedRows(),
                         coreOptions.dataEvolutionRowSidecarMaxSelectionRatio())) {
             Path rowPath = dataFilePathFactory.toAlignedPath(rowSidecar, file);
@@ -1238,6 +1556,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return shouldReadRowSidecar(
                 file,
                 rowRanges,
+                null,
                 CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.defaultValue(),
                 CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.defaultValue());
     }
@@ -1248,16 +1567,24 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable List<Range> rowRanges,
             long maxSelectedRows,
             double maxSelectionRatio) {
-        if (rowRanges == null
-                || rowRanges.isEmpty()
-                || file.rowCount() <= 0
+        return shouldReadRowSidecar(file, rowRanges, null, maxSelectedRows, maxSelectionRatio);
+    }
+
+    @VisibleForTesting
+    static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        if (file.rowCount() <= 0
                 || isBlobFile(file.fileName())
                 || isVectorStoreFile(file.fileName())
                 || rowSidecarFileName(file) == null) {
             return false;
         }
 
-        long selectedRowCount = selectedRowCount(file, rowRanges);
+        long selectedRowCount = selectedRowCount(file, rowRanges, fileIndexResult);
         if (selectedRowCount <= 0 || selectedRowCount >= file.rowCount()) {
             return false;
         }
@@ -1281,6 +1608,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 .sum();
     }
 
+    private static long selectedRowCount(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult) {
+        if (fileIndexResult instanceof BitmapIndexResult) {
+            RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
+            RoaringBitmap32 rangeSelection = file.toFileSelection(rowRanges);
+            return rangeSelection == null
+                    ? indexSelection.getCardinality()
+                    : RoaringBitmap32.and(rangeSelection, indexSelection).getCardinality();
+        }
+        return isNullOrEmpty(rowRanges) ? file.rowCount() : selectedRowCount(file, rowRanges);
+    }
+
     private static boolean isRowSidecarFile(String fileName) {
         try {
             return ROW_SIDECAR_FORMAT.equals(DataFilePathFactory.formatIdentifier(fileName));
@@ -1299,6 +1640,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             this.formatIdentifier = formatIdentifier;
             this.path = path;
             this.fileSize = fileSize;
+        }
+
+        /**
+         * Sidecars and ordinary "row" data files use the same positional decoder and physical
+         * schema mapping. They can share a cache entry for the same physical and requested fields.
+         */
+        private boolean isPositionalRowFormat() {
+            return ROW_SIDECAR_FORMAT.equals(formatIdentifier);
         }
     }
 

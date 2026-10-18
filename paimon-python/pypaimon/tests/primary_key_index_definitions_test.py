@@ -111,10 +111,15 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                      .with_query("content", "paimon")
                      .with_limit(2))
 
-        self.assertIsInstance(vector.new_vector_search_scan(), PrimaryKeyVectorScan)
-        self.assertIsInstance(vector.new_vector_search_read(), PrimaryKeyVectorRead)
-        self.assertIsInstance(full_text.new_full_text_scan(), PrimaryKeyFullTextScan)
-        self.assertIsInstance(full_text.new_full_text_read(), PrimaryKeyFullTextRead)
+        # Exercise native qualification even without an installed binding. A
+        # schema-only table cannot delegate, but still selects the PK readers.
+        with mock.patch(
+                "pypaimon.table.source.native_search_plan.native_runtime_available",
+                return_value=True):
+            self.assertIsInstance(vector.new_vector_search_scan(), PrimaryKeyVectorScan)
+            self.assertIsInstance(vector.new_vector_search_read(), PrimaryKeyVectorRead)
+            self.assertIsInstance(full_text.new_full_text_scan(), PrimaryKeyFullTextScan)
+            self.assertIsInstance(full_text.new_full_text_read(), PrimaryKeyFullTextRead)
 
     def test_primary_key_full_text_only_supports_fast_mode(self):
         fields = [DataField(0, "id", AtomicType("INT")),

@@ -32,14 +32,14 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
-from pypaimon.read.native_plan import native_plan, native_version_at_least
+from pypaimon.read.native_plan import native_plan, native_runtime_available
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 _PLANNERS = ['python', pytest.param('native', marks=[pytest.mark.native_plan, pytest.mark.skipif(
-    not native_version_at_least(0, 4, 0),
+    not native_runtime_available(),
     reason='pypaimon-rust>=0.4.0 required for native DV paths')])]
 
 

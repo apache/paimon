@@ -23,14 +23,14 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse, ErrorResponse, GetTableSnapshotResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.read.native_plan import native_method_available, native_runtime_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.row.blob import BlobViewStruct
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_runtime_available(), reason='Rust planner required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 
 @pytest.fixture
@@ -149,7 +149,7 @@ def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog
         refresh.assert_called()
 
 
-@pytest.mark.skipif(not native_method_available('Table', 'from_rest_response_with_token'),
+@pytest.mark.skipif(not native_runtime_available(),
                     reason='REST data token reuse binding required')
 @pytest.mark.parametrize('local_cache', [False, True])
 def test_native_rest_reuses_python_data_token(
@@ -284,7 +284,7 @@ def test_reused_rest_environment_sees_new_snapshot(rest_source):
     _assert_parity(table.copy({'read.batch-size': '1'}), rows + [{'id': 3, 'value': 'latest'}], 3)
 
 
-@pytest.mark.skipif(not native_method_available('Table', 'from_rest_response'),
+@pytest.mark.skipif(not native_runtime_available(),
                     reason='REST response binding required')
 def test_repeated_plans_reuse_remote_file_sizes(rest_source, tmp_path):
     import json

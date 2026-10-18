@@ -17,23 +17,42 @@
 
 """End-to-end tests for the ``$files`` system table."""
 
-import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.table.system.files_table import FilesTable, _row_values
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
+from pypaimon.table.system.files_table import FilesTable, _metadata_file_path, _render_partition, _row_values
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
 
 def _read(table):
     rb = table.new_read_builder()
     return rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+
+def _stats_map(text):
+    # FilesTable exposes Java Map.toString, with sorted names and unquoted cells.
+    assert text.startswith('{') and text.endswith('}')
+    pairs = {}
+    for item in text[1:-1].split(', ') if text != '{}' else []:
+        name, value = item.split('=', 1)
+        try:
+            value = int(value)
+        except ValueError:
+            value = None if value == 'null' else value
+        pairs[name] = value
+    return pairs
 
 
 class FilesTableTest(unittest.TestCase):
@@ -78,6 +97,20 @@ class FilesTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$files")
         self.assertIsInstance(table, FilesTable)
 
+    def test_file_path_suffix_filter(self):
+        self._create_partitioned_table()
+        self._write_two_partitions()
+        table = self.catalog.get_table("db.t$files")
+        expected = _read(table).column("file_path").to_pylist()
+        self.assertTrue(expected)
+        rb = table.new_read_builder()
+        pb = rb.new_predicate_builder()
+        for suffix, paths in ((".parquet", expected), (".missing", [])):
+            with self.subTest(suffix=suffix):
+                rb.with_filter(pb.endswith("file_path", suffix)).with_projection(["file_path"])
+                result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+                self.assertEqual(result.column("file_path").to_pylist(), paths)
+
     def test_schema_column_layout(self):
         self._create_partitioned_table()
         table = self.catalog.get_table("db.t$files")
@@ -114,10 +147,10 @@ class FilesTableTest(unittest.TestCase):
         arrow_table = _read(self.catalog.get_table("db.t$files"))
         self.assertGreater(arrow_table.num_rows, 0)
 
-        # One row per file; partitions captured as `pt=value` strings.
+        # One row per file; partitions rendered with Java Row to STRING.
         partitions = set(arrow_table.column("partition").to_pylist())
-        self.assertIn("dt=2024-01-01", partitions)
-        self.assertIn("dt=2024-01-02", partitions)
+        self.assertIn("{2024-01-01}", partitions)
+        self.assertIn("{2024-01-02}", partitions)
 
         for path in arrow_table.column("file_path").to_pylist():
             self.assertTrue(path)
@@ -126,17 +159,17 @@ class FilesTableTest(unittest.TestCase):
         for size in arrow_table.column("file_size_in_bytes").to_pylist():
             self.assertGreater(size, 0)
 
-        # Stats columns are JSON dicts keyed by column name.
+        # Stats columns use Java Map.toString keyed by column name.
         for value in arrow_table.column("null_value_counts").to_pylist():
             self.assertIsInstance(value, str)
-            decoded = json.loads(value)
+            decoded = _stats_map(value)
             self.assertIsInstance(decoded, dict)
         for value in arrow_table.column("min_value_stats").to_pylist():
             self.assertIsInstance(value, str)
-            self.assertIsInstance(json.loads(value), dict)
+            self.assertIsInstance(_stats_map(value), dict)
         for value in arrow_table.column("max_value_stats").to_pylist():
             self.assertIsInstance(value, str)
-            self.assertIsInstance(json.loads(value), dict)
+            self.assertIsInstance(_stats_map(value), dict)
 
         # Append-only tables expose empty min_key / max_key.
         for value in arrow_table.column("min_key").to_pylist():
@@ -178,9 +211,9 @@ class FilesTableTest(unittest.TestCase):
 
         arrow_table = _read(self.catalog.get_table("db.stats_t$files"))
         self.assertGreater(arrow_table.num_rows, 0)
-        mins = [json.loads(s) for s in
+        mins = [_stats_map(s) for s in
                 arrow_table.column("min_value_stats").to_pylist()]
-        maxs = [json.loads(s) for s in
+        maxs = [_stats_map(s) for s in
                 arrow_table.column("max_value_stats").to_pylist()]
         # Real per-column values, not an empty {} (the BinaryRow-lacks-values bug).
         self.assertTrue(any(m for m in mins),
@@ -227,17 +260,17 @@ class FilesTableTest(unittest.TestCase):
         # The re-added ``v`` is a different column: the old file has no stats
         # for it and all of its rows are null there.
         self.assertEqual({"id": 1, "v": None},
-                         json.loads(old_file["min_value_stats"]))
+                         _stats_map(old_file["min_value_stats"]))
         self.assertEqual({"id": 1, "v": None},
-                         json.loads(old_file["max_value_stats"]))
+                         _stats_map(old_file["max_value_stats"]))
         self.assertEqual({"id": 0, "v": 1},
-                         json.loads(old_file["null_value_counts"]))
+                         _stats_map(old_file["null_value_counts"]))
         self.assertEqual({"id": 2, "v": 20},
-                         json.loads(new_file["min_value_stats"]))
+                         _stats_map(new_file["min_value_stats"]))
         self.assertEqual({"id": 2, "v": 20},
-                         json.loads(new_file["max_value_stats"]))
+                         _stats_map(new_file["max_value_stats"]))
         self.assertEqual({"id": 0, "v": 0},
-                         json.loads(new_file["null_value_counts"]))
+                         _stats_map(new_file["null_value_counts"]))
 
     def test_stats_decode_errors_are_not_swallowed(self):
         class CorruptRow:
@@ -250,6 +283,67 @@ class FilesTableTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             _row_values(CorruptRow())
 
+
+@pytest.mark.parametrize('type_name', ['TIMESTAMP_LTZ(9)', 'TIMESTAMP(9) WITH LOCAL TIME ZONE'])
+@pytest.mark.parametrize('value,expected', [
+    (datetime(2500, 1, 1, tzinfo=timezone.utc), {
+        'UTC': '2500-01-01 00:00:00.000000000',
+        'America/New_York': '2499-12-31 19:00:00.000000000',
+        'Asia/Shanghai': '2500-01-01 08:00:00.000000000',
+    }),
+    (datetime(2500, 7, 1, microsecond=123456, tzinfo=timezone.utc), {
+        'UTC': '2500-07-01 00:00:00.123456000',
+        'America/New_York': '2500-06-30 20:00:00.123456000',
+        'Asia/Shanghai': '2500-07-01 08:00:00.123456000',
+    }),
+    (datetime(1600, 1, 1, microsecond=123456, tzinfo=timezone.utc), {
+        'UTC': '1600-01-01 00:00:00.123456000',
+        'America/New_York': '1599-12-31 19:03:58.123456000',
+        'Asia/Shanghai': '1600-01-01 08:05:43.123456000',
+    }),
+])
+def test_ltz_partition_strings_outside_arrow_nanosecond_range(type_name, value, expected):
+    zone = os.environ.get('TZ', time.tzname[0])
+    if zone not in expected:
+        pytest.skip('Run Java timezone golden cases with TZ set to UTC, New York or Shanghai')
+    fields = [DataField(0, 'pt', AtomicType(type_name))]
+    row = GenericRow([value], fields)
+    decoded = GenericRowDeserializer.from_bytes(GenericRowSerializer.to_bytes(row), fields)
+    assert _render_partition(decoded) == '{' + expected[zone] + '}'
+
+
+def test_ltz_partition_strings_preserve_submicrosecond_fraction():
+    import pandas as pd
+    expected = {
+        'UTC': '2024-01-01 00:00:00.123456789',
+        'America/New_York': '2023-12-31 19:00:00.123456789',
+        'Asia/Shanghai': '2024-01-01 08:00:00.123456789',
+    }
+    zone = os.environ.get('TZ', time.tzname[0])
+    if zone not in expected:
+        pytest.skip('Run Java timezone golden cases with TZ set to UTC, New York or Shanghai')
+    row = GenericRow([pd.Timestamp('2024-01-01 00:00:00.123456789', tz='UTC')],
+                     [DataField(0, 'pt', AtomicType('TIMESTAMP_LTZ(9)'))])
+    assert _render_partition(row) == '{' + expected[zone] + '}'
+
+
+@pytest.mark.parametrize('root,expected', [
+    ('file:/warehouse/t', 'file:/warehouse/t/'),
+    ('file:///warehouse/t', 'file:/warehouse/t/'),
+    ('s3://bucket/warehouse/t', 's3://bucket/warehouse/t/'),
+])
+@pytest.mark.parametrize('data_directory', [None, 'data'])
+def test_metadata_file_paths_keep_logical_scheme_and_escaped_partition(root, expected, data_directory):
+    factory = FileStorePathFactory(
+        root=root, partition_keys=['pt'], default_part_value='__DEFAULT_PARTITION__',
+        format_identifier='parquet', data_file_prefix='data-', changelog_file_prefix='changelog-',
+        legacy_partition_name=False, file_suffix_include_compression=False, file_compression='zstd',
+        data_file_path_directory=data_directory, partition_types=[AtomicType('STRING')])
+    table = SimpleNamespace(table_path=root, path_factory=lambda: factory)
+    entry = SimpleNamespace(file=SimpleNamespace(external_path=None, file_name='data.parquet'),
+                            partition=GenericRow(['a/b'], [DataField(0, 'pt', AtomicType('STRING'))]), bucket=0)
+    assert _metadata_file_path(table, entry) == (
+        expected + ('data/' if data_directory else '') + 'pt=a%2Fb/bucket-0/data.parquet')
 
 if __name__ == "__main__":
     unittest.main()

@@ -180,12 +180,36 @@ class PackagingTest(unittest.TestCase):
                 self.assertEqual(supports_1_0_10, "1.0.10" in active[0].specifier)
                 self.assertNotIn("2.0", active[0].specifier)
 
+    def test_python_ci_dependencies_do_not_pull_native_sql(self):
+        resolve = runpy.run_path(str(self.source / "dev/install.py"))["resolve_group"]
+        extras = self.config["project"]["optional-dependencies"]
+
+        def dependencies(group):
+            pending = list(resolve(self.config["dependency-groups"], group))
+            names, expanded = set(), set()
+            while pending:
+                requirement = Requirement(pending.pop())
+                names.add(canonicalize_name(requirement.name))
+                if canonicalize_name(requirement.name) == "pypaimon":
+                    for extra in requirement.extras - expanded:
+                        pending.extend(extras[extra])
+                        expanded.add(extra)
+            return names
+
+        # Follow local extras too: the Rust extension previously entered the
+        # ordinary Python and Torch environments indirectly through [sql].
+        for group in ("torch", "python-tests", "legacy"):
+            with self.subTest(group=group):
+                self.assertNotIn("pypaimon-rust", dependencies(group))
+        self.assertIn("pypaimon-rust", dependencies("dev"))
+
     def test_dev_group_reuses_product_extras(self):
         resolve = runpy.run_path(str(self.source / "dev/install.py"))["resolve_group"]
         requirements = [Requirement(value) for value in resolve(
             self.config["dependency-groups"], "dev")]
-        project = next(requirement for requirement in requirements if requirement.name == "pypaimon")
-        self.assertTrue({"ray", "sql", "vindex", "full-text"}.issubset(project.extras))
+        extras = set().union(*(requirement.extras for requirement in requirements
+                               if requirement.name == "pypaimon"))
+        self.assertTrue({"ray", "sql", "vindex", "full-text"}.issubset(extras))
         # Product constraints belong to extras, not a second developer copy.
         names = {requirement.name for requirement in requirements}
         self.assertFalse(names.intersection({"datafusion", "paimon-vindex", "requests", "h5py"}))

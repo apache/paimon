@@ -26,6 +26,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.table.functions.ScalarFunction;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -715,8 +719,7 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testUpdateRawBlobColumnThrowsError() throws Exception {
-        // Create a table with raw-data BLOB column
+    public void testUpdateRawBlobColumn() throws Exception {
         sEnv.executeSql(
                 buildDdl(
                         "RAW_BLOB_T",
@@ -730,12 +733,43 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                                 put("blob-field", "picture");
                             }
                         }));
-        insertInto("RAW_BLOB_T", "(1, 'name1', X'48656C6C6F')");
+        insertInto(
+                "RAW_BLOB_T",
+                "(1, 'name1', X'48656C6C6F')",
+                "(2, 'name2', X'5945')",
+                "(3, 'name3', X'414243')");
 
-        // Create source table
         sEnv.executeSql(
                 buildDdl(
                         "RAW_BLOB_S",
+                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_BLOB_S", "(1, 'updated_name1', X'4E4557')");
+
+        builder(warehouse, database, "RAW_BLOB_T")
+                .withMergeCondition("RAW_BLOB_T.id=RAW_BLOB_S.id")
+                .withMatchedUpdateSet(
+                        "RAW_BLOB_T.name=RAW_BLOB_S.name, RAW_BLOB_T.picture=RAW_BLOB_S.picture")
+                .withSourceTable("RAW_BLOB_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, name, picture FROM RAW_BLOB_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, "updated_name1", new byte[] {78, 69, 87}),
+                        changelogRow("+I", 2, "name2", new byte[] {89, 69}),
+                        changelogRow("+I", 3, "name3", new byte[] {65, 66, 67})));
+    }
+
+    @Test
+    public void testUpdateRawBlobColumnToNull() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_NULL_T",
                         Arrays.asList("id INT", "picture BYTES"),
                         Collections.emptyList(),
                         Collections.emptyList(),
@@ -746,25 +780,107 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                                 put("blob-field", "picture");
                             }
                         }));
-        insertInto("RAW_BLOB_S", "(1, X'4E4557')");
+        insertInto("RAW_BLOB_NULL_T", "(1, X'48656C6C6F')", "(2, X'5945')");
 
-        DataEvolutionMergeIntoAction action =
-                builder(warehouse, database, "RAW_BLOB_T")
-                        .withMergeCondition("RAW_BLOB_T.id=RAW_BLOB_S.id")
-                        .withMatchedUpdateSet("RAW_BLOB_T.picture=RAW_BLOB_S.picture")
-                        .withSourceTable("RAW_BLOB_S")
-                        .withSinkParallelism(1)
-                        .build();
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_NULL_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_BLOB_NULL_S", "(1, CAST(NULL AS BYTES))");
 
-        Throwable t = Assertions.assertThrows(IllegalStateException.class, () -> action.run());
-        Assertions.assertTrue(
-                t.getMessage().contains("raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column"),
-                "Expected error about raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column but got: "
-                        + t.getMessage());
+        builder(warehouse, database, "RAW_BLOB_NULL_T")
+                .withMergeCondition("RAW_BLOB_NULL_T.id=RAW_BLOB_NULL_S.id")
+                .withMatchedUpdateSet("RAW_BLOB_NULL_T.picture=RAW_BLOB_NULL_S.picture")
+                .withSourceTable("RAW_BLOB_NULL_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, picture FROM RAW_BLOB_NULL_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, null), changelogRow("+I", 2, new byte[] {89, 69})));
     }
 
     @Test
-    public void testUpdateRawMapBlobColumnThrowsError() throws Exception {
+    public void testUpdateRawArrayBlobColumn() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_ARRAY_BLOB_T",
+                        Arrays.asList("id INT", "pictures ARRAY<BYTES>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "pictures");
+                            }
+                        }));
+        String targetDataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, new byte[][] {new byte[] {72, 101, 108, 108, 111}}),
+                                Row.of(2, new byte[][] {new byte[] {65, 66, 67}}),
+                                Row.of(3, null)));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE RAW_ARRAY_BLOB_TARGET_SOURCE "
+                                        + "(id INT, pictures ARRAY<BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                targetDataId))
+                .await();
+        sEnv.executeSql(
+                        "INSERT INTO RAW_ARRAY_BLOB_T "
+                                + "SELECT * FROM RAW_ARRAY_BLOB_TARGET_SOURCE")
+                .await();
+
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_ARRAY_BLOB_S",
+                        Arrays.asList("id INT", "pictures ARRAY<BYTES>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        String sourceDataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, new byte[][] {new byte[] {78, 69, 87}, null}),
+                                Row.of(3, new byte[0][])));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE RAW_ARRAY_BLOB_UPDATE_SOURCE "
+                                        + "(id INT, pictures ARRAY<BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                sourceDataId))
+                .await();
+        sEnv.executeSql(
+                        "INSERT INTO RAW_ARRAY_BLOB_S "
+                                + "SELECT * FROM RAW_ARRAY_BLOB_UPDATE_SOURCE")
+                .await();
+
+        builder(warehouse, database, "RAW_ARRAY_BLOB_T")
+                .withMergeCondition("RAW_ARRAY_BLOB_T.id=RAW_ARRAY_BLOB_S.id")
+                .withMatchedUpdateSet("RAW_ARRAY_BLOB_T.pictures=RAW_ARRAY_BLOB_S.pictures")
+                .withSourceTable("RAW_ARRAY_BLOB_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, CARDINALITY(pictures), pictures[1], pictures[2] "
+                        + "FROM RAW_ARRAY_BLOB_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, 2, new byte[] {78, 69, 87}, null),
+                        changelogRow("+I", 2, 1, new byte[] {65, 66, 67}, null),
+                        changelogRow("+I", 3, 0, null, null)));
+    }
+
+    @Test
+    public void testUpdateRawMapBlobColumn() throws Exception {
         sEnv.executeSql(
                 buildDdl(
                         "RAW_MAP_BLOB_T",
@@ -778,7 +894,23 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                                 put("blob-field", "pictures");
                             }
                         }));
-        insertInto("RAW_MAP_BLOB_T", "(1, MAP['old', X'4F4C44'])");
+        Map<String, byte[]> oldPictures = new LinkedHashMap<>();
+        oldPictures.put("old", new byte[] {72, 101, 108, 108, 111});
+        Map<String, byte[]> keptPictures = new LinkedHashMap<>();
+        keptPictures.put("keep", new byte[] {65, 66, 67});
+        String targetDataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, oldPictures), Row.of(2, keptPictures), Row.of(3, null)));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE RAW_MAP_BLOB_TARGET_SOURCE "
+                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                targetDataId))
+                .await();
+        sEnv.executeSql("INSERT INTO RAW_MAP_BLOB_T SELECT * FROM RAW_MAP_BLOB_TARGET_SOURCE")
+                .await();
         sEnv.executeSql(
                 buildDdl(
                         "RAW_MAP_BLOB_S",
@@ -786,20 +918,36 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.emptyMap()));
-        insertInto("RAW_MAP_BLOB_S", "(1, MAP['new', X'4E4557'])");
+        Map<String, byte[]> newPictures = new LinkedHashMap<>();
+        newPictures.put("new", new byte[] {78, 69, 87});
+        String sourceDataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(Row.of(1, newPictures), Row.of(3, new LinkedHashMap<>())));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE RAW_MAP_BLOB_UPDATE_SOURCE "
+                                        + "(id INT, pictures MAP<STRING, BYTES>) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                sourceDataId))
+                .await();
+        sEnv.executeSql("INSERT INTO RAW_MAP_BLOB_S SELECT * FROM RAW_MAP_BLOB_UPDATE_SOURCE")
+                .await();
 
-        DataEvolutionMergeIntoAction action =
-                builder(warehouse, database, "RAW_MAP_BLOB_T")
-                        .withMergeCondition("RAW_MAP_BLOB_T.id=RAW_MAP_BLOB_S.id")
-                        .withMatchedUpdateSet("RAW_MAP_BLOB_T.pictures=RAW_MAP_BLOB_S.pictures")
-                        .withSourceTable("RAW_MAP_BLOB_S")
-                        .withSinkParallelism(1)
-                        .build();
+        builder(warehouse, database, "RAW_MAP_BLOB_T")
+                .withMergeCondition("RAW_MAP_BLOB_T.id=RAW_MAP_BLOB_S.id")
+                .withMatchedUpdateSet("RAW_MAP_BLOB_T.pictures=RAW_MAP_BLOB_S.pictures")
+                .withSourceTable("RAW_MAP_BLOB_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
 
-        Throwable t = Assertions.assertThrows(IllegalStateException.class, () -> action.run());
-        Assertions.assertTrue(
-                t.getMessage().contains("raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column"),
-                "Expected error about raw-data MAP<X, BLOB> column but got: " + t.getMessage());
+        testBatchRead(
+                "SELECT id, CARDINALITY(pictures), pictures['old'], pictures['keep'], pictures['new'] "
+                        + "FROM RAW_MAP_BLOB_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, 1, null, null, new byte[] {78, 69, 87}),
+                        changelogRow("+I", 2, 1, null, new byte[] {65, 66, 67}, null),
+                        changelogRow("+I", 3, 0, null, null, null)));
     }
 
     @Test
@@ -1068,6 +1216,350 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 Arrays.asList(
                         changelogRow("+I", 1, "updated_name1"), changelogRow("+I", 2, "name2"));
         testBatchRead("SELECT id, name FROM DESC_BLOB_T ORDER BY id", expected);
+    }
+
+    @Test
+    public void testUpdateRawBlobColumnSplitsFilesAndKeepsUnchangedPayload() throws Exception {
+        byte[] large = new byte[64 * 1024];
+        Arrays.fill(large, (byte) 7);
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_SPLIT_UPDATE_T",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+                                put("sink.parallelism", "1");
+                            }
+                        }));
+        String targetDataId =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.of(1, new byte[] {1}),
+                                Row.of(2, large),
+                                Row.of(3, new byte[] {3})));
+        sEnv.executeSql(
+                        String.format(
+                                "CREATE TEMPORARY TABLE BLOB_SPLIT_UPDATE_TARGET_SOURCE "
+                                        + "(id INT, picture BYTES) "
+                                        + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                                targetDataId))
+                .await();
+        sEnv.executeSql(
+                        "INSERT INTO BLOB_SPLIT_UPDATE_T "
+                                + "SELECT * FROM BLOB_SPLIT_UPDATE_TARGET_SOURCE")
+                .await();
+        long sequenceBeforeUpdate = maxSequence("BLOB_SPLIT_UPDATE_T");
+
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_SPLIT_UPDATE_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("BLOB_SPLIT_UPDATE_S", "(1, X'02')");
+
+        builder(warehouse, database, "BLOB_SPLIT_UPDATE_T")
+                .withMergeCondition("BLOB_SPLIT_UPDATE_T.id=BLOB_SPLIT_UPDATE_S.id")
+                .withMatchedUpdateSet("BLOB_SPLIT_UPDATE_T.picture=BLOB_SPLIT_UPDATE_S.picture")
+                .withSourceTable("BLOB_SPLIT_UPDATE_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, picture FROM BLOB_SPLIT_UPDATE_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, new byte[] {2}),
+                        changelogRow("+I", 2, large),
+                        changelogRow("+I", 3, new byte[] {3})));
+
+        List<Row> newBlobFiles = new ArrayList<>();
+        boolean sawOriginalLargeFile = false;
+        for (Row file :
+                collect(
+                        "SELECT first_row_id, record_count, file_size_in_bytes, max_sequence_number "
+                                + "FROM `BLOB_SPLIT_UPDATE_T$files` WHERE file_path LIKE '%.blob'")) {
+            long sequence = ((Number) file.getField(3)).longValue();
+            long size = ((Number) file.getField(2)).longValue();
+            if (sequence <= sequenceBeforeUpdate) {
+                if (size >= large.length) {
+                    sawOriginalLargeFile = true;
+                }
+            } else {
+                newBlobFiles.add(file);
+            }
+        }
+        assertTrue(sawOriginalLargeFile);
+        newBlobFiles.sort(
+                (left, right) ->
+                        Long.compare(
+                                ((Number) left.getField(0)).longValue(),
+                                ((Number) right.getField(0)).longValue()));
+        assertTrue(newBlobFiles.size() > 1);
+        long expectedRowId = 0;
+        long totalRecords = 0;
+        for (Row file : newBlobFiles) {
+            long firstRowId = ((Number) file.getField(0)).longValue();
+            long recordCount = ((Number) file.getField(1)).longValue();
+            long size = ((Number) file.getField(2)).longValue();
+            assertEquals(expectedRowId, firstRowId);
+            assertTrue(size < 4096);
+            expectedRowId += recordCount;
+            totalRecords += recordCount;
+        }
+        assertEquals(3L, totalRecords);
+    }
+
+    @Test
+    public void testUpdateRawBlobColumnTwice() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_TWICE_T",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                            }
+                        }));
+        insertInto("BLOB_TWICE_T", "(1, X'01')", "(2, X'02')", "(3, X'03')");
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_TWICE_S1",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("BLOB_TWICE_S1", "(1, X'11')");
+        builder(warehouse, database, "BLOB_TWICE_T")
+                .withMergeCondition("BLOB_TWICE_T.id=BLOB_TWICE_S1.id")
+                .withMatchedUpdateSet("BLOB_TWICE_T.picture=BLOB_TWICE_S1.picture")
+                .withSourceTable("BLOB_TWICE_S1")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_TWICE_S2",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("BLOB_TWICE_S2", "(1, X'21')", "(3, X'23')");
+        builder(warehouse, database, "BLOB_TWICE_T")
+                .withMergeCondition("BLOB_TWICE_T.id=BLOB_TWICE_S2.id")
+                .withMatchedUpdateSet("BLOB_TWICE_T.picture=BLOB_TWICE_S2.picture")
+                .withSourceTable("BLOB_TWICE_S2")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, picture FROM BLOB_TWICE_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, new byte[] {0x21}),
+                        changelogRow("+I", 2, new byte[] {2}),
+                        changelogRow("+I", 3, new byte[] {0x23})));
+    }
+
+    @Test
+    public void testUpdateRawBlobColumnFromDescriptor() throws Exception {
+        File external = new File(warehouse, "external-blob.bin");
+        byte[] payload = "from-descriptor".getBytes(StandardCharsets.UTF_8);
+        Files.write(external.toPath(), payload);
+        String uri = external.toURI().toString();
+
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_DESC_MERGE_T",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                            }
+                        }));
+        insertInto("BLOB_DESC_MERGE_T", "(1, X'00')", "(2, X'01')");
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_DESC_MERGE_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        sEnv.executeSql(
+                        "INSERT INTO BLOB_DESC_MERGE_S "
+                                + "SELECT 1, sys.path_to_descriptor('"
+                                + uri
+                                + "')")
+                .await();
+
+        builder(warehouse, database, "BLOB_DESC_MERGE_T")
+                .withMergeCondition("BLOB_DESC_MERGE_T.id=BLOB_DESC_MERGE_S.id")
+                .withMatchedUpdateSet("BLOB_DESC_MERGE_T.picture=BLOB_DESC_MERGE_S.picture")
+                .withSourceTable("BLOB_DESC_MERGE_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, picture FROM BLOB_DESC_MERGE_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, payload), changelogRow("+I", 2, new byte[] {1})));
+    }
+
+    @Test
+    public void testUpdateRawBlobColumnWithAppendWriteBuffer() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_BUFFER_T",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "true");
+                            }
+                        }));
+        insertInto("BLOB_BUFFER_T", "(1, X'01')", "(2, X'02')");
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_BUFFER_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("BLOB_BUFFER_S", "(1, X'11')");
+
+        builder(warehouse, database, "BLOB_BUFFER_T")
+                .withMergeCondition("BLOB_BUFFER_T.id=BLOB_BUFFER_S.id")
+                .withMatchedUpdateSet("BLOB_BUFFER_T.picture=BLOB_BUFFER_S.picture")
+                .withSourceTable("BLOB_BUFFER_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, picture FROM BLOB_BUFFER_T ORDER BY id",
+                Arrays.asList(
+                        changelogRow("+I", 1, new byte[] {0x11}),
+                        changelogRow("+I", 2, new byte[] {2})));
+    }
+
+    @Test
+    public void testUpdateRawBlobColumnNullOnInvalidDescriptorUri() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_FETCH_FAIL_T",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put(CoreOptions.BLOB_WRITE_NULL_ON_FETCH_FAILURE.key(), "true");
+                            }
+                        }));
+        insertInto("BLOB_FETCH_FAIL_T", "(1, X'01')", "(2, X'02')");
+        sEnv.executeSql(
+                buildDdl(
+                        "BLOB_FETCH_FAIL_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        sEnv.executeSql(
+                        "INSERT INTO BLOB_FETCH_FAIL_S SELECT 1, sys.path_to_descriptor("
+                                + "'https://img.alicdn.com/imgextra/##1304008055350781673')")
+                .await();
+
+        builder(warehouse, database, "BLOB_FETCH_FAIL_T")
+                .withMergeCondition("BLOB_FETCH_FAIL_T.id=BLOB_FETCH_FAIL_S.id")
+                .withMatchedUpdateSet("BLOB_FETCH_FAIL_T.picture=BLOB_FETCH_FAIL_S.picture")
+                .withSourceTable("BLOB_FETCH_FAIL_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, picture FROM BLOB_FETCH_FAIL_T ORDER BY id",
+                Arrays.asList(changelogRow("+I", 1, null), changelogRow("+I", 2, new byte[] {2})));
+    }
+
+    @Test
+    public void testUpdateVideoFrameFieldThrowsError() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "VIDEO_FRAME_T",
+                        Arrays.asList("id INT", "frame BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("video-frame-field", "frame");
+                            }
+                        }));
+        insertInto("VIDEO_FRAME_T", "(1, CAST(NULL AS BYTES))");
+        sEnv.executeSql(
+                buildDdl(
+                        "VIDEO_FRAME_S",
+                        Arrays.asList("id INT", "frame BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("VIDEO_FRAME_S", "(1, X'01')");
+
+        IllegalStateException thrown =
+                Assertions.assertThrows(
+                        IllegalStateException.class,
+                        () ->
+                                builder(warehouse, database, "VIDEO_FRAME_T")
+                                        .withMergeCondition("VIDEO_FRAME_T.id=VIDEO_FRAME_S.id")
+                                        .withMatchedUpdateSet(
+                                                "VIDEO_FRAME_T.frame=VIDEO_FRAME_S.frame")
+                                        .withSourceTable("VIDEO_FRAME_S")
+                                        .withSinkParallelism(1)
+                                        .build()
+                                        .run());
+        assertTrue(thrown.getMessage().contains("video-frame field"));
+        assertTrue(thrown.getMessage().contains("frame"));
+    }
+
+    private List<Row> collect(String query) throws Exception {
+        List<Row> rows = new ArrayList<>();
+        try (CloseableIterator<Row> iterator = bEnv.executeSql(query).collect()) {
+            while (iterator.hasNext()) {
+                rows.add(iterator.next());
+            }
+        }
+        return rows;
+    }
+
+    private long maxSequence(String table) throws Exception {
+        List<Row> rows = collect("SELECT MAX(max_sequence_number) FROM `" + table + "$files`");
+        Object value = rows.get(0).getField(0);
+        return value == null ? -1L : ((Number) value).longValue();
     }
 
     private void prepareTargetTable() throws Exception {

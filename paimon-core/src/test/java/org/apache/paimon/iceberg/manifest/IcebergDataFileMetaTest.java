@@ -57,6 +57,30 @@ class IcebergDataFileMetaTest {
     }
 
     @Test
+    @DisplayName("Test delete file meta without column stats survives serialization")
+    void testDeleteFileMetaRoundTrip() {
+        IcebergDataFileMeta meta =
+                IcebergDataFileMeta.createForDeleteFile(
+                        IcebergDataFileMeta.Content.POSITION_DELETES,
+                        "index-path",
+                        "puffin",
+                        BinaryRow.EMPTY_ROW,
+                        3,
+                        100,
+                        "data-path",
+                        4L,
+                        20L);
+
+        IcebergDataFileMetaSerializer serializer = new IcebergDataFileMetaSerializer(RowType.of());
+        IcebergDataFileMeta restored = serializer.fromRow(serializer.toRow(meta));
+
+        assertThat(restored).isEqualTo(meta);
+        assertThat(restored.nullValueCounts()).isNull();
+        assertThat(restored.lowerBounds()).isNull();
+        assertThat(restored.upperBounds()).isNull();
+    }
+
+    @Test
     @DisplayName("Test unknown null count is omitted instead of published as 0")
     void testUnknownNullCountOmitted() {
         IcebergSchema icebergSchema =

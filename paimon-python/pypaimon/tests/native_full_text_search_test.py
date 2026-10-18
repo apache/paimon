@@ -23,7 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.api.api_response import GetTableSnapshotResponse, ErrorResponse
-from pypaimon.read.native_plan import _native_table, native_method_available, _predicate_to_native
+from pypaimon.read.native_plan import _native_table, native_runtime_available, _predicate_to_native
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.tests import native_sorted_index_build_test as indexes
@@ -31,7 +31,7 @@ from pypaimon.tests.vector_search_filter_test import match_query, boost_query
 
 rest_catalog = indexes.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_full_text_search_builder'), reason='Rust full-text search API required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 SCHEMA = pa.schema([('id', pa.int32()), ('content', pa.string()), ('label', pa.string()), ('pt', pa.int32())])
 
 

@@ -18,14 +18,23 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.VarCharType;
 
@@ -40,11 +49,13 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.spark.ShowCreateTableTestUtils.showCreateTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,6 +71,44 @@ public class SparkReadITCase extends SparkReadTestBase {
         innerTestSimpleType(spark.table("t1"));
 
         innerTestNestedType(spark.table("t2"));
+    }
+
+    @Test
+    public void testReadOrcMapWithNullKey() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("m", DataTypes.MAP(DataTypes.INT(), DataTypes.INT()))
+                        .option("file.format", "orc")
+                        .build();
+
+        Options options = new Options();
+        options.set(WAREHOUSE, warehousePath.toString());
+        try (Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options))) {
+            catalog.createTable(Identifier.create("default", "invalid_map"), schema, false);
+            catalog.createTable(Identifier.create("default", "valid_map"), schema, false);
+        }
+
+        Map<Integer, Integer> invalidMap = new LinkedHashMap<>();
+        invalidMap.put(null, 17);
+        invalidMap.put(2, 20);
+        writeTable("invalid_map", GenericRow.of(1, new GenericMap(invalidMap)));
+
+        Map<Integer, Integer> validMap = new LinkedHashMap<>();
+        validMap.put(1, 17);
+        validMap.put(2, null);
+        writeTable("valid_map", GenericRow.of(2, new GenericMap(validMap)));
+
+        assertThat(spark.sql("SELECT id FROM invalid_map").collectAsList().toString())
+                .isEqualTo("[[1]]");
+
+        Row validRow = spark.sql("SELECT id, m FROM valid_map").collectAsList().get(0);
+        assertThat(validRow.getInt(0)).isEqualTo(2);
+        assertThat(validRow.<Integer, Integer>getJavaMap(1))
+                .containsExactlyInAnyOrderEntriesOf(validMap);
+
+        assertThatThrownBy(() -> spark.sql("SELECT id, m FROM invalid_map").collectAsList())
+                .hasStackTraceContaining("Spark map data does not support null keys.");
     }
 
     @Test

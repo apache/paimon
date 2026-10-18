@@ -496,7 +496,10 @@ def test_python_written_partition_source_uses_java_paths_for_native_merge(tmp_pa
     assert _rows(source) == values
     ranges = catalog.get_table('db.source$file_key_ranges').new_read_builder()
     reported = ranges.new_read().to_arrow(ranges.new_scan().plan().splits())['file_path'].to_pylist()
-    assert reported and all(source.file_io.exists(path) for path in reported)
+    from pypaimon.utils.path import to_file_io_path
+    # System tables display Java logical paths; preserve literal escaped
+    # components when passing these strings into Python's URI-based FileIO.
+    assert reported and all(source.file_io.exists(to_file_io_path(path)) for path in reported)
     assert all('pa%23rt=' in path for path in reported)
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     kwargs = dict(commit_identifier=57) if stream else {}

@@ -205,7 +205,7 @@ def _rewrite_updates(
     scan_table = table.copy_without_time_travel({
         CoreOptions.SCAN_SNAPSHOT_ID.key(): str(latest_snapshot.id),
     })
-    scan_plan = scan_table.new_read_builder().new_scan().plan_for_write()
+    scan_plan = scan_table.new_read_builder().new_scan().plan_all_files()
     if scan_plan.snapshot_id != latest_snapshot.id:
         return None
     current_splits = list(scan_plan.splits())

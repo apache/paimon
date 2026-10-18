@@ -33,6 +33,7 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal import window_dataset
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.table_scan import TableScan
 
@@ -144,6 +145,80 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         self.assertEqual([0], dataset[0]["value"])
         self.assertEqual([False], dataset[0]["value_is_pad"].tolist())
         self.assertEqual(103, dataset[-1]["value"][0])
+
+    def test_anchor_selection_preserves_context_across_files(self):
+        table = self.conn.create_table(
+            "anchor_context", schema=self._schema(), options=_TABLE_OPTIONS)
+        for start in (0, 3, 6):
+            table.add([self._row("episode-a", step)
+                       for step in range(start, min(start + 3, 8))])
+        row_ids = {row["step"]: row["_ROW_ID"] for row in
+                   table.scan().select(["step"]).with_row_id().to_list()}
+        dataset = table.scan().to_contiguous_window_dataset(
+            columns=["value", "payload"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-1, 0, 1], "payload": [0, 1]},
+            anchor_row_ids=[row_ids[5], row_ids[2], row_ids[5]])
+
+        self.assertEqual(2, len(dataset))
+        samples = dataset.__getitems__([1, 0, 1])
+        self.assertEqual([5, 2, 5], [sample["step"] for sample in samples])
+        self.assertEqual([[4, 5, 6], [1, 2, 3], [4, 5, 6]],
+                         [sample["value"] for sample in samples])
+        self.assertEqual([[b"episode-a-5", b"episode-a-6"],
+                          [b"episode-a-2", b"episode-a-3"],
+                          [b"episode-a-5", b"episode-a-6"]],
+                         [sample["payload"] for sample in samples])
+        self.assertTrue(all(not sample["value_is_pad"].any() for sample in samples))
+
+    def test_anchor_selection_keeps_stride_and_checks_only_selected_boundaries(self):
+        table = self._table()
+        row_ids = {row["step"]: row["_ROW_ID"] for row in
+                   table.scan().where("episode = 'episode-b'")
+                   .select(["step"]).with_row_id().to_list()}
+        kwargs = dict(
+            columns=["value"], group_key="episode", order_key="step",
+            frame_offsets={"value": [-1, 0, 1]}, stride=2, boundary="error")
+        dataset = table.scan().to_contiguous_window_dataset(
+            anchor_row_ids=(row_ids[step] for step in (1, 2)), **kwargs)
+
+        self.assertEqual(1, len(dataset))
+        self.assertEqual(2, dataset[0]["step"])
+        self.assertEqual([101, 102, 103], dataset[0]["value"])
+        with self.assertRaisesRegex(ValueError, "episode-b.*incomplete window at 0"):
+            table.scan().to_contiguous_window_dataset(
+                anchor_row_ids=[row_ids[0]], **kwargs)
+
+    def test_empty_anchor_selection_has_no_windows_or_payload_reads(self):
+        with patch("pypaimon.multimodal.window_dataset.fetch_blob_bodies") as fetch:
+            dataset = self._table().scan().to_contiguous_window_dataset(
+                columns=["value", "payload"], group_key="episode", order_key="step",
+                frame_offsets={"value": [-2, 0, 2]}, boundary="error",
+                anchor_row_ids=[])
+            self.assertEqual(0, len(dataset))
+            self.assertEqual([], dataset[:])
+            with self.assertRaises(IndexError):
+                dataset[0]
+            fetch.assert_not_called()
+
+    def test_anchor_selection_rejects_invalid_or_out_of_context_ids(self):
+        table = self._table()
+        for selected, error, message in (
+                ([True], TypeError, "booleans"),
+                ([1.5], TypeError, "integer row IDs"),
+                (["1"], TypeError, "integer row IDs"),
+                ([-1], ValueError, "nonnegative int64"),
+                ([2 ** 63], ValueError, "nonnegative int64"),
+                ([999], ValueError, "outside the context query")):
+            with self.subTest(selected=selected):
+                with self.assertRaisesRegex(error, message):
+                    self._dataset(table, anchor_row_ids=selected)
+
+        excluded_id = (table.scan().where("episode = 'episode-b'")
+                       .select(["step"]).with_row_id().to_list()[0]["_ROW_ID"])
+        with self.assertRaisesRegex(ValueError, "outside the context query"):
+            table.scan().where("episode = 'episode-a'").to_contiguous_window_dataset(
+                columns=["value"], group_key="episode", order_key="step",
+                anchor_row_ids=[excluded_id])
 
     def test_drop_offsets_keep_stride_anchored_at_group_start(self):
         table = self._table()
@@ -772,22 +847,47 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         self.assertIsNone(dataset._table.options.scan_snapshot_id())
         self.assertEqual([100, 101, 102], dataset[0]["value"])
 
-    def test_plans_the_pinned_snapshot_once_per_projection(self):
+    def test_reuses_context_plan_across_projections_and_pickle(self):
         dataset = self._dataset(self._table(), anchor_columns=["payload"])
 
         with patch.object(
                 TableScan, "plan", autospec=True,
                 side_effect=TableScan.plan) as plan:
             samples = [dataset[index] for index in range(len(dataset))]
-            samples.extend(dataset.__getitems__(list(range(len(dataset)))))
+            restored = pickle.loads(pickle.dumps(dataset))
+            samples.extend(restored.__getitems__(list(range(len(dataset)))))
 
-        self.assertEqual(2, plan.call_count)
+        self.assertEqual(0, plan.call_count)
         self.assertEqual(
             [[100, 101, 102], [101, 102, 103]] * 2,
             [sample["value"] for sample in samples])
         self.assertEqual(
             [[b"episode-b-0"], [b"episode-b-1"]] * 2,
             [sample["payload"] for sample in samples])
+
+    @pytest.mark.python_read
+    def test_window_ranges_do_not_need_a_second_predicate_scan(self):
+        table = self.conn.create_table(
+            "sparse_reads", schema=self._schema(), options=_TABLE_OPTIONS)
+        table.add([self._row("episode-a", step) for step in range(12)])
+        dataset = table.scan().to_contiguous_window_dataset(
+            window_size=2, columns=["value"],
+            group_key="episode", order_key="step")
+        filtered_rows = []
+        original_filter = FilterRecordBatchReader._filter_batch
+
+        def record_filter(reader, batch):
+            filtered_rows.append(batch.num_rows)
+            return original_filter(reader, batch)
+
+        with patch.object(FilterRecordBatchReader, "_filter_batch", record_filter):
+            samples = dataset.__getitems__([5, 1, 5])
+
+        self.assertEqual([[5, 6], [1, 2], [5, 6]],
+                         [sample["value"] for sample in samples])
+        # IndexedSplit already selects these sparse rows; a predicate scanner
+        # would evaluate the same membership again for every fetched batch.
+        self.assertEqual(0, sum(filtered_rows))
 
     def test_rejects_query_authorization_that_masks_row_ids(self):
         table = self._table()

@@ -56,6 +56,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
             raise ValueError("Primary-key search result contains duplicate physical positions.")
         self._splits = tuple(_materialize(
             source_splits, positions, snapshot_id))
+        self._native_result = None
 
     @property
     def snapshot_id(self):
@@ -67,11 +68,23 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
 
     @property
     def splits(self):
+        # Exposing mutable Python splits transfers metadata ownership to the
+        # caller. A later native scan must observe any edits to that view.
+        self._native_result = None
         return self._splits
+
+    def __getstate__(self):
+        # GlobalIndexResult owns a live core table. Transport the materialized
+        # Python metadata. copy.copy also uses this protocol and shares the
+        # mutable splits, so the original must stop using its native cache too.
+        self._native_result = None
+        state = self.__dict__.copy()
+        state.pop('_native_result', None)
+        return state
 
     @classmethod
     def _from_native(cls, table, result):
-        """Convert the selections already built by core without rebuilding them."""
+        """Wrap core GlobalIndexResult; retain it for direct native scan handoff."""
         from pypaimon.read.native_plan import _partition_fields
         from pypaimon.read.split_serializer import deserialize_split_v1
 
@@ -81,6 +94,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
         value._splits = tuple(deserialize_split_v1(
             split, _partition_fields(table), table.trimmed_primary_keys_fields)
             for split in result.splits())
+        value._native_result = result
         return value
 
 

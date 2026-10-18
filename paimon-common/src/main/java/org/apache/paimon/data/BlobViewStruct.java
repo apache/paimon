@@ -19,6 +19,9 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
@@ -50,6 +53,37 @@ public class BlobViewStruct implements Serializable {
         this.identifier = Objects.requireNonNull(identifier, "identifier");
         this.fieldId = fieldId;
         this.rowId = rowId;
+    }
+
+    public static BlobViewStruct of(
+            Identifier identifier, RowType upstreamRowType, String fieldName, long rowId) {
+        return new BlobViewStruct(
+                identifier, resolveBlobFieldId(identifier, upstreamRowType, fieldName), rowId);
+    }
+
+    public static int resolveBlobFieldId(
+            Identifier identifier, RowType upstreamRowType, String fieldName) {
+        Objects.requireNonNull(identifier, "identifier");
+        Objects.requireNonNull(upstreamRowType, "upstreamRowType");
+        Objects.requireNonNull(fieldName, "fieldName");
+        if (!upstreamRowType.containsField(fieldName)) {
+            throw new IllegalArgumentException(
+                    "Cannot find blob field "
+                            + fieldName
+                            + " in upstream table "
+                            + identifier.getFullName()
+                            + ".");
+        }
+        DataField field = upstreamRowType.getField(fieldName);
+        if (!field.type().is(DataTypeRoot.BLOB)) {
+            throw new IllegalArgumentException(
+                    "Field "
+                            + fieldName
+                            + " in upstream table "
+                            + identifier.getFullName()
+                            + " is not a BLOB field.");
+        }
+        return field.id();
     }
 
     public Identifier identifier() {

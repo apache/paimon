@@ -81,14 +81,19 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
     protected void updateTableMap()
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<String> databases = catalog.listDatabases();
+        // Counted across bucket types: the two combined sources each see all matched tables.
+        int matchedTables = 0;
 
         for (String databaseName : databases) {
             if (databasePattern.matcher(databaseName).matches()) {
                 List<String> tables = catalog.listTables(databaseName);
                 for (String tableName : tables) {
                     Identifier identifier = Identifier.create(databaseName, tableName);
-                    if (shouldCompactTable(identifier, includingPattern, excludingPattern)
-                            && (!checkTableScanned(identifier))) {
+                    if (!shouldCompactTable(identifier, includingPattern, excludingPattern)) {
+                        continue;
+                    }
+                    matchedTables++;
+                    if (!checkTableScanned(identifier)) {
                         Table table = catalog.getTable(identifier);
                         if (!(table instanceof FileStoreTable)) {
                             LOG.error(
@@ -103,6 +108,15 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
                     }
                 }
             }
+        }
+
+        if (matchedTables == 0) {
+            LOG.warn(
+                    "No tables match database pattern '{}', including pattern '{}' and excluding pattern '{}'. "
+                            + "Table patterns are matched against 'databaseName.tableName'.",
+                    databasePattern,
+                    includingPattern,
+                    excludingPattern);
         }
     }
 

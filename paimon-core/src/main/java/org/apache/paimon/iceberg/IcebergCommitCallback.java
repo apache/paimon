@@ -47,6 +47,7 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -1067,6 +1068,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // In this case, if `baseMetadata` already contains this file, we should not add a
         // duplicate.
         List<IcebergManifestFileMeta> newDataManifestFileMetas;
+        List<IcebergDataFileMeta> deletedFiles = new ArrayList<>();
         String operation;
         if (isAddOnly) {
             // Fast case. We don't need to remove files from `baseMetadata`. We only need to append
@@ -1083,7 +1085,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             modifiedPartitions,
                             baseDataManifestFileMetas,
                             snapshotId,
-                            snapshot.commitKind());
+                            snapshot.commitKind(),
+                            deletedFiles);
             newDataManifestFileMetas = result.getLeft();
             operation = result.getRight();
         }
@@ -1108,39 +1111,37 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 addedFiles.values().stream().mapToLong(p -> p.getRight().rowCount()).sum();
         metrics.addedFilesSize =
                 addedFiles.values().stream().mapToLong(p -> p.getRight().fileSize()).sum();
-        metrics.deletedDataFiles = removedFiles.size();
+        metrics.deletedDataFiles = deletedFiles.size();
         metrics.deletedRecords =
-                removedFiles.values().stream().mapToLong(p -> p.getRight().rowCount()).sum();
+                deletedFiles.stream().mapToLong(IcebergDataFileMeta::recordCount).sum();
         metrics.deletedFilesSize =
-                removedFiles.values().stream().mapToLong(p -> p.getRight().fileSize()).sum();
-        metrics.changedPartitionCount = modifiedPartitionsSet.size();
+                deletedFiles.stream().mapToLong(IcebergDataFileMeta::fileSizeInBytes).sum();
+        Set<BinaryRow> changedPartitions = new HashSet<>();
+        addedFiles.values().stream().map(Pair::getLeft).forEach(changedPartitions::add);
+        deletedFiles.stream()
+                .map(file -> removedFiles.get(file.filePath()).getLeft())
+                .forEach(changedPartitions::add);
+        if (needAddDvToIceberg && !indexFiles.isEmpty()) {
+            changedPartitions.addAll(
+                    partitionsWithChangedDeleteFiles(indexFiles, baseDVManifestFileMetas));
+        }
+        metrics.changedPartitionCount = changedPartitions.size();
 
+        metrics.totalDataFiles = computeLiveFileCount(newDataManifestFileMetas);
+        metrics.totalRecords = computeLiveRowCount(newDataManifestFileMetas);
+
+        // file sizes are not in the manifest list, so the previous total is reused when its
+        // file count matches the base manifests
         IcebergSnapshot baseSnapshot = baseMetadata.currentSnapshot();
-
-        Long previousTotalRecordsValue =
-                getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_RECORDS);
-        long previousTotalRecords =
-                previousTotalRecordsValue != null
-                        ? previousTotalRecordsValue
-                        : computeLiveRowCount(baseDataManifestFileMetas);
-        metrics.totalRecords =
-                Math.max(0, previousTotalRecords + metrics.addedRecords - metrics.deletedRecords);
-
         Long previousTotalDataFilesValue =
                 getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_DATA_FILES);
-        long previousTotalDataFiles =
-                previousTotalDataFilesValue != null
-                        ? previousTotalDataFilesValue
-                        : computeLiveFileCount(baseDataManifestFileMetas);
-        metrics.totalDataFiles =
-                Math.max(
-                        0,
-                        previousTotalDataFiles + metrics.addedDataFiles - metrics.deletedDataFiles);
-
         Long previousTotalFilesSizeValue =
                 getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE);
         long previousTotalFilesSize =
                 previousTotalFilesSizeValue != null
+                                && previousTotalDataFilesValue != null
+                                && previousTotalDataFilesValue
+                                        == computeLiveFileCount(baseDataManifestFileMetas)
                         ? previousTotalFilesSizeValue
                         : computeTotalFilesSizeFromManifests(baseDataManifestFileMetas);
         metrics.totalFilesSize =
@@ -1395,7 +1396,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             List<BinaryRow> modifiedPartitions,
             List<IcebergManifestFileMeta> baseManifestFileMetas,
             long currentSnapshotId,
-            Snapshot.CommitKind commitKind)
+            Snapshot.CommitKind commitKind,
+            List<IcebergDataFileMeta> deletedFiles)
             throws IOException {
         String operation = IcebergSnapshotSummary.APPEND.operation();
         List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
@@ -1465,6 +1467,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     for (IcebergManifestEntry entry : sourceEntries) {
                         if (entry.isLive()) {
                             boolean removed = removedFiles.containsKey(entry.file().filePath());
+                            if (removed) {
+                                deletedFiles.add(entry.file());
+                            }
                             newEntries.add(
                                     new IcebergManifestEntry(
                                             removed
@@ -1888,6 +1893,40 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 icebergDvEntries.iterator(), snapshotId, IcebergManifestFileMeta.Content.DELETES);
     }
 
+    private Set<BinaryRow> partitionsWithChangedDeleteFiles(
+            List<IndexManifestEntry> indexFiles,
+            List<IcebergManifestFileMeta> baseDvManifestFileMetas) {
+        Set<String> baseDeleteFiles = new HashSet<>();
+        for (IcebergManifestFileMeta meta : baseDvManifestFileMetas) {
+            for (IcebergManifestEntry entry :
+                    manifestFile.read(new Path(meta.manifestPath()).getName())) {
+                if (entry.isLive()) {
+                    baseDeleteFiles.add(entry.file().filePath());
+                }
+            }
+        }
+
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (IndexManifestEntry entry : indexFiles) {
+            if (!DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                continue;
+            }
+            boolean inBase = baseDeleteFiles.contains(indexFileHandler.filePath(entry).toString());
+            boolean changed;
+            if (entry.kind() == FileKind.ADD) {
+                // a retry passes every index file of the snapshot as ADD, unchanged ones included
+                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                changed = !inBase && dvRanges != null && !dvRanges.isEmpty();
+            } else {
+                changed = inBase;
+            }
+            if (changed) {
+                partitions.add(entry.partition());
+            }
+        }
+        return partitions;
+    }
+
     // -------------------------------------------------------------------------------------
     // Snapshot Summary Computation
     // -------------------------------------------------------------------------------------
@@ -1975,23 +2014,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     private long computeLiveFileCount(List<IcebergManifestFileMeta> manifestMetas) {
-        return manifestMetas.stream()
-                .mapToLong(
-                        meta ->
-                                meta.addedFilesCount()
-                                        + meta.existingFilesCount()
-                                        - meta.deletedFilesCount())
-                .sum();
+        return manifestMetas.stream().mapToLong(IcebergManifestFileMeta::liveFilesCount).sum();
     }
 
     private long computeLiveRowCount(List<IcebergManifestFileMeta> manifestMetas) {
-        return manifestMetas.stream()
-                .mapToLong(
-                        meta ->
-                                meta.addedRowsCount()
-                                        + meta.existingRowsCount()
-                                        - meta.deletedRowsCount())
-                .sum();
+        return manifestMetas.stream().mapToLong(IcebergManifestFileMeta::liveRowsCount).sum();
     }
 
     @Nullable

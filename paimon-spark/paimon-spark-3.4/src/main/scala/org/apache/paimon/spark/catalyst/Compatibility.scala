@@ -55,6 +55,7 @@ object Compatibility {
   }
 
   def getExecutionMetrics(spark: SparkSession, executionId: Long): Seq[SQLPlanMetric] = {
-    spark.sharedState.statusStore.execution(executionId).get.metrics.toSeq
+    // The SQL status store is updated asynchronously and may not have this execution yet.
+    spark.sharedState.statusStore.execution(executionId).map(_.metrics.toSeq).getOrElse(Seq.empty)
   }
 }

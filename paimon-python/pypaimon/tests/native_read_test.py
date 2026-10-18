@@ -52,6 +52,7 @@ def _table_read(limit=None):
     read.predicate = None
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.include_row_kind = False
+    read._row_kind_column = '_row_kind'
     read.output_projection = None
     read.table.options.row_tracking_enabled.return_value = False
     read.table.fields = read.read_type
@@ -352,19 +353,16 @@ def test_native_split_bridge_failure_falls_back_before_starting_reader():
     native.assert_not_called()
 
 
-def test_native_query_auth_falls_back_to_python_reader():
+def test_native_query_auth_transports_rules_for_core_authorization():
     read = _table_read()
-    split = _Split()
-    split._native_split = object()
-    wrapped = QueryAuthSplit(split, object())
-
-    with patch(
-            'pypaimon.read.native_plan.native_split_from_python') as convert, patch(
-            'pypaimon.read.native_plan.native_read') as native:
-        assert read._try_native_batches(
-            [wrapped], pa.schema([('id', pa.int32())])) is None
-    convert.assert_not_called()
-    native.assert_not_called()
+    wrapped = QueryAuthSplit(_Split(), object())
+    converted = object()
+    with patch('pypaimon.read.native_plan.native_split_from_python', return_value=converted) as convert, \
+            patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([2])]) as native:
+        batches = list(read._try_native_batches([wrapped], pa.schema([('id', pa.int32())])))
+    assert batches[0].column('id').to_pylist() == [2]
+    convert.assert_called_once_with(wrapped)
+    assert native.call_args.args[1] == [converted]
 
 
 def test_native_read_uses_effective_parallelism_from_table_option():

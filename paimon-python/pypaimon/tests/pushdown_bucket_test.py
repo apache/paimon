@@ -524,11 +524,10 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
             self.assertTrue(sel(None, b, 8))
             self.assertTrue(sel.may_contain(b, b, 8))
 
-    def test_selector_partition_not_matching_returns_empty_bucket_set(self):
+    def test_selector_partition_not_matching_keeps_java_bucket_fallback(self):
         # ``part = 'a' AND id = 1`` on partition {part: 'c'} simplifies to
-        # AlwaysFalse — the selector returns False for every bucket since
-        # no row in this partition can possibly match. Sound: dropping a
-        # partition that *can't* contain matches doesn't lose data.
+        # AlwaysFalse. Java cannot extract bucket-key values and falls back
+        # to all buckets; the independent partition filter rejects this row.
         pred = PredicateBuilder.and_predicates([
             self.pb.equal('part', 'a'),
             self.pb.equal('id', 1),
@@ -538,9 +537,15 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
         self.assertIsNotNone(sel)
         part_c = GenericRow(['c'], [self.part_field], RowKind.INSERT)
         for b in range(8):
-            self.assertFalse(sel(part_c, b, 8),
-                             "partition c can't satisfy part='a', "
-                             "drop every bucket (b=%d)" % b)
+            self.assertTrue(sel(part_c, b, 8))
+
+    def test_pending_buckets_are_never_pruned_by_key_hash(self):
+        pred = self.pb.equal('id', 7)
+        sel = create_bucket_selector(pred, [self.id_field], partition_fields=[self.part_field])
+        part = GenericRow(['a'], [self.part_field], RowKind.INSERT)
+        for bucket in [-2, -1]:
+            self.assertTrue(sel(part, bucket, 8))
+            self.assertTrue(sel(bucket, 8))
 
     def test_selector_partition_only_constraint_drops_partition(self):
         # ``part='a' AND id IN (1,2)`` — same partition value 'a'

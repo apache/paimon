@@ -21,7 +21,7 @@ package org.apache.paimon.spark.read
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
-import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, SparkTypeUtils}
+import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, PhysicalBucketFilter, SparkTypeUtils}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
@@ -49,6 +49,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   // Push down
   def pushedPartitionFilters: Seq[PartitionPredicate]
   def pushedDataFilters: Seq[Predicate]
+  def pushedBucketFilters: Seq[Predicate] = Seq.empty
   def pushedLimit: Option[Int] = None
   def pushedTopN: Option[TopN] = None
   def pushedVectorSearch: Option[VectorSearch] = None
@@ -127,6 +128,10 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     if (pushedDataFilters.nonEmpty) {
       _readBuilder.withFilter(pushedDataFilters.asJava)
     }
+    PhysicalBucketFilter.push(
+      _readBuilder,
+      pushedBucketFilters,
+      Option(coreOptions.scanBucket()).map(_.intValue()))
     pushedLimit.foreach(_readBuilder.withLimit)
     pushedTopN.foreach(_readBuilder.withTopN)
     _readBuilder.dropStats()
@@ -210,6 +215,11 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     } else {
       ""
     }
+    val pushedBucketFiltersStr = if (pushedBucketFilters.nonEmpty) {
+      s", BucketFilters: [${pushedBucketFilters.mkString(",")}]"
+    } else {
+      ""
+    }
     val pushedVariantsStr =
       if (pushedVariantExtractions.isEmpty) ""
       else
@@ -228,6 +238,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       pushedPartitionFiltersStr +
       pushedRuntimePartitionFiltersStr +
       pushedDataFiltersStr +
+      pushedBucketFiltersStr +
       pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
       pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("") +
       pushedVectorSearch.map(vs => s", VectorSearch: [$vs]").getOrElse("") +

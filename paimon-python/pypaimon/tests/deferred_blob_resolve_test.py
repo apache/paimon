@@ -29,6 +29,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.query_auth_split import QueryAuthSplit
+from pypaimon.read.reader.format_blob_reader import BlobRecordIterator
 from pypaimon.table.row.blob import BlobRef
 
 
@@ -122,6 +123,15 @@ class DeferredBlobResolveTest(unittest.TestCase):
         cls.blob_ref_to_data_patch = patch.object(
             BlobRef, "to_data", counted_to_data)
         cls.blob_ref_to_data_patch.start()
+        original_inline_read = BlobRecordIterator._read_inline_blob
+
+        def counted_inline_read(reader, position, length):
+            if isinstance(reader.file_io, _BlobCountingFileIO):
+                reader.file_io.blobs_fetched += 1
+            return original_inline_read(reader, position, length)
+
+        cls.inline_blob_read_patch = patch.object(BlobRecordIterator, '_read_inline_blob', counted_inline_read)
+        cls.inline_blob_read_patch.start()
         cls.catalog = CatalogFactory.create({
             "warehouse": os.path.join(cls.tempdir, "warehouse")
         })
@@ -134,6 +144,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.inline_blob_read_patch.stop()
         cls.blob_ref_to_data_patch.stop()
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
@@ -172,14 +183,14 @@ class DeferredBlobResolveTest(unittest.TestCase):
         commit.close()
         return self.catalog.get_table(identifier)
 
-    def _read(self, table, predicate, limit=None, blob_parallelism=None):
+    def _read(self, table, predicate, limit=None, blob_parallelism=None,
+              projection=("sample_id", "payload", "score")):
         counting_file_io = _BlobCountingFileIO(table.file_io)
         table.file_io = counting_file_io
         read_builder = table.new_read_builder()
         if predicate is not None:
             read_builder = read_builder.with_filter(predicate)
-        read_builder = read_builder.with_projection(
-            ["sample_id", "payload", "score"])
+        read_builder = read_builder.with_projection(list(projection))
         if limit is not None:
             read_builder = read_builder.with_limit(limit)
         splits = read_builder.new_scan().plan().splits()
@@ -366,6 +377,107 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
         self.assertEqual(_ROW_COUNT - 1, result.num_rows)
         self.assertEqual(_ROW_COUNT - 1, counting_file_io.blobs_fetched)
+
+    def test_post_mask_filter_defers_unrelated_payloads(self):
+        table = self._create_table('defer_post_mask')
+        auth = TableQueryAuthResult(None, {'sample_id': json.dumps({
+            'name': 'UPPER', 'inputs': [{'index': 0, 'name': 'sample_id', 'type': 'STRING'}]})})
+        table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+        predicate = table.new_read_builder().new_predicate_builder().is_not_null('sample_id')
+        result, counting = self._read(table, predicate, limit=2)
+        self.assertEqual(['SAMPLE_0', 'SAMPLE_1'], result.column('sample_id').to_pylist())
+        self.assertEqual(2, counting.blobs_fetched)
+
+    def test_post_mask_filter_keeps_blob_mask_inputs_eager(self):
+        table = self._create_table('defer_post_mask_inputs', payloads=[b'keep'] * _ROW_COUNT)
+        auth = TableQueryAuthResult(None, {'sample_id': json.dumps({
+            'name': 'FIELD_REF', 'fieldRef': {'index': 1, 'name': 'payload', 'type': 'BLOB'}})})
+        table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+        predicate = table.new_read_builder().new_predicate_builder().startswith('sample_id', 'keep')
+        result, counting = self._read(table, predicate, limit=2)
+        self.assertEqual(['keep', 'keep'], result.column('sample_id').to_pylist())
+        self.assertEqual(_ROW_COUNT, counting.blobs_fetched)
+
+    def test_post_mask_filter_defers_output_mask_inputs(self):
+        for projection in (('sample_id', 'payload', 'score'), ('sample_id', 'score')):
+            with self.subTest(projection=projection):
+                table = self._create_table(
+                    'defer_post_mask_output_inputs_%d' % len(projection),
+                    payloads=[str(100 + index).encode() for index in range(_ROW_COUNT)])
+                auth = TableQueryAuthResult(None, {
+                    'sample_id': json.dumps({'name': 'UPPER', 'inputs': [
+                        {'index': 0, 'name': 'sample_id', 'type': 'STRING'}]}),
+                    'score': json.dumps({'name': 'FIELD_REF', 'fieldRef': {
+                        'index': 1, 'name': 'payload', 'type': 'BLOB'}}),
+                })
+                table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+                predicate = table.new_read_builder().new_predicate_builder().is_not_null('sample_id')
+                result, counting = self._read(table, predicate, limit=2, projection=projection)
+                self.assertEqual(list(projection), result.column_names)
+                self.assertEqual(['SAMPLE_0', 'SAMPLE_1'], result.column('sample_id').to_pylist())
+                self.assertEqual([100, 101], result.column('score').to_pylist())
+                if 'payload' in projection:
+                    self.assertEqual([b'100', b'101'], result.column('payload').to_pylist())
+                self.assertEqual(2, counting.blobs_fetched)
+
+    def test_post_mask_filter_skips_null_masked_payloads(self):
+        table = self._create_table('defer_post_mask_null_payloads')
+        auth = TableQueryAuthResult(None, {
+            'sample_id': json.dumps({'name': 'UPPER', 'inputs': [
+                {'index': 0, 'name': 'sample_id', 'type': 'STRING'}]}),
+            'payload': json.dumps({'name': 'NULL'}),
+        })
+        table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+        predicate = table.new_read_builder().new_predicate_builder().is_not_null('sample_id')
+        result, counting = self._read(table, predicate, limit=2)
+        self.assertEqual([None, None], result.column('payload').to_pylist())
+        self.assertEqual(0, counting.blobs_fetched)
+
+    def test_post_mask_filter_defers_payloads_without_limit(self):
+        table = self._create_table('defer_post_mask_without_limit')
+        auth = TableQueryAuthResult(None, {'sample_id': json.dumps({
+            'name': 'UPPER', 'inputs': [{'index': 0, 'name': 'sample_id', 'type': 'STRING'}]})})
+        table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+        predicate = table.new_read_builder().new_predicate_builder().startswith('sample_id', 'SAMPLE_1')
+        result, counting = self._read(table, predicate, blob_parallelism=4)
+        self.assertEqual([1], result.column('score').to_pylist())
+        self.assertEqual(1, counting.blobs_fetched)
+
+    def test_post_mask_limit_follows_row_authorization(self):
+        table = self._create_table('defer_post_mask_row_auth')
+        auth = TableQueryAuthResult(_RejectScoreOneAuthResult.filter, {'sample_id': json.dumps({
+            'name': 'UPPER', 'inputs': [{'index': 0, 'name': 'sample_id', 'type': 'STRING'}]})})
+        table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+        predicate = table.new_read_builder().new_predicate_builder().is_not_null('sample_id')
+        result, counting = self._read(table, predicate, limit=2)
+        self.assertEqual([0, 2], result.column('score').to_pylist())
+        self.assertEqual(2, counting.blobs_fetched)
+
+    def test_post_mask_limit_defers_payloads_across_splits(self):
+        for method in ('batches', 'iterator'):
+            with self.subTest(method=method):
+                table = self._create_table(
+                    'defer_post_mask_splits_' + method, extra_options={'source.split.target-size': '1b'},
+                    partition_keys=['sample_id'], sample_ids=['a'] + ['b'] * (_ROW_COUNT - 1))
+                table.file_io = counting = _BlobCountingFileIO(table.file_io)
+                auth = TableQueryAuthResult(None, {'sample_id': json.dumps({
+                    'name': 'UPPER', 'inputs': [{'index': 0, 'name': 'sample_id', 'type': 'STRING'}]})})
+                table.catalog_environment.table_query_auth = lambda options, identifier: lambda select: auth
+                predicate = table.new_read_builder().new_predicate_builder().is_not_null('sample_id')
+                builder = table.new_read_builder().with_filter(predicate).with_limit(2)
+                splits = builder.new_scan().plan().splits()
+                self.assertEqual(2, len(splits))
+                reader = builder.new_read()
+                if method == 'batches':
+                    result = pa.Table.from_batches(reader.to_arrow_batch_reader(splits))
+                    values = zip(result.column('score').to_pylist(), result.column('payload').to_pylist())
+                else:
+                    values = [(row.get_field(2), row.get_field(1)) for row in reader.to_iterator(splits)]
+                values = list(values)
+                self.assertEqual(2, len(values))
+                self.assertEqual(2, counting.blobs_fetched)
+                for score, payload in values:
+                    self.assertEqual(bytes([score]) * 1024, payload)
 
     def test_auth_filter_preserves_file_io_for_blob_descriptors(self):
         table = self._create_table(

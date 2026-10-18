@@ -32,7 +32,6 @@ import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -4798,7 +4797,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.write(
                 GenericRow.of(
                         BinaryString.fromString("d1"),
-                        Blob.fromView(new BlobViewStruct(identifier, 1, 0L))));
+                        Blob.fromView(identifier, table.rowType(), "image", 0L)));
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(write.prepareCommit());
         write.close();

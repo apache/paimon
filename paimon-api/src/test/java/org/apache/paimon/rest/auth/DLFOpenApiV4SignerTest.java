@@ -243,9 +243,9 @@ public class DLFOpenApiV4SignerTest {
 
         assertEquals(
                 "ACS4-HMAC-SHA256 Credential=TestAKId/20250416/cn-hangzhou/DlfNext/aliyun_v4_request,"
-                        + "SignedHeaders=host;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;"
-                        + "x-acs-version,"
-                        + "Signature=9812bacd92dd1152e7ea32aacfad0545835d6a18543852364f1a1ea0cba6219a",
+                        + "SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;"
+                        + "x-acs-signature-nonce;x-acs-version,"
+                        + "Signature=2d5fdb5201901a5cdceee97318366666a88504eeae0b1ce534dbf86889cc00fb",
                 authorization);
     }
 
@@ -279,7 +279,11 @@ public class DLFOpenApiV4SignerTest {
         DLFOpenApiV4Signer signer = new DLFOpenApiV4Signer(REGION);
         DLFToken token = new DLFToken("TestAKId", "TestAKSecret", null, null);
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("/v1/clg-paimon-1/tables", new HashMap<>(), "GET", null);
+                new RESTAuthParameter(
+                        "/v1/clg-paimon-1/databases/db/tables/t/unknown",
+                        new HashMap<>(),
+                        "GET",
+                        null);
         Map<String, String> signHeaders = signer.signHeaders(null, NOW, null, HOST);
 
         String authorization = signer.authorization(restAuthParameter, token, HOST, signHeaders);

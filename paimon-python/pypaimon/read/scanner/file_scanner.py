@@ -36,6 +36,8 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            exclude_predicate_with_fields,
+                                           predicate_for_physical_fields,
+                                           predicate_matches_physical_names,
                                            remove_row_id_filter,
                                            rewrite_predicate_indices,
                                            trim_and_transform_predicate,
@@ -230,39 +232,15 @@ class FileScanner:
 
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
-        self.predicate = predicate
+        self._user_predicate = predicate
+        self._partition_predicate = partition_predicate
         self._explicit_partition_filter = partition_predicate is not None
-        row_ranges = (
-            _row_ranges_from_predicate(predicate) if predicate else None
-        )
-        if predicate and row_ranges is not None:
-            self.predicate_for_stats = remove_row_id_filter(predicate)
-        else:
-            self.predicate_for_stats = predicate
-        self.predicate_for_stats = exclude_predicate_with_fields(
-            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES)
-        # Partition columns aren't in data files, so skip them for value-stats pruning.
-        self.predicate_for_stats = exclude_predicate_with_fields(
-            self.predicate_for_stats, set(self.table.partition_keys))
         self.limit = limit
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_list_manager = ManifestListManager(table)
         self.manifest_file_manager = ManifestFileManager(table)
 
-        self.primary_key_predicate = trim_and_transform_predicate(
-            self.predicate, self.table.field_names, self.table.trimmed_primary_keys)
-
-        if partition_predicate is None:
-            self.partition_key_predicate = trim_and_transform_predicate(
-                self.predicate, self.table.field_names, self.table.partition_keys)
-        else:
-            # External predicate may carry full-schema indices and non-partition
-            # leaves; drop non-partition leaves and rebind the rest by name to the
-            # partition-row layout (matches derived path / Java), else IndexError.
-            self.partition_key_predicate = rewrite_predicate_indices(
-                trim_predicate_by_fields(partition_predicate, self.table.partition_keys),
-                self.table.partition_keys_fields)
         options = self.table.options
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
@@ -290,16 +268,31 @@ class FileScanner:
         self.auth_partition_predicate = None
         self.auth_has_non_partition_filter = False
 
-        # Predicate-driven bucket pruning (HASH_FIXED only). Mirrors Java
-        # BucketSelectConverter. Set on demand and reused across all
-        # _filter_manifest_entry calls; the inner _Selector caches the
-        # bucket set per ``total_buckets`` value.
-        self._bucket_selector = self._init_bucket_selector()
+        self._set_predicate(predicate)
 
         self.simple_stats_evolutions = SimpleStatsEvolutions(
             self._schema_fields,
             self.table.table_schema.id
         )
+
+    def _set_predicate(self, predicate):
+        self.predicate = predicate
+        physical = predicate_for_physical_fields(predicate, self.table.fields)
+        row_ranges = _row_ranges_from_predicate(physical) if physical else None
+        self.predicate_for_stats = (
+            remove_row_id_filter(physical) if row_ranges is not None else physical)
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES | set(self.table.partition_keys))
+        self.primary_key_predicate = trim_and_transform_predicate(
+            physical, self.table.field_names, self.table.trimmed_primary_keys)
+        if self._partition_predicate is None:
+            self.partition_key_predicate = trim_and_transform_predicate(
+                physical, self.table.field_names, self.table.partition_keys)
+        else:
+            self.partition_key_predicate = rewrite_predicate_indices(
+                trim_predicate_by_fields(self._partition_predicate, self.table.partition_keys),
+                self.table.partition_keys_fields)
+        self._bucket_selector = self._init_bucket_selector()
 
     def _schema_fields(self, schema_id: int):
         """Resolve schema fields, short-circuiting current table schema id to avoid
@@ -334,10 +327,13 @@ class FileScanner:
                     raise ValueError(
                         "Primary-key scan requires a GlobalIndexSplitResult, but found %s."
                         % type(self._global_index_result).__name__)
-                return Plan(
-                    list(self._global_index_result.splits),
-                    snapshot_id=self._global_index_result.snapshot_id,
-                )
+                # Java ignores external raw-index results under query auth:
+                # masking can invalidate both their positions and their scores.
+                if not self.table.options.query_auth_enabled:
+                    return Plan(
+                        list(self._global_index_result.splits),
+                        snapshot_id=self._global_index_result.snapshot_id,
+                    )
         # Create appropriate split generator based on table type
         if self.chunk_shuffle is not None:
             self._validate_chunk_shuffle_compat()
@@ -425,8 +421,9 @@ class FileScanner:
 
     def _apply_primary_key_sorted_indexes(self, splits, snapshot=None):
         snapshot = snapshot if snapshot is not None else self._scanned_snapshot
+        predicate = predicate_for_physical_fields(self.predicate, self.table.fields)
         if (not self.table.options.global_index_enabled()
-                or self.predicate is None
+                or predicate is None
                 or snapshot is None
                 or not splits):
             return splits
@@ -456,7 +453,7 @@ class FileScanner:
         evaluated = primary_key_sorted_index_scan.evaluate(
             index_plan,
             self.table.fields,
-            self.predicate,
+            predicate,
             definitions,
             primary_key_sorted_index_scan.reader_factory(self.table),
         )
@@ -471,7 +468,7 @@ class FileScanner:
         self._scanned_snapshot = snapshot
         self._scanned_snapshot_id = snapshot.id if snapshot else None
 
-        if row_ranges is None:
+        if row_ranges is None and not self.table.options.query_auth_enabled:
             global_index_plan = self._global_index_result \
                 if self._global_index_result is not None \
                 else self._eval_global_index(snapshot)
@@ -489,7 +486,8 @@ class FileScanner:
                 if isinstance(global_index_result, ScoredGlobalIndexResult):
                     score_getter = global_index_result.score_getter()
         if row_ranges is None and self.predicate is not None:
-            row_ranges = _row_ranges_from_predicate(self.predicate)
+            row_ranges = _row_ranges_from_predicate(
+                predicate_for_physical_fields(self.predicate, self.table.fields))
 
         if row_ranges is not None and not row_ranges:
             return [], DataEvolutionSplitGenerator(
@@ -552,7 +550,8 @@ class FileScanner:
 
     def _eval_global_index(self, snapshot=None):
         # Snapshot indexes describe current state, not historical change events.
-        if self.is_streaming or self.predicate is None:
+        predicate = predicate_for_physical_fields(self.predicate, self.table.fields)
+        if self.is_streaming or predicate is None:
             return None
 
         # Check if global index is enabled
@@ -565,20 +564,20 @@ class FileScanner:
             scanner = DataEvolutionGlobalIndexScanner.create(
                 self.table,
                 partition_filter=self.partition_key_predicate,
-                predicate=self.predicate,
+                predicate=predicate,
                 snapshot=snapshot,
             )
             if scanner is None:
                 return None
             with scanner:
-                evaluation = scanner.scan_with_coverage(self.predicate)
+                evaluation = scanner.scan_with_coverage(predicate)
                 if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
                 return _GlobalIndexPlanningResult(
                     evaluation.result,
                     scanner.unindexed_ranges(
-                        self.predicate,
+                        predicate,
                         search_mode=scalar_mode,
                         contributing_field_ids=(
                             evaluation.contributing_field_ids),
@@ -706,6 +705,7 @@ class FileScanner:
         """
         self.scan_stats = ScanStats()
         plan = self.scan()
+        plan._scan_stats = self.scan_stats
         return plan, self.scan_stats
 
     def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'FileScanner':
@@ -727,13 +727,15 @@ class FileScanner:
             raise ValueError("chunk_shuffle cannot combine with global index")
         if self._row_ranges is not None:
             raise ValueError("chunk_shuffle cannot combine with row ranges")
+        if self.auth_has_non_partition_filter:
+            raise ValueError("chunk_shuffle cannot combine with authorization filters evaluated during reading")
         # Only partition predicates are allowed: row-level / column-level
         # predicates would silently shrink each chunk's effective row count,
         # breaking the chunk_size contract DataLoader callers expect.
-        if self.predicate is not None:
+        if self._user_predicate is not None:
             partition_keys = set(self.table.partition_keys or [])
-            non_partition_fields = _get_all_fields(self.predicate) - partition_keys
-            if non_partition_fields:
+            non_partition_fields = _get_all_fields(self._user_predicate) - partition_keys
+            if non_partition_fields or not predicate_matches_physical_names(self._user_predicate):
                 raise ValueError(
                     "chunk_shuffle predicate must reference only partition keys; "
                     "got non-partition fields: "
@@ -772,6 +774,8 @@ class FileScanner:
         """Mirror Java ``SnapshotReaderImpl.hasNonPartitionFilter``."""
         if self.predicate is None:
             return False
+        if not predicate_matches_physical_names(self.predicate):
+            return True
         partition_keys = set(self.table.partition_keys or [])
         return not _get_all_fields(self.predicate).issubset(partition_keys)
 
@@ -809,6 +813,9 @@ class FileScanner:
         which can vary between manifest entries after a bucket rescale.
         """
         if self.predicate is None:
+            return None
+        predicate = predicate_for_physical_fields(self.predicate, self.table.fields)
+        if predicate is None:
             return None
         # ``bucket_mode()`` returns HASH_FIXED only when ``options.bucket()
         # > 0``; other modes (DYNAMIC / POSTPONE / UNAWARE / CROSS_PARTITION)
@@ -849,7 +856,7 @@ class FileScanner:
                 if name in self.table.field_dict
             ]
         return create_bucket_selector(
-            self.predicate, bucket_key_fields,
+            predicate, bucket_key_fields,
             partition_fields=partition_fields,
         )
 

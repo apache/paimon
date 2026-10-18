@@ -24,7 +24,8 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.write.native_update import (
-    _native_row_id_table, _native_update_columns_supported, _supported_upsert_key_type,
+    _dictionary_value_type, _native_row_id_table, _native_update_columns_supported,
+    _native_update_formats_supported, _supported_upsert_key_type,
 )
 from pypaimon.write.native_write import _native_partition_types_supported
 
@@ -49,8 +50,8 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         from pypaimon.read.native_plan import _native_blob_view_supported
         from pypaimon.table.file_store_table import FileStoreTable
         if (type(source) is not FileStoreTable
-                or source.options.file_format() != 'parquet'
-                or source.options.video_frame_fields() or source.options.with_vector_format()
+                or not _native_update_formats_supported(source)
+                or source.options.video_frame_fields()
                 or (source.is_primary_key_table and not source.trimmed_primary_keys)):
             return None
         from pypaimon.read.table_scan import _validate_scan_mode
@@ -58,7 +59,9 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         if not _native_blob_view_supported(source, source.field_names):
             return None
         # Core resolves a full snapshot or PyPaimon's existing timestamp window.
-        if (source.options.scan_mode() not in ('default', 'from-snapshot', 'from-timestamp', 'incremental')
+        if (source.options.scan_mode() not in (
+                'default', 'latest', 'latest-full', 'from-snapshot',
+                'from-snapshot-full', 'from-timestamp', 'incremental')
                 or any(str(key).startswith('incremental-') and key != 'incremental-between-timestamp'
                        for key in source.table_schema.options)):
             return None
@@ -68,9 +71,23 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
                 source_schema, source.partition_keys,
                 source.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
             return None
-        native_source = create_native_write_table(source)
-        if native_source is None:
-            return None
+        if source.options.query_auth_enabled:
+            from pypaimon.read.native_plan import _native_query_auth_supported, _native_table
+            from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+            from pypaimon.write.native_commit import _rest_catalog_supported
+            if (not _rest_catalog_supported(source) or not _native_query_auth_supported(source)
+                    or source.current_branch() != 'main' or '_read_snapshot' in vars(source)
+                    or any(source.table_schema.options.get(key) is not None for key in SCAN_KEYS)):
+                return None
+            # A source is a read, not a write. Core obtains a fresh REST grant
+            # and requires it to be unrestricted, as Python plan_all_files does.
+            native_source = _native_table(source)
+        else:
+            native_source = create_native_write_table(source)
+            if native_source is None:
+                return None
+            from pypaimon.read.native_plan import _with_native_read_snapshot
+            native_source = _with_native_read_snapshot(source, native_source)
     source, matched, not_matched, context = _prepare(
         table, source, list(matched), list(not_matched), on, source_schema=source_schema)
     if any(callable(value) for clause in matched + not_matched for value in clause.spec.values()):
@@ -79,7 +96,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         return None
     for target, origin in zip(target_keys, source_keys):
         target_type = pa.int64() if target == '_ROW_ID' else context.full_pa_schema.field(target).type
-        source_type = target_type if self_merge else source.schema.field(origin).type
+        source_type = target_type if self_merge else _dictionary_value_type(source.schema.field(origin).type)
         if source_type != target_type or not _supported_upsert_key_type(target_type):
             return None
 

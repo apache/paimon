@@ -17,6 +17,7 @@
 ################################################################################
 
 import json
+from dataclasses import replace
 from typing import Callable, Dict, List, Optional
 
 import pyarrow as pa
@@ -26,7 +27,6 @@ from pypaimon.common.predicate_json_parser import (
     extract_referenced_fields,
     parse_predicate_to_batch_filter,
 )
-from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.special_fields import SpecialFields
@@ -132,7 +132,7 @@ class TableQueryAuthResult:
         if not self.has_restrictions:
             return plan
         auth_splits = [QueryAuthSplit(split, self) for split in plan.splits()]
-        return Plan(auth_splits, snapshot_id=plan.snapshot_id)
+        return replace(plan, _splits=auth_splits)
 
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:

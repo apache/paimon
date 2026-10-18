@@ -21,6 +21,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
     DatabaseNotExistException, TableNotExistException
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -627,7 +628,7 @@ class RESTSimpleTest(RESTBaseTest):
         splits.extend(read_builder.new_scan().with_shard(2, 3).plan().splits())
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
-        expected_sorted = table_sort_by(self.expected.cast(self.pk_pa_schema), 'user_id')
+        expected_sorted = table_sort_by(self.expected.cast(read_arrow_schema(table.fields)), 'user_id')
         actual_sorted = table_sort_by(actual, 'user_id')
         self.assertEqual(actual_sorted, expected_sorted)
 
@@ -664,7 +665,7 @@ class RESTSimpleTest(RESTBaseTest):
             'behavior': ['b', 'c', 'a', 'd', 'e'],
             'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-12', '2025-08-13']
         }
-        expected = pa.Table.from_pydict(data_expected, schema=table_pa_schema)
+        expected = pa.Table.from_pydict(data_expected, schema=read_arrow_schema(table.fields))
         self.assertEqual(actual.combine_chunks(), expected.combine_chunks())
 
     def test_with_shard_uniform_division(self):

@@ -549,6 +549,12 @@ under the License.
             <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.merged-read.stats-pushdown.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to push filters down into a row-id range whose columns are merged from several data files. The rows which may match are computed from the file statistics and page indexes of the files holding the latest values of the filtered columns, then every file of the range reads only these rows. Only Parquet files are supported.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.nested-field.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

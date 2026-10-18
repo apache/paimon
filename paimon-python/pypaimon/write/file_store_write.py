@@ -386,7 +386,7 @@ class FileStoreWrite:
                 if snapshot is None:
                     raise ValueError("Snapshot id '{}' doesn't exist".format(self.restore_snapshot_id))
             # Replace inherited selectors and mode, including an explicit empty
-            # view. plan_for_write still validates row filters and column masks.
+            # view. plan_all_files still validates row filters and column masks.
             return self.table._copy_with_snapshot(snapshot)
         return self.table
 
@@ -395,11 +395,14 @@ class FileStoreWrite:
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):
-            sub_predicates.append(predicate_builder.equal(key, value))
+            # Java PartitionPredicate uses IS NULL for null partition values.
+            # Equality to NULL cannot locate the files whose sequence we restore.
+            sub_predicates.append(predicate_builder.is_null(key) if value is None
+                                  else predicate_builder.equal(key, value))
         partition_filter = predicate_builder.and_predicates(sub_predicates)
 
         scan = read_builder.with_filter(partition_filter).new_scan()
-        splits = scan.plan_for_write().splits()
+        splits = scan.plan_all_files().splits()
 
         max_seq_numbers = {}
         for split in splits:

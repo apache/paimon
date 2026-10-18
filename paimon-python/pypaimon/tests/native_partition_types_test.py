@@ -258,7 +258,7 @@ def test_native_commit_binary_partition_capability_precedes_execution(tmp_path, 
     table, _ = _table(tmp_path, pa.binary(), native=False,
                       extra_options={'partition.legacy-name': str(legacy).lower()})
     with patch('pypaimon.write.native_commit._rest_catalog_supported', return_value=True), \
-            patch('pypaimon.write.native_commit.native_commit_available', return_value=True), \
+            patch('pypaimon.write.native_commit.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_commit.create_native_write_table') as native:
         committer = create_native_commit(table, 'user')
         if legacy:

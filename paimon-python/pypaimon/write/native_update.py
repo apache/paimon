@@ -21,6 +21,8 @@ import json
 
 import pyarrow as pa
 
+from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
@@ -29,20 +31,24 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.native_write import native_write_available, _native_partition_types_supported
+from pypaimon.write.native_write import _native_partition_types_supported
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
+
+
+def _native_update_formats_supported(table):
+    return (table.options.file_format() == 'parquet'
+            and (not table.options.with_vector_format() or table.options.vector_file_format() == 'parquet'))
 
 
 def _native_update_table(table):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            or table.options.file_format() != 'parquet'
-            or table.options.with_vector_format()
+            or not _native_update_formats_supported(table)
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
-            or not native_write_available()):
+            or not native_runtime_available()):
         return None
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if not _native_partition_types_supported(
@@ -97,9 +103,6 @@ def create_native_update_by_row_id(table, commit_user, commit_identifier):
 
 def create_native_shard_updator(table, commit_user, projection, columns, shard, shard_count, stream=False):
     """Core owns whole-file sharding, the captured reader and positional updates."""
-    from pypaimon.read.native_plan import native_method_available
-    if not native_method_available('BatchTableUpdate', 'new_shard_updator'):
-        return None
     if not _native_update_columns_supported(table, columns):
         return None
     native_table = _native_row_id_table(table)
@@ -151,6 +154,39 @@ def _supported_upsert_key_type(data_type):
         pa.types.is_time, pa.types.is_timestamp,
         pa.types.is_floating,
     ))
+
+
+def _dictionary_value_type(data_type):
+    while pa.types.is_dictionary(data_type):
+        data_type = data_type.value_type
+    return data_type
+
+
+def _native_upsert_key_type_compatible(source, target):
+    """Qualify layouts; exact values and conversion bounds belong to core."""
+    source = _dictionary_value_type(source)
+    if pa.types.is_null(source):
+        return True
+
+    def numeric(data_type):
+        return (pa.types.is_integer(data_type) or pa.types.is_floating(data_type)
+                or pa.types.is_decimal(data_type))
+    if numeric(source) and numeric(target):
+        return True
+    for family in (pa.types.is_date, pa.types.is_time):
+        if family(source) and family(target):
+            return True
+
+    def binary(data_type):
+        return (pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
+                or pa.types.is_fixed_size_binary(data_type))
+    if binary(source) and binary(target):
+        return True
+    if pa.types.is_timestamp(source) and pa.types.is_timestamp(target):
+        return (source.tz is None) == (target.tz is None)
+    return arrow_schemas_compatible(
+        pa.schema([pa.field('key', source)]), pa.schema([pa.field('key', target)]),
+        check_top_level_nullability=False, allow_binary_compatibility=True)
 
 
 def _native_update_columns_supported(table, columns):
@@ -212,11 +248,17 @@ def create_native_upsert(table, commit_user, data, keys, columns):
             from pypaimon.write.native_blob_rows import NativeBlobRows
             blob_rows = NativeBlobRows()
         data = _upsert_row_batches(data, fields, schema, table, blob_rows)
-    elif (len(data.column_names) != len(set(data.column_names))
-            or not set(data.column_names) <= set(schema.names)
-            or any(data.schema.field(name).type != schema.field(name).type
-                   for name in data.column_names)):
-        return None
+    else:
+        if (len(data.column_names) != len(set(data.column_names))
+                or not set(data.column_names) <= set(schema.names)):
+            return None
+        # Keys need a shared representation before matching. Core selects
+        # surviving payloads before applying row-ID update or append rules;
+        # validating all payload types here would reject valid matched updates.
+        key_names = list(dict.fromkeys(keys + table.partition_keys))
+        if not all(_native_upsert_key_type_compatible(data.schema.field(name).type, schema.field(name).type)
+                   for name in key_names):
+            return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
               .new_update()
@@ -246,11 +288,8 @@ def create_native_predicate_update(table, commit_user, predicate, columns=None):
 
 def native_predicate_row_ids(scan_table, predicate, splits):
     """Match a batch delete predicate in Rust and return its row IDs."""
-    from pypaimon.read.native_plan import (
-        _prepare_native_read, native_split_bridge_available,
-        native_split_from_python,
-    )
-    if not native_split_bridge_available():
+    from pypaimon.read.native_plan import _prepare_native_read, native_split_from_python
+    if not native_runtime_available():
         return None
     reader = _prepare_native_read(
         scan_table, predicate=predicate, projection=['_ROW_ID']
@@ -264,9 +303,7 @@ def native_predicate_row_ids(scan_table, predicate, splits):
 
 def create_native_predicate_delete(table, commit_user, predicate):
     """Delegate matching and partition metadata deletion to the core updater."""
-    from pypaimon.read.native_plan import _predicate_to_native, native_method_available
-    if not native_method_available('BatchTableUpdate', 'delete_by_predicate'):
-        return None
+    from pypaimon.read.native_plan import _predicate_to_native
     # Core selects whole-partition metadata deletes for append/PK tables too;
     # only the row-level branch requires row tracking and deletion vectors.
     native_table = _native_update_table(table)

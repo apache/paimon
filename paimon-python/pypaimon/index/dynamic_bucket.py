@@ -385,7 +385,8 @@ class HashBucketAssigner:
         if scan_table.partition_keys:
             predicate_builder = read_builder.new_predicate_builder()
             predicates = [
-                predicate_builder.equal(key, value)
+                predicate_builder.is_null(key) if value is None
+                else predicate_builder.equal(key, value)
                 for key, value in zip(scan_table.partition_keys, partition)
             ]
             read_builder.with_filter(
@@ -393,7 +394,7 @@ class HashBucketAssigner:
             )
         return {
             split.bucket
-            for split in read_builder.new_scan().plan_for_write().splits()
+            for split in read_builder.new_scan().plan_all_files().splits()
             if split.files
         }
 
