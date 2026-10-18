@@ -18,7 +18,6 @@
 """Compare committed timestamp windows, including cross-snapshot change events."""
 
 import json
-import os
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -30,6 +29,8 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.read.native_plan import native_method_available
 from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
 from pypaimon.utils.range import Range
 
 
@@ -71,14 +72,19 @@ def _set_time(table, timestamp):
     return snapshot.id
 
 
-def _write(table, timestamp, rows, overwrite=False):
+def _write(table, timestamp, rows, overwrite=False, kind=None):
     builder = table.new_batch_write_builder()
     if overwrite:
         builder.overwrite()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
-        writer.write_arrow(pa.Table.from_pydict({
-            key: [row[key] for row in rows] for key in SCHEMA.names}, schema=SCHEMA))
+        if kind is None:
+            writer.write_arrow(pa.Table.from_pydict({
+                key: [row[key] for row in rows] for key in SCHEMA.names}, schema=SCHEMA))
+        else:
+            for row in rows:
+                writer.write_row(GenericRow(
+                    [row[field.name] for field in table.fields], table.fields, kind))
         commit.commit(writer.prepare_commit())
     finally:
         writer.close()
@@ -352,15 +358,16 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
     scan = AsyncStreamingTableScan(table, prefetch_enabled=False)
     expected = []
     for kind in range(4):
-        snapshot_id = _write(table, (kind + 1) * 100, [{'k': 1, 'v': str(kind)}])
+        # Write each physical kind through the public API so committed files
+        # and manifest metadata remain consistent for both reader paths.
+        snapshot_id = _write(table, (kind + 1) * 100, [{'k': 1, 'v': str(kind)}], kind=RowKind(kind))
         plan = scan._create_delta_plan(table.snapshot_manager().get_snapshot_by_id(snapshot_id))
         file = plan.splits()[0].files[0]
-        physical = pq.read_table(file.file_path)
-        index = physical.schema.get_field_index('_VALUE_KIND')
-        physical = physical.set_column(index, physical.schema.field(index), pa.array([kind], pa.int8()))
-        pq.write_table(physical, file.file_path)
-        rows = list(table.new_read_builder().new_read().to_iterator(plan.splits()))
-        assert [(row.get_field(1), row.get_row_kind().value) for row in rows] == [(str(kind), kind)]
+        assert pq.read_table(file.file_path, columns=['_VALUE_KIND']).column(0).to_pylist() == [kind]
+        assert file.file_size == table.file_io.get_file_size(file.file_path)
+        rows = [(row.get_field(1), row.get_row_kind().value)
+                for row in table.new_read_builder().new_read().to_iterator(plan.splits())]
+        assert rows == [(str(kind), kind)]
         assert plan.snapshot_id == snapshot_id
         expected.append((str(kind), kind))
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
@@ -372,22 +379,10 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
             stack.enter_context(patch.object(batch_scan.file_scanner, 'scan',
                                              side_effect=AssertionError('native fallback')))
     plan = batch_scan.plan()
-    if native:
-        # The fixture rewrites Parquet bytes after commit to manufacture all
-        # four physical kinds. Refresh the opaque split's file-size metadata;
-        # real committed files already have matching manifest sizes.
-        from pypaimon_rust.datafusion import Split as NativeSplit
-        for split in plan.splits():
-            _, (state,) = split._native_split.__reduce__()
-            native_state = json.loads(bytes(state))
-            for native_file, data_file in zip(
-                    native_state['data_files'], split.files):
-                native_file['_FILE_SIZE'] = os.path.getsize(
-                    data_file.file_path)
-            split._native_split = NativeSplit(
-                json.dumps(native_state).encode())
-    rows = list(builder.new_read().to_iterator(plan.splits()))
-    assert sorted((row.get_field(1), row.get_row_kind().value) for row in rows) == expected
+    # InternalRow views are reused by the iterator; capture values as it advances.
+    rows = [(row.get_field(1), row.get_row_kind().value)
+            for row in builder.new_read().to_iterator(plan.splits())]
+    assert sorted(rows) == expected
     if native:
         read = builder.new_read()
         read.include_row_kind = True
