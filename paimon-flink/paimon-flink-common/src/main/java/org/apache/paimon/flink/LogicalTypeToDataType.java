@@ -179,7 +179,7 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
     }
 
     public DataType visit(VariantType variantType) {
-        return new org.apache.paimon.types.VariantType();
+        return new org.apache.paimon.types.VariantType(variantType.isNullable());
     }
 
     @Override
