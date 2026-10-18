@@ -165,10 +165,22 @@ public class RESTTokenRefresher {
             if (current != null && remainingMillis(current.token) >= minimumValidityMillis) {
                 return current.token;
             }
-            RESTToken loaded = load();
-            cached = new CachedToken(loaded, currentTimeMillis());
-            lastFailure = null;
-            return loaded;
+            // A failed reload is not repeated before its retry, as in token().
+            if (currentTimeMillis() < nextAttemptMillis) {
+                throw new IllegalStateException(
+                        "The data token of "
+                                + identifier
+                                + " has less than "
+                                + minimumValidityMillis
+                                + " ms left and reloading it failed.",
+                        lastFailure);
+            }
+            try {
+                return loadAndCache();
+            } catch (RuntimeException e) {
+                failed(e);
+                throw e;
+            }
         } finally {
             lock.unlock();
         }
@@ -195,15 +207,10 @@ public class RESTTokenRefresher {
                     lastFailure);
         }
         try {
-            RESTToken loaded = load();
-            cached = new CachedToken(loaded, currentTimeMillis());
-            lastFailure = null;
-            return loaded;
+            return loadAndCache();
         } catch (RuntimeException e) {
-            // A slow request must neither use up the retry interval nor outlive the current token.
-            long failedAt = currentTimeMillis();
-            lastFailure = e;
-            nextAttemptMillis = failedAt + RELOAD_INTERVAL_MILLIS;
+            // A slow request must not outlive the current token.
+            long failedAt = failed(e);
             if (current == null || failedAt >= current.token.expireAtMillis()) {
                 throw e;
             }
@@ -213,6 +220,21 @@ public class RESTTokenRefresher {
                     e);
             return current.token;
         }
+    }
+
+    private RESTToken loadAndCache() {
+        RESTToken loaded = load();
+        cached = new CachedToken(loaded, currentTimeMillis());
+        lastFailure = null;
+        return loaded;
+    }
+
+    /** Records a failed reload and returns when it failed, which starts the retry interval. */
+    private long failed(RuntimeException e) {
+        long failedAt = currentTimeMillis();
+        lastFailure = e;
+        nextAttemptMillis = failedAt + RELOAD_INTERVAL_MILLIS;
+        return failedAt;
     }
 
     private RESTToken load() {

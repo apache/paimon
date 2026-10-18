@@ -270,6 +270,30 @@ class RESTTokenFileIOTest {
         verify(api, times(2)).loadTableToken(identifier);
     }
 
+    @Test
+    void testPresigningDoesNotRepeatAFailedReload() throws IOException {
+        Path root = new Path("oss://bucket/table");
+        BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/data.blob", 0, 1);
+        Duration validity = Duration.ofMinutes(1);
+        AtomicLong now = new AtomicLong(1700000000000L);
+        FileIO delegate = mock(FileIO.class);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(tokenResponse(now.get() + Duration.ofMinutes(2).toMillis()))
+                .thenThrow(new IllegalStateException("REST server unavailable"));
+        RESTTokenFileIO fileIO = restTokenFileIO(loader(delegate), api, identifier, now);
+        fileIO.validToken();
+        now.addAndGet(Duration.ofSeconds(61).toMillis());
+
+        for (int i = 0; i < 2; i++) {
+            assertThatThrownBy(() -> fileIO.createBlobPresignedUrl(root, descriptor, validity))
+                    .hasRootCauseMessage("REST server unavailable");
+        }
+        verify(delegate, never()).createBlobPresignedUrl(any(), any(), any());
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
     private static FileIOLoader loader(FileIO delegate) {
         FileIOLoader loader = mock(FileIOLoader.class);
         when(loader.load(any())).thenReturn(delegate);

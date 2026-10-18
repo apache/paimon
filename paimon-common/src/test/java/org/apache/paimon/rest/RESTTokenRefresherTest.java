@@ -197,6 +197,49 @@ class RESTTokenRefresherTest {
     }
 
     @Test
+    void testFailedReloadIsNotRepeatedForALongerValidity() {
+        when(api.loadTableToken(identifier))
+                .thenThrow(new IllegalStateException("REST server unavailable"));
+        RESTTokenRefresher refresher = refresher(token("first", Duration.ofMinutes(2)));
+        // due for a reload, with less than the requested minute left
+        now.addAndGet(Duration.ofSeconds(61).toMillis());
+        long validity = Duration.ofMinutes(1).toMillis();
+
+        for (int i = 0; i < 2; i++) {
+            assertThatThrownBy(() -> refresher.tokenValidFor(validity))
+                    .hasMessageContaining("reloading it failed")
+                    .hasRootCauseMessage("REST server unavailable");
+        }
+        verify(api, times(1)).loadTableToken(identifier);
+
+        now.addAndGet(RESTTokenRefresher.RELOAD_INTERVAL_MILLIS);
+        assertThatThrownBy(() -> refresher.tokenValidFor(validity))
+                .hasRootCauseMessage("REST server unavailable");
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
+    void testFailedForcedReloadIsRetriedAfterTheInterval() {
+        when(api.loadTableToken(identifier))
+                .thenThrow(new IllegalStateException("REST server unavailable"))
+                .thenReturn(response("second", hours(4)));
+        RESTTokenRefresher refresher = refresher(token("first", hours(2)));
+        long validity = hours(3).toMillis();
+
+        assertThatThrownBy(() -> refresher.tokenValidFor(validity))
+                .hasMessageContaining("REST server unavailable");
+        assertThatThrownBy(() -> refresher.tokenValidFor(validity))
+                .hasMessageContaining("reloading it failed")
+                .hasRootCauseMessage("REST server unavailable");
+        assertThat(refresher.token().token()).containsEntry("k", "first");
+        verify(api, times(1)).loadTableToken(identifier);
+
+        now.addAndGet(RESTTokenRefresher.RELOAD_INTERVAL_MILLIS);
+        assertThat(refresher.tokenValidFor(validity).token()).containsEntry("k", "second");
+        verify(api, times(2)).loadTableToken(identifier);
+    }
+
+    @Test
     void testExpiredTokenFailsFastWithinTheRetryInterval() {
         when(api.loadTableToken(identifier))
                 .thenThrow(new IllegalStateException("REST server unavailable"));
