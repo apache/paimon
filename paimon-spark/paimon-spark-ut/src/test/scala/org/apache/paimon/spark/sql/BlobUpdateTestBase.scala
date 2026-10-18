@@ -525,6 +525,30 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: incremental query of normal columns after merge-into updates only the BLOB column") {
+    withTable("s", "t") {
+      sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F'), (2, 'name2', X'5945')")
+      sql("CREATE TABLE s (id INT, picture BINARY)")
+      sql("INSERT INTO s VALUES (1, X'4E4557')")
+      // the commit holds only a .blob file, its normal file is in the earlier snapshot
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+            |""".stripMargin)
+
+      // like an update of other columns, the delta brings its row with the columns it did not
+      // write as NULL
+      checkAnswer(
+        sql("SELECT id, name FROM paimon_incremental_query('t', 1, 2)"),
+        Seq(Row(null, null)))
+      checkAnswer(sql("SELECT _ROW_ID FROM paimon_incremental_query('t', 1, 2)"), Seq(Row(0L)))
+    }
+  }
+
 }
 
 class BlobUpdateTestWithV2Write extends BlobUpdateTestBase {

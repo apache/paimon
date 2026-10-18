@@ -228,6 +228,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      * anchor file to lookup corresponding Deletion Files. Without deletion vectors, the anchor is
      * still kept when the kept files are all blob/vector-store files, which may cover only part of
      * the group's row-id range.
+     *
+     * <p>An incremental scan can see a group with only blob files, whose normal file is in an
+     * earlier snapshot. Such a group is kept whole.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
@@ -260,6 +263,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             Set<Integer> filterFieldIds,
             boolean deletionVectorsEnabled,
             Function<ManifestEntry, Set<Integer>> fileFieldIds) {
+        // An incremental scan can see a group of blob files whose normal file is in an earlier
+        // snapshot. It has no anchor, and the reader takes the group's rows from all of its
+        // files, so keep it whole.
+        if (group.stream().allMatch(e -> isBlobFile(e.file().fileName()))) {
+            return group;
+        }
         ManifestEntry anchor =
                 deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();

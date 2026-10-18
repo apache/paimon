@@ -50,6 +50,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -389,6 +390,23 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(pruned)
                 .extracting(e -> e.file().fileName())
                 .containsExactlyInAnyOrder("data-b1-0.blob", "data-b2-0.blob");
+
+        Function<ManifestEntry, Set<Integer>> fieldIds =
+                entry -> fileFieldIds(schemas.get(entry.file().schemaId()), entry.file());
+        for (boolean deletionVectors : new boolean[] {false, true}) {
+            // There is no anchor to look up deletion vectors with, and the whole group stays
+            // whatever the projection, so that the reader sees the rows of all its files.
+            for (String column : new String[] {"b1", "v"}) {
+                assertThat(
+                                DataEvolutionFileStoreScan.pruneByReadType(
+                                        Arrays.asList(b1, b2),
+                                        tableSchema.logicalRowType().project(column),
+                                        Collections.emptySet(),
+                                        deletionVectors,
+                                        fieldIds))
+                        .containsExactly(b1, b2);
+            }
+        }
     }
 
     @Test

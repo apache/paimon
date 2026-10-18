@@ -36,7 +36,10 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 
-/** A {@link FileRecordReader} which emits blob placeholder rows for a row-id range. */
+/**
+ * A {@link FileRecordReader} which emits blob placeholder rows for a row-id range. With a negative
+ * {@code blobIndex}, the rows hold only the row-tracking fields and NULL elsewhere.
+ */
 class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
 
     private static final Path PLACEHOLDER_PATH = new Path("placeholder");
@@ -44,7 +47,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
     private final long firstRowId;
     private final int fieldCount;
     private final int blobIndex;
-    private final Object blobPlaceholder;
+    @Nullable private final Object blobPlaceholder;
     private final int rowIdIndex;
     private final int seqNumIndex;
     private final long sequenceNumber;
@@ -61,7 +64,10 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.fieldCount = readRowType.getFieldCount();
         this.blobIndex = blobIndex;
-        this.blobPlaceholder = blobPlaceholder(readRowType.getTypeAt(blobIndex).getTypeRoot());
+        this.blobPlaceholder =
+                blobIndex < 0
+                        ? null
+                        : blobPlaceholder(readRowType.getTypeAt(blobIndex).getTypeRoot());
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
         this.sequenceNumber = sequenceNumber;
@@ -113,7 +119,9 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
 
     private InternalRow placeholderRow(long rowId) {
         GenericRow row = new GenericRow(fieldCount);
-        row.setField(blobIndex, blobPlaceholder);
+        if (blobIndex >= 0) {
+            row.setField(blobIndex, blobPlaceholder);
+        }
         if (rowIdIndex >= 0) {
             row.setField(rowIdIndex, rowId);
         }
