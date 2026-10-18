@@ -75,9 +75,13 @@ _CASES = [
     ('score', 'is_null', []), ('score', 'is_not_null', []),
     ('score', 'is_in', [[None, 7, 9]]), ('score', 'is_not_in', [[7]]),
     ('score', 'between', [1, 9]), ('score', 'not_between', [1, 9]),
+    ('score', 'is_in', [[]]), ('score', 'is_not_in', [[]]),
+    ('score', 'is_in', [[None]]), ('score', 'is_not_in', [[None, 7]]),
+    ('score', 'between', [9, 1]), ('score', 'not_between', [9, 1]),
     ('label', 'equal', ['中文']), ('label', 'startswith', ['w']),
     ('label', 'contains', ['中']), ('label', 'endswith', ['文']),
-    ('label', 'like', ['_文']), ('amount', 'equal', [Decimal('1.25')]),
+    ('label', 'like', ['_文']), ('label', 'like', ['w%']),
+    ('amount', 'equal', [Decimal('1.25')]),
     ('instant', 'greater_or_equal', [datetime(2024, 1, 1)]),
 ]
 
