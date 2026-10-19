@@ -226,7 +226,7 @@ def _resolved_rest_table_response(table, identifier=None):
     environment = table.catalog_environment
     identifier = table.identifier if identifier is None else identifier
     response = getattr(environment, 'rest_table_response', None)
-    if (type(environment) is not CatalogEnvironment
+    if (not isinstance(environment, CatalogEnvironment)
             or type(environment.catalog_loader) is not RESTCatalogLoader
             or not isinstance(response, str)):
         return None
@@ -237,6 +237,60 @@ def _resolved_rest_table_response(table, identifier=None):
                 and metadata['database'] != identifier.get_database_name())):
         return None
     return response
+
+
+def _native_file_io(table):
+    """Reuse resolved custom routing, including the caller's storage loaders."""
+    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
+    from pypaimon.filesystem.oss_file_io import OssFileIO
+    from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+    from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+
+    file_io = table.file_io
+    delegate = file_io._delegate if type(file_io) is CachingFileIO else file_io
+    loader = table.catalog_environment.catalog_loader
+    context = loader.context() if _catalog_metastore(loader) == 'rest' else None
+    if (type(delegate) in (LocalFileIO, FuseLocalFileIO, PyArrowFileIO, OssFileIO,
+                           ResolvingFileIO, RESTTokenFileIO)
+            and not any(getattr(context, attr, None) is not None for attr in (
+                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'))):
+        return None
+    return file_io
+
+
+def _native_rest_identifier(table):
+    if _native_file_io(table) is None:
+        return _validate_native_fuse_binding(table) or table.identifier
+    # A copied view retains its resolved FileIO, which may be bound to the main
+    # table. Construct that catalog identity before selecting the branch.
+    from pypaimon.common.identifier import Identifier
+    response = table.catalog_environment.rest_table_response
+    if isinstance(response, str):
+        metadata = json.loads(response)
+        name = metadata.get('name')
+        if isinstance(name, str):
+            original = Identifier.create(table.identifier.get_database_name(), name)
+            if (metadata.get('path') == table.table_path
+                    and metadata.get('database', original.get_database_name()) == original.get_database_name()
+                    and original.get_table_name() == table.identifier.get_table_name()):
+                return original
+    return table.identifier
+
+
+def _rest_table_response(table, identifier):
+    response = _resolved_rest_table_response(table, identifier)
+    if response is not None:
+        return response
+    from pypaimon.common.json_util import JSON
+    # Fetch metadata without rerunning the FileIO loaders or replacing the
+    # already bound Python provider. Snapshot reads/publication remain REST.
+    catalog = table.catalog_environment.catalog_loader.load()
+    response = catalog.rest_api.get_table(identifier)
+    if (response.path != table.table_path or response.id != table.catalog_environment.uuid):
+        raise RuntimeError('Native catalog resolved a different table identity')
+    return JSON.to_json(response)
 
 
 class _NativeRestTableCache:
@@ -264,10 +318,13 @@ class _NativeRestTableCache:
                 state.entry = (key, create())
             return state.entry[1]
 
-    def get(self, response, database, table, options, token_loader=None):
+    def get(self, response, database, table, options, token_loader=None, file_io=None):
         from pypaimon_rust.datafusion import Table
 
         def create():
+            if file_io is not None:
+                return Table.from_rest_response(
+                    response, database=database, table=table, rest_options=options, file_io=file_io)
             token = token_loader() if token_loader else None
             if token is None:
                 return Table.from_rest_response(
@@ -276,7 +333,7 @@ class _NativeRestTableCache:
                 response, database=database, table=table, rest_options=options,
                 data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
 
-        key = (response, database, table, tuple(sorted(options.items())))
+        key = (response, database, table, tuple(sorted(options.items())), id(file_io))
         return self.get_or_create(key, create)
 
 
@@ -342,26 +399,31 @@ def _validate_native_fuse_binding(table):
 
 def _native_table(table):
     """Transport the resolved schema, shared FileIO and captured read view."""
-    _validate_native_fuse_binding(table)
+    if _native_file_io(table) is None:
+        _validate_native_fuse_binding(table)
     if ('_read_snapshot' in vars(table)
             and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
         from pypaimon.common.json_util import JSON
         environment = table.catalog_environment
         cache = vars(table).setdefault('_native_pinned_table_cache', _NativeRestTableCache())
-        key = (table.table_path, table.identifier.get_full_name(), table.file_io,
+        key = (table.table_path, table.identifier.get_full_name(), id(table.file_io),
                environment.uuid, environment.rest_table_response,
                tuple(sorted(_catalog_options(table).items())),
                JSON.to_json(table._read_snapshot) if table._read_snapshot is not None else None)
         # Keep core's verified snapshot alive for this captured view, including
         # ordinary read-option copies. Pickling/forking starts a fresh cache.
         native = cache.get_or_create(key, lambda: _load_native_table(table))
-        return _with_native_read_snapshot(table, _with_native_resolved_schema(table, native))
-    return _load_native_table(table)
+        resolved = _with_native_read_snapshot(table, _with_native_resolved_schema(table, native))
+        return _with_native_query_auth(table, resolved)
+    return _with_native_query_auth(table, _load_native_table(table))
 
 
 def _load_native_table(table):
-    identifier = _validate_native_fuse_binding(table) or table.identifier
-    rest_response = _resolved_rest_table_response(table, identifier)
+    file_io = _native_file_io(table) if _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest' else None
+    identifier = _native_rest_identifier(table) if file_io is not None else (
+        _validate_native_fuse_binding(table) or table.identifier)
+    rest_response = (_rest_table_response(table, identifier) if file_io is not None
+                     else _resolved_rest_table_response(table, identifier))
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
         cache = table.catalog_environment.__dict__.setdefault(
@@ -371,7 +433,7 @@ def _load_native_table(table):
             database=identifier.get_database_name(),
             table=identifier.get_object_name(),
             options=_catalog_options(table),
-            token_loader=lambda: _rest_data_token(table))
+            token_loader=lambda: _rest_data_token(table), file_io=file_io)
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(
@@ -534,15 +596,16 @@ def native_plan(
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
     from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
+    query_auth = table.options.query_auth_enabled or _native_query_auth(table)[1] is not None
     supplied_pk_splits = (isinstance(global_index_result, GlobalIndexSplitResult)
-                          and not table.options.query_auth_enabled)
+                          and not query_auth)
     if supplied_pk_splits or incremental_range is None:
         scan = builder.new_scan()
     elif incremental_mode == 'delta':
         scan = builder.new_incremental_scan(*incremental_range)
     else:
         scan = builder.new_incremental_scan(*incremental_range, incremental_mode)
-    if global_index_result is not None and not table.options.query_auth_enabled:
+    if global_index_result is not None and not query_auth:
         # A PK result already selected a snapshot and physical files. Java's
         # PrimaryKeyBatchScan returns those selections before ordinary planning.
         from pypaimon_rust.datafusion import GlobalIndexResult, Split as NativeSplit
@@ -581,22 +644,52 @@ def native_plan(
     return _from_native_plan(table, rust_plan)
 
 
-def _native_query_auth_supported(table):
-    """Only reproduce authorization owned by the standard REST environment."""
+def _unrestricted_query_auth(select):
+    """A custom environment can explicitly return no authorization policy."""
+    return None
+
+
+def _native_query_auth(table):
+    """Return the supported catalog hook, keeping standard REST auth in core."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment, _TableQueryAuthFn
 
     environment = table.catalog_environment
-    auth = environment.table_query_auth(table.options, table.identifier)
+    factory = environment.table_query_auth
+    auth = factory(table.options, table.identifier)
+    standard_factory = (getattr(factory, '__func__', None) is CatalogEnvironment.table_query_auth
+                        and getattr(factory, '__self__', None) is environment)
+    if standard_factory and auth is None:
+        return True, None
+    rest = _catalog_metastore(environment.catalog_loader) == 'rest'
+    if (standard_factory and type(auth) is _TableQueryAuthFn
+            and auth._catalog_loader is environment.catalog_loader
+            and auth._identifier == table.identifier
+            and table.options.query_auth_enabled and rest):
+        return True, None
+    if not rest:
+        # A filesystem environment returning no hook has no default REST
+        # authorization to replace; its normal resolved-schema path is valid.
+        return auth is None, None
     if auth is None:
-        return True
-    if (type(environment) is not CatalogEnvironment
-            or type(auth) is not _TableQueryAuthFn
-            or auth._catalog_loader is not environment.catalog_loader
-            or auth._identifier != table.identifier
-            or not table.options.query_auth_enabled
-            or _catalog_metastore(environment.catalog_loader) != 'rest'):
-        return False
-    return True
+        if not table.options.query_auth_enabled:
+            return True, None
+        # Java uses the CatalogEnvironment factory result directly. A null
+        # result must not be replaced with a different policy from the
+        # standard REST endpoint.
+        return True, _unrestricted_query_auth
+    return callable(auth), auth
+
+
+def _native_query_auth_supported(table):
+    return _native_query_auth(table)[0]
+
+
+def _with_native_query_auth(table, native_table):
+    """Install the callback after resolving the branch, schema and snapshot."""
+    supported, auth = _native_query_auth(table)
+    if not supported:
+        raise RuntimeError('Native query authorization requires a callable REST catalog hook')
+    return native_table if auth is None else native_table.with_query_auth(auth)
 
 
 def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):

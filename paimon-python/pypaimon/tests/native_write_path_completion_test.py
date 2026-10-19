@@ -130,7 +130,7 @@ def _bind_fuse(table, root, cached=False):
 
 
 @pytest.mark.parametrize('cached', [False, True])
-def test_builtin_fuse_is_accepted_without_relaxing_custom_file_io(tmp_path, native_rest_catalog, cached):
+def test_builtin_and_custom_fuse_keep_standard_rest_publication(tmp_path, native_rest_catalog, cached):
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO
 
     table = _table(tmp_path, native_rest_catalog)
@@ -141,7 +141,9 @@ def test_builtin_fuse_is_accepted_without_relaxing_custom_file_io(tmp_path, nati
         pass
 
     table.file_io = CustomFuse(table.table_path, str(mount))
-    assert not _rest_catalog_supported(table)
+    assert _rest_catalog_supported(table)
+    from pypaimon.read.native_plan import _native_file_io
+    assert _native_file_io(table) is table.file_io
 
 
 @pytest.mark.parametrize('cached', [False, True])

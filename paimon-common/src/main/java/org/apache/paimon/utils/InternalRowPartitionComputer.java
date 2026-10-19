@@ -65,7 +65,12 @@ public class InternalRowPartitionComputer {
             int i = columnList.indexOf(partitionColumns[j]);
             DataType type = rowType.getTypeAt(i);
             partitionFieldGetters[j] = createNullCheckingFieldGetter(type, i);
-            partitionCastExecutors[j] = CastExecutors.resolve(type, VarCharType.STRING_TYPE);
+            // byte[].toString contains an allocation identity, which changes every time a
+            // BinaryRow field is read. Always use the UTF-8 cast for binary partition names.
+            partitionCastExecutors[j] =
+                    legacyPartitionName && !TypeCheckUtils.isBinaryString(type)
+                            ? value -> value
+                            : CastExecutors.resolve(type, VarCharType.STRING_TYPE);
         }
     }
 
@@ -76,13 +81,9 @@ public class InternalRowPartitionComputer {
             Object field = partitionFieldGetters[i].getFieldOrNull(in);
             String partitionValue = null;
             if (field != null) {
-                if (legacyPartitionName) {
-                    partitionValue = field.toString();
-                } else {
-                    Object casted = partitionCastExecutors[i].cast(field);
-                    if (casted != null) {
-                        partitionValue = casted.toString();
-                    }
+                Object casted = partitionCastExecutors[i].cast(field);
+                if (casted != null) {
+                    partitionValue = casted.toString();
                 }
             }
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {

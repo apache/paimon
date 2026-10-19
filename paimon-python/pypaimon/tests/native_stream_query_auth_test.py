@@ -28,7 +28,7 @@ from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.consumer.consumer_manager import ConsumerManager
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
+from pypaimon.read.streaming_table_scan import StreamTableScan
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
@@ -226,7 +226,7 @@ def test_combined_timestamp_events_apply_auth_and_masked_filter_before_limit(sou
 
 
 @pytest.mark.parametrize('custom_policy', ['subclass', 'instance'])
-def test_custom_authorization_environment_keeps_its_python_policy(source, custom_policy):
+def test_custom_authorization_environment_keeps_its_policy_in_native(source, custom_policy):
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.catalog.table_query_auth import TableQueryAuthResult
     _, table, _, _ = source
@@ -245,12 +245,8 @@ def test_custom_authorization_environment_keeps_its_python_policy(source, custom
     selected.catalog_environment = custom
     builder = selected.new_stream_read_builder().with_projection(['id'])
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, AsyncStreamingTableScan)
-    try:
-        snapshot = selected.snapshot_manager().get_latest_snapshot()
-        assert _rows(builder, scan._create_initial_plan(snapshot), False) == [{'id': 2}]
-    finally:
-        scan._prefetch_executor.shutdown(wait=True)
+    assert isinstance(scan, StreamTableScan)
+    assert _rows(builder, scan.plan(), False) == [{'id': 2}]
 
 
 @pytest.mark.parametrize('native', [False, True])

@@ -18,7 +18,7 @@
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.arrow_schema import (
     arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
@@ -30,20 +30,9 @@ from pypaimon.write.native_commit import (
 from pypaimon.write.row_utils import require_columns, row_to_named_values, row_values_to_arrow_table
 
 
-def _native_partition_types_supported(schema, partition_keys, legacy_partition_name=True):
-    """Partition keys which Rust can encode and use to locate existing files."""
-    # Java's legacy byte[].toString() contains an allocation identity, so binary
-    # partitions only have portable names with the cast-based option.
-    return not legacy_partition_name or not any(
-        pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
-        or pa.types.is_fixed_size_binary(data_type)
-        for data_type in (schema.field(name).type for name in partition_keys))
-
-
 def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     # DV tables flush normal level-0 files using the configured merge engine.
     # Batch visibility is controlled by deletion-vectors.merge-on-read.
     if (not native_runtime_available()
@@ -57,8 +46,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                 and table.options.changelog_producer() == ChangelogProducer.INPUT
                 and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
-            or not _native_partition_types_supported(
-                schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME))
             or table.options.video_frame_fields()):
         return None
     native_table = create_native_write_table(table)

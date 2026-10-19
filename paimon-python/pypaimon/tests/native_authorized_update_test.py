@@ -343,15 +343,15 @@ def test_empty_target_merge_authorizes_before_insert_callable(rest_catalog, use_
     assert table.snapshot_manager().get_latest_snapshot() is None
 
 
-def test_custom_query_authorization_stays_on_python_path(rest_catalog):
+def test_custom_query_authorization_uses_native_update(rest_catalog):
     catalog, _ = rest_catalog
     table = _table(catalog, True)
     custom_auth = Mock()
     with patch.object(table.catalog_environment, 'table_query_auth', return_value=custom_auth), \
             patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_update.create_native_write_table') as create:
-        assert _native_row_id_table(table) is None
-    create.assert_not_called()
+        assert _native_row_id_table(table) is create.return_value
+    create.assert_called_once_with(table)
     custom_auth.assert_not_called()
 
 

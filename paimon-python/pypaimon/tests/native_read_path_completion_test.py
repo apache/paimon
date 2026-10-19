@@ -332,12 +332,11 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
                                    rest_table_response=environment.rest_table_response)
     table.catalog_environment = custom
     scan = table.new_read_builder().new_scan()
-    from pypaimon.read.plan import Plan
-    with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([])) as planner, \
-            patch('pypaimon.read.native_plan.native_runtime_available', return_value=True):
-        with pytest.raises(TableNoPermissionException):
-            scan.plan_all_files()
-        planner.assert_not_called()
+    from pypaimon.read.native_plan import native_plan
+    with pytest.raises(Exception, match='unrestricted|query.authorization'):
+        native_plan(table, all_files=True)
+    with pytest.raises(TableNoPermissionException):
+        scan.plan_all_files()
 
 
 @pytest.mark.parametrize('mode', ['pvfs', 'raw'])

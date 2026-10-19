@@ -69,6 +69,7 @@ def _scan(native_enabled, file_scanner):
     scan.table.table_schema.id = 1
     scan.table.schema_manager.latest.return_value.id = 1   # loaded schema is latest
     scan.table.identifier.get_database_name.return_value = 'default'
+    scan.table.catalog_environment.table_query_auth.return_value = None
     scan.table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
         CatalogContext.create_from_options(Options({})))           # filesystem catalog
     file_scanner.idx_of_this_subtask = None       # no shard
@@ -925,6 +926,9 @@ class NativePlanTest(unittest.TestCase):
         table = Mock()
         table.identifier = Identifier('db', 't', branch='dev')
         table.table_path = 'oss://bucket/t'
+        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+        table.file_io = ResolvingFileIO(Options({}))
+        table.options.query_auth_enabled = False
         table.current_branch.return_value = 'dev'
         table.catalog_environment = CatalogEnvironment(
             identifier=table.identifier, uuid='uuid', catalog_loader=loader,
@@ -1006,7 +1010,7 @@ class NativePlanTest(unittest.TestCase):
         cache = _NativeRestTableCache()
         with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
             with ThreadPoolExecutor(max_workers=4) as pool:
-                tables = list(pool.map(lambda _: cache.get('response', 'db', 't', {}), range(8)))
+                tables = list(pool.map(lambda _, cache=cache: cache.get('response', 'db', 't', {}), range(8)))
             self.assertTrue(all(table is tables[0] for table in tables))
             fake_df.Table.from_rest_response.assert_called_once()
             reference = weakref.ref(tables[0])
@@ -1271,6 +1275,8 @@ class NativePlanTest(unittest.TestCase):
                 table.options = CoreOptions(Options(table.table_schema.options))
                 table.catalog_environment.catalog_loader = loader_type(
                     CatalogContext.create_from_options(Options({})))
+                from pypaimon.filesystem.local_file_io import LocalFileIO
+                table.file_io = LocalFileIO()
                 incomplete_table = SimpleNamespace(
                     location=lambda: table.table_path, new_read_builder=Mock())
                 with patch('pypaimon_rust.datafusion.Table', type('Table', (), {}), create=True), \

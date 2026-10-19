@@ -539,7 +539,7 @@ def test_disabled_option_never_initializes_native(tmp_path):
     commit.close()
 
 
-@pytest.mark.parametrize('kind', ['custom-env', 'custom-io'])
+@pytest.mark.parametrize('kind', ['custom-env', 'custom-publisher'])
 def test_incompatible_publication_environment_is_not_reconstructed(
         tmp_path, native_rest_catalog, kind):
     table = _table(tmp_path, catalog=native_rest_catalog)
@@ -548,7 +548,7 @@ def test_incompatible_publication_environment_is_not_reconstructed(
             pass
         table.catalog_environment = CustomEnvironment()
     else:
-        table.file_io = Mock()
+        table.catalog_environment.snapshot_commit = Mock()
     with patch('pypaimon.write.native_commit.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None

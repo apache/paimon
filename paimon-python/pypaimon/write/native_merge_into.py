@@ -19,15 +19,12 @@
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions
-
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.native_commit import create_native_write_table, from_native_commit_messages
 from pypaimon.write.native_update import (
     _dictionary_value_type, _native_row_id_table, _native_update_columns_supported,
     _native_update_formats_supported, _supported_upsert_key_type,
 )
-from pypaimon.write.native_write import _native_partition_types_supported
 
 
 def _callable_assignment(function, on_pairs):
@@ -76,10 +73,6 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
             return None
         from pypaimon.schema.data_types import PyarrowFieldParser
         source_schema = PyarrowFieldParser.from_paimon_schema(source.table_schema.fields)
-        if not _native_partition_types_supported(
-                source_schema, source.partition_keys,
-                source.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
-            return None
         if source.options.query_auth_enabled:
             from pypaimon.read.native_plan import _native_query_auth_supported, _native_table
             from pypaimon.write.native_commit import _rest_catalog_supported

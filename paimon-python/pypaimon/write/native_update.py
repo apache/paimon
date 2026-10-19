@@ -25,14 +25,13 @@ import pyarrow.compute as pc
 from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, VectorType, is_blob_file_field
-from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.native_write import _native_partition_types_supported
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
@@ -52,10 +51,6 @@ def _native_update_table(table, *, allow_changelog=False):
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_runtime_available()
             or not _native_query_auth_supported(table)):
-        return None
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    if not _native_partition_types_supported(
-            schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
         return None
     return create_native_write_table(table)
 
