@@ -344,7 +344,7 @@ class NativePlanTest(unittest.TestCase):
 
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
-            row_ranges=None)
+            row_ranges=None, _query_auth=(True, None))
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [keep])
 
@@ -396,6 +396,7 @@ class NativePlanTest(unittest.TestCase):
             limit=5,
             projection=['k', 'dt'],
             row_ranges=None,
+            _query_auth=(True, None),
         )
 
     def test_plan_forwards_global_index_result(self):
@@ -416,6 +417,7 @@ class NativePlanTest(unittest.TestCase):
             projection=None,
             row_ranges=None,
             global_index_result=fs._global_index_result,
+            _query_auth=(True, None),
         )
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [split])
@@ -436,6 +438,7 @@ class NativePlanTest(unittest.TestCase):
             projection=None,
             row_ranges=None,
             global_index_result=fs._global_index_result,
+            _query_auth=(True, None),
         )
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [])
@@ -674,7 +677,7 @@ class NativePlanTest(unittest.TestCase):
         self.assertIs(plan.stats(), counters)
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
-            row_ranges=None)
+            row_ranges=None, _query_auth=(True, None))
         fs.scan_with_stats.assert_not_called()
         fs.scan.assert_not_called()
 

@@ -22,7 +22,7 @@ import json
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, VectorType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer
@@ -49,8 +49,7 @@ def _native_update_table(table, *, allow_changelog=False):
             or not _native_update_formats_supported(table)
             or (not allow_changelog and table.options.changelog_producer() != ChangelogProducer.NONE)
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
-            or not native_runtime_available()
-            or not _native_query_auth_supported(table)):
+            or not native_runtime_available()):
         return None
     return create_native_write_table(table)
 

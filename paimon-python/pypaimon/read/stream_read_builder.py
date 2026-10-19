@@ -129,23 +129,25 @@ class StreamReadBuilder:
         """Create a stateful streaming scan using the configured backend."""
         projection = self._projection_builder()
         projection._validate_map_key_filter()
-        from pypaimon.read.native_plan import _native_query_auth_supported
-        if (self.table.options.native_plan_enabled()
-                and _native_query_auth_supported(self.table)):
-            try:
-                return StreamTableScan(
-                    self.table, predicate=self._predicate, read_type=projection.read_type(),
-                    poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
-                    consumer_id=self._consumer_id)
-            except Exception as error:
-                _raise_if_native_fork_safety_error(error)
-                logging.warning("Cannot create Native stream scan, using Python: %s", error)
+        from pypaimon.read.native_plan import _native_query_auth
+        query_auth = self.table.catalog_environment.table_query_auth(self.table.options, self.table.identifier)
+        if self.table.options.native_plan_enabled():
+            native_auth = _native_query_auth(self.table, query_auth)
+            if native_auth[0]:
+                try:
+                    return StreamTableScan(
+                        self.table, predicate=self._predicate, read_type=projection.read_type(),
+                        poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
+                        consumer_id=self._consumer_id, _query_auth=native_auth)
+                except Exception as error:
+                    _raise_if_native_fork_safety_error(error)
+                    logging.warning("Cannot create Native stream scan, using Python: %s", error)
         scan = AsyncStreamingTableScan(
             table=self.table,
             predicate=self._predicate,
             poll_interval_ms=self._poll_interval_ms,
             bucket_filter=self._bucket_filter,
-            consumer_id=self._consumer_id
+            consumer_id=self._consumer_id, _query_auth=query_auth
         )
         scan._read_type = projection.read_type()
         return scan

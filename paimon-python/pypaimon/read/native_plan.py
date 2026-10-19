@@ -38,6 +38,9 @@ from pypaimon.read.split_serializer import (
 from pypaimon.schema.data_types import DataField, RowType
 
 
+_QUERY_AUTH_UNSET = object()
+
+
 def _raise_if_native_fork_safety_error(error):
     """Propagate native fork errors instead of using inherited SDK state."""
     if not native_runtime_available():
@@ -340,9 +343,10 @@ def _validate_native_fuse_binding(table):
     raise RuntimeError('Native catalog cannot reconstruct the bound FUSE FileIO')
 
 
-def _native_table(table):
+def _native_table(table, query_auth=_QUERY_AUTH_UNSET):
     """Transport the resolved schema, shared FileIO and captured read view."""
     _validate_native_fuse_binding(table)
+    query_auth = _native_query_auth(table) if query_auth is _QUERY_AUTH_UNSET else query_auth
     if ('_read_snapshot' in vars(table)
             and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
         from pypaimon.common.json_util import JSON
@@ -356,8 +360,8 @@ def _native_table(table):
         # ordinary read-option copies. Pickling/forking starts a fresh cache.
         native = cache.get_or_create(key, lambda: _load_native_table(table))
         resolved = _with_native_read_snapshot(table, _with_native_resolved_schema(table, native))
-        return _with_native_query_auth(table, resolved)
-    return _with_native_query_auth(table, _load_native_table(table))
+        return _with_native_query_auth(table, resolved, query_auth)
+    return _with_native_query_auth(table, _load_native_table(table), query_auth)
 
 
 def _load_native_table(table):
@@ -434,8 +438,8 @@ def _with_native_read_snapshot(table, native_table):
     return native_table
 
 
-def _native_read_builder(table):
-    return _native_table(table).new_read_builder()
+def _native_read_builder(table, query_auth=_QUERY_AUTH_UNSET):
+    return _native_table(table, query_auth).new_read_builder()
 
 
 def _configure_native_read_builder(builder, predicate, limit, projection,
@@ -465,7 +469,8 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
     if not native_runtime_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust extension")
-    if not _native_query_auth_supported(table):
+    query_auth = _native_query_auth(table)
+    if not query_auth[0]:
         raise RuntimeError('Native reads cannot reconstruct custom query authorization')
     if read_type is None:
         from pypaimon.read.read_builder import ReadBuilder
@@ -474,7 +479,7 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
             resolved.with_projection(projection)
         read_type = resolved.read_type()
     builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, limit, projection,
+        _native_read_builder(table, query_auth), predicate, limit, projection,
         read_type=read_type,
         include_row_kind=include_row_kind)
     if blob_parallelism is not None:
@@ -515,7 +520,8 @@ def native_plan(
         shard: Optional[Tuple[int, int]] = None,
         partition_predicate: Optional[Predicate] = None,
         global_index_result=None,
-        all_files: bool = False) -> Plan:
+        all_files: bool = False,
+        _query_auth=_QUERY_AUTH_UNSET) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -528,23 +534,24 @@ def native_plan(
     if not native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs the pypaimon-rust extension")
+    query_auth = _native_query_auth(table) if _query_auth is _QUERY_AUTH_UNSET else _query_auth
     builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, limit, projection)
+        _native_read_builder(table, query_auth), predicate, limit, projection)
     if partition_predicate is not None:
         builder = builder.with_partition_filter(_predicate_to_native(partition_predicate))
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
     from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
-    query_auth = table.options.query_auth_enabled or _native_query_auth(table)[1] is not None
+    requires_auth = table.options.query_auth_enabled or query_auth[1] is not None
     supplied_pk_splits = (isinstance(global_index_result, GlobalIndexSplitResult)
-                          and not query_auth)
+                          and not requires_auth)
     if supplied_pk_splits or incremental_range is None:
         scan = builder.new_scan()
     elif incremental_mode == 'delta':
         scan = builder.new_incremental_scan(*incremental_range)
     else:
         scan = builder.new_incremental_scan(*incremental_range, incremental_mode)
-    if global_index_result is not None and not query_auth:
+    if global_index_result is not None and not requires_auth:
         # A PK result already selected a snapshot and physical files. Java's
         # PrimaryKeyBatchScan returns those selections before ordinary planning.
         from pypaimon_rust.datafusion import GlobalIndexResult, Split as NativeSplit
@@ -580,7 +587,7 @@ def native_plan(
     if shard is not None:
         scan = scan.with_shard(*shard)
     rust_plan = scan.plan_all_files() if all_files else scan.plan()
-    return _from_native_plan(table, rust_plan)
+    return _from_native_plan(table, rust_plan, retain_native_splits=query_auth[1] is None)
 
 
 def _unrestricted_query_auth(select):
@@ -588,19 +595,15 @@ def _unrestricted_query_auth(select):
     return None
 
 
-def _native_query_auth(table):
+def _native_query_auth(table, query_auth=_QUERY_AUTH_UNSET):
     """Return the supported catalog hook, keeping standard REST auth in core."""
-    from pypaimon.catalog.catalog_environment import CatalogEnvironment, _TableQueryAuthFn
+    from pypaimon.catalog.catalog_environment import _TableQueryAuthFn
 
     environment = table.catalog_environment
-    factory = environment.table_query_auth
-    auth = factory(table.options, table.identifier)
-    standard_factory = (getattr(factory, '__func__', None) is CatalogEnvironment.table_query_auth
-                        and getattr(factory, '__self__', None) is environment)
-    if standard_factory and auth is None:
-        return True, None
+    auth = (environment.table_query_auth(table.options, table.identifier)
+            if query_auth is _QUERY_AUTH_UNSET else query_auth)
     rest = _catalog_metastore(environment.catalog_loader) == 'rest'
-    if (standard_factory and type(auth) is _TableQueryAuthFn
+    if (type(auth) is _TableQueryAuthFn
             and auth._catalog_loader is environment.catalog_loader
             and auth._identifier == table.identifier
             and table.options.query_auth_enabled and rest):
@@ -619,22 +622,19 @@ def _native_query_auth(table):
     return callable(auth), auth
 
 
-def _native_query_auth_supported(table):
-    return _native_query_auth(table)[0]
-
-
-def _with_native_query_auth(table, native_table):
-    """Install the callback after resolving the branch, schema and snapshot."""
-    supported, auth = _native_query_auth(table)
+def _with_native_query_auth(table, native_table, query_auth=_QUERY_AUTH_UNSET):
+    """Install one resolved callback after selecting the branch, schema and snapshot."""
+    supported, auth = _native_query_auth(table) if query_auth is _QUERY_AUTH_UNSET else query_auth
     if not supported:
         raise RuntimeError('Native query authorization requires a callable REST catalog hook')
     return native_table if auth is None else native_table.with_query_auth(auth)
 
 
-def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):
+def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None,
+                       *, _query_auth=_QUERY_AUTH_UNSET):
     """Create Rust's stateful StreamTableScan with the canonical reader type."""
     builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, None, None, read_type=read_type)
+        _native_read_builder(table, _query_auth), predicate, None, None, read_type=read_type)
     scan = builder.new_stream_scan()
     if bucket_filter is not None:
         scan.with_bucket_filter(bucket_filter)
@@ -643,7 +643,7 @@ def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None
     return scan
 
 
-def _from_native_plan(table, rust_plan) -> Plan:
+def _from_native_plan(table, rust_plan, *, retain_native_splits=True) -> Plan:
     """Keep one split/metadata bridge for batch and streaming planning."""
     rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
@@ -653,7 +653,7 @@ def _from_native_plan(table, rust_plan) -> Plan:
         deserialize_split_v1(split.serialize(), pfields, kfields)
         for split in rust_splits
     ]
-    if table.options.native_read_enabled():
+    if table.options.native_read_enabled() and retain_native_splits:
         # Retain the opaque Rust split next to the Python metadata view so an
         # unchanged native plan can be read without reserializing each split.
         # A caller that needs different metadata (such as an endpoint DV)
@@ -661,5 +661,8 @@ def _from_native_plan(table, rust_plan) -> Plan:
         # time from its current fields.
         for split, rust_split in zip(splits, rust_splits):
             split._native_split = rust_split
+    # Custom authorizers mint a new core session for each native table copy.
+    # Preserve their QueryAuthSplit wire rules, then let authorize_splits verify
+    # and bind those rules to the reader's session rather than reusing a stale grant.
     snapshot_id = rust_plan.snapshot_id()
     return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())
