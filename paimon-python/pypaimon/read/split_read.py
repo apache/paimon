@@ -1678,9 +1678,9 @@ class DataEvolutionSplitRead(SplitRead):
             if DataFileMeta.is_blob_file(first_file.file_name):
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
             elif DataFileMeta.is_vector_file(first_file.file_name):
-                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+                field_ids = self._get_field_ids_from_write_cols(first_file)
             elif first_file.write_cols:
-                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+                field_ids = self._get_field_ids_from_write_cols(first_file)
             else:
                 # For regular files without write_cols, derive field IDs from
                 # the file's schema version, not the current table schema.
@@ -1863,10 +1863,14 @@ class DataEvolutionSplitRead(SplitRead):
                 return field.id
         raise ValueError(f"Field {field_name} not found in file schema {file.schema_id}")
 
-    def _get_field_ids_from_write_cols(self, write_cols: List[str]) -> List[int]:
+    def _get_field_ids_from_write_cols(self, file: DataFileMeta) -> List[int]:
+        # write_cols records names from the schema that wrote this file. Resolve
+        # them there so a rename cannot hide a newer column version, or rebind a
+        # dropped/re-added name to a different field ID.
+        file_fields = self._resolve_schema(file.schema_id).fields
         field_ids = []
-        for field_name in write_cols:
-            for field in self.table.fields:
+        for field_name in file.write_cols:
+            for field in file_fields:
                 if field.name == field_name:
                     field_ids.append(field.id)
         field_ids.append(SpecialFields.ROW_ID.id)

@@ -27,6 +27,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -38,6 +40,9 @@ import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.CompactIncrement;
@@ -117,6 +122,234 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
 
     /** Inside the min/max range of f2 ("b000".."b099"), but not written. */
     private static final String MISSING_F2 = "b050x";
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "file-bitmap-single",
+                "file-bitmap-merged",
+                "bitmap-single",
+                "bitmap-merged",
+                "btree-single",
+                "btree-merged"
+            })
+    public void testVariantIndexQueryReadsRowSidecar(String mode) throws Exception {
+        boolean merged = mode.endsWith("merged");
+        boolean fileIndex = mode.startsWith("file-");
+        String indexType = mode.substring(0, mode.indexOf('-'));
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payload", DataTypes.VARIANT())
+                        .column(
+                                "nested",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(3, "label", DataTypes.STRING()),
+                                        DataTypes.FIELD(4, "detail", DataTypes.VARIANT())))
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED.key(), "true")
+                        .option(
+                                CoreOptions.GLOBAL_INDEX_ENABLED.key(),
+                                Boolean.toString(!fileIndex))
+                        .option(CoreOptions.GLOBAL_INDEX_QUERY_IN_READER_ENABLED.key(), "false");
+        Identifier identifier = identifier("variant_sidecar_" + mode);
+        catalog.createTable(identifier, schemaBuilder.build(), false);
+        FileStoreTable table = getTable(identifier);
+
+        // A preceding group makes the selected global row ids differ from physical positions.
+        write(table, variantSidecarRow(-2), variantSidecarRow(-1));
+        RowType firstWriteType =
+                merged ? table.rowType().project("id", "payload") : table.rowType();
+        BatchWriteBuilder writeBuilder =
+                table.copy(fileIndex ? bitmapOptions("id") : Collections.emptyMap())
+                        .newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite().withWriteType(firstWriteType);
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < ROW_COUNT; i++) {
+                GenericRow row = variantSidecarRow(i);
+                write.write(merged ? GenericRow.of(i, row.getVariant(1)) : row);
+            }
+            commit.commit(write.prepareCommit());
+        }
+        if (merged) {
+            table = getTable(identifier);
+            writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write =
+                            writeBuilder
+                                    .newWrite()
+                                    .withWriteType(table.rowType().project("nested"));
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                for (int i = 0; i < ROW_COUNT; i++) {
+                    write.write(GenericRow.of(variantSidecarRow(i).getRow(2, 2)));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                setSingleFileFirstRowId(messages, 2L);
+                commit.commit(messages);
+            }
+            table = getTable(identifier);
+            writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write =
+                            writeBuilder
+                                    .newWrite()
+                                    .withWriteType(table.rowType().project("payload"));
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                for (int i = 0; i < ROW_COUNT; i++) {
+                    write.write(GenericRow.of(variantSidecarRow(i + 1000).getVariant(1)));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                setSingleFileFirstRowId(messages, 2L);
+                commit.commit(messages);
+            }
+        }
+        table = getTable(identifier);
+        if (!fileIndex) {
+            ScanResult<DataSplit> indexScan =
+                    new SortedGlobalIndexScanner(table, indexType)
+                            .withIndexFields(Collections.singletonList("id"))
+                            .scan()
+                            .get();
+            List<CommitMessage> messages = new ArrayList<>();
+            for (DataSplit split : indexScan.entries()) {
+                messages.addAll(
+                        SortedGlobalIndexTestUtils.buildIndex(
+                                table, indexType, "id", split, indexScan.scanSnapshotId()));
+            }
+            try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+                commit.commit(messages);
+            }
+        }
+        catalog.alterTable(
+                identifier, SchemaChange.renameColumn("payload", "renamed_payload"), false);
+        FileStoreTable latest = getTable(identifier);
+        Predicate filter =
+                new PredicateBuilder(latest.rowType()).in(0, Arrays.asList(50, 51, 52, 53, 54));
+        RowType fullType =
+                rowTypeWithRowId(latest.rowType())
+                        .project("nested", "renamed_payload", "id", SpecialFields.ROW_ID.name());
+        ReadBuilder fullRead = latest.newReadBuilder().withReadType(fullType).withFilter(filter);
+        TableScan.Plan plan = fullRead.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        Split selected = plan.splits().get(0);
+        if (!fileIndex) {
+            assertThat(selected).isInstanceOf(IndexedSplit.class);
+            assertThat(((IndexedSplit) selected).rowRanges()).containsExactly(new Range(52L, 56L));
+        }
+        DataSplit split =
+                selected instanceof IndexedSplit
+                        ? ((IndexedSplit) selected).dataSplit()
+                        : (DataSplit) selected;
+        assertThat(split.dataFiles()).hasSize(merged ? 3 : 1);
+        DataFilePathFactory paths =
+                latest.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket());
+        for (DataFileMeta file : split.dataFiles()) {
+            assertThat(file.fileName()).endsWith(".parquet");
+            List<String> sidecars =
+                    file.extraFiles().stream()
+                            .filter(name -> name.endsWith(".row"))
+                            .collect(Collectors.toList());
+            assertThat(sidecars).hasSize(1);
+            assertThat(latest.fileIO().exists(paths.toAlignedPath(sidecars.get(0), file))).isTrue();
+            // Any main-file fallback or full scan now fails; only the sparse ROW path can work.
+            assertThat(latest.fileIO().delete(paths.toPath(file), false)).isTrue();
+        }
+        InternalRowSerializer fullSerializer = new InternalRowSerializer(fullType);
+        List<InternalRow> expected = new ArrayList<>();
+        for (int i = 50; i <= 54; i++) {
+            GenericRow row = variantSidecarRow(i);
+            expected.add(
+                    fullSerializer
+                            .toBinaryRow(
+                                    GenericRow.of(
+                                            row.getRow(2, 2),
+                                            merged
+                                                    ? variantSidecarRow(i + 1000).getVariant(1)
+                                                    : row.getVariant(1),
+                                            i,
+                                            i + 2L))
+                            .copy());
+        }
+        assertThat(collect(fullRead.newRead().executeFilter(), plan, fullType))
+                .containsExactlyInAnyOrderElementsOf(expected);
+
+        RowType extraction =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.INT(), "$.x", false, "UTC")
+                        .field(DataTypes.VARIANT(), "$")
+                        .build();
+        RowType nestedType = (RowType) latest.rowType().getField("nested").type();
+        RowType extractedType =
+                DataTypes.ROW(
+                        latest.rowType()
+                                .getField("nested")
+                                .newType(
+                                        DataTypes.ROW(
+                                                nestedType.getField("detail").newType(extraction))),
+                        latest.rowType().getField("renamed_payload").newType(extraction),
+                        latest.rowType().getField("id"));
+        ReadBuilder extractedRead =
+                latest.newReadBuilder().withReadType(extractedType).withFilter(filter);
+        InternalRowSerializer extractedSerializer = new InternalRowSerializer(extractedType);
+        expected.clear();
+        for (int i = 50; i <= 54; i++) {
+            GenericRow row = variantSidecarRow(i);
+            InternalRow nested = row.getRow(2, 2);
+            Object nestedValue = null;
+            if (nested != null) {
+                nestedValue =
+                        GenericRow.of(
+                                nested.isNullAt(1)
+                                        ? null
+                                        : GenericRow.of(
+                                                i % 5 == 1 ? null : -i, nested.getVariant(1)));
+            }
+            expected.add(
+                    extractedSerializer
+                            .toBinaryRow(
+                                    GenericRow.of(
+                                            nestedValue,
+                                            row.isNullAt(1)
+                                                    ? null
+                                                    : GenericRow.of(
+                                                            i % 5 == 0
+                                                                    ? i + (merged ? 1000 : 0)
+                                                                    : null,
+                                                            merged
+                                                                    ? variantSidecarRow(i + 1000)
+                                                                            .getVariant(1)
+                                                                    : row.getVariant(1)),
+                                            i))
+                            .copy());
+        }
+        assertThat(
+                        collect(
+                                extractedRead.newRead().executeFilter(),
+                                extractedRead.newScan().plan(),
+                                extractedType))
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private static GenericRow variantSidecarRow(int id) {
+        int kind = Math.floorMod(id, 5);
+        GenericVariant payload =
+                kind == 1
+                        ? null
+                        : GenericVariant.fromJson(
+                                kind == 0
+                                        ? "{\"x\":" + id + "}"
+                                        : kind == 2 ? "null" : kind == 3 ? "\"text\"" : "[1,null]");
+        GenericVariant detail =
+                kind == 2
+                        ? null
+                        : GenericVariant.fromJson(kind == 1 ? "null" : "{\"x\":" + -id + "}");
+        return GenericRow.of(
+                id,
+                payload,
+                kind == 3 ? null : GenericRow.of(BinaryString.fromString("label"), detail));
+    }
 
     @Test
     public void testBitmapFilterWithProjectedWriteSchemaAndRowSidecar() throws Exception {
