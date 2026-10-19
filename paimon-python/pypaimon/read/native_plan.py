@@ -218,12 +218,13 @@ def _predicate_to_native(predicate: Predicate) -> dict:
     return result
 
 
-def _resolved_rest_table_response(table):
+def _resolved_rest_table_response(table, identifier=None):
     """Reuse REST metadata only when the standard loader can be reproduced."""
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 
     environment = table.catalog_environment
+    identifier = table.identifier if identifier is None else identifier
     response = getattr(environment, 'rest_table_response', None)
     if (type(environment) is not CatalogEnvironment
             or type(environment.catalog_loader) is not RESTCatalogLoader
@@ -231,9 +232,9 @@ def _resolved_rest_table_response(table):
         return None
     metadata = json.loads(response)
     if (metadata.get('path') != table.table_path
-            or metadata.get('name') != table.identifier.get_object_name()
+            or metadata.get('name') != identifier.get_object_name()
             or ('database' in metadata
-                and metadata['database'] != table.identifier.get_database_name())):
+                and metadata['database'] != identifier.get_database_name())):
         return None
     return response
 
@@ -296,7 +297,9 @@ def _rest_data_token(table):
 
 
 def _validate_native_fuse_binding(table):
-    """Validate and return the FUSE directory already bound to the view."""
+    """Find the catalog table whose construction reproduces the bound FileIO."""
+    from pypaimon.catalog.rest.fuse_support import FusePathResolver
+    from pypaimon.common.identifier import Identifier
     from pypaimon.filesystem.caching_file_io import CachingFileIO
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
 
@@ -313,16 +316,28 @@ def _validate_native_fuse_binding(table):
         raise RuntimeError('Native catalog would disable the bound FUSE mount')
     if file_io.path.rstrip('/') != table.table_path.rstrip('/'):
         raise RuntimeError('The bound FUSE FileIO belongs to a different table path')
-    return str(LocalFileIO()._to_file(file_io.fuse_path).absolute())
-
-
-def _with_native_bound_file_io(table, native):
-    mount = _validate_native_fuse_binding(table)
-    if mount is not None:
-        # Java Table.copy retains FileIO while changing the branch publication
-        # identity. Transport that binding rather than re-resolving its mount.
-        return native._copy_with_fuse_file_io(mount)
-    return native
+    candidates = []
+    response = table.catalog_environment.rest_table_response
+    if isinstance(response, str):
+        metadata = json.loads(response)
+        if (metadata.get('path') == table.table_path
+                and metadata.get('database', table.identifier.get_database_name())
+                == table.identifier.get_database_name() and isinstance(metadata.get('name'), str)):
+            original = Identifier.create(table.identifier.get_database_name(), metadata['name'])
+            if original.get_table_name() == table.identifier.get_table_name():
+                candidates.append(original)
+    candidates.append(table.identifier)
+    # A manually resolved view can omit the original REST response. Its usual
+    # main-table binding can still be reconstructed by the same catalog.
+    candidates.append(Identifier.create(table.identifier.get_database_name(), table.identifier.get_table_name()))
+    resolver = FusePathResolver(options, None)
+    local = LocalFileIO()
+    mounted = local._to_file(file_io.fuse_path).absolute()
+    for identifier in candidates:
+        expected = resolver.resolve_local_path(table.table_path, identifier)
+        if mounted == local._to_file(expected).absolute():
+            return identifier
+    raise RuntimeError('Native catalog cannot reconstruct the bound FUSE FileIO')
 
 
 def _native_table(table):
@@ -345,18 +360,18 @@ def _native_table(table):
 
 
 def _load_native_table(table):
-    rest_response = _resolved_rest_table_response(table)
+    identifier = _validate_native_fuse_binding(table) or table.identifier
+    rest_response = _resolved_rest_table_response(table, identifier)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
         cache = table.catalog_environment.__dict__.setdefault(
             '_native_rest_table_cache', _NativeRestTableCache())
         rt = cache.get(
             rest_response,
-            database=table.identifier.get_database_name(),
-            table=table.identifier.get_object_name(),
+            database=identifier.get_database_name(),
+            table=identifier.get_object_name(),
             options=_catalog_options(table),
             token_loader=lambda: _rest_data_token(table))
-        rt = _with_native_resolved_schema(table, _with_native_bound_file_io(table, rt))
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(
@@ -372,10 +387,15 @@ def _load_native_table(table):
         # REST may keep branch schemas in the catalog only. Load the base
         # environment, then attach the schema/branch already resolved here.
         rt = catalog.get_table((
-            table.identifier.get_database_name(), table.identifier.get_object_name()))
+            identifier.get_database_name(), identifier.get_object_name()))
         if rt.location() != table.table_path:
             raise RuntimeError('Native catalog resolved a different table location')
-        rt = _with_native_resolved_schema(table, _with_native_bound_file_io(table, rt))
+    if identifier != table.identifier:
+        # Construct the originally bound table, then use the existing copy API.
+        # Core retains its FileIO while resolving the branch's REST identity.
+        rt = rt.copy({'branch': table.current_branch()})
+    if file_io_options is None:
+        rt = _with_native_resolved_schema(table, rt)
     if table.current_branch() != 'main':
         if rt.branch() != table.current_branch():
             raise RuntimeError("Native table did not resolve the requested branch")

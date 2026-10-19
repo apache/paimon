@@ -17,6 +17,8 @@
 
 """Native write/commit routing and failure ownership contracts."""
 
+import json
+from types import ModuleType
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -139,6 +141,58 @@ def test_builtin_fuse_is_accepted_without_relaxing_custom_file_io(tmp_path, nati
         pass
 
     table.file_io = CustomFuse(table.table_path, str(mount))
+    assert not _rest_catalog_supported(table)
+
+
+@pytest.mark.parametrize('cached', [False, True])
+@pytest.mark.parametrize('invalid', [None, 'source-uuid', 'source-path', 'target-path', 'target-branch'])
+def test_copied_fuse_write_uses_existing_copy_and_checks_identity(
+        tmp_path, native_rest_catalog, cached, invalid):
+    from pypaimon.write.native_commit import create_native_write_table
+
+    original = _table(tmp_path, native_rest_catalog)
+    _bind_fuse(original, tmp_path / 'fuse', cached)
+    table = original.copy_without_time_travel({'branch': 'dev'})
+    assert table.catalog_environment.uuid is None
+    assert _rest_catalog_supported(table)
+
+    module = ModuleType('pypaimon_rust.datafusion')
+    module.Table = Mock()
+    module.PaimonCatalog = Mock()
+    source = Mock(spec=['location', 'rest_table_uuid', 'copy'])
+    target = Mock(spec=['location', 'branch', 'copy_with_resolved_schema'])
+    source.location.return_value = original.table_path if invalid != 'source-path' else '/different'
+    source.rest_table_uuid.return_value = (
+        original.catalog_environment.uuid if invalid != 'source-uuid' else 'replacement-uuid')
+    source.copy.return_value = target
+    target.location.return_value = table.table_path if invalid != 'target-path' else '/different'
+    target.branch.return_value = 'dev' if invalid != 'target-branch' else 'main'
+    target.copy_with_resolved_schema.return_value = target
+    module.PaimonCatalog.return_value.get_table.return_value = source
+    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}):
+        result = create_native_write_table(table)
+    module.PaimonCatalog.return_value.get_table.assert_called_once_with(('default', 't'))
+    if invalid is None:
+        assert result is target
+        source.copy.assert_called_once_with({'branch': 'dev'})
+        target.copy_with_resolved_schema.assert_called_once()
+        schema = json.loads(target.copy_with_resolved_schema.call_args[0][0])
+        assert schema['options']['branch'] == 'dev'
+    else:
+        assert result is None
+        target.copy_with_resolved_schema.assert_not_called()
+        if invalid.startswith('source-'):
+            source.copy.assert_not_called()
+
+
+@pytest.mark.parametrize('identity', [None, '', 123])
+def test_copied_fuse_write_requires_original_rest_uuid(tmp_path, native_rest_catalog, identity):
+    table = _table(tmp_path, native_rest_catalog)
+    _bind_fuse(table, tmp_path / 'fuse')
+    table = table.copy_without_time_travel({'branch': 'dev'})
+    response = json.loads(table.catalog_environment.rest_table_response)
+    response['id'] = identity
+    table.catalog_environment.rest_table_response = json.dumps(response)
     assert not _rest_catalog_supported(table)
 
 
