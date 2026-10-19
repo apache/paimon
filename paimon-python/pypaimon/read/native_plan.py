@@ -464,12 +464,13 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
                          projection: Optional[List[str]] = None,
                          blob_parallelism: Optional[int] = None,
                          read_type: Optional[List[DataField]] = None,
-                         include_row_kind: bool = False):
+                         include_row_kind: bool = False,
+                         *, _query_auth=_QUERY_AUTH_UNSET):
     """Create one Rust reader reusable across split groups."""
     if not native_runtime_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust extension")
-    query_auth = _native_query_auth(table)
+    query_auth = _native_query_auth(table) if _query_auth is _QUERY_AUTH_UNSET else _query_auth
     if not query_auth[0]:
         raise RuntimeError('Native reads cannot reconstruct custom query authorization')
     if read_type is None:

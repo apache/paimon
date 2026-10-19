@@ -545,3 +545,78 @@ def test_python_stream_does_not_probe_native_authorization(rest_catalog):
         auth.assert_not_called()
     finally:
         scan._prefetch_executor.shutdown(wait=True)
+
+
+@pytest.mark.parametrize('limit', [None, 2])
+@pytest.mark.parametrize('revoked', [False, True])
+def test_ordered_native_read_captures_one_factory_but_refreshes_policy(rest_catalog, limit, revoked):
+    import pyarrow as pa
+
+    catalog, _ = rest_catalog
+    table = update_tests._table(catalog, seed=False).copy({
+        'query-auth.enabled': 'false', 'read.native.enabled': 'true'})
+    denied = PermissionError('the captured policy was revoked')
+    auth = Mock(side_effect=[None, denied if revoked else None])
+    factory = Mock(side_effect=[auth, AssertionError('the authorizer factory was resolved twice')])
+    _set_factory(table, factory)
+    read = table.new_read_builder().with_projection(['id']).with_limit(limit).new_read()
+    splits = [SimpleNamespace(files=[SimpleNamespace(file_name='data.parquet', file_size=1)],
+                              _native_split=value) for value in (1, 2)]
+
+    def read_builder(source, state):
+        assert state[1] is auth
+        builder = Mock()
+
+        def read_arrow(group):
+            # Core refreshes the callback on each group; only the factory result
+            # belongs to this read operation, never the returned policy.
+            state[1](['id'])
+            return [pa.record_batch([pa.array(group, type=pa.int32())], names=['id'])]
+
+        builder.new_read.return_value.read_arrow = read_arrow
+        return builder
+
+    with patch('pypaimon.read.native_plan.native_runtime_available', return_value=True), \
+            patch('pypaimon.read.native_plan._native_read_builder', side_effect=read_builder), \
+            patch('pypaimon.read.native_plan._configure_native_read_builder',
+                  side_effect=lambda builder, *args, **kwargs: builder), \
+            patch.object(read, '_project_batch_to_output', side_effect=lambda batch: batch):
+        batches = read._try_native_batches(
+            splits, pa.schema([('id', pa.int32())]), preserve_split_order=True)
+        if revoked:
+            with pytest.raises(PermissionError) as error:
+                list(batches)
+            assert error.value is denied
+        else:
+            assert [value for batch in batches for value in batch.column(0).to_pylist()] == [1, 2]
+    factory.assert_called_once_with(table.options, table.identifier)
+    assert auth.call_args_list == [((['id'],), {}), ((['id'],), {})]
+
+
+@pytest.mark.parametrize('use_native', _ENGINES)
+def test_custom_authorized_iterator_limit_spans_multiple_splits(rest_catalog, use_native):
+    catalog, _ = rest_catalog
+    table = update_tests._table(catalog, partitioned=True).copy({
+        'scan.native-plan.enabled': str(use_native).lower(),
+        'read.native.enabled': str(use_native).lower(),
+    })
+    auth = Mock(return_value=None)
+    factory = Mock(return_value=auth)
+    _set_factory(table, factory)
+    builder = table.new_read_builder().with_projection(['id']).with_limit(3)
+    splits = builder.new_scan().plan().splits()
+    assert len(splits) >= 2
+    # Planning and reading are separate operations. Within this iterator,
+    # rebuilding the remaining-LIMIT reader must keep its captured hook.
+    factory.reset_mock()
+    factory.side_effect = [auth, AssertionError('the authorizer factory was resolved twice')]
+    read = builder.new_read()
+    with ExitStack() as stack:
+        if use_native:
+            stack.enter_context(patch.object(read, '_create_split_read',
+                                             side_effect=AssertionError('Python read fallback')))
+        assert sorted(row.get_field(0) for row in read.to_iterator(splits)) == [1, 2, 3]
+    if use_native:
+        factory.assert_called_once_with(table.options, table.identifier)
+    else:
+        factory.assert_not_called()

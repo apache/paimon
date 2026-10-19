@@ -634,8 +634,12 @@ class TableRead:
             rust_splits.append(rust_split)
             split_weights.append(self._native_split_weight(split))
         if preserve_split_order:
-            read_kwargs = self._native_read_kwargs(blob_parallelism)
             try:
+                from pypaimon.read.native_plan import _native_query_auth
+                read_kwargs = self._native_read_kwargs(blob_parallelism)
+                # LIMIT can rebuild the core reader between splits. Keep this
+                # operation's authorizer, while core refreshes its policy.
+                read_kwargs['_query_auth'] = _native_query_auth(self.table)
                 read_splits = _prepare_native_read(self.table, **read_kwargs)
             except Exception as e:
                 _raise_if_native_fork_safety_error(e)
