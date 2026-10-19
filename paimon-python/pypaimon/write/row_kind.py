@@ -41,7 +41,7 @@ def row_kinds(
             'Cannot find rowkind field %s in table schema' % row_kind_field_name
         )
     column = data.column(row_kind_field_name)
-    if not pa.types.is_string(column.type):
+    if not (pa.types.is_string(column.type) or pa.types.is_large_string(column.type)):
         raise ValueError('rowkind.field column must be a string')
     kinds: List[int] = []
     for value in column.to_pylist():

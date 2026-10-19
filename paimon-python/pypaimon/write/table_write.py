@@ -36,6 +36,20 @@ if TYPE_CHECKING:
     from ray.data import Dataset
 
 
+def _pandas_write_schema(table, schema):
+    """Keep ignored events available for the normal row-kind NULL checks."""
+    if table is None or not table.is_primary_key_table:
+        return schema
+    options = table.options
+    raw = options.options.to_map()
+    if (raw.get('rowkind.field') is None
+            or not (options.ignore_delete() or str(raw.get('ignore-update-before', 'false')).lower() == 'true')):
+        return schema
+    # Pandas checks top-level NOT NULL before Arrow reaches the writer. Only
+    # relax the transport; the declared schema and nested fields stay intact.
+    return pa.schema([field.with_nullable(True) for field in schema], metadata=schema.metadata)
+
+
 def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
                hash_fixed_precluster='auto', static_partition=None):
     """Share Ray coordination without constructing another local data writer."""
@@ -205,7 +219,8 @@ class TableWrite:
             pa_schema = self._write_cols_pyarrow_schema(write_cols)
         else:
             pa_schema = self.table_pyarrow_schema
-        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
+        transport = _pandas_write_schema(getattr(self, 'table', None), pa_schema)
+        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=transport)
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
@@ -331,6 +346,7 @@ class TableWrite:
         data = filter_write_batch(table, data)
         if not data.num_rows:
             return data
+        data = normalize_arrow_strings(data)
         target = self.table_pyarrow_schema
         if data.schema.names != target.names and self.file_store_write.write_cols is not None:
             target = self._write_cols_pyarrow_schema(self.file_store_write.write_cols)
@@ -341,7 +357,10 @@ class TableWrite:
         return data
 
     def _prepare_arrow_schema(self, data):
-        data = normalize_arrow_strings(data)
+        # Legacy schema-only callers have no row-kind options to evaluate.
+        # A real writer must defer casts until ignored events have been removed.
+        if getattr(self, 'table', None) is None:
+            data = normalize_arrow_strings(data)
         self._validate_pyarrow_schema(
             data.schema, check_nested_nullability=getattr(self, 'table', None) is None)
         return data

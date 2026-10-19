@@ -20,7 +20,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
@@ -212,7 +212,6 @@ class NativeTableWrite:
         self._native_writer.write_arrow(data, bucket)
 
     def _prepare_native_arrow_data(self, data):
-        data = normalize_arrow_strings(data)
         # Core resolves row kinds and filters ignored events before inspecting
         # payload values. This facade checks only the logical Arrow schema.
         compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True,
@@ -231,7 +230,9 @@ class NativeTableWrite:
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
             return self._python_writer.write_pandas(dataframe)
-        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=self._schema))
+        from pypaimon.write.table_write import _pandas_write_schema
+        transport = _pandas_write_schema(self.table, self._schema)
+        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=transport))
 
     def write_ray(self, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
                   hash_fixed_precluster='auto', static_partition=None):

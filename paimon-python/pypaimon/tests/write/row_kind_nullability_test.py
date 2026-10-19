@@ -18,7 +18,7 @@
 """Filtered events retain Java's row-kind-specific top-level NULL checks."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -59,11 +59,14 @@ def _write(writer, table, schema, rows, input_):
             writer.write_row(GenericRow([row[field.name] for field in table.fields], table.fields))
     elif input_ == 'batch':
         writer.write_arrow_batch(pa.RecordBatch.from_pylist(rows, schema=schema))
+    elif input_ == 'pandas':
+        import pandas as pd
+        writer.write_pandas(pd.DataFrame.from_records(rows, columns=schema.names))
     else:
         writer.write_arrow(pa.Table.from_pylist(rows, schema=schema))
 
 
-@pytest.mark.parametrize('input_', ['row', 'batch', 'table'])
+@pytest.mark.parametrize('input_', ['row', 'batch', 'table', 'pandas'])
 @pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
 @pytest.mark.parametrize('kind,field', [('-D', 'id'), ('-D', 'seq'), ('-U', 'value'), ('+I', 'value')])
 def test_filtered_events_check_required_nulls_before_routing(tmp_path, input_, stream, kind, field):
@@ -82,7 +85,7 @@ def test_filtered_events_check_required_nulls_before_routing(tmp_path, input_, s
         writer.close()
 
 
-@pytest.mark.parametrize('input_', ['row', 'batch', 'table'])
+@pytest.mark.parametrize('input_', ['row', 'batch', 'table', 'pandas'])
 @pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
 def test_ignored_delete_may_omit_non_key_not_null_values(tmp_path, input_, stream, native):
@@ -104,11 +107,37 @@ def test_ignored_delete_may_omit_non_key_not_null_values(tmp_path, input_, strea
     assert builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist() == [expected]
 
 
+@pytest.mark.parametrize('input_', ['batch', 'table'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+def test_large_string_row_kinds_filter_before_casting_payloads(tmp_path, input_, stream, native):
+    table, schema = _table(tmp_path, **{'write.native.enabled': str(native).lower()})
+    transport = pa.schema([field.with_type(pa.large_string()) if field.name == 'op' else field
+                           for field in schema])
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    expected = dict(id=2, op='+I', seq=2, value=42)
+    try:
+        assert isinstance(writer, NativeTableWrite) == native
+        # A whole-table STRING cast checks unrelated top-level NOT NULL
+        # fields, and would reject this DELETE before its row kind is applied.
+        _write(writer, table, transport, [dict(id=1, op='-D', seq=1, value=None), expected], input_)
+        if native:
+            assert writer._python_writer is None
+        messages = writer.prepare_commit(1) if stream else writer.prepare_commit()
+        commit.commit(messages, 1) if stream else commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+    builder = table.new_read_builder()
+    assert builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist() == [expected]
+
+
 @pytest.mark.native_plan
 @_NATIVE
-@pytest.mark.parametrize('input_', ['row', 'batch', 'table'])
+@pytest.mark.parametrize('input_', ['row', 'batch', 'table', 'pandas'])
 @pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
-@pytest.mark.parametrize('kind,field', [('-D', 'id'), ('-D', 'seq'), ('-U', 'value')])
+@pytest.mark.parametrize('kind,field', [('-D', 'id'), ('-D', 'seq'), ('-U', 'value'), ('+I', 'value')])
 def test_native_filtered_events_keep_required_null_checks(tmp_path, input_, stream, kind, field):
     table, schema = _table(tmp_path, **{'write.native.enabled': 'true'})
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
@@ -122,6 +151,47 @@ def test_native_filtered_events_keep_required_null_checks(tmp_path, input_, stre
         assert writer._python_writer is None
         assert not list(tmp_path.rglob('*.parquet'))
         assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+
+
+def test_native_pandas_facade_preserves_null_payload_for_core_filtering(tmp_path):
+    import pandas as pd
+
+    table, schema = _table(tmp_path)
+    native = Mock()
+    writer = NativeTableWrite(table, 'user', None, False, native)
+    rows = [dict(id=1, op='-D', seq=1, value=None), dict(id=2, op='+I', seq=2, value=42)]
+    writer.write_pandas(pd.DataFrame.from_records(rows, columns=schema.names))
+    native.write_arrow.assert_called_once()
+    transported = native.write_arrow.call_args[0][0]
+    assert transported.to_pylist() == rows
+    assert transported.schema.field('value').nullable
+    assert not writer._schema.field('value').nullable
+    assert writer._python_writer is None
+
+
+@pytest.mark.parametrize('primary_key', [False, True], ids=['append', 'pk-without-filter'])
+def test_pandas_non_filtering_writers_keep_not_null_validation(tmp_path, primary_key):
+    import pandas as pd
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([pa.field('id', pa.int32(), nullable=False),
+                        pa.field('value', pa.int32(), nullable=False)])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'] if primary_key else [], options={
+            'bucket': '1', 'write.native.enabled': 'false'}), False)
+    table = catalog.get_table('default.t')
+    data = pd.DataFrame([dict(id=1, value=None)])
+    writer = table.new_batch_write_builder().new_write()
+    facade = NativeTableWrite(table, 'native-user', None, False, Mock())
+    try:
+        for candidate in [writer, facade]:
+            with pytest.raises(ValueError, match='non-nullable'):
+                candidate.write_pandas(data)
+        assert not writer.file_store_write.data_writers
+        facade._native_writer.write_arrow.assert_not_called()
     finally:
         writer.close()
 
@@ -159,7 +229,9 @@ def test_native_bridge_leaves_nested_value_validation_to_core(tmp_path):
     writer._table_schema = writer._schema = declared
     writer._write_cols = None
     with patch('pypaimon.write.native_write.normalize_arrow_write_nullability',
-               side_effect=AssertionError('bridge inspected values before core filtering'), create=True):
+               side_effect=AssertionError('bridge inspected values before core filtering'), create=True), \
+            patch('pypaimon.write.native_write.normalize_arrow_strings',
+                  side_effect=AssertionError('bridge cast values before core filtering'), create=True):
         assert writer._prepare_native_arrow_data(data) is data
 
 
