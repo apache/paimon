@@ -31,6 +31,7 @@ import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.ApplyBitmapIndexRecordReader;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
@@ -73,6 +74,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -87,6 +89,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests file index and predicate push down in {@link
@@ -770,6 +773,48 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         writeAllColumns(table, ROW_COUNT);
 
         assertThat(readWithFilter(table, equalF1(MISSING_F1))).hasSize(ROW_COUNT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testIgnoreUnknownFileIndexInSingleFile(int version) throws Exception {
+        Map<String, String> options = bloomOptions("f1", "1 B");
+        options.put(CoreOptions.FILE_INDEX_FORMAT_VERSION.key(), Integer.toString(version));
+        FileStoreTable table = createTable("unknown_single_file", options);
+        writeAllColumns(table, ROW_COUNT);
+
+        DataSplit split = (DataSplit) table.newReadBuilder().newScan().plan().splits().get(0);
+        assertThat(split.dataFiles()).hasSize(1);
+        DataFileMeta file = split.dataFiles().get(0);
+        DataFilePathFactory pathFactory =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket());
+        List<String> indexes =
+                file.extraFiles().stream()
+                        .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .collect(Collectors.toList());
+        assertThat(indexes).hasSize(1);
+        // Replace the sidecar with an index produced by a plugin unavailable to this reader.
+        try (OutputStream out =
+                        table.fileIO()
+                                .newOutputStream(
+                                        pathFactory.toAlignedPath(indexes.get(0), file), true);
+                FileIndexFormat.Writer writer = FileIndexFormat.createWriter(out, version)) {
+            writer.writeIndex("f1", "unknown", payload -> payload.write(42));
+            writer.finish();
+        }
+
+        assertThatThrownBy(() -> readWithFilter(table, equalF1(MISSING_F1)))
+                .hasMessage("Can't find file index for type: unknown");
+        catalog.alterTable(
+                identifier(table.name()),
+                SchemaChange.setOption(
+                        CoreOptions.FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE.key(), "true"),
+                false);
+        assertThat(readWithFilter(table, equalF1(MISSING_F1))).hasSize(ROW_COUNT);
+        assertThat(query(table, equalF1(MISSING_F1))).isEmpty();
+        assertRow(assertSingleRow(query(table, equalF1(f1(50)))), 50);
     }
 
     @Test

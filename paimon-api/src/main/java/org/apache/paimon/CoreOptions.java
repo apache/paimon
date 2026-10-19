@@ -443,6 +443,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.");
 
+    public static final ConfigOption<Boolean> FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE =
+            key("file-index.read.ignore-unknown-type")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore unregistered file index types when reading. "
+                                    + "If true, skip these indexes with a warning and retain all rows "
+                                    + "for them. Other indexes can still filter rows. "
+                                    + "If false, fail when reading an unregistered non-empty index.");
+
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
             key("file-index.read.enabled")
                     .booleanType()
@@ -4590,6 +4600,10 @@ public class CoreOptions implements Serializable {
                 Integer.MAX_VALUE,
                 bytes);
         return bytes;
+    }
+
+    public boolean fileIndexReadIgnoreUnknownType() {
+        return options.get(FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE);
     }
 
     public boolean fileIndexReadEnabled() {

@@ -97,6 +97,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 manifestFileFactory,
                 scanManifestParallelism,
                 false,
+                false,
                 deletionVectorsEnabled,
                 true);
         this.deletionVectorsEnabled = deletionVectorsEnabled;

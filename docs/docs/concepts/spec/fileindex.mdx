@@ -43,6 +43,11 @@ deletion vectors, see [Table Index](./tableindex).
 | Range bitmap | [Range Bitmap](#index-range-bitmap) |
 | Bit-slice bitmap | [Bit-Slice Index Bitmap](#index-bit-slice-index-bitmap) |
 
+By default, reading an unregistered non-empty index type fails. Set
+`file-index.read.ignore-unknown-type` to `true` to skip unregistered index types and log a warning.
+Skipped indexes do not filter any rows; registered indexes and query predicates still apply.
+This option does not suppress errors from registered index implementations.
+
 ## Index File
 
 The container version is selected by `file-index.format.version` (default: `1`). Readers support

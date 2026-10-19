@@ -834,7 +834,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                             dataFilePathFactory,
                             file,
                             dv,
-                            fileOffset);
+                            fileOffset,
+                            coreOptions.fileIndexReadIgnoreUnknownType());
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }
@@ -1068,7 +1069,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 null,
                 dataFilePathFactory,
                 file,
-                null);
+                null,
+                0L,
+                coreOptions.fileIndexReadIgnoreUnknownType());
     }
 
     /**
@@ -1111,7 +1114,16 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
             FileIndexResult result =
                     FileIndexEvaluator.evaluate(
-                            fileIO, dataSchema, dataFilters, null, null, pathFactory, file, null);
+                            fileIO,
+                            dataSchema,
+                            dataFilters,
+                            null,
+                            null,
+                            pathFactory,
+                            file,
+                            null,
+                            0L,
+                            coreOptions.fileIndexReadIgnoreUnknownType());
             results.add(new FileIndexResultEntry(file, result));
             if (!result.remain()) {
                 return results;

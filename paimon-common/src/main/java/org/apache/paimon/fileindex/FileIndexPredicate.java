@@ -109,12 +109,17 @@ public class FileIndexPredicate implements Closeable {
     }
 
     public FileIndexResult evaluate(@Nullable Predicate predicate) {
+        return evaluate(predicate, false);
+    }
+
+    public FileIndexResult evaluate(@Nullable Predicate predicate, boolean ignoreUnknownType) {
         if (predicate == null) {
             return REMAIN;
         }
         Set<String> requiredFieldNames = getRequiredNames(predicate);
         Map<String, Collection<FileIndexReader>> indexReaders = new HashMap<>();
-        requiredFieldNames.forEach(name -> indexReaders.put(name, reader.readColumnIndex(name)));
+        requiredFieldNames.forEach(
+                name -> indexReaders.put(name, reader.readColumnIndex(name, ignoreUnknownType)));
         FileIndexResult result = new FileIndexPredicateTest(indexReaders).test(predicate);
         if (!result.remain()) {
             LOG.debug(
@@ -125,6 +130,11 @@ public class FileIndexPredicate implements Closeable {
     }
 
     public FileIndexResult evaluateTopN(@Nullable TopN topN, FileIndexResult result) {
+        return evaluateTopN(topN, result, false);
+    }
+
+    public FileIndexResult evaluateTopN(
+            @Nullable TopN topN, FileIndexResult result, boolean ignoreUnknownType) {
         if (topN == null || !result.remain()) {
             return result;
         }
@@ -139,7 +149,7 @@ public class FileIndexPredicate implements Closeable {
 
         List<SortValue> orders = topN.orders();
         String requiredName = orders.get(0).field().name();
-        Set<FileIndexReader> readers = reader.readColumnIndex(requiredName);
+        Set<FileIndexReader> readers = reader.readColumnIndex(requiredName, ignoreUnknownType);
         for (FileIndexReader reader : readers) {
             FileIndexResult ret = reader.visitTopN(topN, result);
             if (!REMAIN.equals(ret)) {

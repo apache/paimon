@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.fileindex.FileIndexFormat;
@@ -26,7 +27,10 @@ import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
@@ -37,15 +41,97 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileIndexEvaluator}. */
 public class FileIndexEvaluatorTest {
+
+    @TempDir java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @CsvSource({"1,true", "1,false", "2,true", "2,false"})
+    void testIgnoreUnknownIndex(int version, boolean embedded) throws Exception {
+        Options options = new Options();
+        assertThat(new CoreOptions(options).fileIndexReadIgnoreUnknownType()).isFalse();
+        options.set(CoreOptions.FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE, true);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(bytes, version)) {
+            writer.writeIndex("a", "unknown", out -> out.write(42));
+            writer.finish();
+        }
+        LocalFileIO fileIO = LocalFileIO.create();
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir.toUri()),
+                        "avro",
+                        "data-",
+                        "changelog-",
+                        false,
+                        null,
+                        null);
+        String indexName = "data.index";
+        if (!embedded) {
+            try (OutputStream out =
+                    fileIO.newOutputStream(new Path(pathFactory.parent(), indexName), false)) {
+                out.write(bytes.toByteArray());
+            }
+        }
+        DataFileMeta file =
+                DataFileMeta.forAppend(
+                        "data.avro",
+                        0,
+                        2,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        0,
+                        embedded ? Collections.emptyList() : Collections.singletonList(indexName),
+                        embedded ? bytes.toByteArray() : null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        List<Predicate> filters =
+                Collections.singletonList(
+                        new PredicateBuilder(tableSchema().logicalRowType()).equal(0, 1));
+        assertThatThrownBy(
+                        () ->
+                                FileIndexEvaluator.evaluate(
+                                        fileIO,
+                                        tableSchema(),
+                                        filters,
+                                        null,
+                                        null,
+                                        pathFactory,
+                                        file,
+                                        null))
+                .hasMessage("Can't find file index for type: unknown");
+        assertThat(
+                        FileIndexEvaluator.evaluate(
+                                fileIO,
+                                tableSchema(),
+                                filters,
+                                null,
+                                null,
+                                pathFactory,
+                                file,
+                                null,
+                                0L,
+                                new CoreOptions(options).fileIndexReadIgnoreUnknownType()))
+                .isSameAs(FileIndexResult.REMAIN);
+    }
 
     @Test
     public void testLimitIntersectsBitmapDeletionVector() throws Exception {

@@ -1770,6 +1770,7 @@ public class ManifestFileTest {
                         2,
                         false,
                         false,
+                        false,
                         false);
         scan.withRowRanges(Collections.singletonList(new Range(100, 100)));
         fileIO.reset();
@@ -1826,6 +1827,7 @@ public class ManifestFileTest {
                         mock(TableSchema.class),
                         factory,
                         2,
+                        false,
                         false,
                         false,
                         false);
@@ -1890,6 +1892,7 @@ public class ManifestFileTest {
                         mock(TableSchema.class),
                         factory,
                         2,
+                        false,
                         false,
                         false,
                         false);
