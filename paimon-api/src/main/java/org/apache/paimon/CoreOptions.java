@@ -268,6 +268,18 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
+    public static final ConfigOption<Boolean> LAKE_STREAM_ENABLED =
+            key("lakestream.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable lake-stream mode. When enabled, regular writes are "
+                                    + "routed to the Lakestream Store, while INSERT OVERWRITE writes "
+                                    + "directly to Paimon. The Lakestream Store's tiering service "
+                                    + "asynchronously writes data to Paimon. Reads from the original table name "
+                                    + "access only Paimon, while reads from the '$rt'-suffixed table "
+                                    + "name combine Paimon and Lakestream Store data.");
+
     public static final ConfigOption<Boolean> CHAIN_TABLE_ENABLED =
             key("chain-table.enabled")
                     .booleanType()

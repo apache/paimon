@@ -123,6 +123,12 @@ under the License.
             <td>Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in the metastore and need to be manually added as separate partition operations.</td>
         </tr>
         <tr>
+            <td><h5>lakestream.store</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies the Lakestream Store implementation used to provide second-level data freshness for Paimon tables.</td>
+        </tr>
+        <tr>
             <td><h5>local-cache.block-size</h5></td>
             <td style="word-wrap: break-word;">1 mb</td>
             <td>MemorySize</td>

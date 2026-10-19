@@ -255,4 +255,12 @@ public class CatalogOptions {
                             "Comma-separated list of file types to cache. "
                                     + "Supported values: meta, global-index, bucket-index, data, file-index, "
                                     + "or * for all of them.");
+
+    public static final ConfigOption<String> LAKE_STREAM_STORE =
+            ConfigOptions.key("lakestream.store")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies the Lakestream Store implementation used to provide "
+                                    + "second-level data freshness for Paimon tables.");
 }

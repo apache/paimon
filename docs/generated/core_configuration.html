@@ -969,6 +969,12 @@ under the License.
             <td>Whether index file in data file directory.</td>
         </tr>
         <tr>
+            <td><h5>lakestream.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable lake-stream mode. When enabled, regular writes are routed to the Lakestream Store, while INSERT OVERWRITE writes directly to Paimon. The Lakestream Store's tiering service asynchronously writes data to Paimon. Reads from the original table name access only Paimon, while reads from the '$rt'-suffixed table name combine Paimon and Lakestream Store data.</td>
+        </tr>
+        <tr>
             <td><h5>local-kv-db.block-size</h5></td>
             <td style="word-wrap: break-word;">4 kb</td>
             <td>MemorySize</td>

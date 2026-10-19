@@ -154,6 +154,23 @@ public class CatalogUtils {
         }
     }
 
+    /**
+     * Validate that a lake-stream table is neither renamed nor replaced. Its identifier is what
+     * resolves the corresponding table in the Lakestream Store, so renaming it would break that
+     * resolution, and replacing it can truncate data the store has not tiered yet or silently drop
+     * the {@code lakestream.enabled} option.
+     */
+    public static void checkNotLakeStreamTable(Table table, Identifier identifier, String method) {
+        if (Options.fromMap(table.options()).get(CoreOptions.LAKE_STREAM_ENABLED)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for lake-stream table '%s', the table identifier is used "
+                                    + "to resolve the corresponding table in the Lakestream Store. "
+                                    + "Please set '%s' to false first.",
+                            method, identifier, CoreOptions.LAKE_STREAM_ENABLED.key()));
+        }
+    }
+
     public static void validateCreateTable(Schema schema, boolean dataTokenEnabled) {
         Options options = Options.fromMap(schema.options());
         checkArgument(
