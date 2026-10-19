@@ -41,10 +41,14 @@ def _require_ray():
 
 
 def _ray_source_uri(source):
-    if isinstance(source, str) and "://" in source:
-        return source
-    if isinstance(source, Path) or isinstance(source, str) and Path(source).is_dir():
-        return Path(source).expanduser().resolve().as_uri()
+    if isinstance(source, str):
+        source = source.strip()
+        if "://" in source:
+            return source
+        if source and Path(source).expanduser().is_dir():
+            return Path(source).expanduser().resolve().as_uri()
+    elif isinstance(source, Path):
+        return source.expanduser().resolve().as_uri()
     raise ValueError(
         "Parallel import requires a FileIO URI or shared directory, not a Hub repo_id.")
 

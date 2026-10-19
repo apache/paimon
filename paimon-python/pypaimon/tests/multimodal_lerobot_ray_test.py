@@ -17,6 +17,7 @@
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -134,7 +135,7 @@ class LeRobotRayImportTest(unittest.TestCase):
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
         self.source = self.root / "source"
         self.conn = pm.connect(options={"warehouse": (self.root / "lake").as_uri()})
 
@@ -261,10 +262,14 @@ class LeRobotRayImportTest(unittest.TestCase):
     def test_absolute_image_paths_match_serial_import(self):
         self._check_image_import(True)
 
-    def _check_image_import(self, path_backed):
-        self._source(path_backed=path_backed)
+    def test_home_string_path_matches_serial_import(self):
+        with patch.dict(os.environ, {"HOME": str(self.root)}):
+            self._check_image_import(True, "  ~/source  ")
+
+    def _check_image_import(self, path_backed, source=None):
+        self._source(path_backed=path_backed, data_files=4)
         self._import_serial()
-        self.conn.load_from_lerobot("parallel", self.source, parallelism=2,
+        self.conn.load_from_lerobot("parallel", source or self.source, parallelism=2,
                                     batch_size=1, tag_name="imported")
         for suffix in ("", "__episodes", "__tasks", "__info"):
             def read(name, tag=None):
