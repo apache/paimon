@@ -187,11 +187,22 @@ def test_pandas_non_filtering_writers_keep_not_null_validation(tmp_path, primary
     writer = table.new_batch_write_builder().new_write()
     facade = NativeTableWrite(table, 'native-user', None, False, Mock())
     try:
-        for candidate in [writer, facade]:
+        with pytest.raises(ValueError, match='non-null column|non-nullable'):
+            writer.write_pandas(data)
+        if primary_key:
+            # The native facade preserves nullable KV transport; the actual
+            # core writer enforces logical INSERT nullability, covered by the
+            # retained DELETE integration tests.
+            facade.write_pandas(data)
+            transported = facade._native_writer.write_arrow.call_args[0][0]
+            assert transported.column('value').to_pylist() == [None]
+            assert transported.schema.field('value').nullable
+            assert not facade._schema.field('value').nullable
+        else:
             with pytest.raises(ValueError, match='non-nullable'):
-                candidate.write_pandas(data)
+                facade.write_pandas(data)
+            facade._native_writer.write_arrow.assert_not_called()
         assert not writer.file_store_write.data_writers
-        facade._native_writer.write_arrow.assert_not_called()
     finally:
         writer.close()
 
