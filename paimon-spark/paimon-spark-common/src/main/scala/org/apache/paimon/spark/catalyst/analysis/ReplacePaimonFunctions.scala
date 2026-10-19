@@ -108,7 +108,11 @@ object ReplacePaimonFunctions {
           catalogAndIdentifier.identifier(),
           catalogAndIdentifier.catalog().name())
       val fieldId =
-        BlobViewStruct.resolveBlobFieldId(paimonIdentifier, sparkTable.table.rowType(), fieldName)
+        BlobViewStruct.resolveBlobFieldId(
+          paimonIdentifier,
+          sparkTable.table.rowType(),
+          sparkTable.table.options(),
+          fieldName)
 
       ApplyFunctionExpression(
         new BlobViewFieldIdSparkFunction,

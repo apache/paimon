@@ -104,7 +104,8 @@ public class BlobViewFunction extends ScalarFunction implements CatalogAwareFunc
     private int fieldId(Identifier identifier, String fieldName) {
         try {
             Table table = catalog().getTable(identifier);
-            return BlobViewStruct.resolveBlobFieldId(identifier, table.rowType(), fieldName);
+            return BlobViewStruct.resolveBlobFieldId(
+                    identifier, table.rowType(), table.options(), fieldName);
         } catch (Catalog.TableNotExistException e) {
             throw new IllegalArgumentException(
                     "Cannot find upstream table " + identifier.getFullName() + ".", e);

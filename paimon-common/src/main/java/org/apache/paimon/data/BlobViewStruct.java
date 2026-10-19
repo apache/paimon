@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
@@ -26,6 +27,7 @@ import org.apache.paimon.types.RowType;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Map;
 import java.util.Objects;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -59,6 +61,42 @@ public class BlobViewStruct implements Serializable {
             Identifier identifier, RowType upstreamRowType, String fieldName, long rowId) {
         return new BlobViewStruct(
                 identifier, resolveBlobFieldId(identifier, upstreamRowType, fieldName), rowId);
+    }
+
+    public static BlobViewStruct of(
+            Identifier identifier,
+            RowType upstreamRowType,
+            Map<String, String> upstreamOptions,
+            String fieldName,
+            long rowId) {
+        return new BlobViewStruct(
+                identifier,
+                resolveBlobFieldId(identifier, upstreamRowType, upstreamOptions, fieldName),
+                rowId);
+    }
+
+    public static int resolveBlobFieldId(
+            Identifier identifier,
+            RowType upstreamRowType,
+            Map<String, String> upstreamOptions,
+            String fieldName) {
+        int fieldId = resolveBlobFieldId(identifier, upstreamRowType, fieldName);
+        validateUpstreamRowTracking(identifier, upstreamOptions);
+        return fieldId;
+    }
+
+    public static void validateUpstreamRowTracking(
+            Identifier identifier, Map<String, String> upstreamOptions) {
+        Objects.requireNonNull(identifier, "identifier");
+        Objects.requireNonNull(upstreamOptions, "upstreamOptions");
+        if (!CoreOptions.fromMap(upstreamOptions).rowTrackingEnabled()) {
+            throw new IllegalArgumentException(
+                    "Upstream table "
+                            + identifier.getFullName()
+                            + " referenced by blob view must enable '"
+                            + CoreOptions.ROW_TRACKING_ENABLED.key()
+                            + "'.");
+        }
     }
 
     public static int resolveBlobFieldId(

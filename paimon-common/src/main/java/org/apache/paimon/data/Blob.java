@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -88,6 +89,16 @@ public interface Blob {
     static BlobView fromView(
             Identifier identifier, RowType upstreamRowType, String fieldName, long rowId) {
         return fromView(BlobViewStruct.of(identifier, upstreamRowType, fieldName, rowId));
+    }
+
+    static BlobView fromView(
+            Identifier identifier,
+            RowType upstreamRowType,
+            Map<String, String> upstreamOptions,
+            String fieldName,
+            long rowId) {
+        return fromView(
+                BlobViewStruct.of(identifier, upstreamRowType, upstreamOptions, fieldName, rowId));
     }
 
     static Blob fromBytes(

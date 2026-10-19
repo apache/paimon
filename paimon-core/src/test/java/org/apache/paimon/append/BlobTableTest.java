@@ -1349,6 +1349,71 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testBlobViewRejectsUpstreamWithoutRowTracking() throws Exception {
+        String upstreamTableName = "UpstreamPkBlob";
+        Schema.Builder upstreamSchema = Schema.newBuilder();
+        upstreamSchema.primaryKey("id");
+        upstreamSchema.column("id", DataTypes.INT().notNull());
+        upstreamSchema.column("image", DataTypes.BLOB());
+        upstreamSchema.option(CoreOptions.BUCKET.key(), "1");
+        upstreamSchema.option(CoreOptions.BLOB_FIELD.key(), "image");
+        catalog.createTable(identifier(upstreamTableName), upstreamSchema.build(), true);
+
+        FileStoreTable upstreamTable = getTable(identifier(upstreamTableName));
+        writeRows(
+                upstreamTable,
+                Collections.singletonList(GenericRow.of(1, new BlobData(randomBytes()))));
+
+        Identifier upstreamIdentifier = Identifier.fromString(database + "." + upstreamTableName);
+        String expectedMessage =
+                "Upstream table "
+                        + upstreamIdentifier.getFullName()
+                        + " referenced by blob view must enable 'row-tracking.enabled'.";
+        assertThatThrownBy(
+                        () ->
+                                BlobViewStruct.of(
+                                        upstreamIdentifier,
+                                        upstreamTable.rowType(),
+                                        upstreamTable.options(),
+                                        "image",
+                                        0L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(expectedMessage);
+
+        String downstreamTableName = "DownstreamBlobViewInvalidUpstream";
+        Schema.Builder downstreamSchema = Schema.newBuilder();
+        downstreamSchema.column("id", DataTypes.INT());
+        downstreamSchema.column("image", DataTypes.BLOB());
+        downstreamSchema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        downstreamSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        downstreamSchema.option(CoreOptions.BLOB_FIELD.key(), "image");
+        downstreamSchema.option(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
+        catalog.createTable(identifier(downstreamTableName), downstreamSchema.build(), true);
+
+        FileStoreTable downstreamTable = getTable(identifier(downstreamTableName));
+        writeRows(
+                downstreamTable,
+                Collections.singletonList(
+                        GenericRow.of(
+                                1,
+                                Blob.fromView(
+                                        upstreamIdentifier,
+                                        upstreamTable.rowType(),
+                                        "image",
+                                        0L))));
+
+        ReadBuilder downstreamReadBuilder = downstreamTable.newReadBuilder();
+        assertThatThrownBy(
+                        () ->
+                                downstreamReadBuilder
+                                        .newRead()
+                                        .createReader(downstreamReadBuilder.newScan().plan())
+                                        .forEachRemaining(row -> {}))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(expectedMessage);
+    }
+
+    @Test
     public void testBlobProjectionExcludesBlobColumn() throws Exception {
         createTableDefault();
         writeDataDefault(

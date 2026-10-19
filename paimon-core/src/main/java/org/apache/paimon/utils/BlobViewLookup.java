@@ -258,6 +258,7 @@ public class BlobViewLookup {
                         new FieldRead(
                                 fieldId, fieldPos, table.rowType().getFields().get(fieldPos)));
             }
+            BlobViewStruct.validateUpstreamRowTracking(tableReferences.identifier, table.options());
 
             Collections.sort(fields, Comparator.comparingInt(left -> left.fieldPos));
 

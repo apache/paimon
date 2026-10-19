@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -28,6 +29,8 @@ import org.junit.jupiter.api.Test;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -72,6 +75,36 @@ public class BlobViewStructTest {
         assertThatThrownBy(() -> BlobViewStruct.of(identifier, upstreamRowType, "id", 5L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Field id in upstream table default.source is not a BLOB field.");
+    }
+
+    @Test
+    public void testValidateUpstreamRowTracking() {
+        Identifier identifier = Identifier.fromString("default.source");
+        RowType upstreamRowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(7, "picture", DataTypes.BLOB())));
+        Map<String, String> rowTrackingOptions =
+                Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+
+        BlobViewStruct viewStruct =
+                BlobViewStruct.of(identifier, upstreamRowType, rowTrackingOptions, "picture", 5L);
+        assertThat(viewStruct.fieldId()).isEqualTo(7);
+        assertThat(Blob.fromView(identifier, upstreamRowType, rowTrackingOptions, "picture", 5L))
+                .isEqualTo(Blob.fromView(viewStruct));
+
+        assertThatThrownBy(
+                        () ->
+                                BlobViewStruct.of(
+                                        identifier,
+                                        upstreamRowType,
+                                        Collections.emptyMap(),
+                                        "picture",
+                                        5L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Upstream table default.source referenced by blob view must enable 'row-tracking.enabled'.");
     }
 
     @Test

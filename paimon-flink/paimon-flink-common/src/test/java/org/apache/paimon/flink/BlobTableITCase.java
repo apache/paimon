@@ -915,6 +915,28 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testBlobViewRejectsUpstreamWithoutRowTracking() {
+        tEnv.executeSql(
+                "CREATE TABLE upstream_pk_blob (id INT PRIMARY KEY NOT ENFORCED, name STRING, picture BYTES)"
+                        + " WITH ('blob-field'='picture')");
+
+        String fullTableName = tEnv.getCurrentDatabase() + ".upstream_pk_blob";
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT sys.blob_view("
+                                                + "'%s', "
+                                                + "'picture', "
+                                                + "CAST(0 AS BIGINT))",
+                                        fullTableName))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Upstream table "
+                                + fullTableName
+                                + " referenced by blob view must enable 'row-tracking.enabled'.");
+    }
+
+    @Test
     public void testBlobInlineFieldCanDeclareBlobWithoutBlobField() throws Exception {
         assertSecondaryBlobFieldCanDeclareBlobWithoutBlobField(
                 "blob_descriptor_without_blob_field", "blob-descriptor-field");

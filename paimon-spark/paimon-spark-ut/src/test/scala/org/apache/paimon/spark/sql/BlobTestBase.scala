@@ -623,6 +623,26 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: blob_view rejects upstream table without row tracking") {
+    withTable("upstream_pk_blob") {
+      sql(
+        "CREATE TABLE upstream_pk_blob (id INT, name STRING, picture BINARY) " +
+          "TBLPROPERTIES (" +
+          "'primary-key'='id', " +
+          "'blob-field'='picture')")
+
+      val upstreamFullName = s"$dbName0.upstream_pk_blob"
+      val error = intercept[Exception] {
+        sql(s"SELECT sys.blob_view('$upstreamFullName', 'picture', CAST(0 AS BIGINT))").collect()
+      }
+      assert(
+        exceptionContains(
+          error,
+          s"Upstream table $upstreamFullName referenced by blob view must enable 'row-tracking.enabled'."),
+        exceptionMessages(error))
+    }
+  }
+
   test("Blob: test write blob descriptor from external storage") {
     val catalogName = "isolated_paimon"
     val databaseName = "external_blob_db"
