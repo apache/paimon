@@ -671,7 +671,25 @@ class TableUpdateByRowId:
         # write types at the writer boundary, including untouched input batches.
         write_schema = PyarrowFieldParser.from_paimon_schema(
             [self.table.field_dict[name] for name in data.schema.names])
-        return normalize_arrow_write_nullability(data, write_schema)
+        normalized = normalize_arrow_write_nullability(data, write_schema)
+        # Reads relax field nullability for schema evolution. A projected
+        # update must still enforce the declared write type, as Java's
+        # TableWrite.withWriteType does for every selected output column.
+        for field, column in zip(write_schema, normalized.columns):
+            self._check_write_not_null(field.name, column.null_count > 0)
+        if any(actual.nullable != expected.nullable
+               for actual, expected in zip(normalized.schema, write_schema)):
+            fields = [actual.with_nullable(expected.nullable)
+                      for actual, expected in zip(normalized.schema, write_schema)]
+            schema = pa.schema(fields, metadata=normalized.schema.metadata)
+            if isinstance(normalized, pa.RecordBatch):
+                return pa.RecordBatch.from_arrays(normalized.columns, schema=schema)
+            return pa.Table.from_arrays(normalized.columns, schema=schema)
+        return normalized
+
+    def _check_write_not_null(self, column_name, has_null):
+        if not self.table.field_dict[column_name].type.nullable and has_null:
+            raise ValueError('Cannot write null to non-null column(%s)' % column_name)
 
     @classmethod
     def _merge_chunked_column(
@@ -928,6 +946,12 @@ class TableUpdateByRowId:
             blob_object_columns,
             blob_columns_with_baseline,
         )
+
+        # Dedicated Blob files bypass the ordinary Arrow writer. Validate
+        # the merged values that will be written, including row-based inputs,
+        # while placeholders and NULL children of non-NULL containers remain valid.
+        for column_name, values in blob_columns.items():
+            self._check_write_not_null(column_name, any(value is None for value in values))
 
         partition_tuple = tuple(partition.values)
         new_files = []

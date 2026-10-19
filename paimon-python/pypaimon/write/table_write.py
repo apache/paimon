@@ -40,6 +40,8 @@ def _pandas_write_schema(table, schema):
     """Keep ignored events available for the normal row-kind NULL checks."""
     if table is None or not table.is_primary_key_table:
         return schema
+    from pypaimon.write.row_kind import write_value_schema
+    schema = write_value_schema(table, schema)
     options = table.options
     raw = options.options.to_map()
     if (raw.get('rowkind.field') is None
@@ -375,6 +377,8 @@ class TableWrite:
             fields.append(pa.field(field.name, field.type, nullable=declared.nullable,
                                    metadata=declared.metadata))
         schema = pa.schema(fields, metadata=self.table_pyarrow_schema.metadata)
+        from pypaimon.write.row_kind import write_value_schema
+        schema = write_value_schema(self.table, schema)
         if data.schema.equals(schema, check_metadata=True):
             return data
         if isinstance(data, pa.RecordBatch):

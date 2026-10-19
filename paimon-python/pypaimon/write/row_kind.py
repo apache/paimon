@@ -56,22 +56,22 @@ def filter_write_batch(table, data):
         return data
     options = table.options
     raw = options.options.to_map()
-    if 'rowkind.field' not in raw:
-        return data
     kinds = row_kinds(options, data)
     ignore_delete = options.ignore_delete()
     ignore_before = str(raw.get('ignore-update-before', 'false')).lower() == 'true'
-    if not ignore_delete and not ignore_before:
-        return data
     # Java checks top-level NULLs before its RowKindFilter. A DELETE in a
     # non-cross-partition deduplicate table only requires non-NULL keys and
     # sequence fields; UPDATE_BEFORE retains all declared NOT NULL fields.
     for name, check_delete in _not_null_fields(table):
+        if name not in data.schema.names:
+            continue
         invalid = data.column(name).is_null()
         if not check_delete:
             invalid = pc.and_(invalid, pc.not_equal(kinds, RowKind.DELETE.value))
         if pc.any(invalid).as_py():
             raise ValueError('Cannot write null to non-null column(%s)' % name)
+    if not ignore_delete and not ignore_before:
+        return data
     ignored = [RowKind.UPDATE_BEFORE.value]
     if ignore_delete:
         ignored.append(RowKind.DELETE.value)
@@ -109,10 +109,9 @@ def skip_write_row(table, values, row_kind=RowKind.INSERT):
         if row_kind_field_name is None
         else RowKind.from_string(values[row_kind_field_name]).value
     )
-    if options.ignore_delete() or str(raw.get('ignore-update-before', 'false')).lower() == 'true':
-        for name, check_delete in _not_null_fields(table):
-            if (check_delete or kind != RowKind.DELETE.value) and values[name] is None:
-                raise ValueError('Cannot write null to non-null column(%s)' % name)
+    for name, check_delete in _not_null_fields(table):
+        if (check_delete or kind != RowKind.DELETE.value) and values.get(name) is None:
+            raise ValueError('Cannot write null to non-null column(%s)' % name)
     return _is_filtered(kind, options.ignore_delete(),
                         str(raw.get('ignore-update-before', 'false')).lower() == 'true')
 
@@ -125,6 +124,16 @@ def _not_null_fields(table):
         delete_fields = set(table.table_schema.primary_keys + table.options.sequence_field())
     return [(field.name, delete_fields is None or field.name in delete_fields)
             for field in table.fields if not field.type.nullable]
+
+
+def write_value_schema(table, schema):
+    """Java's KV value type can persist DELETEs with only keys and sequence."""
+    if (not table.is_primary_key_table or table.cross_partition_update
+            or table.options.merge_engine() != MergeEngine.DEDUPLICATE):
+        return schema
+    required = set(table.table_schema.primary_keys + table.options.sequence_field())
+    return pa.schema([field if field.name in required else field.with_nullable(True)
+                      for field in schema], metadata=schema.metadata)
 
 
 def _is_filtered(kind, ignore_delete, ignore_before):
