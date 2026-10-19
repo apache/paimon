@@ -437,7 +437,7 @@ class NativeTableUpsert:
                 self.writer.upsert_by_arrow_with_key(self.data, self.keys))
         finally:
             if self.blob_rows is not None:
-                self.blob_rows.readers.clear()
+                self.blob_rows.clear()
 
 
 class NativePredicateTableUpdate:

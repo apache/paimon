@@ -53,6 +53,8 @@ def lit(value: Any) -> LiteralValue:
 
 
 class WhenMatched:
+    """Matched UPDATE/DELETE clause; callable SET values consume t./s. Arrow columns."""
+
     def __init__(
             self,
             action: str,
@@ -83,6 +85,8 @@ class WhenMatched:
 
 @dataclass
 class WhenNotMatched:
+    """INSERT clause; callable values consume s. Arrow columns and return Arrow arrays."""
+
     insert: SetSpec
     condition: Optional[str] = None
 
@@ -169,6 +173,20 @@ def build_delete_schema(row_id_name: str) -> pa.Schema:
     return pa.schema([pa.field(row_id_name, pa.int64(), nullable=False)])
 
 
+def _merge_callable_input(batch: pa.Table, on_pairs):
+    # Arrow joins coalesce ON keys; callbacks still expose both SQL aliases.
+    for source, target in on_pairs:
+        source_name, target_name = "s." + source, "t." + target
+        if target_name in batch.column_names:
+            if source_name in batch.column_names:
+                batch = batch.set_column(batch.schema.get_field_index(source_name),
+                                         source_name, batch.column(target_name))
+            else:
+                batch = batch.append_column(source_name, batch.column(target_name))
+    return batch.select(sorted(name for name in batch.column_names
+                               if name.startswith(("t.", "s."))))
+
+
 def _resolve_spec_array(
     val: Any,
     batch: pa.Table,
@@ -178,11 +196,9 @@ def _resolve_spec_array(
     callable_input: Optional[pa.Table] = None,
 ):
     if callable(val) and not isinstance(val, type):
-        if callable_input is None:
-            raise TypeError(
-                "Callable SET values are only supported for self-merge."
-            )
-        result = val(callable_input)
+        # Public MERGE callbacks see the joined t./s. columns. The internal
+        # predicate-update adapter supplies its existing unqualified read view.
+        result = val(_merge_callable_input(batch, on_pairs) if callable_input is None else callable_input)
         if not isinstance(result, (pa.Array, pa.ChunkedArray)):
             raise ValueError(
                 "Callable SET values must return a pyarrow.Array or "

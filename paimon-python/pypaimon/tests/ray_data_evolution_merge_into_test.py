@@ -1789,17 +1789,24 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['old'])
         self.assertEqual(out['age'], [99])
 
-    def test_callable_value_rejected(self):
+    def test_callable_values_read_qualified_target_and_source(self):
         target = self._create_table()
-        with self.assertRaises(TypeError):
-            merge_into(
-                target=target,
-                source=self._source(),
-                catalog_options=self.catalog_options,
-                on=['id'],
-                when_matched=[WhenMatched.update({'name': lambda r: r})],
-                num_partitions=_TEST_NUM_PARTITIONS,
-            )
+        self._write(target, self._source())
+        merge_into(
+            target=target,
+            source=self._source(),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update({
+                'age': lambda rows: pc.add(rows['t.age'], rows['s.age']),
+                'name': lambda rows: pc.utf8_upper(rows['t.name']),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+        expected = self._source().sort_by('id').to_pydict()
+        actual = self._read_sorted(target)
+        self.assertEqual(actual['age'], [age * 2 for age in expected['age']])
+        self.assertEqual(actual['name'], [name.upper() for name in expected['name']])
 
     def test_source_missing_referenced_col(self):
         target = self._create_table()
@@ -2530,6 +2537,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_rebases_staged_updates_after_compaction(self):
         from pypaimon.data.generic_variant import GenericVariant
         from pypaimon.data.variant_path import variant_get, variant_replace
@@ -3507,17 +3515,13 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
     def test_self_merge_callable_validation(self):
         target = self._create_table()
 
-        with self.assertRaisesRegex(
-                ValueError, 'Callable SET values require read_columns'):
-            merge_into(
-                target=target,
-                source=target,
-                catalog_options=self.catalog_options,
-                on=['_ROW_ID'],
-                when_matched=[WhenMatched.update({
-                    'age': lambda rows: rows['age'],
-                })],
-            )
+        from pypaimon.ray.data_evolution_merge_into import _prepare
+        _, _, _, _, ctx = _prepare(
+            target, target, self.catalog_options,
+            [WhenMatched.update({'age': lambda rows: rows['t.age']})],
+            [], ['_ROW_ID'],
+        )
+        self.assertEqual(ctx.read_columns, ())
 
         with self.assertRaisesRegex(
                 ValueError, 'read_columns requires a callable SET value'):
@@ -3540,20 +3544,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 read_columns=['missing'],
                 when_matched=[WhenMatched.update({
                     'age': lambda rows: rows['missing'],
-                })],
-            )
-
-        source = self._create_table()
-        with self.assertRaisesRegex(
-                TypeError, 'callables are only supported for self-merge'):
-            merge_into(
-                target=target,
-                source=source,
-                catalog_options=self.catalog_options,
-                on=['id'],
-                read_columns=['age'],
-                when_matched=[WhenMatched.update({
-                    'age': lambda rows: rows['age'],
                 })],
             )
 

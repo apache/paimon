@@ -85,14 +85,76 @@ def test_copied_branch_does_not_rebind_an_existing_fuse_mount(tmp_path):
     assert branch.identifier.get_object_name() == 't$branch_dev'
     module = ModuleType('pypaimon_rust.datafusion')
     module.PaimonCatalog = Mock()
-    native_table = module.PaimonCatalog.return_value.get_table.return_value
+    native_table = Mock(spec=['location', 'branch', 'copy'])
+    module.PaimonCatalog.return_value.get_table.return_value = native_table
     native_table.location.return_value = location
     native_table.branch.return_value = 'dev'
+    native_table.copy.return_value = native_table
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
             patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
-        with pytest.raises(RuntimeError, match='different FUSE mount'):
-            _native_table(branch)
-    module.PaimonCatalog.assert_not_called()
+        assert _native_table(branch) is native_table
+    native_table.copy.assert_called_once_with({'branch': 'dev'})
+    module.PaimonCatalog.return_value.get_table.assert_called_once_with(('default', 't'))
+
+
+@pytest.mark.parametrize('target_branch', ['main', 'audit'])
+@pytest.mark.parametrize('mode', ['pvfs', 'raw'])
+def test_copied_fuse_view_reconstructs_original_non_main_binding(tmp_path, target_branch, mode):
+    from pypaimon.catalog.catalog_context import CatalogContext
+    from pypaimon.catalog.rest.fuse_support import FusePathResolver
+    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+    from pypaimon.common.identifier import Identifier
+    from pypaimon.common.options.options import Options
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO
+    from pypaimon.read.native_plan import _native_table
+    from pypaimon.schema.table_schema import TableSchema
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    identifier = Identifier.create('default', 't', branch='dev')
+    options = Options({'fuse.enabled': 'true', 'fuse.root': tmp_path.as_uri(),
+                       'fuse.mode': mode, 'fuse.validation-mode': 'none'})
+    loader = RESTCatalogLoader(CatalogContext.create_from_options(options))
+    location = 'oss://bucket/warehouse/default/t'
+    response = json.dumps({'database': 'default', 'name': 't$branch_dev',
+                           'path': location, 'id': 'original-uuid'})
+    environment = CatalogEnvironment(identifier=identifier, catalog_loader=loader,
+                                     uuid='original-uuid', rest_table_response=response)
+    mount = FusePathResolver(options, None).resolve_local_path(location, identifier)
+    table = FileStoreTable(FuseLocalFileIO(location, mount), identifier, location, TableSchema(), environment)
+    table = table.copy_without_time_travel({'branch': target_branch})
+    module = ModuleType('pypaimon_rust.datafusion')
+    module.Table = Mock()
+    native_table = Mock(spec=['copy', 'branch'])
+    native_table.copy.return_value = native_table
+    native_table.branch.return_value = target_branch
+    module.Table.from_rest_response.return_value = native_table
+    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
+            patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
+        assert _native_table(table) is native_table
+    assert module.Table.from_rest_response.call_args[1]['table'] == 't$branch_dev'
+    native_table.copy.assert_called_once_with({'branch': target_branch})
+
+
+def test_native_fuse_binding_rejects_unreconstructible_mount_before_catalog_io(tmp_path):
+    from pypaimon.catalog.catalog_context import CatalogContext
+    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+    from pypaimon.common.identifier import Identifier
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO
+    from pypaimon.read.native_plan import _native_table
+    from pypaimon.schema.table_schema import TableSchema
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    identifier = Identifier.create('default', 't')
+    loader = RESTCatalogLoader(CatalogContext.create_from_options({
+        'fuse.enabled': 'true', 'fuse.root': str(tmp_path / 'configured')}))
+    location = 'oss://bucket/warehouse/default/t'
+    environment = CatalogEnvironment(identifier=identifier, catalog_loader=loader)
+    table = FileStoreTable(FuseLocalFileIO(location, str(tmp_path / 'custom')), identifier,
+                           location, TableSchema(), environment)
+    with patch('pypaimon.read.native_plan._load_native_table') as load:
+        with pytest.raises(RuntimeError, match='cannot reconstruct'):
+            _native_table(table)
+    load.assert_not_called()
 
 
 @pytest.mark.parametrize('mode,branch', [('pvfs', 'main'), ('pvfs', 'dev'), ('raw', 'dev')])

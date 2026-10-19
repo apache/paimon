@@ -213,7 +213,7 @@ def _prepare(
                 c.update,
                 settable_field_names,
                 on_map,
-                allow_callables=is_self_merge,
+                allow_callables=True,
             )
         matched_specs.append(
             _NormalizedClause(
@@ -254,6 +254,7 @@ def _prepare(
         spec = _normalize_set_spec(
             c.insert, settable_field_names, on_map,
             allow_target_refs=False,
+            allow_callables=True,
         )
         for tk, sk in on_map.items():
             if tk in settable_field_names and tk not in spec:
@@ -277,8 +278,6 @@ def _prepare(
     if read_columns and not has_callable:
         raise ValueError("read_columns requires a callable SET value.")
     if has_callable:
-        if not read_columns:
-            raise ValueError("Callable SET values require read_columns.")
         for col in read_columns:
             if col not in full_target_field_names:
                 raise ValueError(
@@ -714,10 +713,14 @@ def _resolve_target_projection(
     target_on: Sequence[str],
     update_cols: Sequence[str],
     target_field_names: Sequence[str],
+    callable_columns: Optional[Sequence[str]] = None,
 ) -> list:
     needed = set(_needed_target_cols(
         clauses, target_on, update_cols, target_field_names,
     ))
+    if any(callable(value) and not isinstance(value, type)
+           for clause in clauses for value in clause.spec.values()):
+        needed.update(target_field_names if callable_columns is None else callable_columns)
     if any(c.condition is not None for c in clauses):
         from pypaimon.ray.merge_condition import extract_target_columns
         target_set = set(target_field_names)
