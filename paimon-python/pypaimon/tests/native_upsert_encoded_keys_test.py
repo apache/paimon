@@ -240,6 +240,40 @@ def _typed_null_keys(kind, value_type):
     return pa.DictionaryArray.from_arrays(pa.array([0, 1, None, 1, 2], type=pa.int8()), values).slice(1, 3)
 
 
+def _typed_null_union_keys(dense, dictionary, non_null=False):
+    tags = pa.array([7, 42, 7, 42, 7], type=pa.int8())
+    middle = '1' if non_null else None
+    row_type = pa.struct([('unused', pa.string())])
+    if dense:
+        values = pa.UnionArray.from_dense(
+            tags, pa.array([0, 0, 1, 0, 2], type=pa.int32()),
+            [pa.array(['outside', middle, 'outside']),
+             pa.array([None, {'unused': 'unselected'}], type=row_type)], type_codes=[7, 42])
+    else:
+        values = pa.UnionArray.from_sparse(
+            tags, [pa.array(['outside', 'inactive', middle, 'inactive', 'outside']),
+                   pa.array([{'unused': 'inactive'}, None, {'unused': 'inactive'}, None,
+                             {'unused': 'inactive'}], type=row_type)], type_codes=[7, 42])
+    # Nonzero parent offsets must select child tags/offsets from the slice.
+    values = values.slice(1, 3)
+    if dictionary:
+        values = pa.DictionaryArray.from_arrays(
+            pa.array([0, 0, 1, None, 2], type=pa.int8()), values).slice(1, 3)
+    return values
+
+
+@pytest.mark.parametrize('dense', [False, True])
+@pytest.mark.parametrize('dictionary', [False, True])
+@pytest.mark.parametrize('non_null', [False, True])
+def test_null_union_key_gate_uses_selected_logical_values(dense, dictionary, non_null):
+    keys = _typed_null_union_keys(dense, dictionary, non_null)
+    assert keys.to_pylist() == [None, '1' if non_null else None, None]
+    assert not _native_upsert_key_type_compatible(keys.type, pa.int32())
+    assert _native_upsert_key_compatible(keys, pa.int32()) is not non_null
+    chunks = pa.chunked_array([keys.slice(0, 1), keys.slice(1)])
+    assert _native_upsert_key_compatible(chunks, pa.int32()) is not non_null
+
+
 def test_unrelated_non_null_key_types_still_use_the_existing_python_path():
     for source in [pa.array([None, '1']), pa.array([True]), pa.array([{'unused': 'value'}])]:
         assert not _native_upsert_key_compatible(source, pa.int32())
@@ -274,6 +308,31 @@ def test_all_null_key_columns_update_existing_null_rows(
         native_rest_catalog, native, kind, value_type):
     table = _table(native_rest_catalog, pa.int32(), [1, 2], native, True)
     keys = _typed_null_keys(kind, value_type)
+    source = pa.table({'key': keys, 'p': ['a'] * 3, 'value': pa.array([90, 91, 92], type=pa.int32())})
+    source = pa.concat_tables([source.slice(0, 1), source.slice(1)])
+    builder = table.new_batch_write_builder()
+    with ExitStack() as stack:
+        _native_only(stack, native)
+        messages = builder.new_update().with_update_type(['value']).upsert_by_arrow_with_key(source, ['key'])
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    assert _read(table) == [
+        dict(key=1, p='a', value=11, keep='duplicate'), dict(key=1, p='a', value=10, keep='first'),
+        dict(key=None, p='a', value=92, keep='null'), dict(key=1, p='b', value=40, keep='other-partition'),
+        dict(key=2, p='a', value=20, keep='second'),
+    ]
+
+
+@pytest.mark.parametrize('native', _ENGINES)
+@pytest.mark.parametrize('dense', [False, True])
+@pytest.mark.parametrize('dictionary', [False, True])
+def test_all_null_union_keys_update_existing_null_rows(
+        native_rest_catalog, native, dense, dictionary):
+    table = _table(native_rest_catalog, pa.int32(), [1, 2], native, True)
+    keys = _typed_null_union_keys(dense, dictionary)
     source = pa.table({'key': keys, 'p': ['a'] * 3, 'value': pa.array([90, 91, 92], type=pa.int32())})
     source = pa.concat_tables([source.slice(0, 1), source.slice(1)])
     builder = table.new_batch_write_builder()

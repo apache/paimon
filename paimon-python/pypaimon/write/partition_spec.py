@@ -78,7 +78,12 @@ def _partition_spec_value(value, data_type):
                         r'[pP][+-]?[0-9]+[fFdD]?)', text) is None:
             raise ValueError('Invalid floating partition value')
         text = text[:-1] if text[-1:] in ('f', 'F', 'd', 'D') else text
-        result = float.fromhex(text) if 'p' in text.lower() else float(text)
+        try:
+            result = float.fromhex(text) if 'p' in text.lower() else float(text)
+        except OverflowError:
+            # Double.parseDouble saturates overflowing hexadecimal text to
+            # infinity, while Python's float.fromhex raises instead.
+            result = float('-inf') if text.startswith('-') else float('inf')
         if target == pa.float32():
             try:
                 single = struct.unpack('>f', struct.pack('>f', result))[0]
@@ -122,10 +127,13 @@ def _partition_spec_value(value, data_type):
             if zone_minute is not None and seconds is None:
                 raise ValueError('Invalid TIME partition value')
             fraction = (fraction or '').strip(_JAVA_WHITESPACE)
-            digits = (fraction + '000')[:3]
-            millis = sum((int(char) if '0' <= char <= '9' else 0) * factor
-                         for char, factor in zip(digits, (100, 10, 1)))
-            if len(fraction) > 3 and fraction[3] >= '5':
+            # DateTimeUtils.parseFraction scans UTF-16 chars. A supplementary
+            # character occupies two positions, including for rounding.
+            encoded = fraction[:4].encode('utf-16-le', 'surrogatepass')
+            units = [encoded[index] | encoded[index + 1] << 8 for index in range(0, len(encoded), 2)]
+            millis = sum((unit - ord('0') if ord('0') <= unit <= ord('9') else 0) * factor
+                         for unit, factor in zip(units, (100, 10, 1)))
+            if len(units) > 3 and units[3] >= ord('5'):
                 millis += 1
             components = [int(item or 0) for item in (hours, minutes, seconds, zone_hour, zone_minute)]
             if any(item >= 1 << 31 for item in components):

@@ -215,6 +215,23 @@ def _native_upsert_key_compatible(source, target):
             # Index validity alone misses a selected NULL dictionary value.
             # Select only its validity bitmap, without decoding key payloads.
             return pc.fill_null(pc.take(nulls(array.dictionary), array.indices), True)
+        if pa.types.is_union(array.type):
+            # Unions have no validity bitmap. Only the active child's NULL
+            # counts; inactive children can contain unrelated non-NULL values.
+            # Read the parent buffers at its offset because PyArrow's union
+            # type_codes/offsets accessors can omit the offset of a slice.
+            buffers = array.buffers()
+            codes = pa.Array.from_buffers(pa.int8(), len(array), [None, buffers[1]], offset=array.offset)
+            offsets = (pa.Array.from_buffers(pa.int32(), len(array), [None, buffers[2]], offset=array.offset)
+                       if array.type.mode == 'dense' else None)
+            result = pc.fill_null(pa.nulls(len(array), type=pa.bool_()), False)
+            for index, code in enumerate(array.type.type_codes):
+                active = pc.equal(codes, code)
+                child_nulls = nulls(array.field(index))
+                if offsets is not None:
+                    child_nulls = pc.take(child_nulls, pc.if_else(active, offsets, None))
+                result = pc.if_else(active, child_nulls, result)
+            return result
         return array.is_null()
 
     try:
