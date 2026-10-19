@@ -24,6 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.native_write import NativeTableWrite
@@ -31,6 +32,8 @@ from pypaimon.write.row_kind import skip_write_row
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
+_NATIVE = pytest.mark.skipif(not native_runtime_available(), reason='pypaimon-rust not installed')
+_ENGINES = [False, pytest.param(True, marks=[pytest.mark.native_plan, _NATIVE])]
 
 
 def _table(tmp_path, **options):
@@ -81,13 +84,17 @@ def test_filtered_events_check_required_nulls_before_routing(tmp_path, input_, s
 
 @pytest.mark.parametrize('input_', ['row', 'batch', 'table'])
 @pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
-def test_ignored_delete_may_omit_non_key_not_null_values(tmp_path, input_, stream):
-    table, schema = _table(tmp_path)
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+def test_ignored_delete_may_omit_non_key_not_null_values(tmp_path, input_, stream, native):
+    table, schema = _table(tmp_path, **{'write.native.enabled': str(native).lower()})
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     expected = dict(id=2, op='+I', seq=2, value=42)
     try:
+        assert isinstance(writer, NativeTableWrite) == native
         _write(writer, table, schema, [dict(id=1, op='-D', seq=1, value=None), expected], input_)
+        if native:
+            assert writer._python_writer is None
         messages = writer.prepare_commit(1) if stream else writer.prepare_commit()
         commit.commit(messages, 1) if stream else commit.commit(messages)
     finally:
@@ -95,6 +102,28 @@ def test_ignored_delete_may_omit_non_key_not_null_values(tmp_path, input_, strea
         commit.close()
     builder = table.new_read_builder()
     assert builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist() == [expected]
+
+
+@pytest.mark.native_plan
+@_NATIVE
+@pytest.mark.parametrize('input_', ['row', 'batch', 'table'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('kind,field', [('-D', 'id'), ('-D', 'seq'), ('-U', 'value')])
+def test_native_filtered_events_keep_required_null_checks(tmp_path, input_, stream, kind, field):
+    table, schema = _table(tmp_path, **{'write.native.enabled': 'true'})
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer = builder.new_write()
+    invalid = dict(id=1, op=kind, seq=1, value=10)
+    invalid[field] = None
+    try:
+        assert isinstance(writer, NativeTableWrite)
+        with pytest.raises(ValueError, match=r'non-null column\(%s\)' % field):
+            _write(writer, table, schema, [invalid], input_)
+        assert writer._python_writer is None
+        assert not list(tmp_path.rglob('*.parquet'))
+        assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
 
 
 def test_delete_null_exception_is_limited_to_non_cross_partition_deduplicate(tmp_path):
