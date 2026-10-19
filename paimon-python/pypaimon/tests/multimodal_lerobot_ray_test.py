@@ -461,7 +461,9 @@ class LeRobotRayImportTest(unittest.TestCase):
         for parallelism in (1, 2):
             with self.subTest(parallelism=parallelism):
                 name = "invalid_commit_%d" % parallelism
-                with patch("pypaimon.multimodal.lerobot.loader._prepare_dataset") as prepare, \
+                with patch("pypaimon.multimodal.lerobot.api._import_lerobot_dataset",
+                           return_value=None), \
+                        patch("pypaimon.multimodal.lerobot.loader._prepare_dataset") as prepare, \
                         patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group") as group:
                     with self.assertRaises(ValueError):
                         self.conn.load_from_lerobot(
