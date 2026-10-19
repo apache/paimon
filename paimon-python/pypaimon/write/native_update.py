@@ -20,6 +20,7 @@
 import json
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
@@ -41,12 +42,12 @@ def _native_update_formats_supported(table):
             and (not table.options.with_vector_format() or table.options.vector_file_format() == 'parquet'))
 
 
-def _native_update_table(table):
+def _native_update_table(table, *, allow_changelog=False):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
             or not _native_update_formats_supported(table)
-            or table.options.changelog_producer() != ChangelogProducer.NONE
+            or (not allow_changelog and table.options.changelog_producer() != ChangelogProducer.NONE)
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
             or not native_runtime_available()
             or not _native_query_auth_supported(table)):
@@ -205,6 +206,47 @@ def _native_upsert_key_type_compatible(source, target):
         check_top_level_nullability=False, allow_binary_compatibility=True)
 
 
+def _native_upsert_key_compatible(source, target):
+    if _native_upsert_key_type_compatible(source.type, target):
+        return True
+
+    def nulls(array):
+        if pa.types.is_dictionary(array.type):
+            # Index validity alone misses a selected NULL dictionary value.
+            # Select only its validity bitmap, without decoding key payloads.
+            return pc.fill_null(pc.take(nulls(array.dictionary), array.indices), True)
+        if pa.types.is_union(array.type):
+            # Unions have no validity bitmap. Only the active child's NULL
+            # counts; inactive children can contain unrelated non-NULL values.
+            # Read the parent buffers at its offset because PyArrow's union
+            # type_codes/offsets accessors can omit the offset of a slice.
+            buffers = array.buffers()
+            codes = pa.Array.from_buffers(pa.int8(), len(array), [None, buffers[1]], offset=array.offset)
+            offsets = (pa.Array.from_buffers(pa.int32(), len(array), [None, buffers[2]], offset=array.offset)
+                       if array.type.mode == 'dense' else None)
+            result = pc.fill_null(pa.nulls(len(array), type=pa.bool_()), False)
+            for index, code in enumerate(array.type.type_codes):
+                active = pc.equal(codes, code)
+                child_nulls = nulls(array.field(index))
+                if offsets is not None:
+                    child_nulls = pc.take(child_nulls, pc.if_else(active, offsets, None))
+                result = pc.if_else(active, child_nulls, result)
+            return result
+        return array.is_null()
+
+    try:
+        chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
+        for chunk in chunks:
+            if chunk.null_count != len(chunk) and not pc.all(nulls(chunk)).as_py():
+                return False
+            # Keep Python's existing input contract. In particular, bare view
+            # and run-end inputs have no take kernel on supported PyArrow.
+            pc.take(chunk, pa.array([], type=pa.int64()))
+        return True
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError, TypeError):
+        return False
+
+
 def _native_update_columns_supported(table, columns):
     """Core writes Parquet columns and Java-compatible sparse Blob deltas."""
     if type(table) is not FileStoreTable:
@@ -272,7 +314,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         # surviving payloads before applying row-ID update or append rules;
         # validating all payload types here would reject valid matched updates.
         key_names = list(dict.fromkeys(keys + table.partition_keys))
-        if not all(_native_upsert_key_type_compatible(data.schema.field(name).type, schema.field(name).type)
+        if not all(_native_upsert_key_compatible(data.column(name), schema.field(name).type)
                    for name in key_names):
             return None
     writer = (native_table.new_batch_write_builder()
@@ -320,9 +362,25 @@ def native_predicate_row_ids(scan_table, predicate, splits):
 def create_native_predicate_delete(table, commit_user, predicate):
     """Delegate matching and partition metadata deletion to the core updater."""
     from pypaimon.read.native_plan import _predicate_to_native
+    if type(table) is not FileStoreTable:
+        return None
+
+    def canonical_paths(node):
+        if node.field_path and node.field_path != [node.field]:
+            return False
+        return (all(canonical_paths(child) for child in (node.literals or []))
+                if node.method in ('and', 'or') else True)
+
     # Core selects whole-partition metadata deletes for append/PK tables too;
     # only the row-level branch requires row tracking and deletion vectors.
-    native_table = _native_update_table(table)
+    from pypaimon.write.table_update import TableUpdate
+    fields = set() if predicate is None else TableUpdate._predicate_fields(predicate)
+    partition_delete = (table.is_primary_key_table and bool(fields)
+                        and fields.issubset(table.partition_keys) and canonical_paths(predicate))
+    # Partition deletion removes complete file/index metadata. It does not
+    # produce row-level changes, even when the PK writer emits changelogs.
+    # Core still validates the translated predicate and selects this fast path.
+    native_table = _native_update_table(table, allow_changelog=partition_delete)
     if native_table is None:
         return None
     native_predicate = None if predicate is None else _predicate_to_native(predicate)

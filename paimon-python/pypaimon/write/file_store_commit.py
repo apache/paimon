@@ -50,6 +50,7 @@ from pypaimon.write.commit.overwrite_changes_provider import OverwriteChanges, O
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.partition_spec import _UNREPRESENTABLE_PARTITION_VALUE, _partition_spec_value
 
 logger = logging.getLogger(__name__)
 
@@ -327,30 +328,12 @@ class FileStoreCommit:
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
 
-        partition_keys_set = set(self.table.partition_keys)
-        for part in partitions:
-            for key in part:
-                if key not in partition_keys_set:
-                    raise ValueError(
-                        f"Partition spec key '{key}' is not a partition column. "
-                        f"Partition keys are: {list(self.table.partition_keys)}."
-                    )
-
         predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
-        default_part_value = self.table.options.options.get(
-            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         partition_predicates = []
         for part in partitions:
-            sub_predicates = []
-            for key, value in part.items():
-                if value is None or (isinstance(value, str) and value == default_part_value):
-                    sub_predicates.append(predicate_builder.is_null(key))
-                else:
-                    sub_predicates.append(predicate_builder.equal(key, value))
-            if sub_predicates:
-                pred = predicate_builder.and_predicates(sub_predicates)
-                if pred is not None:
-                    partition_predicates.append(pred)
+            pred = self._create_partition_spec_filter(part)
+            if pred is not None:
+                partition_predicates.append(pred)
         if not partition_predicates:
             raise RuntimeError("Failed to build partition filter for drop_partitions.")
 
@@ -879,24 +862,45 @@ class FileStoreCommit:
 
     def _create_static_partition_filter(self, overwrite_partition, commit_messages: List[CommitMessage]):
         """Build a partition filter from the explicit overwrite_partition spec."""
-        if not overwrite_partition:
+        partition_filter = self._create_partition_spec_filter(overwrite_partition)
+        if partition_filter is None:
             return None
-        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
-        default_part_value = self.table.options.options.get(
-            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
-        equalities = []
-        for key, value in overwrite_partition.items():
-            if value is None or (isinstance(value, str) and value == default_part_value):
-                equalities.append(predicate_builder.is_null(key))
-            else:
-                equalities.append(predicate_builder.equal(key, value))
-        partition_filter = predicate_builder.and_predicates(equalities)
         for msg in commit_messages:
             row = OffsetRow(msg.partition, 0, len(msg.partition))
             if not partition_filter.test(row):
                 raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
                                    f"in {msg.partition} does not belong to this partition")
         return partition_filter
+
+    def _create_partition_spec_filter(self, partition_spec):
+        """Convert textual spec values before matching manifest rows or stats."""
+        if not partition_spec:
+            return None
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        fields = {field.name: field for field in self.table.partition_keys_fields}
+        default_part_value = self.table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
+        equalities = []
+        for key, value in partition_spec.items():
+            if key not in fields:
+                raise ValueError(f"Partition spec key '{key}' is not a partition column. "
+                                 f"Partition keys are: {list(self.table.partition_keys)}.")
+            if value is None or (isinstance(value, str) and value == default_part_value):
+                equalities.append(predicate_builder.is_null(key))
+            else:
+                try:
+                    value = _partition_spec_value(value, fields[key].type)
+                except (ValueError, TypeError, OverflowError) as error:
+                    raise ValueError("Invalid partition value for '%s': %r" % (key, value)) from error
+                if value is _UNREPRESENTABLE_PARTITION_VALUE:
+                    # Keep valid Java values outside Python's partition range
+                    # unmatched, without wrapping a TIME into another day.
+                    equalities.append(predicate_builder.and_predicates([
+                        predicate_builder.is_null(key), predicate_builder.is_not_null(key)]))
+                else:
+                    equalities.append(predicate_builder.is_null(key) if value is None
+                                      else predicate_builder.equal(key, value))
+        return predicate_builder.and_predicates(equalities)
 
     def _overwrite_changes_provider(self, partition_filter, commit_messages):
         """Build a stateful provider of OVERWRITE commit entries that caches the
