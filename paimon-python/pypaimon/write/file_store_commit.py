@@ -298,11 +298,14 @@ class FileStoreCommit:
 
         # Partition filter is built from dynamic or static partition according to options.
         if len(self.table.partition_keys) > 0 and self.table.options.dynamic_partition_overwrite():
-            if not commit_messages:
-                # In dynamic mode, if there are no changes to commit, no data will be deleted
+            data_messages = [message for message in commit_messages
+                             if message.new_files or message.deleted_files]
+            if not data_messages:
+                # Java derives dynamic overwrite targets from table-file
+                # changes. Index/changelog-only messages do not replace data.
                 skip_overwrite = True
             else:
-                partition_filter = self._create_dynamic_partition_filter(commit_messages)
+                partition_filter = self._create_dynamic_partition_filter(data_messages)
         else:
             partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 

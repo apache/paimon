@@ -252,8 +252,10 @@ class IndexManifestFile:
         if not adds and not deletes:
             return previous_name
         previous = self.read(previous_name) if previous_name else []
-        delete_names = {e.index_file.file_name for e in deletes}
-        survivors = [e for e in previous if e.index_file.file_name not in delete_names]
+        _validate_global_index_deletes(previous, deletes)
+        delete_files = {(e.index_file.index_type, e.index_file.file_name) for e in deletes}
+        survivors = [e for e in previous
+                     if (e.index_file.index_type, e.index_file.file_name) not in delete_files]
         _validate_retained_global_index_files(survivors, adds)
         combined = _combine_hash_indexes(survivors, adds, deletes)
         if not combined:
@@ -311,6 +313,29 @@ class IndexManifestFile:
             "_EXTERNAL_PATH": index_file.external_path,
             "_GLOBAL_INDEX": global_index,
         }
+
+
+def _validate_global_index_deletes(previous_entries, deleted_entries) -> None:
+    # Java combines global indexes by index type and file name. Verify each
+    # removal against the current entry, including metadata-only reassignment.
+    # HASH and DV keep their existing bucket/index-specific deletion rules.
+    current = {(entry.index_file.index_type, entry.index_file.file_name): entry
+               for entry in previous_entries if _is_global_index(entry.index_file.index_type)}
+    for deleted in deleted_entries:
+        meta = deleted.index_file
+        if not _is_global_index(meta.index_type):
+            continue
+        previous = current.pop((meta.index_type, meta.file_name), None)
+        if previous is None:
+            raise RuntimeError(
+                'Trying to delete global index file %s which does not exist.' % meta.file_name)
+        previous_meta = previous.index_file
+        if (previous.partition != deleted.partition or previous.bucket != deleted.bucket
+                or previous_meta != meta or previous_meta.dv_ranges != meta.dv_ranges
+                or previous_meta.external_path != meta.external_path
+                or previous_meta.global_index_meta != meta.global_index_meta):
+            raise RuntimeError(
+                'Index file %s metadata does not match the current entry.' % meta.file_name)
 
 
 def _validate_retained_global_index_files(

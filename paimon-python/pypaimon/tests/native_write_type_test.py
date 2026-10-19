@@ -20,13 +20,14 @@
 from contextlib import ExitStack
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
 from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.write.native_write import NativeTableWrite
 
@@ -44,13 +45,13 @@ def _files(table, pattern='*'):
     return set(root.rglob(pattern))
 
 
-def _table(catalog, use_native, partitioned=False, bucketed=False, buckets=4):
+def _table(catalog, use_native, partitioned=False, bucketed=False, buckets=4, schema=_SCHEMA):
     options = {'write.native.enabled': str(use_native).lower(), 'commit.native.enabled': 'false',
                'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'}
     if bucketed:
         options.update({'bucket': str(buckets), 'bucket-key': 'id'})
     catalog.create_table('default.t', Schema.from_pyarrow_schema(
-        _SCHEMA, partition_keys=['pt'] if partitioned else [], options=options), False)
+        schema, partition_keys=['pt'] if partitioned else [], options=options), False)
     return catalog.get_table('default.t')
 
 
@@ -162,18 +163,67 @@ def test_complete_reordered_append_type_keeps_field_identity_and_copies_column_n
         writer.close()
 
 
+@pytest.mark.parametrize('use_native', _ENGINES)
 @pytest.mark.parametrize('buckets', [1, 4])
-def test_python_full_input_routes_before_projecting_unwritten_hash_fields(rest_catalog, buckets):
+@pytest.mark.parametrize('columns', [('value', 'pt'), ('value',)])
+def test_full_input_routes_before_projecting_unwritten_routing_fields(
+        rest_catalog, use_native, buckets, columns):
     catalog, _ = rest_catalog
-    table = _table(catalog, False, partitioned=True, bucketed=True, buckets=buckets)
+    table = _table(catalog, use_native, partitioned=True, bucketed=True, buckets=buckets)
+    data = pa.Table.from_pylist([
+        dict(id=1, pt=7, value=42), dict(id=None, pt=None, value=43),
+    ], schema=_SCHEMA)
+    partitions, bucket_ids = table.create_row_key_extractor().extract_partition_bucket_batch(data.to_batches()[0])
+    expected_buckets = dict(zip(partitions, bucket_ids))
     builder = table.new_batch_write_builder()
-    writer = builder.new_write().with_write_type(['value', 'pt'])
+    writer = builder.new_write()
     try:
-        writer.write_arrow(pa.Table.from_pylist([dict(id=1, pt=7, value=42)], schema=_SCHEMA))
-        messages = _finish(builder, writer)
-        assert all(0 <= message.bucket < buckets for message in messages)
-        assert all(file.write_cols == ['value', 'pt'] for message in messages for file in message.new_files)
-        assert _rows(table) == [dict(id=None, pt=7, value=42)]
+        with ExitStack() as stack:
+            _native_only(stack, writer, use_native)
+            writer.with_write_type(list(columns))
+            before = _files(table)
+            writer.write_arrow(data.slice(0, 0))
+            assert _files(table) == before
+            writer.write_arrow(data)
+            messages = _finish(builder, writer)
+        assert {tuple(message.partition): message.bucket for message in messages} == expected_buckets
+        assert all(file.write_cols == list(columns) for message in messages for file in message.new_files)
+        assert _rows(table) == [dict(id=None, pt=7, value=42), dict(id=None, pt=None, value=43)]
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('use_native', _ENGINES)
+@pytest.mark.parametrize('partial_row', [False, True])
+@pytest.mark.parametrize('unwritten_blob', [False, True])
+def test_rows_route_with_unwritten_columns_without_requiring_other_fields(
+        rest_catalog, use_native, partial_row, unwritten_blob):
+    from pypaimon.table.row.blob import Blob
+
+    catalog, _ = rest_catalog
+    schema = _SCHEMA.append(pa.field('unwritten', pa.large_binary() if unwritten_blob else pa.int64()))
+    table = _table(catalog, use_native, partitioned=True, bucketed=True, schema=schema)
+    fields = {field.name: field for field in table.fields}
+    names = ['value', 'pt', 'id'] if partial_row else list(schema.names)
+    blob = Mock(spec=Blob)
+    blob.new_input_stream.side_effect = AssertionError('unwritten Blob was opened')
+    values = dict(id=1, pt=7, value=42, unwritten=blob if unwritten_blob else 999)
+    row = GenericRow([values[name] for name in names], [fields[name] for name in names])
+    full_input = pa.Table.from_pylist([dict(values, unwritten=None)], schema=schema).to_batches()[0]
+    _, buckets = table.create_row_key_extractor().extract_partition_bucket_batch(full_input)
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    try:
+        with ExitStack() as stack:
+            _native_only(stack, writer, use_native)
+            writer.with_write_type(['value'])
+            writer.write_row(row)
+            messages = _finish(builder, writer)
+        assert [(tuple(message.partition), message.bucket) for message in messages] == [((7,), buckets[0])]
+        assert all(file.write_cols == ['value'] for message in messages for file in message.new_files)
+        assert _rows(table) == [dict(id=None, pt=7, value=42, unwritten=None)]
+        blob.new_input_stream.assert_not_called()
+        blob.to_descriptor.assert_not_called()
     finally:
         writer.close()
 

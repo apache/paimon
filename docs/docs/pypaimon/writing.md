@@ -103,9 +103,11 @@ remain unsupported.
 
 Append `with_write_type()` preserves the selected column order. Both the full
 table schema and the selected schema are accepted as Arrow input; only selected
-columns are written. For fixed-bucket tables, `write_arrow(data, bucket=...)`
-can omit hash-key columns from the write type when the bucket was assigned
-upstream. Automatic bucket assignment still requires those columns.
+columns are written. Full Arrow inputs and named Rows can carry partition and
+hash columns used only for routing, independently of the physical write type.
+Reads restore omitted partition columns from split metadata. Selected-schema
+inputs must include the routing columns they need; `write_arrow(data, bucket=...)`
+also accepts a bucket assigned upstream.
 
 Native commit selection requires a standard REST catalog and a reconstructible
 built-in FileIO. Other catalogs and custom Python FileIO implementations retain
