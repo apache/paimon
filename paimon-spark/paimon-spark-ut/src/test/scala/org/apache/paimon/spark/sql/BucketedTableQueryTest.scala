@@ -20,12 +20,16 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonBucketedInputPartition, PaimonScan, PaimonSparkTestBase}
+import org.apache.paimon.spark.commands.BucketExpression.quote
+import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.connector.expressions.SortDirection
 import org.apache.spark.sql.execution.SortExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 
 class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
@@ -251,6 +255,56 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       }
       withSparkSQLConf("spark.sql.requireAllClusterKeysForDistribution" -> "true") {
         checkAnswerAndShuffleSorts("SELECT id, c, count(*) FROM t1 GROUP BY id, c", 1, 0)
+      }
+    }
+  }
+
+  for (key <- Seq("id", "#id", "a.b", "a`b")) {
+    test(s"Report scan output ordering - primary key $key") {
+      assume(gteqSpark3_4)
+
+      withTable("t") {
+        val quotedKey = quote(key)
+        sql(s"""CREATE TABLE t ($quotedKey STRING, seq INT)
+               |TBLPROPERTIES ('primary-key'='seq,$key', 'bucket-key'='seq', 'bucket'='1')
+               |""".stripMargin)
+        sql("INSERT INTO t VALUES ('b', 1), ('a', 1), ('a', 2)")
+
+        for (preserve <- Seq(false, true); v2 <- Seq(false, true)) {
+          withSparkSQLConf(
+            "spark.paimon.scan.preserve-data-grouping" -> preserve.toString,
+            "spark.sql.sources.v2.bucketing.enabled" -> v2.toString) {
+            val df = sql(s"SELECT $quotedKey, seq FROM t")
+            checkAnswer(df, Seq(Row("a", 1), Row("b", 1), Row("a", 2)))
+            val scans = collect(df.queryExecution.executedPlan) {
+              case batch: BatchScanExec if batch.scan.isInstanceOf[PaimonScan] =>
+                batch.scan.asInstanceOf[PaimonScan]
+            }
+            assert(scans.size == 1)
+            val scan = scans.head
+            val ordering = scan.outputOrdering()
+            if (preserve && v2) {
+              val partitions = scan.inputPartitions
+              assert(partitions.size == 1)
+              assert(partitions.head.isInstanceOf[PaimonBucketedInputPartition])
+              val splits = partitions.head.asInstanceOf[PaimonBucketedInputPartition].splits
+              assert(splits.size == 1)
+              assert(splits.head.asInstanceOf[DataSplit].dataFiles().size() == 1)
+              assert(
+                ordering
+                  .map(_.expression().references().map(_.fieldNames().toSeq).toSeq)
+                  .toSeq == Seq(Seq(Seq("seq")), Seq(Seq(key))))
+              assert(ordering.forall(_.direction() == SortDirection.ASCENDING))
+            } else {
+              assert(ordering.isEmpty)
+            }
+          }
+        }
+
+        checkAnswerAndShuffleSorts(
+          s"SELECT l.$quotedKey, l.seq FROM t l JOIN t r ON l.seq = r.seq AND l.$quotedKey = r.$quotedKey",
+          0,
+          0)
       }
     }
   }
