@@ -24,7 +24,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.ChainReadContext;
@@ -342,12 +341,12 @@ public class FileStorePathFactory {
             }
 
             @Override
-            public Path toPath(IndexFileMeta file) {
-                return Optional.ofNullable(file.externalPath())
+            public Path toPath(String fileName, @Nullable String externalPath) {
+                return Optional.ofNullable(externalPath)
                         .map(Path::new)
                         // If external path is null, use the index path (not global index root dir,
                         // because the root dir may change by alter table)
-                        .orElse(new Path(indexPath(), file.fileName()));
+                        .orElse(new Path(indexPath(), fileName));
             }
 
             @Override

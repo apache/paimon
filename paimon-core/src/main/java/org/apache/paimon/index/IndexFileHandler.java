@@ -54,6 +54,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** Handle index files. */
 public class IndexFileHandler {
@@ -288,6 +289,12 @@ public class IndexFileHandler {
 
     public Path filePath(IndexManifestEntry entry) {
         return pathFactories.get(entry.partition(), entry.bucket()).toPath(entry.indexFile());
+    }
+
+    public Path filePath(BinaryIndexManifestEntry entry) {
+        return pathFactories
+                .get(deserializeBinaryRow(entry.partitionBytes()), entry.bucket())
+                .toPath(entry.fileName(), entry.externalPath());
     }
 
     public boolean existsManifest(String indexManifest) {
