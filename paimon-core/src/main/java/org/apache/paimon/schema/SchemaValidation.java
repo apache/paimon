@@ -501,10 +501,10 @@ public class SchemaValidation {
     }
 
     /**
-     * Only the Parquet format can store {@code VARIANT}, so every format the table may write data
-     * files with has to be parquet: the main format, each per-level override and the changelog
-     * format. Checking here reports the column and the option at DDL time, rather than the bare
-     * "unsupported type" a non-parquet writer raises on the first row.
+     * Every format the table may write {@code VARIANT} data with must support it: the main format,
+     * each per-level override and the changelog format. Checking here reports the column and the
+     * option at DDL time, rather than the bare "unsupported type" an incompatible writer raises on
+     * the first row.
      */
     private static void validateVariantTypes(TableSchema schema, CoreOptions options) {
         List<String> variantColumns =
@@ -521,8 +521,8 @@ public class SchemaValidation {
         }
 
         checkArgument(
-                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
-                "Variant columns %s require '%s'='parquet', but was '%s'.",
+                supportsVariant(options.formatType()),
+                "Variant columns %s require '%s' to be parquet or row, but was '%s'.",
                 variantColumns,
                 CoreOptions.FILE_FORMAT.key(),
                 options.formatType());
@@ -530,19 +530,23 @@ public class SchemaValidation {
                 .forEach(
                         (level, format) ->
                                 checkArgument(
-                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
-                                        "Variant columns %s require parquet at every level, but '%s' contains '%s:%s'.",
+                                        supportsVariant(format),
+                                        "Variant columns %s require parquet or row at every level, but '%s' contains '%s:%s'.",
                                         variantColumns,
                                         CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
                                         level,
                                         format));
         checkArgument(
                 options.changelogFileFormat() == null
-                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
-                "Variant columns %s require '%s' to be parquet, but was '%s'.",
+                        || supportsVariant(options.changelogFileFormat()),
+                "Variant columns %s require '%s' to be parquet or row, but was '%s'.",
                 variantColumns,
                 CoreOptions.CHANGELOG_FILE_FORMAT.key(),
                 options.changelogFileFormat());
+    }
+
+    private static boolean supportsVariant(String format) {
+        return CoreOptions.FILE_FORMAT_PARQUET.equals(format) || "row".equals(format);
     }
 
     private static void validateGeospatialTypes(

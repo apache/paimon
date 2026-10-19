@@ -2045,7 +2045,7 @@ class SchemaValidationTest {
                                         geospatialSchema(
                                                 fields, emptyList(), emptyList(), orcOptions)))
                 .hasMessageContaining(
-                        "Variant columns [v, nested] require 'file.format'='parquet', but was 'orc'");
+                        "Variant columns [v, nested] require 'file.format' to be parquet or row, but was 'orc'");
 
         // these two used to pass DDL and fail on the first row written with that format
         Map<String, String> perLevelOptions = new HashMap<>();
@@ -2059,7 +2059,7 @@ class SchemaValidationTest {
                                                 singletonList("id"),
                                                 perLevelOptions)))
                 .hasMessageContaining(
-                        "Variant columns [v, nested] require parquet at every level, but 'file.format.per.level' contains '0:orc'");
+                        "Variant columns [v, nested] require parquet or row at every level, but 'file.format.per.level' contains '0:orc'");
 
         Map<String, String> changelogOptions = new HashMap<>();
         changelogOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
@@ -2073,7 +2073,24 @@ class SchemaValidationTest {
                                                 singletonList("id"),
                                                 changelogOptions)))
                 .hasMessageContaining(
-                        "Variant columns [v, nested] require 'changelog-file.format' to be parquet, but was 'avro'");
+                        "Variant columns [v, nested] require 'changelog-file.format' to be parquet or row, but was 'avro'");
+
+        for (String format : Arrays.asList("parquet", "row")) {
+            Map<String, String> supportedOptions = new HashMap<>();
+            supportedOptions.put(CoreOptions.FILE_FORMAT.key(), format);
+            supportedOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:row,1:parquet");
+            supportedOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+            supportedOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), format);
+            assertThatNoException()
+                    .isThrownBy(
+                            () ->
+                                    validateTableSchema(
+                                            geospatialSchema(
+                                                    fields,
+                                                    emptyList(),
+                                                    singletonList("id"),
+                                                    supportedOptions)));
+        }
     }
 
     private TableSchema geospatialSchema(

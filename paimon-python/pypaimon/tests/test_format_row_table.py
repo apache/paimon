@@ -23,8 +23,10 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.data.generic_variant import GenericVariant
 
 
 class RowFormatAppendOnlyTest(unittest.TestCase):
@@ -497,6 +499,90 @@ class RowFormatVectorTableTest(unittest.TestCase):
         result = read_builder.new_read().to_arrow(splits)
         self.assertEqual(result.num_rows, 3)
         self.assertEqual(sorted(result.column('id').to_pylist()), [1, 2, 3])
+
+
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.parametrize('table_kind', ['append', 'primary-key', 'data-evolution'])
+def test_row_table_preserves_variant_values(tmp_path, table_kind):
+    variants = GenericVariant.to_arrow_array([
+        GenericVariant.from_python({'a': 1, 'nested': {'b': [True, None, 'text']}}),
+        GenericVariant.from_python([1, {'x': 'value'}, None]),
+        GenericVariant.from_python(None),
+        None,
+        GenericVariant.from_python('scalar'),
+    ])
+    payloads = variants.to_pylist()
+    nested_type = pa.struct([pa.field('payload', variants.type), pa.field('tag', pa.string())])
+    data = pa.table({
+        'id': pa.array(range(5), type=pa.int32()),
+        'payload': variants,
+        'nested': pa.array([
+            {'payload': payloads[0], 'tag': 'object'},
+            {'payload': payloads[1], 'tag': 'array'},
+            {'payload': payloads[2], 'tag': 'variant-null'},
+            None,
+            {'payload': None, 'tag': 'sql-null'},
+        ], type=nested_type),
+        'items': pa.array([
+            [payloads[0], None, payloads[2]], [], None, [payloads[1]], [payloads[4]],
+        ], type=pa.list_(variants.type)),
+        'mapping': pa.array([
+            [('first', payloads[0]), ('missing', None)], [], None,
+            [('array', payloads[1])], [('null', payloads[2])],
+        ], type=pa.map_(pa.string(), variants.type)),
+    })
+    options = {
+        'file.format': 'row', 'write.native.enabled': 'false', 'read.native.enabled': 'false',
+    }
+    primary_keys = []
+    if table_kind == 'primary-key':
+        primary_keys = ['id']
+        options['bucket'] = '1'
+    elif table_kind == 'data-evolution':
+        options.update({'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    catalog.create_table('default.variants', Schema.from_pyarrow_schema(
+        data.schema, primary_keys=primary_keys, options=options), False)
+    table = catalog.get_table('default.variants')
+    builder = table.new_batch_write_builder()
+    writer, committer = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(data)
+        messages = writer.prepare_commit()
+        files = [file for message in messages for file in message.new_files]
+        assert files
+        for file in files:
+            assert file.file_name.endswith('.row')
+            with table.file_io.new_input_stream(file.file_path) as stream:
+                stream.seek(file.file_size - 8)
+                assert stream.read(1) == b'\x01'
+        committer.commit(messages)
+    finally:
+        writer.close()
+        committer.close()
+
+    read_builder = table.new_read_builder()
+    splits = read_builder.new_scan().plan().splits()
+    result = read_builder.new_read().to_arrow(splits).sort_by('id')
+    assert result.to_pydict() == data.to_pydict()
+    restored_payloads = result.column('payload').to_pylist()
+    assert GenericVariant.from_arrow_struct(restored_payloads[0]).to_python() == {
+        'a': 1, 'nested': {'b': [True, None, 'text']},
+    }
+    assert GenericVariant.from_arrow_struct(restored_payloads[1]).to_python() == [
+        1, {'x': 'value'}, None,
+    ]
+    assert restored_payloads[2] is not None
+    assert GenericVariant.from_arrow_struct(restored_payloads[2]).to_python() is None
+    assert restored_payloads[3] is None
+
+    projected = table.new_read_builder().with_projection(['payload', 'id'])
+    projected_result = projected.new_read().to_arrow(
+        projected.new_scan().plan().splits()).sort_by('id')
+    assert projected_result.to_pydict() == data.select(['payload', 'id']).to_pydict()
 
 
 if __name__ == '__main__':

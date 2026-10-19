@@ -28,6 +28,8 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
@@ -134,6 +136,100 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testRowFormatVariantReadWrite() throws Exception {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(1, "payload", DataTypes.VARIANT()),
+                        DataTypes.FIELD(
+                                2,
+                                "nested",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(3, "label", DataTypes.STRING()),
+                                        DataTypes.FIELD(4, "detail", DataTypes.VARIANT()))));
+        Options options = new Options();
+        options.set(BUCKET, -1);
+        options.set(FILE_FORMAT, "row");
+        options.set(WRITE_ONLY, true);
+        new FileSystemSchemaManager(FileIOFinder.find(tablePath), tablePath)
+                .createTable(
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(FileIOFinder.find(tablePath), tablePath);
+        List<InternalRow> expected =
+                Arrays.asList(
+                        GenericRow.of(
+                                1,
+                                GenericVariant.fromJson(
+                                        "{\"a\":[1,\"two\",null],\"b\":{\"c\":true}}"),
+                                GenericRow.of(
+                                        BinaryString.fromString("one"),
+                                        GenericVariant.fromJson("[1,{\"x\":2}]"))),
+                        GenericRow.of(
+                                2, null, GenericRow.of(null, GenericVariant.fromJson("null"))),
+                        GenericRow.of(3, GenericVariant.fromJson("null"), null),
+                        GenericRow.of(
+                                4,
+                                GenericVariant.fromJson("\"text\""),
+                                GenericRow.of(BinaryString.fromString("two"), null)));
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (InternalRow row : expected) {
+                write.write(row);
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        List<InternalRow> actual = new ArrayList<>();
+        for (Split split : readBuilder.newScan().plan().splits()) {
+            try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
+                reader.forEachRemaining(row -> actual.add(serializer.copy(row)));
+            }
+        }
+        assertThat(actual).containsExactlyInAnyOrderElementsOf(expected);
+
+        RowType payloadProjection =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.INT(), "$.a[0]", false, "UTC")
+                        .field(DataTypes.BOOLEAN(), "$.b.c", false, "UTC")
+                        .build();
+        RowType detailProjection =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.INT(), "$[1].x", false, "UTC")
+                        .build();
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                2,
+                                "nested",
+                                DataTypes.ROW(DataTypes.FIELD(4, "detail", detailProjection))),
+                        DataTypes.FIELD(1, "payload", payloadProjection),
+                        DataTypes.FIELD(0, "id", DataTypes.INT()));
+        ReadBuilder projectedRead = table.newReadBuilder().withReadType(readType);
+        InternalRowSerializer projectedSerializer = new InternalRowSerializer(readType);
+        List<InternalRow> projected = new ArrayList<>();
+        for (Split split : projectedRead.newScan().plan().splits()) {
+            try (RecordReader<InternalRow> reader = projectedRead.newRead().createReader(split)) {
+                reader.forEachRemaining(row -> projected.add(projectedSerializer.copy(row)));
+            }
+        }
+        assertThat(projected)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(GenericRow.of(GenericRow.of(2)), GenericRow.of(1, true), 1),
+                        GenericRow.of(GenericRow.of(GenericRow.of((Object) null)), null, 2),
+                        GenericRow.of(null, GenericRow.of(null, null), 3),
+                        GenericRow.of(GenericRow.of((Object) null), GenericRow.of(null, null), 4));
+    }
 
     @Test
     public void testOverwriteSameFiles() throws Exception {
