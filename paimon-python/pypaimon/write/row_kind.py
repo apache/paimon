@@ -21,7 +21,7 @@ from typing import List, Union
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.table.special_fields import SpecialFields
 
@@ -63,6 +63,15 @@ def filter_write_batch(table, data):
     ignore_before = str(raw.get('ignore-update-before', 'false')).lower() == 'true'
     if not ignore_delete and not ignore_before:
         return data
+    # Java checks top-level NULLs before its RowKindFilter. A DELETE in a
+    # non-cross-partition deduplicate table only requires non-NULL keys and
+    # sequence fields; UPDATE_BEFORE retains all declared NOT NULL fields.
+    for name, check_delete in _not_null_fields(table):
+        invalid = data.column(name).is_null()
+        if not check_delete:
+            invalid = pc.and_(invalid, pc.not_equal(kinds, RowKind.DELETE.value))
+        if pc.any(invalid).as_py():
+            raise ValueError('Cannot write null to non-null column(%s)' % name)
     ignored = [RowKind.UPDATE_BEFORE.value]
     if ignore_delete:
         ignored.append(RowKind.DELETE.value)
@@ -100,8 +109,22 @@ def skip_write_row(table, values, row_kind=RowKind.INSERT):
         if row_kind_field_name is None
         else RowKind.from_string(values[row_kind_field_name]).value
     )
+    if options.ignore_delete() or str(raw.get('ignore-update-before', 'false')).lower() == 'true':
+        for name, check_delete in _not_null_fields(table):
+            if (check_delete or kind != RowKind.DELETE.value) and values[name] is None:
+                raise ValueError('Cannot write null to non-null column(%s)' % name)
     return _is_filtered(kind, options.ignore_delete(),
                         str(raw.get('ignore-update-before', 'false')).lower() == 'true')
+
+
+def _not_null_fields(table):
+    """Fields Java checks before filtering, with its DELETE-only exception."""
+    delete_fields = None
+    if (table.options.merge_engine() == MergeEngine.DEDUPLICATE
+            and not table.cross_partition_update):
+        delete_fields = set(table.table_schema.primary_keys + table.options.sequence_field())
+    return [(field.name, delete_fields is None or field.name in delete_fields)
+            for field in table.fields if not field.type.nullable]
 
 
 def _is_filtered(kind, ignore_delete, ignore_before):

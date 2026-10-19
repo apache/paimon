@@ -20,8 +20,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
@@ -214,9 +213,10 @@ class NativeTableWrite:
 
     def _prepare_native_arrow_data(self, data):
         data = normalize_arrow_strings(data)
-        target = self._table_schema if data.schema.names == self._table_schema.names else self._schema
-        data = normalize_arrow_write_nullability(data, target)
-        compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True)
+        # Core resolves row kinds and filters ignored events before inspecting
+        # payload values. This facade checks only the logical Arrow schema.
+        compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True,
+                          check_nested_nullability=False)
         if not (arrow_schemas_compatible(data.schema, self._schema, **compatible)
                 or (self._write_cols is not None
                     and arrow_schemas_compatible(data.schema, self._table_schema, **compatible))):

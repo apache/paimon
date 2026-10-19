@@ -251,7 +251,7 @@ class TableWrite:
     ) -> None:
         """
         Write a Ray Dataset to Paimon table.
-        
+
         Args:
             dataset: Ray Dataset to write. This is a distributed data collection
                 from Ray Data (ray.data.Dataset).
@@ -328,18 +328,22 @@ class TableWrite:
             return data
         data = self._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
-        return filter_write_batch(table, data)
-
-    def _prepare_arrow_schema(self, data):
-        data = normalize_arrow_strings(data)
+        data = filter_write_batch(table, data)
+        if not data.num_rows:
+            return data
         target = self.table_pyarrow_schema
         if data.schema.names != target.names and self.file_store_write.write_cols is not None:
             target = self._write_cols_pyarrow_schema(self.file_store_write.write_cols)
+        # Validate only surviving values. Keep the input transport metadata:
+        # PyArrow otherwise rejects hidden NULL children of NULL ROW parents.
         validated = normalize_arrow_write_nullability(data, target)
         self._validate_pyarrow_schema(validated.schema)
-        # Core checks only visible NOT NULL children. PyArrow's Parquet writer
-        # also rejects hidden NULL children under NULL ROW parents when their
-        # Arrow field is nonnullable, so retain the input's transport metadata.
+        return data
+
+    def _prepare_arrow_schema(self, data):
+        data = normalize_arrow_strings(data)
+        self._validate_pyarrow_schema(
+            data.schema, check_nested_nullability=getattr(self, 'table', None) is None)
         return data
 
     def _normalize_arrow_write_schema(self, data):
@@ -358,22 +362,25 @@ class TableWrite:
             return pa.RecordBatch.from_arrays(data.columns, schema=schema)
         return pa.Table.from_arrays(data.columns, schema=schema)
 
-    def _validate_pyarrow_schema(self, data_schema: pa.Schema):
-        if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
+    def _validate_pyarrow_schema(self, data_schema: pa.Schema, *, check_nested_nullability=True):
+        if self._is_compatible_pyarrow_schema(
+                data_schema, self.table_pyarrow_schema, check_nested_nullability=check_nested_nullability):
             return
 
         write_cols = self.file_store_write.write_cols
         if write_cols is not None:
             write_cols_schema = self._write_cols_pyarrow_schema(write_cols)
-            if self._is_compatible_pyarrow_schema(data_schema, write_cols_schema):
+            if self._is_compatible_pyarrow_schema(
+                    data_schema, write_cols_schema, check_nested_nullability=check_nested_nullability):
                 return
 
         self._raise_inconsistent_schema(data_schema)
 
     def _is_compatible_pyarrow_schema(
-            self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
+            self, data_schema: pa.Schema, expected_schema: pa.Schema, *, check_nested_nullability=True) -> bool:
         return arrow_schemas_compatible(
-            data_schema, expected_schema, check_top_level_nullability=False, allow_binary_compatibility=True)
+            data_schema, expected_schema, check_top_level_nullability=False,
+            allow_binary_compatibility=True, check_nested_nullability=check_nested_nullability)
 
     def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
         table_fields = {
