@@ -30,8 +30,10 @@ import pytest
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 _CASES = {
     'UTC': [('2024-01-02T12:34:56.789', '2024-01-02T12:34:56.789'),
+            ('1970-01-01T00:00:00.000', '1970-01-01T00:00:00.000'),
             ('1969-12-31T23:59:59.999', '1969-12-31T23:59:59.999')],
-    'Asia/Shanghai': [('2024-01-02T12:34:56.789', '2024-01-02T04:34:56.789')],
+    'Asia/Shanghai': [('2024-01-02T12:34:56.789', '2024-01-02T04:34:56.789'),
+                      ('1970-01-01T07:59:59.999', '1969-12-31T23:59:59.999')],
     'America/New_York': [('2024-01-02T12:34:56.789', '2024-01-02T17:34:56.789'),
                          ('2024-03-10T02:30:00.123', '2024-03-10T07:30:00.123'),
                          ('2024-11-03T01:30:00.456', '2024-11-03T05:30:00.456')],
@@ -108,7 +110,7 @@ try:
         return original(method, data, *args, **kwargs)
     for wall in json.loads(sys.argv[3]):
         builder = table.new_batch_write_builder()
-        writer, commit = builder.new_write(), builder.new_commit()
+        writer, earlier_writer, commit = builder.new_write(), builder.new_write(), builder.new_commit()
         callback = Mock()
         commit.add_commit_callback(callback)
         timestamp = Timestamp.from_local_date_time(datetime.strptime(wall, '%Y-%m-%dT%H:%M:%S.%f'))
@@ -118,6 +120,15 @@ try:
             for message in messages:
                 for file in message.new_files:
                     file.creation_time = timestamp
+            earlier_writer.write_arrow(pa.Table.from_pylist([{'id': 2, 'pt': 'p'}], schema=schema))
+            earlier_messages = earlier_writer.prepare_commit()
+            earlier = Timestamp(timestamp.get_millisecond() - 1)
+            for message in earlier_messages:
+                for file in message.new_files:
+                    file.creation_time = earlier
+            messages.extend(earlier_messages)
+            if sys.argv[4] == 'true':
+                messages.reverse()
             with ExitStack() as stack:
                 stack.enter_context(patch.object(server, '_table_commit_handle', side_effect=publish))
                 if sys.argv[2] == 'true':
@@ -125,9 +136,14 @@ try:
                                                      side_effect=AssertionError('native commit fell back')))
                 commit.commit(messages)
             callback.call.assert_called_once()
-            assert callback.call.call_args[0][0].commit_entries[0].file.creation_time == timestamp
+            entries = callback.call.call_args[0][0].commit_entries
+            assert sorted(entry.file.creation_time.get_millisecond() for entry in entries) == [
+                earlier.get_millisecond(), timestamp.get_millisecond()]
+            assert captured[-1][0]['recordCount'] == 2
+            assert captured[-1][0]['fileCount'] == 2
         finally:
             writer.close()
+            earlier_writer.close()
             commit.close()
     print('CREATION_TIME_RESULT=' + json.dumps([stats[0]['lastFileCreationTime'] for stats in captured]))
 finally:
@@ -146,16 +162,14 @@ def _expected_epoch_millis(zone):
 @pytest.mark.skipif(not hasattr(time, 'tzset'), reason='process TZ cannot be changed on this platform')
 @pytest.mark.parametrize('zone', sorted(_CASES))
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
-def test_rest_commit_publishes_creation_time_instants(tmp_path, zone, native):
+@pytest.mark.parametrize('reverse', [False, True], ids=['newer-first', 'older-first'])
+def test_rest_commit_publishes_creation_time_instants(tmp_path, zone, native, reverse):
     from pypaimon.read.native_plan import native_runtime_available
 
     if native and not native_runtime_available():
         pytest.skip('pypaimon-rust not installed')
-    # Existing pre-epoch metadata is covered by the DFM helper test; Java's
-    # per-partition accumulator clamps lastFileCreationTime to zero.
-    cases = [case for case in _CASES[zone] if not case[0].startswith('1969')]
     output = subprocess.check_output(
         [sys.executable, '-c', _REST_SCRIPT, str(tmp_path), str(native).lower(),
-         json.dumps([wall for wall, _ in cases])], env=dict(os.environ, TZ=zone))
+         json.dumps([wall for wall, _ in _CASES[zone]]), str(reverse).lower()], env=dict(os.environ, TZ=zone))
     result = next(line for line in output.decode().splitlines() if line.startswith('CREATION_TIME_RESULT='))
-    assert json.loads(result.split('=', 1)[1]) == [value for value in _expected_epoch_millis(zone) if value >= 0]
+    assert json.loads(result.split('=', 1)[1]) == _expected_epoch_millis(zone)

@@ -1079,30 +1079,29 @@ class FileStoreCommit:
             partition_spec = dict(zip(self.table.partition_keys, path_factory._canonical_partition(partition_value)))
             partition_key = GenericRowSerializer.to_bytes(entry.partition)
 
+            file_meta = entry.file
+            file_creation_time = (file_meta.creation_time_epoch_millis()
+                                  if file_meta.creation_time is not None else int(time.time() * 1000))
+
             if partition_key not in partition_stats:
                 partition_stats[partition_key] = {
                     'partition_spec': partition_spec,
                     'record_count': 0,
                     'file_count': 0,
                     'file_size_in_bytes': 0,
-                    'last_file_creation_time': 0,
+                    # Java starts with the first entry, including times before
+                    # the epoch, rather than clamping negative times to zero.
+                    'last_file_creation_time': file_creation_time,
                     'total_buckets': entry.total_buckets
                 }
             partition_stats[partition_key]['total_buckets'] = (
                 entry.total_buckets)
 
             # Following Java implementation: PartitionEntry.fromDataFile()
-            file_meta = entry.file
             # Extract actual file metadata (following Java DataFileMeta pattern)
             record_count = file_meta.row_count if entry.kind == 0 else file_meta.row_count * -1
             file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
             file_count = 1 if entry.kind == 0 else -1
-
-            # Use epoch millis
-            if file_meta.creation_time:
-                file_creation_time = file_meta.creation_time_epoch_millis()
-            else:
-                file_creation_time = int(time.time() * 1000)
 
             # Accumulate statistics (following Java PartitionEntry.merge() logic)
             partition_stats[partition_key]['record_count'] += record_count

@@ -17,7 +17,7 @@
 
 """Prepared data and dedicated files use Java DataFileMeta's TIMESTAMP(3)."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -100,3 +100,50 @@ def test_prepared_file_creation_times_have_millisecond_precision(tmp_path, strea
     read = table.new_read_builder()
     actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pylist()
     assert actual == ([] if mode == 'postpone' else rows)
+
+
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+def test_input_changelog_creation_time_is_taken_after_its_write(tmp_path, stream):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id'], options={
+            'bucket': '1', 'changelog-producer': 'input',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'}), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    clock = [datetime(2024, 6, 1, 12, 30, 40, 123456)]
+    completed = {}
+    write_parquet = table.file_io.write_parquet
+
+    def write_and_advance(path, *args, **kwargs):
+        result = write_parquet(path, *args, **kwargs)
+        # Advance a deterministic clock only after a real file was written.
+        # Each file's result must use its own completion time, including the
+        # changelog whose statistics were collected before the I/O.
+        clock[0] += timedelta(seconds=1)
+        completed[path] = Timestamp.from_local_date_time(clock[0]).to_millis_timestamp()
+        return result
+
+    try:
+        with patch.object(table.file_io, 'write_parquet', side_effect=write_and_advance), \
+                patch.object(Timestamp, 'now', side_effect=lambda: Timestamp.from_local_date_time(clock[0])):
+            writer.write_arrow(pa.Table.from_pylist([
+                {'id': 1, 'value': 10}, {'id': 1, 'value': 20}], schema=schema))
+            messages = writer.prepare_commit(1) if stream else writer.prepare_commit()
+        data_files = [file for message in messages for file in message.new_files]
+        changelogs = [file for message in messages for file in message.changelog_files]
+        assert data_files and changelogs
+        assert sum(file.row_count for file in data_files) == 1
+        assert sum(file.row_count for file in changelogs) == 2
+        for file in data_files + changelogs:
+            assert file.creation_time == completed[file.file_path]
+        commit.commit(messages, 1) if stream else commit.commit(messages)
+    finally:
+        writer.close()
+        commit.close()
+    read = table.new_read_builder()
+    assert read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist() == [{'id': 1, 'value': 20}]
