@@ -37,7 +37,7 @@ instead of storing its JSON text. The data is parsed when it is converted to `VA
 can extract a path as a requested SQL type.
 
 `VARIANT` does not require Data Evolution mode. SQL support requires Spark 4.0 or later, or Flink
-2.1 or later. Variant data files must use Parquet; ORC and Avro do not support this type.
+2.1 or later. Variant data files can use Parquet or ROW; ORC and Avro do not support this type.
 
 ## Variant vs. JSON String
 
@@ -120,6 +120,11 @@ payload (GROUP)
 The binary representation avoids storing and reparsing JSON syntax. It also retains the type of
 each scalar value. Extracting a sub-field from a plain Variant still requires reading the binary
 `value` field for that Variant column.
+
+The [ROW format](../concepts/spec/rowformat.md) also supports plain Variant values. Set
+`file.format` to `row` to store the same `value` and `metadata` bytes inside compressed row blocks.
+ROW reads and decompresses the selected blocks in full; it does not support Variant shredding or
+sub-field I/O pruning.
 
 ### Shredded Variant
 
@@ -263,7 +268,8 @@ full value.
 
 ## Limitations
 
-- Variant data files must use Parquet. ORC and Avro are not supported.
+- Plain Variant data files can use Parquet or ROW. Variant shredding requires Parquet. ORC and
+  Avro are not supported.
 - `VARIANT` cannot be used as a primary key or partition key.
 - Variant extraction does not by itself create an index or guarantee predicate pushdown. Use
   shredding to reduce sub-column I/O; use an appropriate index or modeled table column when a path

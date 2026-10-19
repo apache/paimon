@@ -150,6 +150,10 @@ public class TestChangelogDataReadWrite {
                         schemaManager,
                         schema,
                         VALUE_TYPE,
+                        dataSchema ->
+                                KeyValue.createKeyValueFields(
+                                        EXTRACTOR.keyFields(dataSchema),
+                                        EXTRACTOR.valueFields(dataSchema)),
                         FileFormatDiscover.of(options),
                         pathFactory,
                         options);
