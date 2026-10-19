@@ -699,6 +699,12 @@ under the License.
             <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be between 1 and 32768 (fixed upper bound).</td>
         </tr>
         <tr>
+            <td><h5>dynamic-bucket.reuse-deleted-slots</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether the dynamic bucket assigner reuses the slots freed by deleted keys instead of opening new buckets. A delete frees one slot in the bucket of its key, so a full bucket accepts new keys again. It relies on a property of dynamic bucket: only one job may write to a given partition. It requires merge-engine = deduplicate, ignore-delete = false and no sequence field, so that every delete is applied to the row.</td>
+        </tr>
+        <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
             <td style="word-wrap: break-word;">2000000</td>
             <td>Long</td>

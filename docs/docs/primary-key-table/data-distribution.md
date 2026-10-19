@@ -71,6 +71,7 @@ Do not configure `bucket-key` in this mode.
 | `dynamic-bucket.target-row-num` | Target row count per bucket |
 | `dynamic-bucket.initial-buckets` | Initial bucket count |
 | `dynamic-bucket.max-buckets` | Maximum bucket count; use `-1` or a value from `1` to `32768` |
+| `dynamic-bucket.reuse-deleted-slots` | Reuse the slots freed by deleted keys instead of opening new buckets |
 
 :::warning Concurrent writers
 
@@ -79,6 +80,34 @@ the same key independently and create duplicates. `write-only` with a dedicated 
 does not remove this restriction.
 
 :::
+
+### Reusing Slots Freed by Deletes
+
+By default a bucket that reaches `dynamic-bucket.target-row-num` never accepts new keys again,
+even if later deletes empty it, so a table with many deletes keeps opening new buckets. With
+`dynamic-bucket.reuse-deleted-slots = true` the assigner counts the live keys of each bucket. A
+`DELETE` frees one slot in the bucket of its key, and a full bucket accepts new keys again.
+
+- A key which is deleted and later written again returns to its own bucket and takes its slot
+  back. Keys never change bucket.
+- Only `DELETE` frees a slot. `UPDATE_BEFORE` is the first half of an update and does not.
+- The limit stays approximate. A bucket can end slightly above `dynamic-bucket.target-row-num`
+  when a deleted key returns after its slot was taken by another key.
+- Keys are tracked by their 32-bit hash, so two different keys with the same hash share a slot and
+  the count can drift by a few rows.
+- A delete also removes the hash of its key from the persisted hash index, so after a restart the
+  counts are rebuilt from live keys only and the freed slots are kept.
+
+The assigner cannot tell whether a delete was applied to the row, so the option is only accepted
+when every delete is applied. The table must be a dynamic-bucket primary-key table with
+`merge-engine = deduplicate`, `ignore-delete = false` and no `sequence.field`; other
+configurations are rejected when the table is created or altered. It also relies on the single
+writer described in the warning above: the counts live in the assigner of that one job.
+
+Today only the Flink sink that writes rows (Flink SQL `INSERT INTO` or the DataStream
+`FlinkSinkBuilder`) applies the option, whatever the source is, including a Flink CDC source whose
+deletes arrive as `DELETE` rows. These writers ignore it: Spark, the Paimon CDC ingestion actions
+such as `mysql-sync-table`, and the Flink CDC pipeline connector for Paimon.
 
 When updates stay within a partition, Paimon uses a hash index for bucket assignment. Budget
 additional memory for active partitions: 100 million entries in a partition require roughly 1 GB

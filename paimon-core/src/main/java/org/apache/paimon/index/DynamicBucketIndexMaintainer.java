@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.IntHashSet;
 import org.apache.paimon.utils.IntIterator;
 
@@ -38,12 +39,19 @@ public class DynamicBucketIndexMaintainer {
 
     private final HashIndexFile indexFile;
     private final IntHashSet hashcode;
+    // Whether a delete removes the hash of its key. This keeps the persisted index (and so the
+    // row count of its file) equal to the number of live keys, which is what the assigner reads
+    // back after a restart. See 'dynamic-bucket.reuse-deleted-slots'.
+    private final boolean removeDeletedKeys;
 
     private boolean modified;
 
     private DynamicBucketIndexMaintainer(
-            HashIndexFile indexFile, @Nullable IndexFileMeta restoredFile) {
+            HashIndexFile indexFile,
+            @Nullable IndexFileMeta restoredFile,
+            boolean removeDeletedKeys) {
         this.indexFile = indexFile;
+        this.removeDeletedKeys = removeDeletedKeys;
         IntHashSet hashcode = new IntHashSet();
         if (restoredFile != null) {
             hashcode = new IntHashSet((int) restoredFile.rowCount());
@@ -72,7 +80,11 @@ public class DynamicBucketIndexMaintainer {
         if (!(key instanceof BinaryRow)) {
             throw new IllegalArgumentException("Unsupported key type: " + key.getClass());
         }
-        boolean changed = hashcode.add(key.hashCode());
+        // only DELETE removes a key: -U is the first half of an update, and +U / +I write the key
+        boolean changed =
+                removeDeletedKeys && record.valueKind() == RowKind.DELETE
+                        ? hashcode.remove(key.hashCode())
+                        : hashcode.add(key.hashCode());
         if (changed) {
             modified = true;
         }
@@ -101,9 +113,15 @@ public class DynamicBucketIndexMaintainer {
     public static class Factory {
 
         private final IndexFileHandler handler;
+        private final boolean removeDeletedKeys;
 
         public Factory(IndexFileHandler handler) {
+            this(handler, false);
+        }
+
+        public Factory(IndexFileHandler handler, boolean removeDeletedKeys) {
             this.handler = handler;
+            this.removeDeletedKeys = removeDeletedKeys;
         }
 
         public IndexFileHandler indexFileHandler() {
@@ -113,7 +131,7 @@ public class DynamicBucketIndexMaintainer {
         public DynamicBucketIndexMaintainer create(
                 BinaryRow partition, int bucket, @Nullable IndexFileMeta restoredFile) {
             return new DynamicBucketIndexMaintainer(
-                    handler.hashIndex(partition, bucket), restoredFile);
+                    handler.hashIndex(partition, bucket), restoredFile, removeDeletedKeys);
         }
     }
 }

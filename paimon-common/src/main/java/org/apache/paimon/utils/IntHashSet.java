@@ -39,6 +39,14 @@ public class IntHashSet {
         return set.add(value);
     }
 
+    public boolean contains(int value) {
+        return set.contains(value);
+    }
+
+    public boolean remove(int value) {
+        return set.remove(value);
+    }
+
     public int size() {
         return set.size();
     }

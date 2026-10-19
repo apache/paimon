@@ -21,6 +21,7 @@ package org.apache.paimon.index;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.utils.Int2ShortHashMap;
+import org.apache.paimon.utils.IntHashSet;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.ListUtils;
 
@@ -51,6 +52,9 @@ public class PartitionIndex {
     public final Set<Integer> totalBucketSet;
     public final List<Integer> totalBucketArray;
 
+    private final Map<Integer, Long> bucketRowCount;
+    private final IntHashSet deletedHashes = new IntHashSet();
+
     private final long targetBucketRowNumber;
     private boolean bucketUpperBoundReached;
 
@@ -64,6 +68,7 @@ public class PartitionIndex {
             long targetBucketRowNumber) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
+        this.bucketRowCount = new HashMap<>(bucketInformation);
         this.totalBucketSet = new LinkedHashSet<>(bucketInformation.keySet());
         this.totalBucketArray = new ArrayList<>(totalBucketSet);
         this.targetBucketRowNumber = targetBucketRowNumber;
@@ -77,7 +82,13 @@ public class PartitionIndex {
 
         // 1. is it a key that has appeared before
         if (hash2Bucket.containsKey(hash)) {
-            return hash2Bucket.get(hash);
+            int bucket = hash2Bucket.get(hash);
+            if (deletedHashes.remove(hash)) {
+                // a deleted key came back: it takes its old slot again, in the same bucket
+                long count = bucketRowCount.merge(bucket, 1L, Long::sum);
+                nonFullBucketInformation.replace(bucket, count);
+            }
+            return bucket;
         }
 
         // 2. find bucket from existing buckets
@@ -89,6 +100,7 @@ public class PartitionIndex {
             Long number = entry.getValue();
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
+                bucketRowCount.merge(bucket, 1L, Long::sum);
                 hash2Bucket.put(hash, toBucketShort(bucket));
                 return bucket;
             } else {
@@ -102,6 +114,7 @@ public class PartitionIndex {
             for (int i = 0; i <= globalMaxBucketId; i++) {
                 if (bucketFilter.test(i) && !totalBucketSet.contains(i)) {
                     nonFullBucketInformation.put(i, 1L);
+                    bucketRowCount.put(i, 1L);
                     totalBucketSet.add(i);
                     totalBucketArray.add(i);
                     hash2Bucket.put(hash, toBucketShort(i));
@@ -130,8 +143,25 @@ public class PartitionIndex {
                             maxBucketsNum, DYNAMIC_BUCKET_MAX_BUCKETS.key()));
         }
         int bucket = ListUtils.pickRandomly(totalBucketArray);
+        bucketRowCount.merge(bucket, 1L, Long::sum);
         hash2Bucket.put(hash, toBucketShort(bucket));
         return bucket;
+    }
+
+    /** Free the slot of a deleted key. Unknown or already deleted keys are ignored. */
+    public void delete(int hash) {
+        if (!hash2Bucket.containsKey(hash) || deletedHashes.contains(hash)) {
+            return;
+        }
+        int bucket = hash2Bucket.get(hash);
+        Long count = bucketRowCount.computeIfPresent(bucket, (b, c) -> c - 1);
+        if (count == null) {
+            return;
+        }
+        deletedHashes.add(hash);
+        if (count < targetBucketRowNumber) {
+            nonFullBucketInformation.put(bucket, count);
+        }
     }
 
     public static PartitionIndex loadIndex(
