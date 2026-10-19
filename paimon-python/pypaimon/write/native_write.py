@@ -18,7 +18,7 @@
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.arrow_schema import (
     arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
@@ -51,7 +51,11 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                                            BucketMode.BUCKET_UNAWARE,
                                            BucketMode.CROSS_PARTITION,
                                            BucketMode.POSTPONE_MODE)
-            or table.options.changelog_file_format() not in (None, 'parquet')
+            # The format matters only when this write emits INPUT changelogs.
+            # Batch overwrites suppress them because they cannot be committed.
+            or (table.options.changelog_file_format() not in (None, 'parquet')
+                and table.options.changelog_producer() == ChangelogProducer.INPUT
+                and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
             or not _native_partition_types_supported(
                 schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME))

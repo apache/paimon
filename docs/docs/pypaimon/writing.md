@@ -104,6 +104,13 @@ Whole-partition predicate deletes can use Native on primary-key tables configure
 with input changelogs. Native upserts also accept fully NULL source key columns
 with a different physical type, including selected NULL dictionary values.
 
+Native selection checks the formats used by the operation. An unused
+`changelog-file.format` does not prevent Native Parquet writes when no INPUT
+changelog is produced, including batch overwrite. Likewise, `vector.file.format`
+does not prevent Native updates on tables without VECTOR fields. These operations
+continue to write Parquet/BLOB files; an active dedicated format must still be
+supported by the Native path.
+
 `write_ray()` uses the shared Python coordinator and lets workers select Native
 writers. For postpone fixed-bucket writes, overwrite plans use the new input
 unless an explicit bucket plan was supplied. A complete primary-key

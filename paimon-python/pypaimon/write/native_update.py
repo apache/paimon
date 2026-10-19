@@ -24,7 +24,7 @@ import pyarrow.compute as pc
 
 from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
-from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
+from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, VectorType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
@@ -39,7 +39,8 @@ from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
 def _native_update_formats_supported(table):
     return (table.options.file_format() == 'parquet'
-            and (not table.options.with_vector_format() or table.options.vector_file_format() == 'parquet'))
+            and (not table.options.with_vector_format() or table.options.vector_file_format() == 'parquet'
+                 or not any(isinstance(field.type, VectorType) for field in table.table_schema.fields)))
 
 
 def _native_update_table(table, *, allow_changelog=False):
