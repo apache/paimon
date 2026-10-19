@@ -46,7 +46,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
     self_merge = _is_self_merge(table, source, target_keys, source_keys)
     if not_matched and table.options.video_frame_fields():
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(table, allow_time_travel=not not_matched)
     if native_table is None:
         return None
     source_schema = None

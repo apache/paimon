@@ -582,3 +582,58 @@ def test_authorized_merge_branch_source_checks_its_own_grant(rest_catalog, use_n
                    for call in requests.call_args_list)
     assignment.assert_not_called()
     assert _files(table) == before
+
+
+@pytest.mark.parametrize('use_native', _ENGINES)
+@pytest.mark.parametrize('policy', ['whole', 'denied', 'filter', 'mask'])
+@pytest.mark.parametrize('operation', ['row-id', 'predicate', 'predicate-delete', 'shard', 'matched-merge'])
+def test_historical_schema_updates_keep_whole_table_authorization(
+        rest_catalog, use_native, policy, operation):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
+    catalog, server = rest_catalog
+    original = _table(catalog, use_native)
+    snapshot = original.snapshot_manager().get_snapshot_by_id(1)
+    catalog.alter_table('default.t', [SchemaChange.add_column('extra', AtomicType('INT'))])
+    latest = catalog.get_table('default.t').copy({'write.native.enabled': str(use_native).lower()})
+    historical = latest.copy({'scan.snapshot-id': str(snapshot.id), 'query-auth.enabled': 'on'})
+    historical = historical._copy_with_snapshot(snapshot)
+    assert historical.table_schema.id != latest.table_schema.id
+    before = _files(latest)
+    builder = historical.new_batch_write_builder()
+    assignment = Mock(side_effect=lambda batch: pc.add(batch['s.value'], 1))
+
+    def operate():
+        if operation != 'matched-merge':
+            return _operate(builder.new_update(), operation)
+        return builder.new_update().merge_into(
+            pa.Table.from_pylist(_ROWS[:1], schema=_SCHEMA), on=['id'], when_matched=[
+                WhenMatched.update({'value': assignment})])
+
+    with ExitStack() as stack:
+        authorize = stack.enter_context(
+            patch.object(server, '_table_query_auth_handle', wraps=server._table_query_auth_handle)
+            if policy == 'whole' else _restricted(server, historical, policy))
+        _native_only(stack, use_native)
+        if policy == 'whole':
+            messages = operate()
+            assert messages
+            assert all(message.check_from_snapshot == snapshot.id for message in messages)
+        else:
+            with pytest.raises(Exception, match='[Pp]ermission|denied|unrestricted|restrict|[Mm]ask|query.auth'):
+                operate()
+            assignment.assert_not_called()
+            assert _files(latest) == before
+        assert authorize.call_count >= 1
+        assert all(json.loads(call.args[1]).get('select') is None for call in authorize.call_args_list)
+    if policy == 'whole':
+        latest.new_batch_write_builder().new_commit().commit(messages)
+        expected = [dict(row, extra=None) for row in _ROWS]
+        if operation == 'predicate-delete':
+            expected.pop(0)
+        else:
+            expected[0]['value'] = 100 if operation == 'shard' else 11
+            if operation == 'shard':
+                expected[1]['value'] = 200
+        assert _rows(latest) == expected

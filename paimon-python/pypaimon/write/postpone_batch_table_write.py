@@ -154,7 +154,7 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         require_columns(values_by_name, self.table.partition_keys, "write_row")
         from pypaimon.write.row_kind import skip_write_row
 
-        if skip_write_row(self.table, values_by_name, row.get_row_kind()):
+        if skip_write_row(self.table, values_by_name, row.get_row_kind(), self.file_store_write.write_cols):
             return
         partition = tuple(
             values_by_name[key] for key in self.table.partition_keys)

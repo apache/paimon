@@ -166,7 +166,7 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     pinned = table.copy({
         'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
     })
-    assert create_native_update(pinned, builder.commit_user, ['name']) is None
+    assert create_native_update(pinned, builder.commit_user, ['name']) is not None
 
     update_builder = table.new_batch_write_builder()
     update = update_builder.new_update().with_update_type(['name', 'age'])
@@ -219,7 +219,7 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
     pinned = table.copy({
         'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
     })
-    assert create_native_delete(pinned, builder.commit_user) is None
+    assert create_native_delete(pinned, builder.commit_user) is not None
 
     with patch.object(TableDeleteByRowId, 'delete',
                       side_effect=AssertionError('Python delete was selected')):

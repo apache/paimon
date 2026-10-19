@@ -24,7 +24,6 @@ from typing import Any, List, Optional, Sequence
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.ray.data_evolution_merge_into import (
     _normalize_on,
     _normalize_set_spec,
@@ -110,7 +109,9 @@ def merge_into(
     # unrestricted whole-table grant before any user callback or staging.
     from pypaimon.write.table_update import _authorize_update
     _authorize_update(target_table)
-    base_snapshot = target_table.snapshot_manager().get_latest_snapshot()
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    base_snapshot = TimeTravelUtil.resolve_snapshot(target_table)
+    target_table = target_table._copy_with_snapshot(base_snapshot)
     source_table, matched_specs, not_matched_specs, ctx = _prepare(
         target_table,
         source,
@@ -794,7 +795,11 @@ def _read_table(table, projection: Optional[List[str]] = None,
 def _copy_at_snapshot(table, snapshot_id: Optional[int]):
     if snapshot_id is None:
         return table
-    return table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot_id)})
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    snapshot = TimeTravelUtil.resolve_snapshot(table)
+    if snapshot is None or snapshot.id != snapshot_id:
+        snapshot = table.snapshot_manager().get_snapshot_by_id(snapshot_id)
+    return table._copy_with_snapshot(snapshot)
 
 
 def _validate_source_on_cols(source_table: pa.Table, on: Sequence[str]) -> None:

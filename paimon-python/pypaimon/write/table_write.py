@@ -52,6 +52,30 @@ def _pandas_write_schema(table, schema):
     return pa.schema([field.with_nullable(True) for field in schema], metadata=schema.metadata)
 
 
+def _pandas_write_batch(table, dataframe, schema, table_schema):
+    """Retain event/routing inputs omitted from the physical write type."""
+    if table is not None and schema.names != table_schema.names:
+        from pypaimon.table.bucket_mode import BucketMode
+        required = list(table.partition_keys)
+        if table.bucket_mode() == BucketMode.HASH_FIXED and table.options.bucket() > 1:
+            required.extend(table.table_schema.bucket_keys)
+        row_kind_field = table.options.options.to_map().get('rowkind.field')
+        if row_kind_field is not None:
+            required.append(row_kind_field)
+        if not set(required).issubset(schema.names):
+            require_columns(dataframe, required, 'write_pandas')
+            retained = set(schema.names) | set(required)
+            # Full transport preserves the declared field order. Unwritten
+            # payloads must not be converted, including live BLOB objects.
+            dataframe = dataframe.reindex(columns=table_schema.names).copy()
+            for name in table_schema.names:
+                if name not in retained:
+                    dataframe[name] = None
+            schema = pa.schema([field if field.name in schema.names else field.with_nullable(True)
+                                for field in table_schema], metadata=table_schema.metadata)
+    return pa.RecordBatch.from_pandas(dataframe, schema=_pandas_write_schema(table, schema))
+
+
 def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
                hash_fixed_precluster='auto', static_partition=None):
     """Share Ray coordination without constructing another local data writer."""
@@ -200,7 +224,7 @@ class TableWrite:
         require_columns(values_by_name, column_names, "write_row")
         require_columns(values_by_name, self.table.partition_keys, "write_row")
         from pypaimon.write.row_kind import skip_write_row
-        if skip_write_row(self.table, values_by_name, row.get_row_kind()):
+        if skip_write_row(self.table, values_by_name, row.get_row_kind(), self.file_store_write.write_cols):
             return
         partition, bucket = (
             self.row_key_extractor.extract_partition_bucket_row(values_by_name)
@@ -225,8 +249,8 @@ class TableWrite:
             pa_schema = self._write_cols_pyarrow_schema(write_cols)
         else:
             pa_schema = self.table_pyarrow_schema
-        transport = _pandas_write_schema(getattr(self, 'table', None), pa_schema)
-        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=transport)
+        record_batch = _pandas_write_batch(
+            getattr(self, 'table', None), dataframe, pa_schema, self.table_pyarrow_schema)
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
@@ -349,7 +373,7 @@ class TableWrite:
             return data
         data = self._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
-        data = filter_write_batch(table, data)
+        data = filter_write_batch(table, data, self.file_store_write.write_cols)
         if not data.num_rows:
             return data
         data = normalize_arrow_strings(data)
