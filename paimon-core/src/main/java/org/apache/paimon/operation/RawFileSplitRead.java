@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -45,6 +46,7 @@ import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
@@ -88,6 +90,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
+    @Nullable private final KeyValueFieldsExtractor keyValueFieldsExtractor;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -103,6 +106,26 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             CoreOptions coreOptions) {
+        this(
+                fileIO,
+                schemaManager,
+                schema,
+                rowType,
+                formatDiscover,
+                pathFactory,
+                coreOptions,
+                null);
+    }
+
+    public RawFileSplitRead(
+            FileIO fileIO,
+            SchemaManager schemaManager,
+            TableSchema schema,
+            RowType rowType,
+            FileFormatDiscover formatDiscover,
+            FileStorePathFactory pathFactory,
+            CoreOptions coreOptions,
+            @Nullable KeyValueFieldsExtractor keyValueFieldsExtractor) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -115,6 +138,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
         this.readRowType = rowType;
+        this.keyValueFieldsExtractor = keyValueFieldsExtractor;
     }
 
     @Override
@@ -209,8 +233,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         RowType outputRowType = readRowType;
-        Builder formatReaderMappingBuilder =
-                createFormatReaderMappingBuilder(outputRowType, topN, intLimit(limit));
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -218,7 +240,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             partition,
                             dataFilePathFactory,
                             file,
-                            formatReaderMappingBuilder,
+                            topN,
+                            intLimit(limit),
                             outputRowType,
                             dvFactories,
                             null));
@@ -251,7 +274,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                 dataFile,
                                 // The caller has already selected the rows. Applying a regular
                                 // TopN or limit before position filtering can drop hits.
-                                createFormatReaderMappingBuilder(outputRowType, null, null),
+                                null,
+                                null,
                                 outputRowType,
                                 dvFactories,
                                 selectedPositions)
@@ -259,11 +283,21 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     private Builder createFormatReaderMappingBuilder(
-            RowType outputRowType, @Nullable TopN pushDownTopN, @Nullable Integer pushDownLimit) {
+            RowType outputRowType,
+            @Nullable TopN pushDownTopN,
+            @Nullable Integer pushDownLimit,
+            String formatIdentifier) {
         return new Builder(
                 formatDiscover,
                 outputRowType.getFields(),
                 schema -> {
+                    if ("row".equals(formatIdentifier) && keyValueFieldsExtractor != null) {
+                        // ROW decodes fields by position, so raw primary-key reads need the
+                        // historical key and merge columns even when only values are projected.
+                        return KeyValue.createKeyValueFields(
+                                keyValueFieldsExtractor.keyFields(schema),
+                                keyValueFieldsExtractor.valueFields(schema));
+                    }
                     if (rowTrackingEnabled) {
                         // maybe file has no row id and sequence number, but in manifest entry
                         return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
@@ -286,7 +320,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
-            Builder formatBuilder,
+            @Nullable TopN pushDownTopN,
+            @Nullable Integer pushDownLimit,
             RowType outputRowType,
             @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories,
             @Nullable RoaringBitmap32 selectedPositions) {
@@ -297,12 +332,17 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 formatReaderMappings.computeIfAbsent(
                         new FormatKey(file.schemaId(), formatIdentifier),
                         key ->
-                                formatBuilder.build(
-                                        formatIdentifier,
-                                        schema,
-                                        schemaId == schema.id()
-                                                ? schema
-                                                : schemaManager.schema(schemaId)));
+                                createFormatReaderMappingBuilder(
+                                                outputRowType,
+                                                pushDownTopN,
+                                                pushDownLimit,
+                                                formatIdentifier)
+                                        .build(
+                                                formatIdentifier,
+                                                schema,
+                                                schemaId == schema.id()
+                                                        ? schema
+                                                        : schemaManager.schema(schemaId)));
 
         IOExceptionSupplier<DeletionVector> dvFactory =
                 dvFactories == null ? null : dvFactories.get(file.fileName());

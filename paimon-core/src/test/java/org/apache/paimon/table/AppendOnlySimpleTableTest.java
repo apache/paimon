@@ -38,6 +38,7 @@ import org.apache.paimon.fileindex.rangebitmap.RangeBitmapFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
@@ -82,6 +83,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
@@ -137,8 +139,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Tests for {@link AppendOnlyFileStoreTable}. */
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
-    @Test
-    public void testRowFormatVariantReadWrite() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"append", "primary-key-raw", "primary-key-merge"})
+    public void testRowFormatVariantReadWrite(String tableKind) throws Exception {
+        boolean primaryKey = !"append".equals(tableKind);
+        boolean merge = "primary-key-merge".equals(tableKind);
         RowType rowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "id", DataTypes.INT()),
@@ -150,7 +155,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                                         DataTypes.FIELD(3, "label", DataTypes.STRING()),
                                         DataTypes.FIELD(4, "detail", DataTypes.VARIANT()))));
         Options options = new Options();
-        options.set(BUCKET, -1);
+        options.set(BUCKET, primaryKey ? 1 : -1);
         options.set(FILE_FORMAT, "row");
         options.set(WRITE_ONLY, true);
         new FileSystemSchemaManager(FileIOFinder.find(tablePath), tablePath)
@@ -158,7 +163,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
-                                Collections.emptyList(),
+                                primaryKey
+                                        ? Collections.singletonList("id")
+                                        : Collections.emptyList(),
                                 options.toMap(),
                                 ""));
         FileStoreTable table =
@@ -180,18 +187,33 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                                 GenericVariant.fromJson("\"text\""),
                                 GenericRow.of(BinaryString.fromString("two"), null)));
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        try (BatchTableWrite write = writeBuilder.newWrite();
-                BatchTableCommit commit = writeBuilder.newCommit()) {
-            for (InternalRow row : expected) {
-                write.write(row);
+        for (int commitIndex = 0; commitIndex < (merge ? 2 : 1); commitIndex++) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                for (InternalRow row : expected) {
+                    write.write(
+                            merge && commitIndex == 0
+                                    ? GenericRow.of(
+                                            row.getInt(0),
+                                            GenericVariant.fromJson("{\"a\":[-1]}"),
+                                            null)
+                                    : row);
+                }
+                commit.commit(write.prepareCommit());
             }
-            commit.commit(write.prepareCommit());
         }
 
         ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        if (primaryKey) {
+            assertThat(splits).hasSize(1);
+            DataSplit split = (DataSplit) splits.get(0);
+            assertThat(split.rawConvertible()).isEqualTo(!merge);
+            assertThat(split.dataFiles()).hasSize(merge ? 2 : 1);
+        }
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         List<InternalRow> actual = new ArrayList<>();
-        for (Split split : readBuilder.newScan().plan().splits()) {
+        for (Split split : splits) {
             try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
                 reader.forEachRemaining(row -> actual.add(serializer.copy(row)));
             }
@@ -229,6 +251,37 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         GenericRow.of(GenericRow.of(GenericRow.of((Object) null)), null, 2),
                         GenericRow.of(null, GenericRow.of(null, null), 3),
                         GenericRow.of(GenericRow.of((Object) null), GenericRow.of(null, null), 4));
+
+        if ("primary-key-raw".equals(tableKind)) {
+            new FileSystemSchemaManager(FileIOFinder.find(tablePath), tablePath)
+                    .commitChanges(
+                            Arrays.asList(
+                                    SchemaChange.renameColumn("id", "renamed_id"),
+                                    SchemaChange.renameColumn("payload", "renamed_payload")));
+            FileStoreTable evolvedTable =
+                    FileStoreTableFactory.create(FileIOFinder.find(tablePath), tablePath);
+            RowType evolvedReadType =
+                    DataTypes.ROW(
+                            readType.getField(2),
+                            readType.getField(1).newName("renamed_payload"),
+                            readType.getField(0).newName("renamed_id"));
+            ReadBuilder evolvedRead = evolvedTable.newReadBuilder().withReadType(evolvedReadType);
+            IndexedSplit selected =
+                    new IndexedSplit(
+                            (DataSplit) splits.get(0),
+                            Arrays.asList(new Range(0, 0), new Range(2, 2)),
+                            null);
+            InternalRowSerializer evolvedSerializer = new InternalRowSerializer(evolvedReadType);
+            List<InternalRow> historical = new ArrayList<>();
+            try (RecordReader<InternalRow> reader = evolvedRead.newRead().createReader(selected)) {
+                reader.forEachRemaining(row -> historical.add(evolvedSerializer.copy(row)));
+            }
+            assertThat(historical)
+                    .containsExactlyInAnyOrder(
+                            GenericRow.of(
+                                    GenericRow.of(GenericRow.of(2)), GenericRow.of(1, true), 1),
+                            GenericRow.of(null, GenericRow.of(null, null), 3));
+        }
     }
 
     @Test

@@ -503,7 +503,9 @@ class RowFormatVectorTableTest(unittest.TestCase):
 
 @pytest.mark.python_read
 @pytest.mark.python_write
-@pytest.mark.parametrize('table_kind', ['append', 'primary-key', 'data-evolution'])
+@pytest.mark.parametrize('table_kind', [
+    'append', 'primary-key', 'primary-key-high-id', 'data-evolution',
+])
 def test_row_table_preserves_variant_values(tmp_path, table_kind):
     variants = GenericVariant.to_arrow_array([
         GenericVariant.from_python({'a': 1, 'nested': {'b': [True, None, 'text']}}),
@@ -536,7 +538,7 @@ def test_row_table_preserves_variant_values(tmp_path, table_kind):
         'file.format': 'row', 'write.native.enabled': 'false', 'read.native.enabled': 'false',
     }
     primary_keys = []
-    if table_kind == 'primary-key':
+    if table_kind.startswith('primary-key'):
         primary_keys = ['id']
         options['bucket'] = '1'
     elif table_kind == 'data-evolution':
@@ -544,25 +546,35 @@ def test_row_table_preserves_variant_values(tmp_path, table_kind):
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', True)
-    catalog.create_table('default.variants', Schema.from_pyarrow_schema(
-        data.schema, primary_keys=primary_keys, options=options), False)
+    schema = Schema.from_pyarrow_schema(
+        data.schema, primary_keys=primary_keys, options=options)
+    if table_kind == 'primary-key-high-id':
+        schema.fields[1].id = 1_000_000
+    catalog.create_table('default.variants', schema, False)
     table = catalog.get_table('default.variants')
+    batches = [data]
+    if table_kind == 'primary-key-high-id':
+        stale = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({'stale': True}) for _ in range(5)
+        ])
+        batches.insert(0, data.set_column(1, 'payload', stale))
     builder = table.new_batch_write_builder()
-    writer, committer = builder.new_write(), builder.new_commit()
-    try:
-        writer.write_arrow(data)
-        messages = writer.prepare_commit()
-        files = [file for message in messages for file in message.new_files]
-        assert files
-        for file in files:
-            assert file.file_name.endswith('.row')
-            with table.file_io.new_input_stream(file.file_path) as stream:
-                stream.seek(file.file_size - 8)
-                assert stream.read(1) == b'\x01'
-        committer.commit(messages)
-    finally:
-        writer.close()
-        committer.close()
+    for batch in batches:
+        writer, committer = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(batch)
+            messages = writer.prepare_commit()
+            files = [file for message in messages for file in message.new_files]
+            assert files
+            for file in files:
+                assert file.file_name.endswith('.row')
+                with table.file_io.new_input_stream(file.file_path) as stream:
+                    stream.seek(file.file_size - 8)
+                    assert stream.read(1) == b'\x01'
+            committer.commit(messages)
+        finally:
+            writer.close()
+            committer.close()
 
     read_builder = table.new_read_builder()
     splits = read_builder.new_scan().plan().splits()

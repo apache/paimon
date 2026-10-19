@@ -95,7 +95,8 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
 KEY_PREFIX = "_KEY_"
-KEY_FIELD_ID_START = 1000000
+# Match Java's reserved key-field range without overlapping valid user IDs.
+KEY_FIELD_ID_START = SpecialFields.SYSTEM_FIELD_ID_START
 NULL_FIELD_INDEX = -1
 
 
