@@ -77,24 +77,24 @@ def _write_dataset(
         batch_size,
         metadata,
         video_fields=()):
-    messages = _prepare_dataset(
-        table.raw_table, dataset, info, source, source_schema, batch_size,
-        metadata, video_fields)
-    return _commit_messages(table.raw_table, messages)
-
-
-def _commit_messages(table, messages):
-    snapshot_recorder = _SnapshotRecorder()
-    table_commit = table.new_batch_write_builder().new_commit()
+    table_commit = table.raw_table.new_batch_write_builder().new_commit()
     try:
-        table_commit.add_commit_callback(snapshot_recorder)
-        table_commit.commit(messages)
-        if snapshot_recorder.snapshot_id is None:
-            raise RuntimeError(
-                "LeRobot append committed without reporting a snapshot id.")
-        return snapshot_recorder.snapshot_id
+        messages = _prepare_dataset(
+            table.raw_table, dataset, info, source, source_schema, batch_size,
+            metadata, video_fields)
+        return _commit_messages(table_commit, messages)
     finally:
         table_commit.close()
+
+
+def _commit_messages(table_commit, messages):
+    snapshot_recorder = _SnapshotRecorder()
+    table_commit.add_commit_callback(snapshot_recorder)
+    table_commit.commit(messages)
+    if snapshot_recorder.snapshot_id is None:
+        raise RuntimeError(
+            "LeRobot append committed without reporting a snapshot id.")
+    return snapshot_recorder.snapshot_id
 
 
 def _abort_messages(table, messages):

@@ -141,7 +141,7 @@ class LeRobotRayImportTest(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def _source(self, video=False, data_files=1):
+    def _source(self, video=False, data_files=1, path_backed=False):
         root = self.source
         (root / "meta/episodes/chunk-000").mkdir(parents=True, exist_ok=True)
         (root / "data/chunk-000").mkdir(parents=True, exist_ok=True)
@@ -205,7 +205,12 @@ class LeRobotRayImportTest(unittest.TestCase):
             for i in range(8):
                 buffer = io.BytesIO()
                 Image.new("RGB", (16, 16), (i * 20, 0, 0)).save(buffer, format="PNG")
-                images.append({"bytes": buffer.getvalue(), "path": None})
+                if path_backed:
+                    path = root / ("image-%d.png" % i)
+                    path.write_bytes(buffer.getvalue())
+                    images.append({"bytes": None, "path": str(path.resolve())})
+                else:
+                    images.append({"bytes": buffer.getvalue(), "path": None})
             rows = rows.append_column("camera", pa.array(images))
         for file_index in range(data_files):
             episode_count = 4 // data_files
@@ -251,7 +256,13 @@ class LeRobotRayImportTest(unittest.TestCase):
                                         batch_size=1, parallelism=1)
 
     def test_images_match_serial_import(self):
-        self._source()
+        self._check_image_import(False)
+
+    def test_absolute_image_paths_match_serial_import(self):
+        self._check_image_import(True)
+
+    def _check_image_import(self, path_backed):
+        self._source(path_backed=path_backed)
         self._import_serial()
         self.conn.load_from_lerobot("parallel", self.source, parallelism=2,
                                     batch_size=1, tag_name="imported")
@@ -389,6 +400,76 @@ class LeRobotRayImportTest(unittest.TestCase):
                 self.assertTrue(any(".vector." in name for name in before), before)
                 self.assertTrue(any(name.endswith(".blob") for name in before), before)
                 table = self.conn.get_table(table_name).raw_table
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                self.assertEqual([], _bucket_files(table))
+
+    def test_interrupt_during_result_delivery_aborts_ready_task(self):
+        import ray
+        self._source()
+        delivered = []
+
+        class InterruptingRay:
+            def __getattr__(self, name):
+                return getattr(ray, name)
+
+            def get(self, task, **kwargs):
+                result = ray.get(task, **kwargs)
+                if not delivered:
+                    delivered.extend(result)
+                    raise KeyboardInterrupt("interrupted result delivery")
+                return result
+
+        with patch("pypaimon.multimodal.lerobot.ray_loader._require_ray",
+                   return_value=InterruptingRay()):
+            with self.assertRaisesRegex(KeyboardInterrupt, "interrupted result delivery"):
+                self.conn.load_from_lerobot("interrupted", self.source, parallelism=2)
+        self.assertTrue(delivered)
+        table = self.conn.get_table("interrupted").raw_table
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual([], _bucket_files(table))
+
+    def test_source_close_interrupt_aborts_prepared_files(self):
+        self._source()
+        trace = self.root / "source-close.json"
+
+        def prepare(*args):
+            from contextlib import contextmanager
+            from pypaimon.multimodal.lerobot import ray_loader
+            original = ray_loader._resolved_source
+
+            @contextmanager
+            def interrupted_source(*source_args):
+                with original(*source_args) as source:
+                    yield source
+                trace.write_text(json.dumps(
+                    [path.name for path in _bucket_files(args[0])]))
+                raise KeyboardInterrupt("interrupted source close")
+
+            with patch.object(ray_loader, "_resolved_source", interrupted_source):
+                return ray_loader._prepare_group(*args)
+
+        with patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group", prepare):
+            with self.assertRaisesRegex(BaseException, "interrupted source close"):
+                self.conn.load_from_lerobot("source_close", self.source, parallelism=2)
+        self.assertTrue(json.loads(trace.read_text()))
+        table = self.conn.get_table("source_close").raw_table
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual([], _bucket_files(table))
+
+    def test_invalid_commit_options_fail_before_preparing(self):
+        self._source()
+        for parallelism in (1, 2):
+            with self.subTest(parallelism=parallelism):
+                name = "invalid_commit_%d" % parallelism
+                with patch("pypaimon.multimodal.lerobot.loader._prepare_dataset") as prepare, \
+                        patch("pypaimon.multimodal.lerobot.ray_loader._prepare_group") as group:
+                    with self.assertRaises(ValueError):
+                        self.conn.load_from_lerobot(
+                            name, self.source.as_uri(), parallelism=parallelism,
+                            options={"commit.max-retries": "typo"})
+                    prepare.assert_not_called()
+                    group.assert_not_called()
+                table = self.conn.get_table(name).raw_table
                 self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
                 self.assertEqual([], _bucket_files(table))
 

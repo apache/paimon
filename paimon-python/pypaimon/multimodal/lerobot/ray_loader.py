@@ -88,79 +88,81 @@ def _task_groups(info, episodes, video_fields, parallelism):
 
 def _prepare_group(table, source_path, source_options, info, schema,
                    batch_size, metadata, video_fields, episode_indices):
-    with _resolved_source(source_path, source_options) as (source, current_info):
-        if current_info != info:
-            raise ValueError("LeRobot source metadata changed during import.")
-        dataset = _RemoteLeRobotDataset(source, info)
-        messages = None
-        close_started = False
-        try:
-            messages = _prepare_dataset(
-                table, dataset, info, source, schema, batch_size,
-                metadata, video_fields, episode_indices)
-            close_started = True
-            dataset.close()
-            return messages
-        except BaseException:
-            # _prepare_dataset aborts an unfinished writer. A cancellation
-            # after prepare_commit must also discard its returned files.
-            if messages is not None:
-                try:
-                    _abort_messages(table, messages)
-                except Exception:
-                    logging.exception("Failed to abort prepared LeRobot files.")
-            if not close_started:
+    messages = None
+    try:
+        with _resolved_source(source_path, source_options) as (source, current_info):
+            if current_info != info:
+                raise ValueError("LeRobot source metadata changed during import.")
+            dataset = _RemoteLeRobotDataset(source, info)
+            try:
+                messages = _prepare_dataset(
+                    table, dataset, info, source, schema, batch_size,
+                    metadata, video_fields, episode_indices)
+            finally:
                 dataset.close()
-            raise
+        return messages
+    except BaseException:
+        # Retain ownership until both the dataset and source have closed.
+        if messages is not None:
+            try:
+                _abort_messages(table, messages)
+            except Exception:
+                logging.exception("Failed to abort prepared LeRobot files.")
+        raise
 
 
 def _write_dataset_ray(table, dataset, info, source, source_schema, batch_size,
                        metadata, video_fields=(), *, parallelism,
                        source_options=None):
     ray = _require_ray()
-    groups = _task_groups(info, dataset._episodes, video_fields, parallelism)
-    # Share only validated metadata, never the driver's dataset or open streams.
-    table_ref = ray.put(table.raw_table)
-    info_ref = ray.put(info)
-    metadata_ref = ray.put({
-        "episodes": metadata["episodes"],
-        "subtask_indices": metadata["subtask_indices"],
-    })
-    prepare = ray.remote(num_cpus=1, max_retries=0)(_prepare_group)
-    pending = []
-    messages = []
+    table_commit = table.raw_table.new_batch_write_builder().new_commit()
     try:
-        for group in groups:
-            pending.append(prepare.remote(
-                table_ref, source.path, source_options, info_ref,
-                source_schema, batch_size, metadata_ref, video_fields, group))
-        while pending:
-            ready, pending = ray.wait(pending, num_returns=1)
-            messages.extend(ray.get(ready[0]))
-    except BaseException:
-        # Soft cancellation raises KeyboardInterrupt in running Ray tasks,
-        # allowing their writer cleanup to run. Never wait without a bound.
-        for task in pending:
-            try:
-                ray.cancel(task)
-            except Exception:
-                logging.exception("Failed to cancel LeRobot import task.")
-        if pending:
-            try:
-                ready, _ = ray.wait(
-                    pending, num_returns=len(pending),
-                    timeout=_CANCEL_DRAIN_SECONDS)
-                for task in ready:
-                    try:
-                        messages.extend(ray.get(task, timeout=0))
-                    except Exception:
-                        pass
-            except Exception:
-                logging.exception("Failed to drain cancelled LeRobot tasks.")
+        groups = _task_groups(info, dataset._episodes, video_fields, parallelism)
+        # Share only validated metadata, never the driver's dataset or open streams.
+        table_ref = ray.put(table.raw_table)
+        info_ref = ray.put(info)
+        metadata_ref = ray.put({
+            "episodes": metadata["episodes"],
+            "subtask_indices": metadata["subtask_indices"],
+        })
+        prepare = ray.remote(num_cpus=1, max_retries=0)(_prepare_group)
+        pending = []
+        messages = []
         try:
-            _abort_messages(table.raw_table, messages)
-        except Exception:
-            logging.exception("Failed to abort prepared LeRobot files.")
-        raise
+            for group in groups:
+                pending.append(prepare.remote(
+                    table_ref, source.path, source_options, info_ref,
+                    source_schema, batch_size, metadata_ref, video_fields, group))
+            while pending:
+                ready, _ = ray.wait(pending, num_returns=1)
+                messages.extend(ray.get(ready[0]))
+                pending.remove(ready[0])
+        except BaseException:
+            # Soft cancellation raises KeyboardInterrupt in running Ray tasks,
+            # allowing their writer cleanup to run. Never wait without a bound.
+            for task in pending:
+                try:
+                    ray.cancel(task)
+                except Exception:
+                    logging.exception("Failed to cancel LeRobot import task.")
+            if pending:
+                try:
+                    ready, _ = ray.wait(
+                        pending, num_returns=len(pending),
+                        timeout=_CANCEL_DRAIN_SECONDS)
+                    for task in ready:
+                        try:
+                            messages.extend(ray.get(task, timeout=0))
+                        except Exception:
+                            pass
+                except Exception:
+                    logging.exception("Failed to drain cancelled LeRobot tasks.")
+            try:
+                _abort_messages(table.raw_table, messages)
+            except Exception:
+                logging.exception("Failed to abort prepared LeRobot files.")
+            raise
 
-    return _commit_messages(table.raw_table, messages)
+        return _commit_messages(table_commit, messages)
+    finally:
+        table_commit.close()

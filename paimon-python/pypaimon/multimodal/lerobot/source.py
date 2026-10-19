@@ -543,6 +543,8 @@ def _remote_source_path(root, path, name, source_file_io=None):
                 % (name, path))
         source_path = posixpath.normpath(
             _fully_unquote(path_uri.path) or "/")
+    elif root_uri.scheme.lower() == "file" and Path(path).is_absolute():
+        source_path = str(Path(path).resolve())
     else:
         relative_path = _relative_dataset_path(path, name)
         source_path = posixpath.normpath(posixpath.join(
