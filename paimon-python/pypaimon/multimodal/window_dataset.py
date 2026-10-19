@@ -278,7 +278,8 @@ class ContiguousWindowDataset(Dataset):
             "version": 1,
             "identity": self._state_identity(),
             "callbacks": {
-                name: copy.deepcopy(callback.state_dict())
+                # A tuple keeps TorchData from flattening dictionary subclasses.
+                name: (copy.deepcopy(callback.state_dict()),)
                 for name, callback in self._stateful_callbacks().items()
             },
             "python_rng": random.getstate(),
@@ -298,7 +299,7 @@ class ContiguousWindowDataset(Dataset):
         if callbacks.keys() != state_dict["callbacks"].keys():
             raise ValueError("CWD checkpoint has different stateful callbacks.")
         for name, callback in callbacks.items():
-            callback.load_state_dict(copy.deepcopy(state_dict["callbacks"][name]))
+            callback.load_state_dict(copy.deepcopy(state_dict["callbacks"][name][0]))
         # Callback restoration may itself consume random numbers.
         random.setstate(state_dict["python_rng"])
         np.random.set_state(state_dict["numpy_rng"])

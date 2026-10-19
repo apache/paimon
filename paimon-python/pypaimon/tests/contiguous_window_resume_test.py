@@ -16,6 +16,7 @@
 # under the License.
 
 import random
+from collections import defaultdict
 from unittest.mock import patch
 
 import numpy as np
@@ -193,6 +194,50 @@ def _loader(dataset, workers, persistent=False):
 def _batch_values(batch):
     return (batch["episode"], batch["step"].tolist(), batch["value"].tolist(),
             batch["value_is_pad"].tolist())
+
+
+class _EpisodeCounter:
+
+    def __init__(self):
+        self.counts = defaultdict(int)
+
+    def __call__(self, sample):
+        episode = sample["episode"]
+        self.counts[episode] += 1
+        return episode, sample["step"], self.counts[episode]
+
+    def state_dict(self):
+        return {"counts": self.counts}
+
+    def load_state_dict(self, state):
+        self.counts = state["counts"]
+
+
+def test_stateful_loader_preserves_callback_dictionary_subclasses(frames, tmp_path):
+    loader_type = pytest.importorskip("torchdata.stateful_dataloader").StatefulDataLoader
+
+    def make_loader():
+        return loader_type(
+            windows(frames, adapter=_EpisodeCounter()), batch_size=4,
+            num_workers=1, multiprocessing_context="spawn", prefetch_factor=2)
+
+    def samples(batches):
+        return [(episode, step, count) for episodes, steps, counts in batches
+                for episode, step, count in zip(episodes, steps.tolist(), counts.tolist())]
+
+    loader = make_loader()
+    iterator = iter(loader)
+    prefix = samples([next(iterator) for _ in range(3)])
+    checkpoint = tmp_path / "loader.pt"
+    torch.save(loader.state_dict(), checkpoint)
+    suffix = samples(iterator)
+    assert prefix + suffix == [(episode, step, step + 1)
+                               for episode in ("a", "b") for step in range(22)]
+
+    restored = make_loader()
+    restored.load_state_dict(torch.load(checkpoint, weights_only=False))
+    # Episode b was absent from the saved counters and still needs the default factory.
+    assert samples(restored) == suffix
 
 
 @pytest.mark.parametrize("workers,persistent,completed", [
