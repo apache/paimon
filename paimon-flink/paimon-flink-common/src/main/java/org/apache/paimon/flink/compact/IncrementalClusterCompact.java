@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.compact.CompactUnit;
@@ -31,6 +32,8 @@ import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.DataEvolutionCommitPreparationOperator;
+import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.RowAppendTableSink;
 import org.apache.paimon.flink.sorter.SortOperator;
@@ -329,6 +332,20 @@ public class IncrementalClusterCompact {
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));
         }
-        sink.doCommit(dataStream, commitUser);
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Snapshot snapshot = clusterManager.snapshot();
+            dataStream =
+                    dataStream
+                            .transform(
+                                    "Data Evolution Cluster Commit Preparation : " + table.name(),
+                                    new CommittableTypeInfo(),
+                                    DataEvolutionCommitPreparationOperator.Factory.forClustering(
+                                            table, snapshot))
+                            .forceNonParallel();
+            new DataEvolutionDeletionVectorMaterializeSink(table, snapshot)
+                    .doCommit(dataStream, commitUser);
+        } else {
+            sink.doCommit(dataStream, commitUser);
+        }
     }
 }

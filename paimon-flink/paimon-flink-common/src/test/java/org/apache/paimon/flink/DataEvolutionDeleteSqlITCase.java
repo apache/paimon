@@ -19,14 +19,35 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -85,6 +106,98 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                         Row.of(3, "three", "A"),
                         Row.of(5, "five", "B"),
                         Row.of(6, "six", "B"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"global-sort", "local-sort"})
+    public void testIncrementalClusteringProcedurePreservesUnselectedPartitionIndexes(String mode)
+            throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql(
+                "ALTER TABLE T SET ("
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', "
+                        + "'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = '"
+                        + mode
+                        + "', "
+                        + "'scan.parallelism' = '2', "
+                        + "'source.split.target-size' = '1 b', "
+                        + "'sink.parallelism' = '1', "
+                        + "'num-sorted-run.compaction-trigger' = '10')");
+        // Interleaved source ranges distinguish the range shuffle from per-reader local sorting.
+        sql("INSERT INTO T VALUES (3, 'three', 'A'), (1, 'one', 'A'), (5, 'five', 'A')");
+        updateFirstGroupNames(paimonTable("T"));
+        sql("INSERT INTO T VALUES (6, 'six', 'A'), (4, 'four', 'A'), (2, 'two', 'A')");
+        sql("INSERT INTO T VALUES (7, 'seven', 'B')");
+        sql("DELETE FROM T WHERE id = 2");
+        createGlobalIndex();
+
+        FileStoreTable table = paimonTable("T");
+        long nextRowId = table.latestSnapshot().get().nextRowId();
+        long beforeSnapshot = table.latestSnapshot().get().id();
+        assertThat(globalIndexPartitions(table)).containsExactly("A", "B");
+
+        sql("CALL sys.compact(`table` => 'default.T', partitions => 'dt=A')");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(beforeSnapshot);
+        sql(
+                "CALL sys.compact(`table` => 'default.T', partitions => 'dt=A', "
+                        + "compact_strategy => 'full')");
+
+        assertThat(sql("SELECT id, name, dt FROM T ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, "updated-one", "A"),
+                        Row.of(3, "updated-three", "A"),
+                        Row.of(4, "four", "A"),
+                        Row.of(5, "updated-five", "A"),
+                        Row.of(6, "six", "A"),
+                        Row.of(7, "seven", "B"));
+        assertThat(sql("SELECT _ROW_ID FROM T$row_tracking " + "WHERE dt = 'A' ORDER BY _ROW_ID"))
+                .containsExactly(
+                        Row.of(nextRowId),
+                        Row.of(nextRowId + 1),
+                        Row.of(nextRowId + 2),
+                        Row.of(nextRowId + 3),
+                        Row.of(nextRowId + 4));
+        assertClusteredFileOrder(table, mode);
+        assertThat(deletionVectorCardinality(table)).isZero();
+        assertThat(globalIndexPartitions(table)).containsExactly("B");
+        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'full')");
+        assertThat(sql("SELECT id FROM T WHERE name = 'updated-three'")).containsExactly(Row.of(3));
+    }
+
+    @Test
+    public void testIncrementalClusteringRemovesFullyDeletedPartition() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql(
+                "ALTER TABLE T SET ("
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', "
+                        + "'clustering.columns' = 'id', "
+                        + "'scan.parallelism' = '2')");
+        sql("INSERT INTO T VALUES (3, 'three', 'A'), (1, 'one', 'A'), (2, 'two', 'A')");
+        sql("INSERT INTO T VALUES (4, 'four', 'B')");
+        createGlobalIndex();
+        sql("DELETE FROM T WHERE id IN (1, 2, 3)");
+        FileStoreTable table = paimonTable("T");
+        assertThat(deletionVectorCardinality(table)).isEqualTo(3L);
+        long nextRowId = table.latestSnapshot().get().nextRowId();
+
+        sql(
+                "CALL sys.compact(`table` => 'default.T', partitions => 'dt=A', "
+                        + "compact_strategy => 'full')");
+
+        assertThat(sql("SELECT id, name, dt FROM T")).containsExactly(Row.of(4, "four", "B"));
+        assertThat(table.newScan().plan().splits())
+                .allSatisfy(
+                        split ->
+                                assertThat(((DataSplit) split).partition().getString(0).toString())
+                                        .isEqualTo("B"));
+        assertThat(deletionVectorCardinality(table)).isZero();
+        assertThat(globalIndexPartitions(table)).containsExactly("B");
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(nextRowId);
     }
 
     @Test
@@ -236,6 +349,88 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         sql("DELETE FROM T WHERE name = 'new'");
 
         assertThat(sql("SELECT id, name, dt FROM T")).containsExactly(Row.of(1, "old", "A"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void updateFirstGroupNames(FileStoreTable table) throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        BinaryRow partition = ((DataSplit) table.newScan().plan().splits().get(0)).partition();
+        try (BatchTableWrite write =
+                        builder.newWrite()
+                                .withWriteType(
+                                        table.rowType().project(Arrays.asList("name", "dt")));
+                BatchTableCommit commit = builder.newCommit()) {
+            // Partial rows do not contain the partition field at its full-schema position.
+            FileStoreWrite<InternalRow> fileStoreWrite =
+                    ((TableWriteImpl<InternalRow>) write).getWrite();
+            for (String name : new String[] {"three", "one", "five"}) {
+                fileStoreWrite.write(
+                        partition,
+                        0,
+                        GenericRow.of(
+                                BinaryString.fromString("updated-" + name),
+                                BinaryString.fromString("A")));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            for (CommitMessage message : messages) {
+                List<DataFileMeta> files =
+                        ((CommitMessageImpl) message).newFilesIncrement().newFiles();
+                List<DataFileMeta> assigned =
+                        files.stream()
+                                .map(file -> file.assignFirstRowId(0L))
+                                .collect(Collectors.toList());
+                files.clear();
+                files.addAll(assigned);
+            }
+            commit.commit(messages);
+        }
+    }
+
+    private static void assertClusteredFileOrder(FileStoreTable table, String mode)
+            throws Exception {
+        List<DataFileMeta> files = new ArrayList<>();
+        List<List<Integer>> fileIds = new ArrayList<>();
+        for (Split split : table.newScan().plan().splits()) {
+            DataSplit dataSplit = (DataSplit) split;
+            if (!dataSplit.partition().getString(0).toString().equals("A")) {
+                continue;
+            }
+            for (DataFileMeta file : dataSplit.dataFiles()) {
+                files.add(file);
+                DataSplit fileSplit =
+                        DataSplit.builder()
+                                .withSnapshot(dataSplit.snapshotId())
+                                .withPartition(dataSplit.partition())
+                                .withBucket(dataSplit.bucket())
+                                .withBucketPath(dataSplit.bucketPath())
+                                .withDataFiles(Collections.singletonList(file))
+                                .build();
+                List<Integer> ids = new ArrayList<>();
+                try (RecordReader<InternalRow> reader = table.newRead().createReader(fileSplit)) {
+                    reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+                }
+                assertThat(ids).isNotEmpty().isSorted();
+                fileIds.add(ids);
+            }
+        }
+        // Verify ordering across actual output files, as well as within each file.
+        assertThat(files).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(files).allSatisfy(file -> assertThat(file.level()).isGreaterThan(0));
+        fileIds.sort(Comparator.comparingInt(ids -> ids.get(0)));
+        boolean overlappingRanges = false;
+        for (int i = 1; i < fileIds.size(); i++) {
+            List<Integer> previous = fileIds.get(i - 1);
+            overlappingRanges |= previous.get(previous.size() - 1) >= fileIds.get(i).get(0);
+        }
+        if (mode.equals("global-sort")) {
+            assertThat(overlappingRanges)
+                    .as("global-sort output file ranges must not overlap")
+                    .isFalse();
+        } else {
+            assertThat(overlappingRanges)
+                    .as("local-sort preserves the interleaved input ranges across readers")
+                    .isTrue();
+        }
     }
 
     private void createGlobalIndex() {

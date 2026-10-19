@@ -163,7 +163,10 @@ public class HistoryPartitionCluster {
                 .collect(
                         Collectors.toMap(
                                 Map.Entry::getKey,
-                                entry -> constructPartitionLevels(entry.getValue())));
+                                entry ->
+                                        constructPartitionLevels(
+                                                entry.getValue(),
+                                                table.coreOptions().dataEvolutionEnabled())));
     }
 
     private Map<BinaryRow, List<DataFileMeta>> filterPartitions(

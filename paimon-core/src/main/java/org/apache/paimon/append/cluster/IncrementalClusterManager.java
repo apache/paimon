@@ -21,6 +21,7 @@ package org.apache.paimon.append.cluster;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
@@ -44,6 +45,7 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RangeHelper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +62,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for Incremental Clustering. */
@@ -83,6 +87,13 @@ public class IncrementalClusterManager {
 
     public IncrementalClusterManager(
             FileStoreTable table, @Nullable PartitionPredicate specifiedPartitions) {
+        this(table, specifiedPartitions, table.snapshotManager().latestSnapshot());
+    }
+
+    public IncrementalClusterManager(
+            FileStoreTable table,
+            @Nullable PartitionPredicate specifiedPartitions,
+            Snapshot snapshot) {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
@@ -99,7 +110,7 @@ public class IncrementalClusterManager {
                         table.store().partitionType(),
                         table.partitionKeys().toArray(new String[0]),
                         table.coreOptions().legacyPartitionName());
-        this.snapshot = table.snapshotManager().latestSnapshot();
+        this.snapshot = snapshot;
         this.snapshotReader =
                 table.newSnapshotReader()
                         .dropStats()
@@ -177,10 +188,21 @@ public class IncrementalClusterManager {
                 .collect(
                         Collectors.toMap(
                                 Map.Entry::getKey,
-                                entry -> constructPartitionLevels(entry.getValue())));
+                                entry ->
+                                        constructPartitionLevels(
+                                                entry.getValue(),
+                                                table.coreOptions().dataEvolutionEnabled())));
     }
 
     public static List<LevelSortedRun> constructPartitionLevels(List<DataFileMeta> partitionFiles) {
+        return constructPartitionLevels(partitionFiles, false);
+    }
+
+    public static List<LevelSortedRun> constructPartitionLevels(
+            List<DataFileMeta> partitionFiles, boolean dataEvolution) {
+        if (dataEvolution) {
+            return constructDataEvolutionLevels(partitionFiles);
+        }
         List<LevelSortedRun> partitionLevels = new ArrayList<>();
         Map<Integer, List<DataFileMeta>> levelMap =
                 partitionFiles.stream().collect(Collectors.groupingBy(DataFileMeta::level));
@@ -206,10 +228,39 @@ public class IncrementalClusterManager {
         return partitionLevels;
     }
 
+    private static List<LevelSortedRun> constructDataEvolutionLevels(List<DataFileMeta> files) {
+        checkArgument(
+                files.stream()
+                        .noneMatch(
+                                file ->
+                                        isBlobFile(file.fileName())
+                                                || isVectorStoreFile(file.fileName())),
+                "Data evolution incremental clustering does not support dedicated BLOB/VECTOR files.");
+        RangeHelper<DataFileMeta> helper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        List<LevelSortedRun> runs = new ArrayList<>();
+        Map<Integer, List<DataFileMeta>> higherLevels = new HashMap<>();
+        for (List<DataFileMeta> group : helper.mergeOverlappingRanges(files)) {
+            checkArgument(
+                    helper.areAllRangesSame(group), "Normal files must have equal row-id ranges.");
+            // A partial update makes the complete group eligible again, including its base.
+            int level = group.stream().mapToInt(DataFileMeta::level).min().getAsInt();
+            if (level == 0) {
+                runs.add(new LevelSortedRun(0, SortedRun.fromSorted(group)));
+            } else {
+                higherLevels.computeIfAbsent(level, ignored -> new ArrayList<>()).addAll(group);
+            }
+        }
+        higherLevels.forEach(
+                (level, group) -> runs.add(new LevelSortedRun(level, SortedRun.fromSorted(group))));
+        runs.sort(Comparator.comparingInt(LevelSortedRun::level));
+        return runs;
+    }
+
     public Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> toSplitsAndRewriteDvFiles(
             Map<BinaryRow, CompactUnit> compactUnits) {
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> result = new HashMap<>();
         boolean dvEnabled = table.coreOptions().deletionVectorsEnabled();
+        boolean dataEvolution = table.coreOptions().dataEvolutionEnabled();
         for (BinaryRow partition : compactUnits.keySet()) {
             CompactUnit unit = compactUnits.get(partition);
             AppendDeleteFileMaintainer dvMaintainer =
@@ -221,6 +272,7 @@ public class IncrementalClusterManager {
 
             DataSplit.Builder builder =
                     DataSplit.builder()
+                            .withSnapshot(snapshot.id())
                             .withPartition(partition)
                             .withBucket(0)
                             .withTotalBuckets(1)
@@ -236,14 +288,16 @@ public class IncrementalClusterManager {
                 String bucketPath =
                         snapshotReader.pathFactory().bucketPath(partition, 0).toString();
                 builder.withDataFiles(dataFiles)
-                        .rawConvertible(splitGroup.rawConvertible)
+                        .rawConvertible(!dataEvolution && splitGroup.rawConvertible)
                         .withBucketPath(bucketPath);
 
                 if (dvMaintainer != null) {
                     List<DeletionFile> dataDeletionFiles = new ArrayList<>();
                     for (DataFileMeta file : dataFiles) {
                         DeletionFile deletionFile =
-                                dvMaintainer.notifyRemovedDeletionVector(file.fileName());
+                                dataEvolution
+                                        ? dvMaintainer.getDeletionFile(file.fileName())
+                                        : dvMaintainer.notifyRemovedDeletionVector(file.fileName());
                         dataDeletionFiles.add(deletionFile);
                     }
                     builder.withDataDeletionFiles(dataDeletionFiles);
@@ -253,7 +307,7 @@ public class IncrementalClusterManager {
 
             // generate delete dv index meta
             CommitMessage dvCommitMessage = null;
-            if (dvMaintainer != null) {
+            if (dvMaintainer != null && !dataEvolution) {
                 List<IndexFileMeta> newIndexFiles = new ArrayList<>();
                 List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
                 List<IndexManifestEntry> indexEntries = dvMaintainer.persist();
@@ -282,6 +336,58 @@ public class IncrementalClusterManager {
         }
 
         return result;
+    }
+
+    public List<CommitMessage> prepareCommitMessages(List<CommitMessage> messages) {
+        return prepareCommitMessages(table, snapshot, messages);
+    }
+
+    /** Merges distributed rewrite outputs before applying the data-evolution commit contract. */
+    public static List<CommitMessage> prepareCommitMessages(
+            FileStoreTable table, Snapshot snapshot, List<CommitMessage> messages) {
+        if (!table.coreOptions().dataEvolutionEnabled()) {
+            return messages;
+        }
+        Map<BinaryRow, CompactIncrement> increments = new HashMap<>();
+        for (CommitMessage message : messages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            checkArgument(
+                    impl.bucket() == 0 && impl.newFilesIncrement().isEmpty(),
+                    "Data evolution clustering requires compact messages for unaware bucket 0.");
+            CompactIncrement merged =
+                    increments.computeIfAbsent(
+                            message.partition(),
+                            ignored ->
+                                    new CompactIncrement(
+                                            new ArrayList<>(),
+                                            new ArrayList<>(),
+                                            new ArrayList<>(),
+                                            new ArrayList<>(),
+                                            new ArrayList<>()));
+            CompactIncrement increment = impl.compactIncrement();
+            merged.compactBefore().addAll(increment.compactBefore());
+            merged.compactAfter().addAll(increment.compactAfter());
+            merged.changelogFiles().addAll(increment.changelogFiles());
+            merged.newIndexFiles().addAll(increment.newIndexFiles());
+            merged.deletedIndexFiles().addAll(increment.deletedIndexFiles());
+        }
+        List<CommitMessage> prepared = new ArrayList<>();
+        increments.forEach(
+                (partition, increment) -> {
+                    checkArgument(
+                            !increment.compactBefore().isEmpty(),
+                            "Data evolution clustering output must include its source files.");
+                    prepared.add(
+                            new CommitMessageImpl(
+                                    partition, 0, null, DataIncrement.emptyIncrement(), increment));
+                });
+        // The committer invalidates global indexes against the latest snapshot on every attempt.
+        prepared.addAll(
+                new DataEvolutionCompactDeletionVectorRewriter(table, snapshot)
+                        .rewriteDeletionVectors(prepared));
+        return prepared.stream()
+                .map(message -> ((CommitMessageImpl) message).withCheckFromSnapshot(snapshot.id()))
+                .collect(Collectors.toList());
     }
 
     public static List<DataFileMeta> upgrade(

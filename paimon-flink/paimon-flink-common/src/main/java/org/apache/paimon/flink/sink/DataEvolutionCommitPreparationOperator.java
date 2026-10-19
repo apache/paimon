@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -41,17 +42,20 @@ public class DataEvolutionCommitPreparationOperator
     private final FileStoreTable table;
     private final Snapshot snapshot;
     private final boolean materializeDvRowIdCheck;
+    private final boolean clustering;
     private final List<Committable> committables;
 
     private DataEvolutionCommitPreparationOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             Snapshot snapshot,
-            boolean materializeDvRowIdCheck) {
+            boolean materializeDvRowIdCheck,
+            boolean clustering) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.snapshot = snapshot;
         this.materializeDvRowIdCheck = materializeDvRowIdCheck;
+        this.clustering = clustering;
         this.committables = new ArrayList<>();
     }
 
@@ -72,6 +76,14 @@ public class DataEvolutionCommitPreparationOperator
         List<CommitMessage> messages = new ArrayList<>(toCommit.size());
         for (Committable committable : toCommit) {
             messages.add(committable.commitMessage());
+        }
+        if (clustering) {
+            List<Committable> prepared = new ArrayList<>();
+            for (CommitMessage message :
+                    IncrementalClusterManager.prepareCommitMessages(table, snapshot, messages)) {
+                prepared.add(new Committable(checkpointId, message));
+            }
+            return prepared;
         }
         for (CommitMessage message :
                 new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages)) {
@@ -97,16 +109,30 @@ public class DataEvolutionCommitPreparationOperator
         private final FileStoreTable table;
         private final Snapshot snapshot;
         private final boolean materializeDvRowIdCheck;
+        private final boolean clustering;
 
         public Factory(FileStoreTable table, Snapshot snapshot) {
             this(table, snapshot, false);
         }
 
         public Factory(FileStoreTable table, Snapshot snapshot, boolean materializeDvRowIdCheck) {
+            this(table, snapshot, materializeDvRowIdCheck, false);
+        }
+
+        public static Factory forClustering(FileStoreTable table, Snapshot snapshot) {
+            return new Factory(table, snapshot, true, true);
+        }
+
+        private Factory(
+                FileStoreTable table,
+                Snapshot snapshot,
+                boolean materializeDvRowIdCheck,
+                boolean clustering) {
             super(Options.fromMap(table.options()));
             this.table = table;
             this.snapshot = snapshot;
             this.materializeDvRowIdCheck = materializeDvRowIdCheck;
+            this.clustering = clustering;
         }
 
         @Override
@@ -115,7 +141,7 @@ public class DataEvolutionCommitPreparationOperator
                 StreamOperatorParameters<Committable> parameters) {
             return (T)
                     new DataEvolutionCommitPreparationOperator(
-                            parameters, table, snapshot, materializeDvRowIdCheck);
+                            parameters, table, snapshot, materializeDvRowIdCheck, clustering);
         }
 
         @Override
