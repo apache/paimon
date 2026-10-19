@@ -74,6 +74,15 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 schemaManager,
                 schema,
                 rowType,
+                dataSchema -> {
+                    if (options.rowTrackingEnabled()) {
+                        // The row id and sequence number may be in the manifest entry.
+                        return SpecialFields.rowTypeWithRowTracking(
+                                        dataSchema.logicalRowType(), true, true)
+                                .getFields();
+                    }
+                    return dataSchema.fields();
+                },
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 options);
