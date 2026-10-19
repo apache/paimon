@@ -551,6 +551,10 @@ Writer restore, overwrite and index construction use this entrypoint and delegat
 planning to Rust core when Native planning is enabled.
 Native planning remains optional and is disabled by default.
 
+Binary partition keys use UTF-8 text and normal partition escaping in both
+`partition.legacy-name` modes, matching Java. This makes repeated writes to the
+same binary value use a stable directory.
+
 # Coalesced BLOB reads
 
 FileIO merges nearby BLOB ranges before reading. Set

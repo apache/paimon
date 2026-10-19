@@ -37,13 +37,6 @@ def _native_vector_builder(builder, batch=False):
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
     if loader is None or _catalog_metastore(loader) != 'rest':
         return None
-    context_fn = getattr(loader, 'context', None)
-    if not callable(context_fn):
-        return None
-    context = context_fn()
-    if any(getattr(context, attr, None) is not None for attr in (
-            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
-        return None
     # Python's batch reader currently supports only global row-ID results.
     if batch and builder._is_primary_key_vector_search():
         return None

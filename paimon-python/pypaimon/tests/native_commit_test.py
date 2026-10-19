@@ -555,6 +555,16 @@ def test_incompatible_publication_environment_is_not_reconstructed(
         resolve.assert_not_called()
 
 
+@pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])
+def test_inactive_context_loader_fields_do_not_disable_native_commit(tmp_path, native_rest_catalog, option):
+    from pypaimon.write.native_commit import _rest_catalog_supported
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    unused = Mock(side_effect=AssertionError('Inactive IO loader was invoked'))
+    setattr(table.catalog_environment.catalog_loader.context(), option, unused)
+    assert _rest_catalog_supported(table)
+    unused.assert_not_called()
+
+
 def test_missing_runtime_falls_back_without_reconstructing_table(
         tmp_path, native_rest_catalog):
     table = _table(tmp_path, catalog=native_rest_catalog)

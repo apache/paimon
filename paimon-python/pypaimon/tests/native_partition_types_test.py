@@ -85,10 +85,12 @@ def _write(table, schema, rows, stream=False):
 
 @pytest.mark.native_plan
 @pytest.mark.parametrize('partition_type,values,names', _PARTITIONS)
+@pytest.mark.parametrize('legacy', [False, True])
 @pytest.mark.parametrize('mode', ['append', 'pk', 'evolution'])
 @pytest.mark.parametrize('placement', ['local', 'directory', 'external'])
-def test_native_partition_write_read_and_file_paths(tmp_path, partition_type, values, names, mode, placement):
-    table, schema = _table(tmp_path, partition_type, mode, placement=placement)
+def test_native_partition_write_read_and_file_paths(tmp_path, partition_type, values, names, legacy, mode, placement):
+    table, schema = _table(tmp_path, partition_type, mode, placement=placement,
+                           extra_options={'partition.legacy-name': str(legacy).lower()})
     rows = [dict(id=i, p=value, value=10 + i) for i, value in enumerate(values)]
     if mode == 'pk':
         rows = [row for row in rows if row['p'] is not None]
@@ -149,8 +151,10 @@ def test_native_non_finite_partitions_use_java_names_for_python_reads(tmp_path, 
 @pytest.mark.python_write
 @pytest.mark.native_plan
 @pytest.mark.parametrize('partition_type,values,names', _PARTITIONS[2:])
-def test_python_binary_partitions_use_java_paths_and_native_reads(tmp_path, partition_type, values, names):
-    table, schema = _table(tmp_path, partition_type, native=False)
+@pytest.mark.parametrize('legacy', [False, True])
+def test_python_binary_partitions_use_java_paths_and_native_reads(tmp_path, partition_type, values, names, legacy):
+    table, schema = _table(tmp_path, partition_type, native=False,
+                           extra_options={'partition.legacy-name': str(legacy).lower()})
     rows = [dict(id=i, p=value, value=i) for i, value in enumerate(values)]
     messages = _write(table, schema, rows)
     for message in messages:
@@ -202,8 +206,10 @@ def test_native_cow_merge_uses_java_partition_path(tmp_path, action):
     (b'', '__DEFAULT_PARTITION__'), (b' \t\x1c', '__DEFAULT_PARTITION__'),
     ('\u00a0'.encode(), '\u00a0'), ('\u0085'.encode(), '\u0085'),
 ])
-def test_binary_partition_string_conversion_matches_java(tmp_path, value, expected):
-    table, _ = _table(tmp_path, pa.binary(), native=False)
+@pytest.mark.parametrize('legacy', [False, True])
+def test_binary_partition_string_conversion_matches_java(tmp_path, value, expected, legacy):
+    table, _ = _table(tmp_path, pa.binary(), native=False,
+                      extra_options={'partition.legacy-name': str(legacy).lower()})
     assert table.path_factory().relative_bucket_path((value,), 0, canonical_partition=True) == (
         'p=' + expected + '/bucket-0')
 
@@ -261,9 +267,31 @@ def test_native_commit_binary_partition_capability_precedes_execution(tmp_path, 
             patch('pypaimon.write.native_commit.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_commit.create_native_write_table') as native:
         committer = create_native_commit(table, 'user')
-        if legacy:
-            assert committer is None
-            native.assert_not_called()
-        else:
-            assert committer is not None
-            native.assert_called_once_with(table)
+        assert committer is not None
+        native.assert_called_once_with(table)
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('mode', ['append', 'pk', 'evolution'])
+def test_python_binary_partition_write_commit_and_reopen(tmp_path, legacy, mode):
+    table, schema = _table(tmp_path, pa.binary(), mode, native=False, extra_options={
+        'partition.legacy-name': str(legacy).lower(),
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+        'commit.native.enabled': 'false'})
+    values = [b'a/b=c', '汉字'.encode('utf-8'), b'\xed\xa0\x80', b' \t\x1c', b'']
+    rows = [dict(id=i, p=value, value=i) for i, value in enumerate(values)]
+    messages = _write(table, schema, rows)
+    for message in messages:
+        for file in message.new_files:
+            assert table.file_io.exists(file.file_path)
+            # Resolve independently from the typed partition bytes, as a
+            # reopened reader does; no Python bytes repr or object identity.
+            from pypaimon.utils.file_store_path_factory import canonical_data_file_path
+            assert file.file_path == canonical_data_file_path(
+                table, message.partition, message.bucket, file.file_name)
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    reopened = catalog.get_table('db.t')
+    assert _read(reopened) == rows
