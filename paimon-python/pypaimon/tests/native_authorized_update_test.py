@@ -179,6 +179,52 @@ def test_unrestricted_rest_updates_share_python_semantics(rest_catalog, use_nati
 
 
 @pytest.mark.parametrize('use_native', _ENGINES)
+@pytest.mark.parametrize('operation', ['update', 'delete'])
+@pytest.mark.parametrize('policy', ['whole', 'denied', 'filter', 'mask'])
+@pytest.mark.parametrize('metadata', ['_ROW_ID', '_SEQUENCE_NUMBER'])
+def test_metadata_predicate_mutations_require_whole_table_authorization(
+        rest_catalog, use_native, operation, policy, metadata):
+    catalog, server = rest_catalog
+    table = _table(catalog, use_native)
+    read = table.new_read_builder().with_projection(_SCHEMA.names + [metadata])
+    predicate = read.new_predicate_builder().equal(metadata, 0 if metadata == '_ROW_ID' else 1)
+    builder = table.new_batch_write_builder()
+    assignment = Mock(side_effect=lambda batch: pc.add(batch['value'], 1))
+    before = _files(table)
+    snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+
+    def mutate():
+        update = builder.new_update()
+        if operation == 'delete':
+            return update.delete_by_predicate(predicate)
+        return update.update_by_predicate(predicate, {'value': assignment}, read_columns=['value'])
+
+    with ExitStack() as stack:
+        authorize = stack.enter_context(
+            patch.object(server, '_table_query_auth_handle', wraps=server._table_query_auth_handle)
+            if policy == 'whole' else _restricted(server, table, policy))
+        _native_only(stack, use_native)
+        if policy == 'whole':
+            messages = mutate()
+            assert messages
+        else:
+            with pytest.raises(Exception, match='[Pp]ermission|denied|unrestricted|restrict|[Mm]ask|query.auth'):
+                mutate()
+            assignment.assert_not_called()
+            assert _files(table) == before
+            assert table.snapshot_manager().get_latest_snapshot().id == snapshot_id
+        assert authorize.call_count >= 1
+        assert all(json.loads(call.args[1]).get('select') is None for call in authorize.call_args_list)
+    if policy == 'whole':
+        assert assignment.call_count == (1 if operation == 'update' else 0)
+        builder.new_commit().commit(messages)
+        matched = 1 if metadata == '_ROW_ID' else 2
+        expected = ([dict(row, value=row['value'] + 1) for row in _ROWS[:matched]] + _ROWS[matched:]
+                    if operation == 'update' else _ROWS[matched:])
+        assert _rows(table) == expected
+
+
+@pytest.mark.parametrize('use_native', _ENGINES)
 @pytest.mark.parametrize('operation', ['row-id', 'incremental', 'predicate', 'upsert', 'row-delete', 'merge'])
 def test_stream_rest_updates_keep_commit_identifier(rest_catalog, use_native, operation):
     catalog, _ = rest_catalog
