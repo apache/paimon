@@ -584,6 +584,9 @@ class FileStoreTable(Table):
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
         new_table._applied_dynamic_options = applied_options
+        new_table._copy_source_identifier = getattr(
+            self, '_copy_source_identifier', self.identifier.get_full_name()
+            if self.catalog_environment.catalog_loader is not None else None)
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
         return new_table

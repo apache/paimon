@@ -488,7 +488,8 @@ class FileStoreCommit:
                     latest_snapshot,
                     commit_identifier,
                     commit_kind,
-                    notify_callbacks=True):
+                    notify_callbacks=True,
+                    commit_result_may_be_uncertain=commit_result_may_be_uncertain):
                 break
             commit_entries = (
                 rewritten_commit_entries
@@ -1175,12 +1176,15 @@ class FileStoreCommit:
             latest_snapshot,
             commit_identifier,
             commit_kind,
-            notify_callbacks=False) -> bool:
-        if (not isinstance(retry_result, CommitFailRetryResult)
-                and not self.dedup.on_first_attempt):
-            # First attempt of a fresh commit_user commit: it cannot be a
-            # duplicate, so skip the scan entirely (per-worker/two-phase
-            # default).
+            notify_callbacks=False,
+            commit_result_may_be_uncertain=False) -> bool:
+        """Check replays and possibly published attempts against persisted commits.
+
+        Uncertainty covers the complete retry history, not just the last
+        attempt: a later definite CAS failure cannot clear an earlier unknown
+        outcome. Fresh commits with only definite failures need no scan.
+        """
+        if not self.dedup.on_first_attempt and not commit_result_may_be_uncertain:
             return False
         # Otherwise this may be a replay carrying a stable commit_user (e.g. a
         # Ray committer-actor task retried after the actor died mid-commit), so

@@ -23,6 +23,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock, patch
 
+import pyarrow as pa
+import pytest
+
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -37,6 +41,7 @@ from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import (
+    CommitDedup,
     CommitFailRetryResult,
     DedupEvidenceMissing,
     FileStoreCommit,
@@ -45,7 +50,7 @@ from pypaimon.write.file_store_commit import (
     _reject_compact_increment,
     _row_id_check_from_messages,
 )
-from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory, canonical_data_file_path
 
 
 class TestRowIdCheckFromMessages(unittest.TestCase):
@@ -511,6 +516,7 @@ class TestFileStoreCommit(unittest.TestCase):
                 latest_snapshot,
                 11,
                 "APPEND",
+                commit_result_may_be_uncertain=True,
             )
 
         # The whole window was walked, not abandoned at the first hole.
@@ -1184,3 +1190,172 @@ class TestFileStoreCommit(unittest.TestCase):
                     file=file
                 ))
         return commit_entries
+
+
+@pytest.mark.python_commit
+class TestFileStoreCommitRecovery(unittest.TestCase):
+
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        catalog = CatalogFactory.create({'warehouse': directory.name})
+        catalog.create_database('default', True)
+        self.arrow_schema = pa.schema([('value', pa.int64())])
+        schema = Schema.from_pyarrow_schema(self.arrow_schema, options={
+            'read.native.enabled': 'false',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        catalog.create_table('default.recovery', schema, False)
+        self.table = catalog.get_table('default.recovery')
+        self.manager = self.table.snapshot_manager()
+        self._append(1)
+
+    def _prepare(self, value, dedup=None):
+        builder = self.table.new_batch_write_builder()
+        writer = builder.new_write()
+        self.addCleanup(writer.close)
+        committer = builder.new_commit(dedup=dedup)
+        self.addCleanup(committer.close)
+        writer.write_arrow(pa.Table.from_pydict(
+            {'value': [value]}, schema=self.arrow_schema))
+        return committer, writer.prepare_commit()
+
+    def _append(self, value):
+        committer, messages = self._prepare(value)
+        committer.commit(messages)
+
+    def _rows(self):
+        builder = self.table.new_read_builder()
+        splits = builder.new_scan().plan().splits()
+        return sorted(builder.new_read().to_arrow(splits)['value'].to_pylist())
+
+    def test_definite_cas_failure_retries_after_observation_expires(self):
+        committer, messages = self._prepare(4)
+        file_store_commit = committer.file_store_commit
+        snapshot_committer = file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        outcomes = []
+
+        def race_commit(base_uuid, snapshot, statistics):
+            if not outcomes:
+                self._append(2)
+                self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            result = original_commit(base_uuid, snapshot, statistics)
+            outcomes.append(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
+                patch.object(file_store_commit, '_commit_retry_wait'):
+            committer.commit(messages)
+
+        self.assertEqual(outcomes, [False, True])
+        self.assertEqual(self.manager.get_latest_snapshot().id, 3)
+        self.assertEqual(self._rows(), [1, 2, 4])
+
+    def test_unknown_cas_outcome_with_expired_observation_fails_closed(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = committer.file_store_commit.snapshot_commit
+
+        def lose_ack(base_uuid, snapshot, statistics):
+            self._append(2)
+            self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            raise OSError('commit acknowledgement unavailable')
+
+        with patch.object(snapshot_committer, 'commit', side_effect=lose_ack) as publish, \
+                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+            with self.assertRaises(DedupEvidenceMissing):
+                committer.commit(messages)
+
+        self.assertEqual(publish.call_count, 1)
+        self.assertEqual(self._rows(), [1, 2])
+
+    def test_replay_still_requires_evidence_after_a_definite_cas_failure(self):
+        committer, messages = self._prepare(4, CommitDedup(on_first_attempt=True))
+        snapshot_committer = committer.file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+
+        def race_commit(base_uuid, snapshot, statistics):
+            self._append(2)
+            self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            result = original_commit(base_uuid, snapshot, statistics)
+            self.assertFalse(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit) as publish, \
+                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+            with self.assertRaises(DedupEvidenceMissing):
+                committer.commit(messages)
+
+        self.assertEqual(publish.call_count, 1)
+        self.assertEqual(self._rows(), [1, 2])
+
+    def test_unknown_cas_outcome_acknowledges_a_persisted_commit(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = committer.file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+
+        def lose_ack(base_uuid, snapshot, statistics):
+            self.assertTrue(original_commit(base_uuid, snapshot, statistics))
+            self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            raise OSError('commit acknowledgement unavailable')
+
+        with patch.object(snapshot_committer, 'commit', side_effect=lose_ack) as publish, \
+                patch.object(committer.file_store_commit, '_commit_retry_wait'), \
+                patch('pypaimon.write.file_store_commit.check_commit_files') as check_files:
+            committer.commit(messages)
+
+        self.assertEqual(publish.call_count, 1)
+        check_files.assert_not_called()
+        self.assertEqual(self._rows(), [1, 4])
+
+    def test_unknown_outcome_survives_a_later_definite_cas_failure(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = committer.file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        attempts = []
+
+        def race_commit(base_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            if len(attempts) == 1:
+                raise OSError('commit acknowledgement unavailable')
+            if len(attempts) == 2:
+                self._append(2)
+                self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            result = original_commit(base_uuid, snapshot, statistics)
+            if len(attempts) == 2:
+                self.assertFalse(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
+                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+            with self.assertRaises(DedupEvidenceMissing):
+                committer.commit(messages)
+
+        self.assertEqual(attempts, [2, 2])
+        self.assertEqual(self._rows(), [1, 2])
+
+    def test_definite_cas_failure_still_checks_prepared_files(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = committer.file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        outcomes = []
+
+        def race_commit(base_uuid, snapshot, statistics):
+            self._append(2)
+            for message in messages:
+                for data_file in message.new_files:
+                    self.table.file_io.delete(canonical_data_file_path(
+                        self.table, message.partition, message.bucket,
+                        data_file.file_name))
+            result = original_commit(base_uuid, snapshot, statistics)
+            outcomes.append(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
+                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+            with self.assertRaisesRegex(RuntimeError, 'required file is missing'):
+                committer.commit(messages)
+
+        self.assertEqual(outcomes, [False])
+        self.assertEqual(self._rows(), [1, 2])

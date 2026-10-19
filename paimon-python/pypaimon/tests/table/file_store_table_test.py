@@ -70,6 +70,29 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIn("new.option", copied_table.table_schema.options)
         self.assertEqual(copied_table.table_schema.options["new.option"], "new_value")
 
+    def test_copy_chain_preserves_catalog_origin(self):
+        identifier = self.table.identifier.get_full_name()
+        self.catalog.create_branch(identifier, 'copy_origin_dev')
+        branch_identifier = identifier + '$branch_copy_origin_dev'
+        copied = self.table.copy({'branch': 'copy_origin_dev'})
+        chained = copied.copy({'target-file-size': '8 mb'})
+        chained = chained.copy_without_time_travel({'branch': None})
+
+        self.assertEqual(copied._copy_source_identifier, identifier)
+        self.assertEqual(chained._copy_source_identifier, identifier)
+        self.assertEqual(copied.identifier.get_full_name(), branch_identifier)
+        self.assertEqual(chained.identifier.get_full_name(), identifier)
+        self.assertEqual(self.table.identifier.get_full_name(), identifier)
+        self.assertEqual(chained._applied_dynamic_options, {
+            'branch': None,
+            'target-file-size': '8 mb',
+        })
+
+        loaded = self.catalog.get_table(branch_identifier)
+        loaded_copy = loaded.copy({'target-file-size': '4 mb'})
+        self.assertEqual(loaded_copy._copy_source_identifier, branch_identifier)
+        self.assertEqual(loaded.identifier.get_full_name(), branch_identifier)
+
     def test_copy_raises_error_when_changing_bucket(self):
         """Test copy method raises ValueError when trying to change bucket number."""
         # Get current bucket value

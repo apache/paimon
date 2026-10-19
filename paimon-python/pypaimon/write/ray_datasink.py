@@ -63,6 +63,29 @@ def _reject_native_commit_for_actor_mode(table) -> None:
             native_commit_unsupported_message(table.identifier))
 
 
+def _actor_bucket_config(table) -> Dict[str, Any]:
+    """Describe the effective layout shared by writers and the committer."""
+    def layout_type(value):
+        if isinstance(value, dict):
+            return {key: layout_type(item) for key, item in value.items()
+                    if key not in ('description', 'defaultValue')}
+        if isinstance(value, list):
+            return [layout_type(item) for item in value]
+        return value
+
+    bucket_count = table.options.bucket()
+    bucket_fields = table.table_schema.logical_bucket_key_fields if bucket_count > 0 else []
+    return {
+        'bucket': bucket_count,
+        'bucket_function': (str(table.table_schema.options.get('bucket-function.type', 'default'))
+                            .strip().lower() if bucket_count > 0 else None),
+        'bucket_key': [(field.id, field.name, layout_type(field.type.to_dict()))
+                       for field in bucket_fields],
+        'partition_keys': [(field.id, field.name, layout_type(field.type.to_dict()))
+                           for field in table.partition_keys_fields],
+    }
+
+
 @dataclass(frozen=True)
 class PaimonWriteResult:
     """Metadata reported by the exact coordinator commit."""
@@ -398,8 +421,8 @@ def write_paimon_dataset(
         commit_mode: Commit mode - 'two_phase' (default, coordinator commits
             after all tasks finish) or 'actor' (each task commits via a
             singleton actor for serialized commits without lock contention).
-        options: Optional dynamic table options to override defaults at write
-            time, e.g. {"target-file-size": "256mb"}.
+        options: Optional dynamic table options applied before routing, bucket
+            planning, and writing, e.g. {"target-file-size": "256mb"}.
 
     Returns:
         PaimonWriteResult with row count and snapshot id, or None if no data
@@ -442,6 +465,11 @@ def write_paimon_dataset(
             "The map_groups barrier conflicts with incremental commit visibility. "
             "Use commit_mode='two_phase' or hash_fixed_precluster='auto'/'off'."
         )
+
+    source_table = table
+    if options:
+        table = table.copy(options)
+        options = None
 
     # POSTPONE tables are routed to a coordinator-committed path below, which
     # would silently downgrade an actor request to two-phase semantics. Reject
@@ -519,14 +547,14 @@ def write_paimon_dataset(
 
     if commit_mode == "actor":
         # Actor mode: serialize commits through a singleton actor
-        catalog_context = table.catalog_environment.catalog_context()
+        catalog_context = source_table.catalog_environment.catalog_context()
         if catalog_context is None:
             raise ValueError(
                 "commit_mode='actor' requires a table with catalog_context. "
                 "This table may have been created without a catalog."
             )
         catalog_options = catalog_context.options.to_map()
-        table_identifier = table.identifier.get_full_name()
+        table_identifier = source_table.identifier.get_full_name()
 
         datasink = PaimonActorDatasink(
             table,
@@ -772,6 +800,7 @@ class PaimonCommitterActor:
         catalog_options: Dict[str, str],
         table_identifier: str,
         options: Optional[Dict[str, str]] = None,
+        expected_bucket_config: Optional[Dict[str, Any]] = None,
     ):
         from pypaimon.catalog.catalog_factory import CatalogFactory
 
@@ -782,7 +811,16 @@ class PaimonCommitterActor:
         # The datasink-side check cannot see configuration that only exists in
         # the catalog this actor reloads the table from, so the actor verifies
         # its own effective configuration too.
-        _reject_native_commit_for_actor_mode(self._target_table())
+        target_table = self._target_table()
+        _reject_native_commit_for_actor_mode(target_table)
+        if expected_bucket_config is not None:
+            actual_bucket_config = _actor_bucket_config(target_table)
+            if actual_bucket_config != expected_bucket_config:
+                raise ValueError(
+                    "Actor bucket configuration no longer matches the writer for table {}: "
+                    "expected {}, actual {}".format(
+                        target_table.identifier.get_full_name(),
+                        expected_bucket_config, actual_bucket_config))
         # commit_users whose commit this instance has started. Only ever used to
         # withhold the claim below -- never to answer "already committed", which
         # would be a memory of the table that a rollback can silently outdate.
@@ -949,6 +987,12 @@ class PaimonActorDatasink(_DatasinkBase):
     ``write()`` returning stay ordered after the commit, and data remains
     incrementally visible.
 
+    The writers' effective bucket configuration is captured at construction.
+    Each actor incarnation checks its reloaded, options-applied table against
+    that configuration before accepting commits. A mismatch fails the write
+    rather than publishing inconsistent bucket metadata. Unrelated metadata
+    changes are allowed; this does not pin the full table schema.
+
     Trade-offs (intentional):
 
     * **Append-only tables only.** Primary-key tables are rejected by
@@ -997,7 +1041,7 @@ class PaimonActorDatasink(_DatasinkBase):
             )
         self.table = table
         self._catalog_options = catalog_options
-        self._table_identifier = table_identifier
+        self._table_identifier = getattr(table, '_copy_source_identifier', None) or table_identifier
         # The committer actor reloads the table from the catalog, so any dynamic
         # options already applied to `table` via table.copy() calls before
         # write_paimon was called would be lost unless we re-supply them. The
@@ -1008,8 +1052,9 @@ class PaimonActorDatasink(_DatasinkBase):
         table_dynamic = getattr(table, '_applied_dynamic_options', {}) or {}
         effective_options = {**table_dynamic, **(options or {})}
         self._options = effective_options if effective_options else None
-        _reject_native_commit_for_actor_mode(
-            table.copy(self._options) if self._options else table)
+        target_table = self._target_table()
+        _reject_native_commit_for_actor_mode(target_table)
+        self._expected_bucket_config = _actor_bucket_config(target_table)
         self._postpone_bucket_plan = postpone_bucket_plan
         self._table_name = table.identifier.get_full_name()
         # Unique per datasink instance: two write_paimon calls in one job
@@ -1045,6 +1090,8 @@ class PaimonActorDatasink(_DatasinkBase):
             self._postpone_bucket_plan = None
         if not hasattr(self, '_dedup_base'):
             self._dedup_base = None
+        if not hasattr(self, '_expected_bucket_config'):
+            self._expected_bucket_config = _actor_bucket_config(self._target_table())
 
     def _target_table(self):
         """The table the writers and committer actually operate on.
@@ -1077,6 +1124,7 @@ class PaimonActorDatasink(_DatasinkBase):
             catalog_options=self._catalog_options,
             table_identifier=self._table_identifier,
             options=self._options,
+            expected_bucket_config=self._expected_bucket_config,
         )
 
         # Pin the dedup scan's lower bound ONCE, before any write task runs. It
@@ -1091,7 +1139,11 @@ class PaimonActorDatasink(_DatasinkBase):
         # bound has to be an id on the branch the commits go to, and the scan
         # also needs the snapshot file's mtime to tell that id line apart from
         # one that was rolled back and re-used the same ids.
-        self._dedup_base = ray.get(self._actor.dedup_base.remote())
+        try:
+            self._dedup_base = ray.get(self._actor.dedup_base.remote())
+        except Exception:
+            self._shutdown_actor()
+            raise
 
         logger.info(
             f"Starting actor-commit write job for table {self._table_name} "

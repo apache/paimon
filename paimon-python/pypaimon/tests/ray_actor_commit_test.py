@@ -19,6 +19,7 @@ import glob
 import os
 import shutil
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -628,6 +629,175 @@ class RayActorCommitTest(unittest.TestCase):
         )
         self.assertEqual(result.snapshot_id, 1)
         self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 2)
+
+    def test_actor_branch_options_preserve_bucket_pruning(self):
+        self._check_actor_branch_bucket_pruning('explicit')
+
+    def test_actor_copied_branch_preserves_bucket_pruning(self):
+        self._check_actor_branch_bucket_pruning('copied')
+
+    def test_actor_copy_chain_preserves_bucket_pruning(self):
+        self._check_actor_branch_bucket_pruning('copy_chain')
+
+    def test_actor_catalog_branch_preserves_bucket_pruning(self):
+        self._check_actor_branch_bucket_pruning('catalog')
+
+    def _check_actor_branch_bucket_pruning(self, input_kind):
+        from pypaimon.ray import write_paimon
+        from pypaimon.schema.schema_change import SchemaChange
+
+        name = 'test_actor_branch_bucket_pruning_' + input_kind
+        identifier = 'default.' + name
+        table = self._create_append_table(name, options={
+            'bucket': '1',
+            'bucket-key': 'id',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        self.catalog.create_branch(identifier, 'dev')
+        branch_identifier = identifier + '$branch_dev'
+        self.catalog.alter_table(
+            branch_identifier, [SchemaChange.set_option('bucket', '3')], False)
+        branch = self.catalog.get_table(branch_identifier)
+        self.assertEqual(table.options.bucket(), 1)
+        self.assertEqual(branch.options.bucket(), 3)
+        self.assertIsNone(branch.snapshot_manager().get_latest_snapshot())
+        expected_ids = list(range(12))
+        dataset = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': expected_ids,
+            'value': ['v'] * len(expected_ids),
+        }, schema=SCHEMA))
+
+        if input_kind == 'explicit':
+            result = write_paimon(
+                dataset, identifier, {'warehouse': self.warehouse},
+                commit_mode='actor', options={'branch': 'dev'}, concurrency=1)
+        else:
+            supplied = branch if input_kind == 'catalog' else table.copy({'branch': 'dev'})
+            if input_kind == 'copy_chain':
+                supplied = supplied.copy({'commit.metadata.chain': 'first'})
+                supplied = supplied.copy_without_time_travel({'commit.metadata.chain': 'last'})
+            result = write_paimon_dataset(dataset, supplied, commit_mode='actor', concurrency=1)
+
+        self.assertEqual(result.row_count, len(expected_ids))
+        self.assertEqual(result.snapshot_id, branch.snapshot_manager().get_latest_snapshot().id)
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(sorted(self._read_all(branch).column('id').to_pylist()), expected_ids)
+        filtered_ids = []
+        for row_id in expected_ids:
+            builder = branch.new_read_builder()
+            predicate = builder.new_predicate_builder().equal('id', row_id)
+            builder = builder.with_filter(predicate)
+            splits = builder.new_scan().plan().splits()
+            filtered = builder.new_read().to_arrow(splits)
+            filtered_ids.extend(filtered.column('id').to_pylist())
+        self.assertEqual(filtered_ids, expected_ids)
+        scanner = branch.new_read_builder().new_scan().file_scanner
+        manifests, _ = scanner.manifest_scanner()
+        entries = scanner.manifest_file_manager.read_entries_parallel(
+            manifests, max_workers=branch.options.scan_manifest_parallelism())
+        expected_buckets = 3 if input_kind == 'catalog' else 1
+        self.assertEqual({entry.total_buckets for entry in entries}, {expected_buckets})
+        if input_kind == 'copy_chain':
+            self.assertEqual(branch.snapshot_manager().get_latest_snapshot().properties[
+                'paimon.commit.metadata.chain'], 'last')
+
+    def test_actor_rejects_schema_drift_before_writing(self):
+        self._check_schema_change_during_write('actor', True)
+
+    def test_actor_allows_non_bucket_schema_change(self):
+        self._check_schema_change_during_write('actor', False)
+
+    def test_two_phase_preserves_buckets_during_schema_change(self):
+        self._check_schema_change_during_write('two_phase', True)
+
+    def _check_schema_change_during_write(self, commit_mode, alter_bucket):
+        from pypaimon.ray import write_paimon
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.ray_datasink import PaimonDatasink
+
+        name = 'test_schema_change_{}_{}'.format(commit_mode, alter_bucket)
+        identifier = 'default.' + name
+        table = self._create_append_table(name, options={
+            'bucket': '1', 'bucket-key': 'id',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        })
+        sink_class = PaimonActorDatasink if commit_mode == 'actor' else PaimonDatasink
+        original_start = sink_class.on_write_start
+        started_sinks = []
+
+        def alter_before_start(sink, schema=None):
+            self.assertEqual(sink.table.options.bucket(), 1)
+            self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+            change = (SchemaChange.set_option('bucket', '3') if alter_bucket
+                      else SchemaChange.set_option('target-file-size', '8 mb'))
+            self.catalog.alter_table(identifier, [change], False)
+            started_sinks.append(sink)
+            return original_start(sink, schema)
+
+        expected_ids = list(range(12))
+        dataset = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': expected_ids, 'value': ['v'] * len(expected_ids),
+        }, schema=SCHEMA))
+
+        def write_dataset():
+            return write_paimon(dataset, identifier, {'warehouse': self.warehouse},
+                                commit_mode=commit_mode, concurrency=1)
+
+        with patch.object(sink_class, 'on_write_start', alter_before_start):
+            if commit_mode == 'actor' and alter_bucket:
+                with self.assertRaisesRegex(Exception, 'bucket configuration.*writer'):
+                    write_dataset()
+                self.assertEqual(len(started_sinks), 1)
+                self.assertIsNone(started_sinks[0]._actor)
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                self.assertEqual(glob.glob(os.path.join(
+                    self.warehouse, 'default.db', name, 'bucket-*', '*.parquet')), [])
+                return
+            result = write_dataset()
+
+        self.assertEqual(len(started_sinks), 1)
+        self.assertEqual(result.row_count, len(expected_ids))
+        reloaded = self.catalog.get_table(identifier)
+        self.assertEqual(reloaded.options.bucket(), 3 if alter_bucket else 1)
+        self.assertEqual(sorted(self._read_all(reloaded).column('id').to_pylist()), expected_ids)
+        filtered_ids = []
+        for row_id in expected_ids:
+            builder = reloaded.new_read_builder()
+            builder = builder.with_filter(builder.new_predicate_builder().equal('id', row_id))
+            rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+            filtered_ids.extend(rows.column('id').to_pylist())
+        self.assertEqual(filtered_ids, expected_ids)
+        scanner = reloaded.new_read_builder().new_scan().file_scanner
+        manifests, _ = scanner.manifest_scanner()
+        entries = scanner.manifest_file_manager.read_entries_parallel(
+            manifests, max_workers=reloaded.options.scan_manifest_parallelism())
+        self.assertEqual({entry.total_buckets for entry in entries}, {1})
+
+    def test_actor_rejects_bucket_drift_after_real_reconstruction(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        name = 'test_actor_reconstruction_bucket_drift'
+        identifier = 'default.' + name
+        table = self._create_append_table(name, options={
+            'bucket': '1', 'bucket-key': 'id',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        })
+        sink = PaimonActorDatasink(table, {'warehouse': self.warehouse}, identifier)
+        try:
+            sink.on_write_start()
+            self.catalog.alter_table(identifier, [SchemaChange.set_option('bucket', '3')], False)
+            ray.kill(sink._actor, no_restart=False)
+            deadline = time.monotonic() + 30
+            actor_id = sink._actor._actor_id.hex()
+            while ray._private.state.actors(actor_id).get('NumRestarts', 0) < 1:
+                self.assertLess(time.monotonic(), deadline, 'Actor did not restart')
+                time.sleep(0.1)
+            with self.assertRaisesRegex(Exception, 'bucket configuration.*writer'):
+                ray.get(sink._actor.dedup_base.remote(), timeout=30)
+            self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        finally:
+            sink._shutdown_actor()
 
     def _rollback_to(self, table, snapshot_id):
         """Drop every snapshot above ``snapshot_id`` and re-point LATEST.

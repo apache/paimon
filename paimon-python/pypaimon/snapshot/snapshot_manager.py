@@ -122,11 +122,12 @@ class SnapshotManager:
         caller. Handling it here keeps every caller of this read covered,
         rather than each one catching the race separately.
 
-        If the hint indicates the table has snapshots but none can be resolved
-        (e.g. an unreadable LATEST plus a listing that an IO error truncated to
-        empty), fail closed with :class:`SnapshotNotResolvable` rather than
-        report the table as empty -- callers such as the immutable-option guard
-        must not mistake a populated table for an empty one.
+        A resolved id or non-empty/unreadable hint is evidence of snapshots
+        throughout this call, even when a later attempt finds neither a hint
+        nor a candidate. Retry such attempts boundedly, then fail closed with
+        :class:`SnapshotNotResolvable` rather than report the table as empty --
+        callers such as the immutable-option guard must not mistake a
+        populated table for an empty one.
 
         Returns:
             The latest snapshot, or None if the table genuinely has none
@@ -134,23 +135,27 @@ class SnapshotManager:
         if not self.file_io.exists(self.snapshot_dir):
             return None
 
+        has_snapshot_evidence = False
+        last_read_error = None
         for attempt in range(LATEST_SNAPSHOT_RELOCATE_ATTEMPTS + 1):
             latest_snapshot_id, hint_indicates_data, hint_read_error = (
                 self._resolve_latest_snapshot_id())
+            has_snapshot_evidence = (
+                has_snapshot_evidence or latest_snapshot_id is not None or hint_indicates_data)
+            if hint_read_error is not None:
+                last_read_error = hint_read_error
 
             if latest_snapshot_id is None:
-                if hint_indicates_data:
-                    raise SnapshotNotResolvable(
-                        f"Snapshot hint under {self.snapshot_dir} indicates existing "
-                        f"snapshots but none could be resolved"
-                        + (f": {hint_read_error}" if hint_read_error else ""))
-                return None
+                if not has_snapshot_evidence:
+                    return None
+                continue
 
             snapshot_file = self.get_snapshot_path(latest_snapshot_id)
             try:
                 return JSON.from_json(
                     self.file_io.read_file_utf8(snapshot_file), Snapshot)
-            except FileNotFoundError:
+            except FileNotFoundError as error:
+                last_read_error = error
                 # The resolved candidate was expired between being resolved and
                 # being read. Re-resolve: the snapshot that replaced it is newer
                 # and readable. Only this one exception is a race -- a
@@ -162,10 +167,10 @@ class SnapshotManager:
                     latest_snapshot_id, self.snapshot_dir, attempt + 1)
 
         raise SnapshotNotResolvable(
-            f"Cannot read the latest snapshot under {self.snapshot_dir}: every "
-            f"one of {LATEST_SNAPSHOT_RELOCATE_ATTEMPTS + 1} resolved candidates "
-            f"was expired before it could be read. The table is not empty, so "
-            f"it must not be treated as such.")
+            f"Cannot resolve the latest snapshot under {self.snapshot_dir} after "
+            f"{LATEST_SNAPSHOT_RELOCATE_ATTEMPTS + 1} attempts despite evidence of "
+            f"existing snapshots. The table is not empty, so it must not be treated as such"
+            + (f": {last_read_error}" if last_read_error is not None else ".")) from last_read_error
 
     def _resolve_latest_snapshot_id(self):
         """Pick the id of the latest snapshot, without reading its contents.
