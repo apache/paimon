@@ -76,6 +76,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
@@ -84,6 +85,70 @@ import static org.mockito.Mockito.when;
 
 /** Tests predicate type preservation and unsupported predicates in index queries. */
 class GlobalIndexQueryTest {
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void testGroupedIndexScalarCoverageExcludesUnsupportedShards(int field) throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
+        Predicate predicate = new PredicateBuilder(rowType).equal(field, 7);
+        String type = "independent-fields";
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        indexFile(type, "supported", 10, 19, 0, new int[] {1}),
+                        indexFile(type, "unsupported", 20, 29, 0, new int[] {1}),
+                        indexFile("unknown-multi", "ignored", 30, 39, 0, new int[] {1}));
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class)))
+                .thenAnswer(
+                        invocation ->
+                                new Path(invocation.<IndexFileMeta>getArgument(0).fileName()));
+        GlobalIndexReader supported = mock(GlobalIndexReader.class);
+        when(supported.visitEqual(any(), eq(7)))
+                .thenReturn(
+                        CompletableFuture.completedFuture(
+                                Optional.of(GlobalIndexResult.fromRange(new Range(2, 2)))));
+        GlobalIndexReader unsupported = mock(GlobalIndexReader.class);
+        when(unsupported.visitEqual(any(), eq(7)))
+                .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+        GlobalIndexer indexer = mock(GlobalIndexer.class);
+        when(indexer.createReader(any(), anyList(), eq(10L), anyList(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            List<GlobalIndexIOMeta> selected = invocation.getArgument(1);
+                            return selected.get(0).filePath().getName().equals("supported")
+                                    ? supported
+                                    : unsupported;
+                        });
+        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
+        when(factory.create(eq(rowType.getFields()), any())).thenReturn(indexer);
+        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                mockStatic(GlobalIndexerFactoryUtils.class, CALLS_REAL_METHODS)) {
+            factories
+                    .when(() -> GlobalIndexerFactoryUtils.supportsGroupedIndexScalarQueries(type))
+                    .thenReturn(true);
+            factories.when(() -> GlobalIndexerFactoryUtils.load(type)).thenReturn(factory);
+            GlobalIndexQuery query =
+                    GlobalIndexQuery.create(rowType, predicate, files, paths, new Options());
+            assertThat(query).isNotNull();
+            assertThat(query.hasMultiFieldQuery()).isTrue();
+            assertThat(query.hasCompositeQuery()).isFalse();
+            assertThat(query.coveredRanges()).containsExactly(new Range(10, 29));
+            List<Range> ranges = Collections.singletonList(new Range(0, 39));
+            GlobalIndexEvaluator.Evaluation evaluation =
+                    query.evaluateWithCoverage(mock(FileIO.class), new Options(), ranges).get();
+            assertThat(evaluation.result().results().toRangeList())
+                    .containsExactly(new Range(12, 12));
+            assertThat(evaluation.coveredRanges()).containsExactly(new Range(10, 19));
+            assertThat(
+                            query.evaluateCandidates(mock(FileIO.class), new Options(), ranges)
+                                    .get()
+                                    .results()
+                                    .toRangeList())
+                    .containsExactly(new Range(0, 9), new Range(12, 12), new Range(20, 39));
+            verify(supported, times(2)).close();
+            verify(unsupported, times(2)).close();
+        }
+    }
 
     @Test
     void testCompositeNonNullRangeLeavesSmallInAsDataFilter() {

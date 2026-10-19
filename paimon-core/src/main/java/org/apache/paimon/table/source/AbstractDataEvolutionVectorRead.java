@@ -253,6 +253,14 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             if (!evaluation.isPresent()) {
                 return null;
             }
+            List<Range> evaluatedRanges = evaluation.get().coveredRanges();
+            List<Range> indexedRanges = splitRows.toRangeList();
+            if (evaluatedRanges != null
+                    && !Range.and(evaluatedRanges, indexedRanges).equals(indexedRanges)) {
+                // Metadata coverage is not proof that every scalar reader accepted the filter.
+                // Reuse the raw path to decide unsupported shards before vector top-k ranking.
+                return null;
+            }
             RoaringNavigableMap64 matched = evaluation.get().result().results();
             if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
                 return matched;
@@ -299,9 +307,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 return null;
             }
             include.or(result.get().result().results());
-            include.or(
-                    scanner.unindexedRowsForContributingFields(result.get().contributingFieldIds())
-                            .results());
+            include.or(scanner.unindexedRowsForEvaluation(result.get()).results());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
