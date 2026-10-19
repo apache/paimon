@@ -17,7 +17,7 @@
 
 """Native writes of the partition/bucket groups produced by Daft."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -377,7 +377,7 @@ def test_empty_restore_ignores_existing_sequences_and_hashes(tmp_path, python_fa
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_empty_restore_preserves_python_write_authorization(tmp_path, overwrite):
+def test_empty_restore_does_not_apply_select_policy_to_python_writes(tmp_path, overwrite):
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
     from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 
@@ -389,14 +389,21 @@ def test_empty_restore_preserves_python_write_authorization(tmp_path, overwrite)
     # Exercise the ordinary writer selected before any Native data is staged.
     writer._switch_to_python()
     auth = TableQueryAuthResult(None, {'value': '{"name":"NULL"}'})
+    authorize = Mock(return_value=auth)
     try:
         with patch.object(type(table.catalog_environment), 'table_query_auth',
-                          return_value=lambda _: auth):
+                          return_value=authorize):
+            writer.write_arrow(_batch([1], ['written']), bucket=0)
+            messages = writer.prepare_commit()
+            assert messages[0].new_files[0].min_sequence_number == 0
+            authorize.assert_not_called()
+            # Only the explicit whole-table read requires an unrestricted grant.
             with pytest.raises(TableNoPermissionException):
-                writer.write_arrow(_batch([1], ['forbidden']), bucket=0)
+                table.new_read_builder().new_scan().plan_all_files()
+        builder.new_commit().commit(messages)
     finally:
         writer.close()
-    assert table.snapshot_manager().get_latest_snapshot() is None
+    assert _rows(table) == [{'id': 1, 'value': 'written', 'pt': 'a'}]
 
 
 def test_python_pk_file_sequence_range_matches_deduplicated_rows(tmp_path):

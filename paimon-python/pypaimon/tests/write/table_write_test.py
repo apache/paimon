@@ -803,10 +803,11 @@ class TableWriteTest(unittest.TestCase):
             PostponeFixedBucketBatchTableWrite,
             PostponeFixedBucketWriteBuilder,
         )
+        from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
         self.assertIsInstance(
             write_builder, PostponeFixedBucketWriteBuilder)
         self.assertIsInstance(
-            table_write, PostponeFixedBucketBatchTableWrite)
+            table_write, (PostponeFixedBucketBatchTableWrite, NativePostponeFixedBucketTableWrite))
         table_commit = write_builder.new_commit()
         table_write.write_arrow(expect)
         commit_messages = table_write.prepare_commit()
@@ -1128,6 +1129,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
 
     @parameterized.expand([('mod',), ('hive',)])
+    @pytest.mark.python_write
     def test_postpone_rejects_unsupported_bucket_function(
             self, bucket_function):
         pa_schema = pa.schema([

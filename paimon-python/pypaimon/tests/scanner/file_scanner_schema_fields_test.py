@@ -18,6 +18,11 @@
 import unittest
 from unittest.mock import MagicMock
 
+import pyarrow as pa
+import pytest
+
+from pypaimon import CatalogFactory, Schema
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.schema.data_types import AtomicType, DataField
 
@@ -88,6 +93,41 @@ class FileScannerSchemaFieldsShortCircuitTest(unittest.TestCase):
 
         self.assertIs(result, current_fields)
         scanner.table.schema_manager.get_schema.assert_not_called()
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
+@pytest.mark.parametrize('guarded', [False, True])
+def test_transported_query_auth_files_retain_snapshot_statistics(tmp_path, guarded):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.string())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'metadata.stats-mode': 'full',
+        'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+    }), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.table({'id': [1, 2], 'value': ['a', 'z']}, schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    table = table.copy({'query-auth.enabled': str(guarded).lower()})
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    manifests = ManifestListManager(table).read_all(snapshot)
+    scanner = table.new_read_builder().new_scan().file_scanner
+    entries = scanner.read_manifest_entries(manifests)
+    assert len(entries) == 1
+    # Core validates the complete transported metadata against the snapshot.
+    # Ordinary scans retain their existing reduced-statistics behavior.
+    assert entries[0].file.value_stats.null_counts == ([0, 0] if guarded else [])
+    assert entries[0].file.value_stats_cols == (None if guarded else [])
 
 
 if __name__ == "__main__":

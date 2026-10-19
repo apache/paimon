@@ -613,7 +613,9 @@ class FileScanner:
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
-            drop_stats=not keep_stats,
+            # Transported guarded splits must match the snapshot metadata when
+            # Rust restores their catalog grant, even if Python planned them.
+            drop_stats=not (keep_stats or self.table.options.query_auth_enabled),
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,

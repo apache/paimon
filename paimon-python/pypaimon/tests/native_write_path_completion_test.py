@@ -453,41 +453,59 @@ def test_native_truncate_partition_specs_use_java_typed_strings(tmp_path, native
         commit.close()
 
 
-@native
-def test_automatic_postpone_blob_rows_keep_unknown_sources_until_prepare(tmp_path):
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.parametrize('fail', [False, True])
+def test_postpone_blob_row_bridge_keeps_sources_until_prepare(fail):
+    from types import SimpleNamespace
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.common.options.options import Options
     from pypaimon.schema.data_types import AtomicType, DataField
     from pypaimon.table.row.blob import Blob, BlobDescriptor
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
-    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'blob-postpone')})
-    catalog.create_database('default', True)
+
+    # Exercise the bridge's deferred input lifetime without creating a table:
+    # Python catalog validation does not allow a primary-key BLOB schema.
     fields = [DataField(0, 'id', AtomicType('INT')), DataField(1, 'pt', AtomicType('STRING')),
               DataField(2, 'payload', AtomicType('BLOB'))]
-    catalog.create_table('default.t', Schema(
-        fields, partition_keys=['pt'], primary_keys=['id', 'pt'], options={
-            'bucket': '-2', 'write.native.enabled': 'true',
-            'postpone.target-row-num-per-bucket': '1'}), False)
-    table = catalog.get_table('default.t')
+    table = SimpleNamespace(
+        table_schema=SimpleNamespace(fields=fields), fields=fields,
+        field_dict={field.name: field for field in fields}, partition_keys=['pt'],
+        is_primary_key_table=True,
+        options=CoreOptions(Options({'bucket': '-2', 'postpone.target-row-num-per-bucket': '1'})))
+    backend = Mock()
+    staged, payloads = [], []
+    backend.write_arrow.side_effect = lambda batch, bucket: staged.append(batch)
+    writer = NativePostponeFixedBucketTableWrite(table, 'job', None, None, backend)
+    factory = backend.with_blob_uri_reader_factory.call_args[0][0]
+    error = RuntimeError('prepare failed')
 
-    def write(rows, buffered):
-        builder = table.new_postpone_fixed_bucket_write_builder()
-        writer, commit = builder.new_write(), builder.new_commit()
-        try:
-            assert isinstance(writer, NativePostponeFixedBucketTableWrite)
-            for identifier, partition in rows:
-                writer.write_row(GenericRow(
-                    [identifier, partition, Blob.from_data(str(identifier).encode())], table.fields))
-            assert len(writer._blob_rows.readers) == buffered
-            messages = writer.prepare_commit()
-            assert not writer._blob_rows.readers
-            commit.commit(messages)
-        finally:
-            writer.close()
-            commit.close()
+    def prepare():
+        for batch in staged:
+            for encoded in batch.column('payload').to_pylist():
+                uri = BlobDescriptor.deserialize(encoded).uri
+                with factory.create(uri).new_input_stream(uri) as stream:
+                    payloads.append(stream.read())
+        if fail:
+            raise error
+        return []
 
-    write([(1, 'known')], 1)
-    write([(2, 'known'), (3, 'new')], 1)
-    rows = _rows(table)
-    assert [row['id'] for row in rows] == [1, 2, 3]
-    assert [Blob.from_descriptor_bytes(row['payload'], table.file_io).to_data() for row in rows] == [b'1', b'2', b'3']
-    assert all(not BlobDescriptor.deserialize(row['payload']).uri.startswith('pypaimon-blob-row:') for row in rows)
+    backend.prepare_commit.side_effect = prepare
+    try:
+        for identifier in [1, 2]:
+            writer.write_row(GenericRow(
+                [identifier, 'new', Blob.from_data(str(identifier).encode())], fields))
+        assert len(factory.readers) == 2
+        assert not payloads
+        if fail:
+            with pytest.raises(RuntimeError) as raised:
+                writer.prepare_commit()
+            assert raised.value is error
+        else:
+            assert writer.prepare_commit() == []
+        assert payloads == [b'1', b'2']
+        assert not factory.readers
+        backend.abort.assert_not_called()
+    finally:
+        writer.close()

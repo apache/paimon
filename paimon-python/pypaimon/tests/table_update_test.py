@@ -366,6 +366,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['name'].to_pylist(),
         )
 
+    @pytest.mark.python_plan
     @pytest.mark.python_write
     def test_update_by_predicate_processes_one_file_group_at_a_time(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
