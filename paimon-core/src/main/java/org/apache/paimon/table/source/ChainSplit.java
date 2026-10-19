@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
@@ -41,6 +42,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+
+import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * A split describes chain table read scope. It follows DataSplit's custom serialization pattern and
@@ -76,6 +80,18 @@ public class ChainSplit implements Split {
 
     public BinaryRow logicalPartition() {
         return logicalPartition;
+    }
+
+    /** Returns the physical bucket shared by all files in this split. */
+    public int bucket() {
+        // Chain splits are built per bucket. Use the stored paths so older serialized splits
+        // can also provide bucket metadata without changing the serialization format.
+        checkState(!fileBucketPathMapping.isEmpty(), "No bucket path in chain split.");
+        String bucketPath = fileBucketPathMapping.values().iterator().next();
+        String bucketName = new Path(bucketPath).getName();
+        checkState(
+                bucketName.startsWith(BUCKET_PATH_PREFIX), "Invalid bucket path: %s", bucketPath);
+        return Integer.parseInt(bucketName.substring(BUCKET_PATH_PREFIX.length()));
     }
 
     public List<DataFileMeta> dataFiles() {

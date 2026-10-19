@@ -19,14 +19,16 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.catalog.TableQueryAuthResult
-import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.PaimonRecordReaderIterator
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.stats.SimpleStats
-import org.apache.paimon.table.source.{DataSplit, QueryAuthSplit, Split}
+import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplitImpl
+import org.apache.paimon.table.source.{ChainSplit, DataSplit, QueryAuthSplit, Split}
 
-import org.apache.spark.sql.types.BinaryType
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.scalatest.funsuite.AnyFunSuite
 
 import java.util.Collections
@@ -72,12 +74,61 @@ class SplitUtilsQueryAuthTest extends AnyFunSuite {
     assert(SplitUtils.dataFileCount(wrapped) == 1L, "file count collapsed under query auth")
   }
 
-  test("partition metadata columns are refused on a query-authorized split") {
-    val partitionColumn =
-      PaimonMetadataColumn(-1, PaimonMetadataColumn.PARTITION_COLUMN, BinaryType)
-    val error = intercept[RuntimeException] {
-      PaimonRecordReaderIterator(null, Seq(partitionColumn), authorized(dataSplit()))
+  private val partitionColumn =
+    PaimonMetadataColumn.PARTITION(StructType(Seq(StructField("dt", StringType))))
+
+  private class EmptyReader extends RecordReader[InternalRow] {
+    var closed = false
+
+    override def readBatch(): RecordReader.RecordIterator[InternalRow] = null
+
+    override def close(): Unit = {
+      closed = true
     }
-    assert(error.getMessage.contains("DataSplit"))
+  }
+
+  test("partition metadata remains supported for an unwrapped DataSplit") {
+    val iterator =
+      PaimonRecordReaderIterator(new EmptyReader, Seq(partitionColumn), dataSplit())
+    try {
+      assert(!iterator.hasNext)
+    } finally {
+      iterator.close()
+    }
+  }
+
+  private def chainAndAuthorizedSplits(): Seq[Split] = {
+    val chainSplit = ChainSplit.from(dataSplit(), "snapshot")
+    Seq(
+      authorized(dataSplit()),
+      chainSplit,
+      authorized(chainSplit),
+      new FallbackSplitImpl(chainSplit, true),
+      new FallbackSplitImpl(authorized(chainSplit), true))
+  }
+
+  test("partition metadata remains unsupported for authorized and chain splits") {
+    chainAndAuthorizedSplits().foreach {
+      split =>
+        val reader = new EmptyReader
+        val error = intercept[UnsupportedOperationException] {
+          PaimonRecordReaderIterator(reader, Seq(partitionColumn), split)
+        }
+        assert(error.getMessage.contains("Partition metadata is only supported for DataSplit"))
+        assert(reader.closed)
+    }
+  }
+
+  test("bucket metadata supports authorized and chain splits") {
+    chainAndAuthorizedSplits().foreach {
+      split =>
+        val iterator =
+          PaimonRecordReaderIterator(new EmptyReader, Seq(PaimonMetadataColumn.BUCKET), split)
+        try {
+          assert(!iterator.hasNext)
+        } finally {
+          iterator.close()
+        }
+    }
   }
 }

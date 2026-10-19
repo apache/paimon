@@ -22,9 +22,9 @@ import org.apache.paimon.data.{BinaryString, GenericRow, InternalRow => PaimonIn
 import org.apache.paimon.fs.Path
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader, ScoreRecordIterator, ScoreRecordReader}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PARTITION_AND_BUCKET_META_COLUMNS, PATH_AND_INDEX_META_COLUMNS, VECTOR_SEARCH_META_COLUMN_NAMES}
-import org.apache.paimon.table.source.{DataSplit, Split}
-import org.apache.paimon.utils.{CloseableIterator, Preconditions}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PATH_AND_INDEX_META_COLUMNS, VECTOR_SEARCH_META_COLUMN_NAMES}
+import org.apache.paimon.table.source.{ChainSplit, DataSplit, Split, Splits}
+import org.apache.paimon.utils.{CloseableIterator, IOUtils, Preconditions}
 
 import org.apache.spark.sql.PaimonUtils
 
@@ -37,13 +37,31 @@ case class PaimonRecordReaderIterator(
     split: Split)
   extends CloseableIterator[PaimonInternalRow] {
 
+  // Keep partition metadata restricted to the original DataSplit. Unwrapping authorization
+  // here would expose raw partition values after the reader has applied column masks.
   if (
-    metadataColumns.exists(c => PARTITION_AND_BUCKET_META_COLUMNS.contains(c.name)) && !split
+    metadataColumns.exists(_.name == PaimonMetadataColumn.PARTITION_COLUMN) && !split
       .isInstanceOf[DataSplit]
   ) {
-    throw new RuntimeException(
-      "There need be DataSplit when path and index metadata columns are required")
+    IOUtils.closeQuietly(reader)
+    throw new UnsupportedOperationException(
+      "Partition metadata is only supported for DataSplit without query authorization.")
   }
+
+  private val bucketMetadata =
+    if (metadataColumns.exists(_.name == PaimonMetadataColumn.BUCKET_COLUMN)) {
+      // Inspect the underlying split only for metadata. The reader still receives the original
+      // split so fallback routing and query authorization are preserved.
+      Some(Splits.underlying(split) match {
+        case dataSplit: DataSplit => dataSplit.bucket()
+        case chainSplit: ChainSplit => chainSplit.bucket()
+        case _ =>
+          throw new RuntimeException(
+            "There need be DataSplit or ChainSplit when bucket metadata is required")
+      })
+    } else {
+      None
+    }
 
   private val needMetadata = metadataColumns.nonEmpty
   private val needPathAndIndexMetadata =
@@ -173,7 +191,7 @@ case class PaimonRecordReaderIterator(
           case PaimonMetadataColumn.PARTITION_COLUMN =>
             metadataRow.setField(index, split.asInstanceOf[DataSplit].partition())
           case PaimonMetadataColumn.BUCKET_COLUMN =>
-            metadataRow.setField(index, split.asInstanceOf[DataSplit].bucket())
+            metadataRow.setField(index, bucketMetadata.get)
         }
     }
   }
