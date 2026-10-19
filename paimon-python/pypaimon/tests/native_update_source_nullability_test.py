@@ -146,6 +146,37 @@ def test_selected_nullable_target_accepts_null(native_rest_catalog, native, oper
     assert _rows(table) == [dict(id=1, value=None, keep=100)]
 
 
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('reverse', [False, True], ids=['null-last', 'null-first'])
+def test_merge_chunked_source_keeps_one_transport_schema(
+        native_rest_catalog, native, stream, reverse):
+    table, schema = _table(native_rest_catalog, native)
+    schema = schema.with_metadata({'origin': 'chunked-merge'})
+    # Each chunk needs a different relaxed transport field. The NULL key and
+    # unmatched value never reach a target assignment, regardless of chunk order.
+    rows = [dict(id=1, value=20, keep=100), dict(id=2, value=None, keep=None),
+            dict(id=None, value=30, keep=100)]
+    chunks = [pa.RecordBatch.from_pylist([dict(id=0, value=0, keep=0), row], schema=schema).slice(1)
+              for row in rows]
+    source = pa.Table.from_batches(chunks[::-1] if reverse else chunks)
+    encoded = pa.chunked_array([pa.DictionaryArray.from_arrays(
+        pa.array([0], type=pa.int8()), pa.array([None], type=pa.int32())) for _ in chunks])
+    source = source.append_column(pa.field('encoded_unused', encoded.type, nullable=False), encoded)
+    schema = source.schema
+    assert source.column('encoded_unused').null_count == 0
+    assert source.column('encoded_unused').to_pylist() == [None, None, None]
+    assert len(source.to_batches()) == 3
+    builder, messages = _messages(table, source, native, stream, 'merge')
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages, 31) if stream else commit.commit(messages)
+    finally:
+        commit.close()
+    assert _rows(table) == [dict(id=1, value=20, keep=100)]
+    assert source.schema.equals(schema, check_metadata=True)
+
+
 def _blob_table(catalog, native, payload_type, nullable, before):
     schema = pa.schema([pa.field('id', pa.int32()),
                         pa.field('payload', payload_type, nullable=nullable)])
