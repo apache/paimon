@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -99,6 +100,291 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 4, 4, 4, 5, 5, 5);
         add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 6);
         validate(func, 1, null, null, 6, null, null, 6);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSequenceGroupSortOrder(boolean explicitAscendingOrder) {
+        Options options = new Options();
+        options.set("fields.f2.sequence-group", "f1");
+        if (explicitAscendingOrder) {
+            options.set("fields.f2.sequence-group.sort-order", "ascending");
+        }
+        options.set("fields.f4.sequence-group", "f3");
+        options.set("fields.f4.sequence-group.sort-order", "descending");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 100, 10, 200, 10);
+        add(func, 1, 50, 5, 50, 5);
+        add(func, 1, 70, 7, 70, 7);
+        validate(func, 1, 100, 10, 50, 5);
+        // Equal ascending values are accepted while a null descending value skips its group.
+        add(func, 1, 101, 10, 999, null);
+        validate(func, 1, 101, 10, 50, 5);
+        // An equal ascending value also replaces a protected field with null.
+        add(func, 1, null, 10, 999, null);
+        validate(func, 1, null, 10, 50, 5);
+        // A higher-precedence ascending value is accepted while a null descending value skips.
+        add(func, 1, 110, 11, 999, null);
+        validate(func, 1, 110, 11, 50, 5);
+        // A null ascending value skips its group while an equal descending value is accepted.
+        add(func, 1, 999, null, 30, 5);
+        validate(func, 1, 110, 11, 30, 5);
+        // An equal descending value also replaces a protected field with null.
+        add(func, 1, 999, null, null, 5);
+        validate(func, 1, 110, 11, null, 5);
+        // A null ascending value skips its group while a smaller descending value is accepted.
+        add(func, 1, 999, null, 31, 4);
+        validate(func, 1, 110, 11, 31, 4);
+        // Null ordering values in both groups leave both groups unchanged.
+        add(func, 1, 999, null, 999, null);
+        validate(func, 1, 110, 11, 31, 4);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "ascending", "descending"})
+    public void testRowSequenceGroupSortOrder(String sortOrder) {
+        Options options = new Options();
+        options.set("fields.f2.sequence-group", "f1");
+        if (!sortOrder.isEmpty()) {
+            options.set("fields.f2.sequence-group.sort-order", sortOrder);
+        }
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.ROW(DataTypes.FIELD(3, "version", DataTypes.INT())));
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        GenericRow nullVersion = GenericRow.of((Object) null);
+        boolean ascending = sortOrder.isEmpty() || "ascending".equals(sortOrder);
+        GenericRow winningSequence = ascending ? GenericRow.of(20) : nullVersion;
+        GenericRow[] records = {
+            GenericRow.of(1, 100, null),
+            GenericRow.of(1, 10, GenericRow.of(10)),
+            GenericRow.of(1, 5, GenericRow.of(5)),
+            GenericRow.of(1, 99, nullVersion),
+            GenericRow.of(1, 20, GenericRow.of(20)),
+            GenericRow.of(1, 200, null),
+            GenericRow.of(1, 21, winningSequence),
+            GenericRow.of(1, null, winningSequence)
+        };
+        // A top-level null skips the group. ROW(NULL) participates in comparison and is smaller
+        // than ROW(5), so descending order prefers it. Equal ROW values still replace the payload,
+        // including with null.
+        GenericRow[] expected = {
+            GenericRow.of(1, null, null),
+            GenericRow.of(1, 10, GenericRow.of(10)),
+            ascending
+                    ? GenericRow.of(1, 10, GenericRow.of(10))
+                    : GenericRow.of(1, 5, GenericRow.of(5)),
+            ascending ? GenericRow.of(1, 10, GenericRow.of(10)) : GenericRow.of(1, 99, nullVersion),
+            ascending ? GenericRow.of(1, 20, GenericRow.of(20)) : GenericRow.of(1, 99, nullVersion),
+            ascending ? GenericRow.of(1, 20, GenericRow.of(20)) : GenericRow.of(1, 99, nullVersion),
+            GenericRow.of(1, 21, winningSequence),
+            GenericRow.of(1, null, winningSequence)
+        };
+        func.reset();
+        for (int i = 0; i < records.length; i++) {
+            func.add(
+                    new KeyValue()
+                            .replace(GenericRow.of(1), sequence++, RowKind.INSERT, records[i]));
+            assertThat(func.getResult().value())
+                    .as("Sort order: %s, input: %s", sortOrder, records[i])
+                    .isEqualTo(expected[i]);
+        }
+    }
+
+    @Test
+    public void testDescendingMultiFieldSequenceGroup() {
+        Options options = new Options();
+        options.set("fields.f2,f3.sequence-group", "f1");
+        options.set("fields.f2,f3.sequence-group.sort-order", "descending");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 100, 10, 10);
+        add(func, 1, 200, 10, 5);
+        add(func, 1, 300, 11, 0);
+        validate(func, 1, 200, 10, 5);
+        // With equal first ordering values, a null second value has lower precedence.
+        add(func, 1, 400, 10, null);
+        validate(func, 1, 200, 10, 5);
+        // In descending order, a smaller first value has higher precedence, even when the second
+        // value is null.
+        add(func, 1, 600, 9, null);
+        validate(func, 1, 600, 9, null);
+        // An all-null ordering tuple skips the group.
+        add(func, 1, 500, null, null);
+        validate(func, 1, 600, 9, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDescendingSequenceGroupProjectionAndDelete(boolean project) {
+        Options options = new Options();
+        options.set("fields.f2.sequence-group", "f1");
+        options.set("fields.f2.sequence-group.sort-order", "descending");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+        // Only request payload and key: adjustReadType must restore the ordering field.
+        RowType readType = project ? factory.adjustReadType(rowType.project("f1", "f0")) : rowType;
+        MergeFunction<KeyValue> func = project ? factory.create(readType) : factory.create();
+        ProjectedRow projection = ProjectedRow.from(readType, rowType);
+        GenericRow[] records = {
+            GenericRow.of(1, 100, 10, 0), GenericRow.of(1, 50, 5, 0),
+            GenericRow.of(1, 99, 7, 0), GenericRow.of(1, 99, 4, 0)
+        };
+        RowKind[] kinds = {RowKind.INSERT, RowKind.INSERT, RowKind.DELETE, RowKind.DELETE};
+        GenericRow[] expected = {
+            GenericRow.of(1, 100, 10, 0), GenericRow.of(1, 50, 5, 0),
+            GenericRow.of(1, 50, 5, 0), GenericRow.of(1, null, 4, 0)
+        };
+        func.reset();
+        for (int i = 0; i < records.length; i++) {
+            func.add(
+                    new KeyValue()
+                            .replace(
+                                    GenericRow.of(1),
+                                    sequence++,
+                                    kinds[i],
+                                    projection.replaceRow(records[i])));
+            assertThat(
+                            InternalRowUtils.equals(
+                                    func.getResult().value(),
+                                    projection.replaceRow(expected[i]),
+                                    readType))
+                    .as("Projected: %s, input: %s, expected: %s", project, records[i], expected[i])
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testDescendingSequenceGroupAggregates() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2");
+        options.set("fields.f3.sequence-group.sort-order", "descending");
+        options.set("fields.f1.aggregate-function", "last_non_null_value");
+        options.set("fields.f2.aggregate-function", "sum");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        // In descending order, sequence 5 has higher precedence than 10; sum adds both values.
+        add(func, 1, 10, 10, 10);
+        add(func, 1, 5, 5, 5);
+        validate(func, 1, 5, 15, 5);
+        // Sequence 7 has lower precedence than 5: last_non_null retains 5, while sum adds 7.
+        add(func, 1, 7, 7, 7);
+        validate(func, 1, 5, 22, 5);
+        // Sequence 3 has higher precedence than 5; last_non_null ignores null while sum adds 3.
+        add(func, 1, null, 3, 3);
+        validate(func, 1, 5, 25, 3);
+        // A null ordering value skips the entire group, including both aggregate contributions.
+        add(func, 1, 999, 100, null);
+        validate(func, 1, 5, 25, 3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "value,id"})
+    public void testDescendingSequenceGroupRowDeleteWithProjection(String selectedFields) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("value", DataTypes.INT())
+                        .field("sequence", DataTypes.INT())
+                        .build();
+        Options options = new Options();
+        options.set("fields.sequence.sequence-group", "value");
+        options.set("fields.sequence.sequence-group.sort-order", "descending");
+        options.set("partial-update.remove-record-on-sequence-group", "sequence");
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("id"));
+        RowType readType =
+                factory.adjustReadType(
+                        rowType.project(
+                                selectedFields.isEmpty()
+                                        ? new String[0]
+                                        : selectedFields.split(",")));
+        MergeFunction<KeyValue> function = factory.create(readType);
+        GenericRow[] records = {
+            GenericRow.of(1, 100, 10),
+            GenericRow.of(1, 99, 11),
+            GenericRow.of(1, 99, 5),
+            GenericRow.of(1, 70, 7),
+            GenericRow.of(1, 40, 4)
+        };
+        RowKind[] kinds = {
+            RowKind.INSERT, RowKind.DELETE, RowKind.DELETE, RowKind.INSERT, RowKind.UPDATE_AFTER
+        };
+        RowKind[] expected = {
+            RowKind.INSERT, RowKind.INSERT, RowKind.DELETE, RowKind.DELETE, RowKind.INSERT
+        };
+        GenericRow[] expectedProjectedValues = {
+            GenericRow.of(100, 1, 10),
+            GenericRow.of(100, 1, 10),
+            GenericRow.of(99, 1, 5),
+            GenericRow.of(99, 1, 5),
+            GenericRow.of(40, 1, 4)
+        };
+        function.reset();
+        for (int i = 0; i < records.length; i++) {
+            function.add(
+                    new KeyValue()
+                            .replace(
+                                    GenericRow.of(1),
+                                    sequence++,
+                                    kinds[i],
+                                    ProjectedRow.from(readType, rowType).replaceRow(records[i])));
+            assertThat(function.getResult().valueKind())
+                    .as("Projection %s, input %s", selectedFields, i)
+                    .isEqualTo(expected[i]);
+            if (!selectedFields.isEmpty()) {
+                assertThat(function.getResult().value())
+                        .as("Projection %s, input %s", selectedFields, i)
+                        .isEqualTo(expectedProjectedValues[i]);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSequenceGroupOrderingFieldsCannotOverlap(boolean descending) {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1");
+        options.set("fields.f3,f4.sequence-group", "f2");
+        if (descending) {
+            options.set("fields.f3,f4.sequence-group.sort-order", "descending");
+        }
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f0")))
+                .hasMessageContaining("Ordering fields must not overlap between sequence groups.");
     }
 
     @Test

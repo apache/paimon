@@ -25,12 +25,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.native_plan import native_runtime_available
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_batch_write_builder'),
-    reason='Rust main writer and planner required')]
+    not native_runtime_available(),
+    reason='pypaimon-rust not installed')]
 
 
 @pytest.mark.parametrize('cross_partition', [False, True], ids=['dynamic', 'cross-partition'])

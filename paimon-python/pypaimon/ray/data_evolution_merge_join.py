@@ -113,6 +113,8 @@ def _resolve_source_projection(
 
     for clause in clauses:
         for value in clause.spec.values():
+            if callable(value) and not isinstance(value, type):
+                needed.update(source_field_names)
             if isinstance(value, SourceColumnRef):
                 needed.add(value.column)
         if clause.condition is not None:
@@ -269,6 +271,7 @@ def build_self_merge_update_plan(
     row_id_name = SpecialFields.ROW_ID.name
     needed_cols = set(resolve_target_projection(
         clauses, [row_id_name], update_cols, target_field_names,
+        callable_columns=read_columns or None,
     ))
     needed_cols.update(read_columns)
     for clause in clauses:
@@ -301,7 +304,7 @@ def build_self_merge_update_plan(
     read_builder = scan_table.new_read_builder().with_projection(projection)
     if scan_predicate is not None:
         read_builder.with_filter(scan_predicate)
-    scan_plan = read_builder.new_scan().plan_for_write()
+    scan_plan = read_builder.new_scan().plan_all_files()
     planned_snapshot_id = (
         scan_plan.snapshot_id
         if scan_plan.snapshot_id is not None else -1
@@ -877,16 +880,11 @@ def distributed_update_apply(
 def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
     """Result schema: each projected column's type plus int64 ``_ROW_ID``, in
     ``read_cols`` order. Shared by the empty-result paths so they can't drift."""
-    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.casting.schema_evolution import read_arrow_schema
     from pypaimon.table.special_fields import SpecialFields
 
-    rid = SpecialFields.ROW_ID.name
-    full = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    # Keep each field's nullability so an empty result matches a non-empty read.
-    return pa.schema([
-        pa.field(rid, pa.int64(), nullable=False) if col == rid else full.field(col)
-        for col in read_cols
-    ])
+    full = read_arrow_schema(table.table_schema.fields + [SpecialFields.ROW_ID])
+    return pa.schema([full.field(col) for col in read_cols])
 
 
 def distributed_read_by_row_id(

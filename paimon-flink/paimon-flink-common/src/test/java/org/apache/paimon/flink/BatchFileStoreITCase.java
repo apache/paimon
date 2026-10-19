@@ -929,6 +929,31 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMinMaxCountsStatsModeNotPushDown() {
+        // a column with stats-mode `counts` has a null count but no min/max
+        sql(
+                "CREATE TABLE min_max_counts (f0 INT, f1 INT) "
+                        + "WITH ('fields.f0.stats-mode' = 'counts')");
+        sql("INSERT INTO min_max_counts VALUES (1, 10), (2, 20), (3, CAST(NULL AS INT))");
+
+        String sql = "SELECT MIN(f0), MAX(f0) FROM min_max_counts";
+        assertThat(sql(sql)).containsOnly(Row.of(1, 3));
+        validateAggregateNotPushDown(sql, "MinAggFunction", "MaxAggFunction");
+
+        sql = "SELECT MIN(f1), MAX(f1) FROM min_max_counts";
+        assertThat(sql(sql)).containsOnly(Row.of(10, 20));
+        validateAggregatePushDown(sql, "MinAggFunction", "MaxAggFunction");
+
+        sql(
+                "CREATE TABLE min_max_counts_all (f0 INT, f1 INT) "
+                        + "WITH ('metadata.stats-mode' = 'counts')");
+        sql("INSERT INTO min_max_counts_all VALUES (1, 10), (2, 20)");
+        sql = "SELECT MIN(f0), MAX(f1) FROM min_max_counts_all";
+        assertThat(sql(sql)).containsOnly(Row.of(1, 20));
+        validateAggregateNotPushDown(sql, "MinAggFunction", "MaxAggFunction");
+    }
+
+    @Test
     public void testMinMaxPKNotPushDown() {
         sql("CREATE TABLE min_max_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 INT)");
         sql("INSERT INTO min_max_pk VALUES (1, 3), (2, 5)");

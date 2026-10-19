@@ -54,9 +54,11 @@ import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DeleteLabelRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.GetLabelRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
@@ -197,6 +199,8 @@ public class RESTApi {
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
+    public static final String ENTITY_TYPE = "entityType";
+    public static final String ENTITY_NAME = "entityName";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -763,8 +767,6 @@ public class RESTApi {
      * @param instant instant to rollback
      * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
      *     snapshot.
-     * @param fromSnapshotUuid expected snapshot UUID, checked together with fromSnapshot
-     * @param commitUser writer identity for active-lock admission, or null without a writer
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
      *     or the tag not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
@@ -774,12 +776,8 @@ public class RESTApi {
             Identifier identifier,
             @Nullable String tableUuid,
             Instant instant,
-            @Nullable Long fromSnapshot,
-            @Nullable String fromSnapshotUuid,
-            @Nullable String commitUser) {
-        RollbackTableRequest request =
-                new RollbackTableRequest(
-                        instant, fromSnapshot, fromSnapshotUuid, tableUuid, commitUser);
+            @Nullable Long fromSnapshot) {
+        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot, tableUuid);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
@@ -924,8 +922,7 @@ public class RESTApi {
      * <p>The server atomically upserts the binding identified by entity type, canonical entity
      * name, and key. Only its value is replaced; other labels are unchanged. Repeating the same
      * request leaves the same label value. Entity types and name resolution are server-defined;
-     * this client does not split, normalize, or resolve entity names. The path carries the binding
-     * identity; the request body contains only its value.
+     * this client does not split, normalize, or resolve entity names.
      *
      * @param value label value; an empty string is allowed, null is not
      * @throws NoSuchResourceException if the entity does not exist
@@ -934,8 +931,8 @@ public class RESTApi {
     @Experimental
     public void upsertLabel(String entityType, String entityName, String key, String value) {
         client.post(
-                resourcePaths.label(entityType, entityName, key),
-                new UpsertLabelRequest(value),
+                resourcePaths.upsertLabel(),
+                new UpsertLabelRequest(entityType, entityName, key, value),
                 restAuthFunction);
     }
 
@@ -947,8 +944,9 @@ public class RESTApi {
      */
     @Experimental
     public GetLabelResponse getLabel(String entityType, String entityName, String key) {
-        return client.get(
-                resourcePaths.label(entityType, entityName, key),
+        return client.post(
+                resourcePaths.getLabel(),
+                new GetLabelRequest(entityType, entityName, key),
                 GetLabelResponse.class,
                 restAuthFunction);
     }
@@ -956,10 +954,16 @@ public class RESTApi {
     /** Lists all labels attached directly to an entity, following catalog pagination. */
     @Experimental
     public List<GetLabelResponse> listLabels(String entityType, String entityName) {
-        String path = resourcePaths.labels(entityType, entityName);
+        Map<String, String> entity = labelEntityQueryParams(entityType, entityName);
         return listDataFromPageApi(
-                queryParams ->
-                        client.get(path, queryParams, ListLabelsResponse.class, restAuthFunction));
+                queryParams -> {
+                    queryParams.putAll(entity);
+                    return client.get(
+                            resourcePaths.labels(),
+                            queryParams,
+                            ListLabelsResponse.class,
+                            restAuthFunction);
+                });
     }
 
     /**
@@ -979,10 +983,12 @@ public class RESTApi {
         checkArgument(
                 maxResults == null || (maxResults >= 1 && maxResults <= 1000),
                 "maxResults must be between 1 and 1000");
+        Map<String, String> queryParams = labelEntityQueryParams(entityType, entityName);
+        queryParams.putAll(buildPagedQueryParams(maxResults, pageToken));
         ListLabelsResponse response =
                 client.get(
-                        resourcePaths.labels(entityType, entityName),
-                        buildPagedQueryParams(maxResults, pageToken),
+                        resourcePaths.labels(),
+                        queryParams,
                         ListLabelsResponse.class,
                         restAuthFunction);
         return new PagedList<>(response.getLabels(), response.getNextPageToken());
@@ -996,7 +1002,10 @@ public class RESTApi {
      */
     @Experimental
     public void deleteLabel(String entityType, String entityName, String key) {
-        client.delete(resourcePaths.label(entityType, entityName, key), restAuthFunction);
+        client.post(
+                resourcePaths.deleteLabel(),
+                new DeleteLabelRequest(entityType, entityName, key),
+                restAuthFunction);
     }
 
     /**
@@ -2054,6 +2063,18 @@ public class RESTApi {
     @VisibleForTesting
     RESTAuthFunction authFunction() {
         return restAuthFunction;
+    }
+
+    private static Map<String, String> labelEntityQueryParams(
+            String entityType, String entityName) {
+        checkArgument(
+                entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
+        checkArgument(
+                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
+        Map<String, String> queryParams = Maps.newHashMap();
+        queryParams.put(ENTITY_TYPE, entityType);
+        queryParams.put(ENTITY_NAME, entityName);
+        return queryParams;
     }
 
     private static void putQueryParameter(

@@ -56,6 +56,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
             raise ValueError("Primary-key search result contains duplicate physical positions.")
         self._splits = tuple(_materialize(
             source_splits, positions, snapshot_id))
+        self._native_result = None
 
     @property
     def snapshot_id(self):
@@ -67,7 +68,34 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
 
     @property
     def splits(self):
+        # Exposing mutable Python splits transfers metadata ownership to the
+        # caller. A later native scan must observe any edits to that view.
+        self._native_result = None
         return self._splits
+
+    def __getstate__(self):
+        # GlobalIndexResult owns a live core table. Transport the materialized
+        # Python metadata. copy.copy also uses this protocol and shares the
+        # mutable splits, so the original must stop using its native cache too.
+        self._native_result = None
+        state = self.__dict__.copy()
+        state.pop('_native_result', None)
+        return state
+
+    @classmethod
+    def _from_native(cls, table, result):
+        """Wrap core GlobalIndexResult; retain it for direct native scan handoff."""
+        from pypaimon.read.native_plan import _partition_fields
+        from pypaimon.read.split_serializer import deserialize_split_v1
+
+        value = cls.__new__(cls)
+        value._snapshot_id = result.snapshot_id() or 0
+        value._positions = tuple(PrimaryKeySearchPosition(*position) for position in result.positions())
+        value._splits = tuple(deserialize_split_v1(
+            split, _partition_fields(table), table.trimmed_primary_keys_fields)
+            for split in result.splits())
+        value._native_result = result
+        return value
 
 
 def _materialize(source_splits, positions, snapshot_id):
@@ -121,11 +149,12 @@ def _ranges(positions):
 
 
 def _partition_bytes(partition):
-    to_bytes = getattr(partition, "to_bytes", None)
-    if callable(to_bytes):
-        return bytes(to_bytes())
-    values = getattr(partition, "values", ())
-    return repr(tuple(values)).encode("utf-8")
+    from pypaimon.table.row.generic_row import GenericRowSerializer
+
+    # Java PrimaryKeySearchPosition compares serialized BinaryRow partitions.
+    # Reuse the wire encoder for both GenericRow and BinaryRow, including the
+    # empty partition's arity prefix and eight-byte body.
+    return bytes(GenericRowSerializer.to_bytes(partition))
 
 
 def _position_key(position):

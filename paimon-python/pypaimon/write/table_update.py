@@ -57,6 +57,16 @@ from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 logger = logging.getLogger(__name__)
 
 
+def _authorize_update(table):
+    """Require the same whole-table grant as plan_all_files for fast paths."""
+    from pypaimon.catalog.catalog_exception import TableNoPermissionException
+    from pypaimon.read.table_scan import authorize
+
+    query_auth = table.catalog_environment.table_query_auth(table.options, table.identifier)
+    if authorize(table, query_auth, None) is not None:
+        raise TableNoPermissionException(table.identifier)
+
+
 def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total_tasks: int) -> List[DataSplit]:
     list_ranges = []
     for split in splits:
@@ -331,7 +341,7 @@ class TableUpdate:
         else:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        plan = read_builder.new_scan().plan_for_write()
+        plan = read_builder.new_scan().plan_all_files()
         splits = plan.splits()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         files_info = RowIdFileIndex.from_splits(
@@ -568,6 +578,7 @@ class TableUpdate:
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
+        _authorize_update(self.table)
         snapshot = self.table.snapshot_manager().get_latest_snapshot()
         if snapshot is None:
             return []
@@ -700,7 +711,7 @@ class TableUpdate:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
         scan = read_builder.new_scan()
-        splits = scan.plan_for_write().splits()
+        splits = scan.plan_all_files().splits()
         if (splits
                 and self.table.options.native_write_enabled()
                 and not any(isinstance(split, QueryAuthSplit)
@@ -934,7 +945,7 @@ class ShardTableUpdator:
         self.dict = defaultdict(list)
 
         scanner = self.table.new_read_builder().new_scan()
-        plan = scanner.plan_for_write()
+        plan = scanner.plan_all_files()
         self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
@@ -957,7 +968,9 @@ class ShardTableUpdator:
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
         read_builder = self.table.new_read_builder()
         read_builder.with_projection(self.projection)
-        return read_builder.new_read().to_arrow_batch_reader(self.splits)
+        # Updates consume row ranges in split order. Parallel native readers
+        # return batches in completion order, which would assign values to other rows.
+        return read_builder.new_read().to_arrow_batch_reader(self.splits, parallelism=1)
 
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []

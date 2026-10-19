@@ -20,6 +20,7 @@
 import copy
 import math
 import operator
+from functools import partial
 
 import numpy as np
 import pyarrow as pa
@@ -30,6 +31,7 @@ from torch.utils.data import Dataset
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.multimodal.query import ScanQuery, _PreFilterQuery
+from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.read.datasource.torch_dataset import (
     SplitRangeIndex,
     row_ranges_for_split,
@@ -75,9 +77,18 @@ class ContiguousWindowDataset(Dataset):
     Only one of the three window definitions may be supplied. Without any,
     every column uses ``[0]``. ``stride`` schedules anchors from each group's
     first row; boundary handling never shifts that schedule.
+    ``anchor_row_ids`` optionally selects scheduled anchors by Paimon row ID
+    without removing their context. IDs must belong to the context query;
+    duplicates do not repeat samples and selection order does not change the
+    group/order schedule. The query, including its limit, defines group bounds.
+    Restrict it to complete groups to retain the original episode boundaries.
+
+    One scan plans and authorizes the index and all requested value columns.
+    Its split metadata is reused by every projection and DataLoader worker;
+    payloads remain lazy. Authorization is resolved at Dataset construction.
     ``blob_parallelism`` controls concurrent BLOB reads for each item or batch.
-    Video frame columns are not supported yet, because a window read would drop
-    the frame metadata carried by their descriptors.
+    Video frame columns retain their descriptors until the requested rows are
+    grouped and decoded, so overlapping windows reuse each physical frame read.
     """
 
     _BOUNDARY_POLICIES = ("drop", "pad", "error")
@@ -101,7 +112,9 @@ class ContiguousWindowDataset(Dataset):
             delta_timestamps=None,
             fps=None,
             tolerance_s=None,
-            boundary=None):
+            boundary=None,
+            video_backend=None,
+            anchor_row_ids=None):
         if not isinstance(query, ScanQuery) or isinstance(query, _PreFilterQuery):
             raise TypeError(
                 "ContiguousWindowDataset is only supported on scan(), "
@@ -135,7 +148,14 @@ class ContiguousWindowDataset(Dataset):
             raise ValueError("group_key and order_key must not be is_pad.")
         self.columns = _columns(
             query, columns, self.group_key, self.order_key)
-        _reject_video_columns(query._table, self.columns)
+        self._video_columns = [
+            name for name in self.columns
+            if name in query._table.options.video_frame_fields()
+        ]
+        if video_backend not in (None, "torchcodec", "pyav"):
+            raise ValueError(
+                "video_backend must be None, 'torchcodec', or 'pyav'.")
+        self.video_backend = video_backend
         self.anchor_columns = _anchor_columns(anchor_columns, self.columns)
         self.frame_offsets = _frame_offsets(
             self.columns, frame_offsets, delta_timestamps, fps, tolerance_s,
@@ -165,12 +185,26 @@ class ContiguousWindowDataset(Dataset):
             raise ValueError(
                 "ContiguousWindowDataset requires row-tracking.enabled=true.")
 
-        index, snapshot_id = _read_window_index(
-            query, self.group_key, self.order_key)
-        self.snapshot_id = snapshot_id
-        self._table = _pin_table(query._table, snapshot_id)
+        index, plan = _read_window_index(
+            query, self.group_key, self.order_key, self.columns)
+        self.snapshot_id = plan.snapshot_id
+        self._table = _pin_table(query._table, self.snapshot_id)
+        self._splits = plan.splits()
         self._plans = {}
-        self._build_index(index)
+        self._video_collators = {
+            name: VideoFrameCollator(
+                self._table,
+                video_column=name,
+                decoder_factory=partial(
+                    _open_default_video_decoder, backend=video_backend),
+                decode_batch_fn=_decode_video_frames,
+                output_column=name,
+                collate_fn=list,
+                range_parallelism=self.blob_parallelism,
+            )
+            for name in self._video_columns
+        }
+        self._build_index(index, anchor_row_ids)
 
     @classmethod
     def from_query(cls, query, **kwargs):
@@ -217,11 +251,28 @@ class ContiguousWindowDataset(Dataset):
         ]
 
     def __getstate__(self):
-        # Cached plans hold planning state of one process; each DataLoader
-        # worker plans the pinned snapshot once for itself.
+        # Reuse split metadata in workers, but rebuild process-local readers.
         state = self.__dict__.copy()
         state["_plans"] = {}
         return state
+
+    def close(self):
+        """Close video decoders opened by this Dataset process."""
+        first_error = None
+        for collator in self._video_collators.values():
+            try:
+                collator.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _resolve_window(self, index):
         index = operator.index(index)
@@ -270,12 +321,13 @@ class ContiguousWindowDataset(Dataset):
             return self.adapter(sample)
         return sample
 
-    def _build_index(self, index):
+    def _build_index(self, index, anchor_row_ids):
         """Validate index rows, then store row IDs, groups, and window anchors.
 
         Args:
             index: Arrow table containing ``group_key``, ``order_key``, and
                 Paimon's ``_ROW_ID`` for the resolved snapshot.
+            anchor_row_ids: Optional selection within the context's row IDs.
 
         The index is kept as NumPy arrays of row IDs, per-group offsets, and
         window anchors, plus one Python group value per group. Order values are
@@ -325,7 +377,9 @@ class ContiguousWindowDataset(Dataset):
             pa.array(self._group_starts, type=pa.int64())).to_pylist()
         self._group_first_orders = order_values[self._group_starts]
         self._validate_contiguity(order_values)
-        self._anchor_groups, self._anchor_starts = self._build_anchors()
+        anchor_mask = _anchor_mask(
+            ordered.column(SpecialFields.ROW_ID.name), anchor_row_ids)
+        self._anchor_groups, self._anchor_starts = self._build_anchors(anchor_mask)
 
     def _validate_contiguity(self, order_values):
         if len(order_values) < 2:
@@ -353,7 +407,7 @@ class ContiguousWindowDataset(Dataset):
             self._group_starts, position, side="right")) - 1
         return self._group_keys[group_index]
 
-    def _build_anchors(self):
+    def _build_anchors(self, anchor_mask):
         groups = []
         starts = []
         minimum = min(min(offsets) for offsets in self.frame_offsets.values())
@@ -365,6 +419,9 @@ class ContiguousWindowDataset(Dataset):
         for group_index, length in enumerate(self._group_lengths):
             length = int(length)
             positions = np.arange(0, length, self.stride, dtype=np.int64)
+            if anchor_mask is not None:
+                positions = positions[
+                    anchor_mask[self._group_starts[group_index] + positions]]
             lower = min(length, max(0, -minimum))
             upper = max(0, min(length, length - maximum))
             valid = (positions >= lower) & (positions < upper)
@@ -402,11 +459,16 @@ class ContiguousWindowDataset(Dataset):
 
         Returns:
             A list of row dictionaries aligned one-for-one with ``row_ids``.
-            The internal ``_ROW_ID`` field is removed, and BLOB descriptors are
-            resolved to their bodies.
+            The internal ``_ROW_ID`` field is removed. Ordinary BLOB
+            descriptors are resolved to their bodies, while video descriptors
+            are decoded to frames.
         """
         columns = self.columns if columns is None else columns
         rows = self._plan_for(columns).read(row_ids)
+        for name in columns:
+            collator = self._video_collators.get(name)
+            if collator is not None:
+                rows = collator(rows)
         row_id_column = SpecialFields.ROW_ID.name
         by_row_id = {}
         for row in rows:
@@ -422,35 +484,52 @@ class ContiguousWindowDataset(Dataset):
         key = tuple(columns)
         plan = self._plans.get(key)
         if plan is None:
+            tag_name = self._table.options.scan_tag_name()
+            if tag_name is not None and self.snapshot_id is not None:
+                _require_tag_snapshot(self._table, tag_name, self.snapshot_id)
             plan = _PinnedRowIdPlan(
-                self._table, columns, self.blob_parallelism, self.snapshot_id)
+                self._table,
+                columns,
+                self.blob_parallelism,
+                self._splits,
+                self._video_columns,
+            )
             self._plans[key] = plan
         return plan
 
 
 class _PinnedRowIdPlan:
-    """One authorized scan plan of the pinned snapshot, read by row ID.
+    """Read a projection from the window context's authorized splits by row ID.
 
-    Planning happens once per projection. Every read then narrows the cached
-    splits to the row ranges covering the requested row IDs, so repeated item
-    and batch reads never revisit the snapshot's manifests.
+    Every read narrows the shared splits to the requested row ranges. Neither
+    new projections nor workers need to revisit the snapshot's manifests.
     """
 
-    def __init__(self, table, columns, blob_parallelism, snapshot_id):
+    def __init__(
+            self,
+            table,
+            columns,
+            blob_parallelism,
+            splits,
+            video_columns=()):
         self._blob_parallelism = blob_parallelism
-        self._snapshot_id = snapshot_id
         self._blob_columns = [
             field.name for field in table.fields
             if field.name in columns
             and is_blob_file_type(field.type)
         ]
+        self._body_blob_columns = [
+            name for name in self._blob_columns if name not in video_columns
+        ]
         self._map_blob_columns = {
             field.name for field in table.fields
-            if field.name in self._blob_columns and is_map_blob_type(field.type)
+            if field.name in self._body_blob_columns
+            and is_map_blob_type(field.type)
         }
         self._array_blob_columns = {
             field.name for field in table.fields
-            if field.name in self._blob_columns and is_array_blob_type(field.type)
+            if field.name in self._body_blob_columns
+            and is_array_blob_type(field.type)
         }
         blob_column_set = set(self._blob_columns)
         self._projection = (
@@ -462,16 +541,7 @@ class _PinnedRowIdPlan:
             table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
             if self._blob_columns else table
         )
-        plan = self._new_read_builder().new_scan().plan()
-        # A tag can be replaced between indexing and this deferred plan, so the
-        # plan is only usable while it still resolves the indexed snapshot.
-        if snapshot_id is not None and plan.snapshot_id != snapshot_id:
-            raise RuntimeError(
-                "The window index was built from snapshot %s, but reading its "
-                "rows now resolves snapshot %s; the pinned snapshot moved."
-                % (snapshot_id, plan.snapshot_id))
-        self._splits = plan.splits()
-        _reject_masked_row_ids(self._splits)
+        self._splits = splits
         self._split_ranges = [
             row_ranges_for_split(split) for split in self._splits
         ]
@@ -485,31 +555,30 @@ class _PinnedRowIdPlan:
             self._splits, self._split_ranges, self._split_range_index, ranges)
         if not splits:
             return []
-        read_builder = self._new_read_builder()
-        predicate = read_builder.new_predicate_builder().is_in(
-            SpecialFields.ROW_ID.name, requested)
-        arrow = read_builder.with_filter(predicate).new_read().to_arrow(splits)
+        # IndexedSplit already pushes the row ranges into the readers. Avoid
+        # running a second predicate scanner over the same selected rows.
+        arrow = self._new_read_builder().new_read().to_arrow(splits)
         # Row ranges are merged per split, so a read can still return rows
         # between requested IDs; drop them before BLOB bodies are fetched.
         row_id_column = arrow.column(SpecialFields.ROW_ID.name)
         arrow = arrow.filter(pc.is_in(
             row_id_column,
             value_set=pa.array(requested, type=row_id_column.type)))
-        if not self._blob_columns:
+        if not self._body_blob_columns:
             return arrow.to_pylist()
 
         bodies = fetch_blob_bodies(
             self._table.file_io,
-            arrow.select(self._blob_columns).to_pydict(),
-            self._blob_columns,
+            arrow.select(self._body_blob_columns).to_pydict(),
+            self._body_blob_columns,
             self._blob_parallelism,
             self._map_blob_columns,
             self._array_blob_columns)
-        blob_column_set = set(self._blob_columns)
+        blob_column_set = set(self._body_blob_columns)
         rows = arrow.select([
             name for name in arrow.column_names if name not in blob_column_set
         ]).to_pylist()
-        for name in self._blob_columns:
+        for name in self._body_blob_columns:
             values = bodies[name]
             if len(values) != len(rows):
                 raise RuntimeError(
@@ -583,19 +652,48 @@ def _group_starts(group_values):
     )).astype(np.int64, copy=False)
 
 
-def _read_window_index(query, group_key, order_key):
+def _anchor_mask(row_ids, selection):
+    if selection is None:
+        return None
+    selected = []
+    maximum = np.iinfo(np.int64).max
+    for value in selection:
+        if isinstance(value, (bool, np.bool_)):
+            raise TypeError("anchor_row_ids must contain integers, not booleans.")
+        try:
+            row_id = operator.index(value)
+        except TypeError:
+            raise TypeError("anchor_row_ids must contain integer row IDs.")
+        if not 0 <= row_id <= maximum:
+            raise ValueError("anchor_row_ids must contain nonnegative int64 row IDs.")
+        selected.append(row_id)
+    selected = pa.array(selected, type=pa.int64())
+    mask = pc.is_in(row_ids, value_set=selected)
+    missing = selected.filter(pc.invert(pc.is_in(
+        selected, value_set=row_ids.filter(mask))))
+    if len(missing):
+        raise ValueError(
+            "anchor_row_ids contains IDs outside the context query: %s."
+            % missing.slice(0, 10).to_pylist())
+    return mask.to_numpy(zero_copy_only=False)
+
+
+def _read_window_index(query, group_key, order_key, columns):
     index_query = copy.copy(query)
-    index_query._projection = [group_key, order_key]
+    index_columns = [group_key, order_key, SpecialFields.ROW_ID.name]
+    # Plan all requested columns: native planning may prune DE column files,
+    # and authorization must cover payload columns as well as the index.
+    index_query._projection = index_columns + list(columns)
     index_query._include_row_id = True
     read_builder = index_query._configured_read_builder()
     plan = read_builder.new_scan().plan()
     splits = plan.splits()
     _reject_masked_row_ids(splits)
     _reject_masked_index_keys(splits, group_key, order_key)
-    index = read_builder.new_read().to_arrow(splits)
+    index = read_builder.with_projection(index_columns).new_read().to_arrow(splits)
     if index.num_rows and plan.snapshot_id is None:
         raise RuntimeError("Cannot pin the snapshot used to build the window index.")
-    return index, plan.snapshot_id
+    return index, plan
 
 
 def _pin_table(table, snapshot_id):
@@ -639,18 +737,25 @@ def _require_tag_snapshot(table, tag_name, snapshot_id):
     if resolved != snapshot_id:
         raise RuntimeError(
             "Tag %r now resolves to snapshot %s, but the window index was "
-            "built from snapshot %s." % (tag_name, resolved, snapshot_id))
+            "built from snapshot %s; the pinned snapshot moved."
+            % (tag_name, resolved, snapshot_id))
 
 
-def _reject_video_columns(table, columns):
-    video_columns = [
-        name for name in columns if name in table.options.video_frame_fields()
-    ]
-    if video_columns:
-        raise ValueError(
-            "ContiguousWindowDataset does not support video frame columns %s "
-            "yet: a window read would drop their frame metadata, such as "
-            "frame_index." % video_columns)
+def _open_default_video_decoder(stream, backend=None):
+    # Keep the codec implementation shared with PaimonLeRobotDataset while the
+    # generic collator owns grouping, range reads, and process-local caching.
+    from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+    return _open_video_decoder(stream, backend=backend)
+
+
+def _decode_video_frames(decoder, frame_indices, unused_rows):
+    get_frames_at = getattr(decoder, "get_frames_at", None)
+    if get_frames_at is not None:
+        frames = get_frames_at(indices=frame_indices).data
+        # Iterating a batched tensor returns views backed by the whole batch.
+        # Give each row compact storage before window assembly deep-copies it.
+        return [frame.clone() for frame in frames]
+    return [decoder[index] for index in frame_indices]
 
 
 def _frame_offsets(columns, offsets, timestamps, fps, tolerance_s,

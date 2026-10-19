@@ -91,6 +91,12 @@ def merge_into(
 
     The returned messages must be committed by the caller's matching
     ``TableCommit``.
+
+    SET and INSERT mappings may contain callables accepting an Arrow table
+    with qualified ``t.`` target and ``s.`` source columns (INSERT has only
+    source columns). Each callable evaluates the rows selected by its clause
+    and returns an Arrow Array or ChunkedArray of the same length. Empty
+    clauses do not invoke callbacks; callback errors propagate to the caller.
     """
     if target_table.options.native_write_enabled():
         from pypaimon.write.native_merge_into import create_native_merge_into
@@ -100,6 +106,10 @@ def merge_into(
         if native is not None:
             return native.prepare_commit()
 
+    # Empty-target INSERT skips the target scan, but still needs the same
+    # unrestricted whole-table grant before any user callback or staging.
+    from pypaimon.write.table_update import _authorize_update
+    _authorize_update(target_table)
     base_snapshot = target_table.snapshot_manager().get_latest_snapshot()
     source_table, matched_specs, not_matched_specs, ctx = _prepare(
         target_table,
@@ -182,6 +192,7 @@ def _prepare(
                 c.update,
                 settable_field_names,
                 on_map,
+                allow_callables=True,
             )
         matched_specs.append(
             _NormalizedClause(
@@ -230,6 +241,7 @@ def _prepare(
             settable_field_names,
             on_map,
             allow_target_refs=False,
+            allow_callables=True,
         )
         for tk, sk in on_map.items():
             if tk in settable_field_names and tk not in spec:
@@ -776,7 +788,7 @@ def _read_table(table, projection: Optional[List[str]] = None,
     if projection is not None:
         read_builder.with_projection(projection)
     scan = read_builder.new_scan()
-    return read_builder.new_read().to_arrow(scan.plan_for_write().splits())
+    return read_builder.new_read().to_arrow(scan.plan_all_files().splits())
 
 
 def _copy_at_snapshot(table, snapshot_id: Optional[int]):

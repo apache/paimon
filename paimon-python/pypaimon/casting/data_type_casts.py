@@ -216,6 +216,11 @@ def can_execute_cast(source_type, target_type) -> bool:
     # Same root: identity, or a same-shape constructed type whose value is
     # rebuilt by the read path's field-id alignment rather than a value cast.
     if source_root == target_root:
+        if source_root == TIME:
+            from pypaimon.table.row.generic_row import _parse_type_precision_scale
+            # Compare parsed precision: TIME and TIME(0) describe the same type.
+            return (_parse_type_precision_scale(source_type.type)[0]
+                    == _parse_type_precision_scale(target_type.type)[0])
         return True
     # Constructed -> character string is rendered by the read path's custom
     # ``_constructed_to_string_array`` (see DataFileBatchReader), not a cast.
@@ -254,7 +259,7 @@ def _schema_evolution_cast_supported(source_type, target_type) -> bool:
             pa.nulls(1, type=source_pa), target_pa, source_type, target_type)
         ok = True
     except (pa.lib.ArrowNotImplementedError, pa.lib.ArrowInvalid,
-            pa.lib.ArrowTypeError):
+            pa.lib.ArrowTypeError, ValueError, NotImplementedError):
         ok = False
     _EXECUTABLE_CAST_CACHE[cache_key] = ok
     return ok

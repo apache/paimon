@@ -26,6 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.file_scanner import FileScanner
@@ -77,6 +78,8 @@ class BinaryRowTest(unittest.TestCase):
         commit.commit(write.prepare_commit())
         write.close()
         commit.close()
+
+        cls.data = cls.data.cast(read_arrow_schema(append_table.fields))
 
     @classmethod
     def tearDownClass(cls):

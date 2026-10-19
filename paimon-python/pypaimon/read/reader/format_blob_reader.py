@@ -202,12 +202,11 @@ class FormatBlobReader(RecordBatchReader):
                             )
                         )
                     else:
-                        if blob is None:
+                        if blob is None or blob is Blob.PLACE_HOLDER:
+                            # A placeholder, including a video frame, has no payload
+                            # in this file. BlobFallbackBatchReader resolves an older
+                            # version; this reader materializes the cell as NULL.
                             pydict_data[field_name].append(None)
-                        elif blob is Blob.PLACE_HOLDER:
-                            raise RuntimeError(
-                                "Blob placeholder is not supported by FormatBlobReader yet."
-                            )
                         elif self._is_video or self._blob_as_descriptor:
                             pydict_data[field_name].append(blob.to_descriptor().serialize())
                         elif self._blob_parallelism > 1:
@@ -269,12 +268,10 @@ class FormatBlobReader(RecordBatchReader):
         row_index,
         blobs_to_resolve,
     ):
-        if blob_array is None:
+        if blob_array is None or blob_array is Blob.ARRAY_PLACE_HOLDER:
+            # ARRAY_PLACE_HOLDER means this file has no payload for the cell.
+            # BlobFallbackBatchReader resolves an older version; here it is NULL.
             return None
-        if blob_array is Blob.ARRAY_PLACE_HOLDER:
-            raise RuntimeError(
-                "Blob placeholder is not supported by FormatBlobReader yet."
-            )
         result = []
         for element_index, blob in enumerate(blob_array):
             if blob is None:
@@ -297,12 +294,10 @@ class FormatBlobReader(RecordBatchReader):
         row_index,
         blobs_to_resolve,
     ):
-        if blob_map is None:
+        if blob_map is None or blob_map is Blob.MAP_PLACE_HOLDER:
+            # MAP_PLACE_HOLDER means this file has no payload for the cell.
+            # BlobFallbackBatchReader resolves an older version; here it is NULL.
             return None
-        if blob_map is Blob.MAP_PLACE_HOLDER:
-            raise RuntimeError(
-                "Blob placeholder is not supported by FormatBlobReader yet."
-            )
         if None in blob_map:
             raise ValueError(
                 "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."

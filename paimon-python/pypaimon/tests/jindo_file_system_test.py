@@ -15,25 +15,35 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import gc
 import io
 import os
 import pickle
+import signal
 import threading
+import time
 import types
 import unittest
 import uuid
+import warnings
+import weakref
 from unittest import mock
 
 import pyarrow.fs as pafs
 
 from pyarrow.fs import PyFileSystem
+from pypaimon.catalog.rest.rest_token import RESTToken
+from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import jindo_file_system_handler as jindo_module
 from pypaimon.filesystem import oss_user_agent
+from pypaimon.filesystem import pyarrow_file_io as pyarrow_file_io_module
 from pypaimon.filesystem.jindo_file_system_handler import (
     JindoFileSystemHandler,
     JindoInputFile,
+    JindoOutputFile,
     JINDO_AVAILABLE,
 )
 
@@ -74,17 +84,79 @@ class JindoInputFileTest(unittest.TestCase):
 
     def test_known_size_avoids_backend_seek_from_end(self):
         stream = _RecordingInputStream()
-        input_file = JindoInputFile(stream, file_size=100)
+        input_file = JindoInputFile(stream, file_size=100, owner=object())
 
         self.assertEqual(95, input_file.seek(-5, os.SEEK_END))
         self.assertEqual([(95, os.SEEK_SET)], stream.seeks)
 
     def test_known_size_bounds_unlimited_read(self):
         stream = _RecordingInputStream(position=40)
-        input_file = JindoInputFile(stream, file_size=100)
+        input_file = JindoInputFile(stream, file_size=100, owner=object())
 
         self.assertEqual(b"x" * 60, input_file.read())
         self.assertEqual([60], stream.reads)
+
+
+class JindoStreamStatsTest(unittest.TestCase):
+
+    def setUp(self):
+        stats = jindo_module._StreamStats
+        for name in ("open", "milestone"):
+            self.addCleanup(setattr, stats, name, getattr(stats, name))
+        stats.open, stats.milestone = 0, 2
+
+    def test_logs_only_when_open_streams_pass_a_power_of_two(self):
+        with self.assertLogs(jindo_module.__name__, level="INFO") as logs:
+            files = [JindoInputFile(_RecordingInputStream(), owner=object()) for _ in range(3)]
+            # The output stream is the one that passes 4.
+            files.append(JindoOutputFile(_RecordingInputStream(), owner=object()))
+        self.assertEqual(["2 streams of JindoFileSystemHandler are open",
+                          "4 streams of JindoFileSystemHandler are open"],
+                         [r.getMessage().split(";")[0] for r in logs.records])
+
+        files.pop().close()
+        self.assertEqual(3, jindo_module._StreamStats.open)
+        files.pop(0).close()
+        # Dropping an unclosed stream closes it, so it no longer counts as open.
+        files.pop(0)
+        gc.collect()
+        self.assertEqual(1, jindo_module._StreamStats.open)
+        files[0].close()
+        files[0].close()
+        self.assertEqual(0, jindo_module._StreamStats.open)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs os.fork")
+    def test_forked_child_counts_streams_while_a_parent_thread_holds_the_lock(self):
+        held, release = threading.Event(), threading.Event()
+
+        def hold():
+            with jindo_module._StreamStats._lock:
+                held.set()
+                release.wait()
+
+        thread = threading.Thread(target=hold)
+        thread.start()
+        held.wait()
+        try:
+            with warnings.catch_warnings():
+                # Python 3.12+ warns about forking with other threads alive, which this test does on purpose.
+                warnings.simplefilter("ignore", DeprecationWarning)
+                pid = os.fork()
+            if pid == 0:
+                code = 1
+                try:
+                    signal.alarm(10)
+                    JindoInputFile(_RecordingInputStream(), owner=object()).close()
+                    code = 0 if jindo_module._StreamStats.open == 0 else 2
+                finally:
+                    os._exit(code)
+            status = os.waitpid(pid, 0)[1]
+        finally:
+            release.set()
+            thread.join()
+        self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
+                         "the forked child blocked on a lock held by a parent thread")
+        self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
 
 
 class JindoConfigTest(unittest.TestCase):
@@ -101,7 +173,7 @@ class JindoConfigTest(unittest.TestCase):
             def tell(self):
                 return self._stream.tell()
 
-        stream = JindoInputFile(JindoStream())
+        stream = JindoInputFile(JindoStream(), owner=object())
         self.assertEqual(5, stream.seek(0, io.SEEK_END))
 
     def test_pickle_reconnects_without_native_client_lock_or_cache(self):
@@ -324,6 +396,219 @@ class JindoConfigTest(unittest.TestCase):
             created_config.values["fs.oss.dlf-cache.server.address"],
             "http://cache-server:18101")
         self.assertEqual(created_config.values["logger.verbose"], "3")
+
+
+class _EvictionRecordingFileSystem:
+    """Fake ``jfs.connect`` result: owns the native store, records teardown."""
+
+    def __init__(self, events):
+        self.events = events
+
+    def open(self, path, mode):
+        return _EvictionRecordingNativeStream(self, self.events)
+
+    def __del__(self):
+        self.events.append('fs-destroyed')
+
+
+class _EvictionRecordingNativeStream:
+    """Fake pyjindo stream: non-owning reference to the native store."""
+
+    def __init__(self, fake_fs, events):
+        # Weak on purpose: the native stream must not keep the store alive.
+        self._fs = weakref.ref(fake_fs)
+        self._events = events
+        self.closed = False
+
+    def read(self, size=None):
+        if self._fs() is None:
+            raise RuntimeError('use-after-free: read after store teardown')
+        return b'x' * (size or 1)
+
+    def pread(self, size, offset):
+        return self.read(size)
+
+    def write(self, data):
+        if self._fs() is None:
+            raise RuntimeError('use-after-free: write after store teardown')
+        return len(data)
+
+    def seek(self, position, whence=0):
+        return position
+
+    def tell(self):
+        return 0
+
+    def close(self):
+        if self.closed:
+            return
+        if self._fs() is None:
+            # Emulates the native use-after-free the keep-alive prevents.
+            self._events.append('stream-closed-after-store-destroyed')
+            return
+        self.closed = True
+        self._events.append('stream-closed')
+
+    def __del__(self):
+        # pyjindo closes its native streams when they are released.
+        if not self.closed:
+            self.close()
+
+
+class JindoKeepAliveTest(unittest.TestCase):
+    """Streams keep the native store alive across a FileIO cache eviction and close
+    before the store is released, without relying on attribute dealloc order."""
+
+    @staticmethod
+    def _handler_with_recording_fs(events):
+        options = Options({
+            "fs.oss.impl": "jindo",
+            "fs.oss.endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.accessKeyId": "test-ak",
+            "fs.oss.accessKeySecret": "test-sk",
+        })
+        fake_fs = _EvictionRecordingFileSystem(events)
+        fake_jfs = types.SimpleNamespace(connect=lambda *a, **kw: fake_fs)
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", fake_jfs), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+        return handler, weakref.ref(fake_fs), weakref.ref(handler)
+
+    def test_evicted_filesystem_outlives_open_stream(self):
+        events = []
+        handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
+        input_file = handler.open_input_file('object')
+
+        # A FileIO cache eviction drops the handler chain: the handler (and its
+        # credentials) must die, the native store must not.
+        del handler
+        gc.collect()
+        self.assertIsNone(
+            handler_ref(), 'eviction must not pin the handler')
+        self.assertIsNotNone(
+            fs_ref(), 'eviction freed the native store while the stream was open')
+
+        # The stream keeps reading after eviction.
+        self.assertEqual(b'x', input_file.read(1))
+
+        # Closing releases the keep-alive: the still-referenced closed file
+        # no longer pins the store, and the stream closes before teardown.
+        input_file.close()
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+        self.assertIsNone(fs_ref())
+        del input_file
+        gc.collect()
+        # No double close on finalization.
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+
+    def test_evicted_filesystem_outlives_open_output_stream(self):
+        events = []
+        handler, fs_ref, handler_ref = self._handler_with_recording_fs(events)
+        output_file = handler.open_output_stream('object', None)
+
+        del handler
+        gc.collect()
+        self.assertIsNone(handler_ref())
+        self.assertIsNotNone(fs_ref())
+
+        self.assertEqual(4, output_file.write(b'data'))
+        output_file.close()
+        self.assertEqual(['stream-closed', 'fs-destroyed'], events)
+        self.assertIsNone(fs_ref())
+
+    def test_finalizer_closes_stream_before_store_teardown(self):
+        # Attribute release order is a CPython implementation detail: if a
+        # future refactor assigns _owner before _stream in __init__, the
+        # owner would be released first on dealloc. The finalizer must still
+        # close the stream while the owner pins the store.
+        events = []
+        fs = _EvictionRecordingFileSystem(events)
+        fs_ref = weakref.ref(fs)
+        stream = _EvictionRecordingNativeStream(fs, events)
+
+        class _ReversedInitInputFile(JindoInputFile):
+            def __init__(self, jindo_stream, owner):
+                self._owner = owner
+                self._stream = jindo_stream
+                self._file_size = None
+                self._closed = False
+
+        input_file = _ReversedInitInputFile(stream, owner=fs)
+        del fs, stream
+        gc.collect()
+        self.assertIsNotNone(fs_ref())
+
+        # Drop without closing: the finalizer must close the stream first...
+        del input_file
+        gc.collect()
+        self.assertIsNone(fs_ref())
+        # ...and the store must be destroyed only afterwards.
+        self.assertEqual(
+            ['stream-closed', 'fs-destroyed'], events,
+            'native stream must be closed before the store is destroyed')
+
+    def test_owner_argument_is_required(self):
+        with self.assertRaises(TypeError):
+            JindoInputFile(_RecordingInputStream())
+        with self.assertRaises(TypeError):
+            JindoOutputFile(_RecordingInputStream())
+
+
+class JindoTokenRefreshTest(unittest.TestCase):
+    """RESTTokenFileIO over the Jindo backend across a data token refresh."""
+
+    def setUp(self):
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
+        self.addCleanup(RESTTokenFileIO._FILE_IO_CACHE.clear)
+
+    @staticmethod
+    def _token(security_token, expire_at_millis):
+        return RESTToken({
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "STS.test-ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "test-sk",
+            OssOptions.OSS_SECURITY_TOKEN.key(): security_token,
+        }, expire_at_millis)
+
+    def test_token_refresh_keeps_previous_jindo_handler(self):
+        events = []
+        connected = []
+
+        def connect(*args, **kwargs):
+            fs = _EvictionRecordingFileSystem(events)
+            connected.append(weakref.ref(fs))
+            return fs
+
+        table_path = "oss://bucket/db.db/t"
+        expire_at_millis = int(time.time() * 1000) + 7_200_000
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(pyarrow_file_io_module, "JINDO_AVAILABLE", True), \
+                mock.patch.object(jindo_module, "jfs", types.SimpleNamespace(connect=connect)), \
+                mock.patch.object(jindo_module, "jutil",
+                                  types.SimpleNamespace(Config=_RecordingConfig)), \
+                mock.patch.object(RESTTokenFileIO, "try_to_refresh_token"):
+            readers = [RESTTokenFileIO(Identifier.create("db", "t"), table_path,
+                                       Options({OssOptions.OSS_IMPL.key(): "jindo"}))
+                       for _ in range(2)]
+            for reader in readers:
+                reader.token = self._token("sts-1", expire_at_millis)
+            stream = readers[0].new_input_stream(table_path + "/bucket-0/data.blob")
+            handler_ref = weakref.ref(readers[0].filesystem.handler)
+            self.assertIs(readers[0].file_io(), readers[1].file_io())
+            self.assertEqual(1, len(connected))
+
+            for reader in readers:
+                reader.token = self._token("sts-2", expire_at_millis + 1)
+            self.assertIs(readers[0].file_io(), readers[1].file_io())
+            gc.collect()
+
+            self.assertEqual(2, len(connected))
+            self.assertIsNotNone(handler_ref(), "token refresh released the previous handler")
+            self.assertEqual(b"x", stream.read(1))
+            stream.close()
+            self.assertEqual(["stream-closed"], events)
 
 
 class JindoFileSystemTest(unittest.TestCase):

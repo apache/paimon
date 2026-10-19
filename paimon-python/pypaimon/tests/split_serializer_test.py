@@ -18,8 +18,11 @@
 import base64
 import struct
 import unittest
+from pathlib import Path
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split_serializer import (
     _decode_modified_utf8, _decode_str_array, _encode_modified_utf8,
     deserialize_split_v1, serialize_split_v1)
@@ -105,6 +108,71 @@ class SplitSerializerTest(unittest.TestCase):
     def _partition_fields(self):
         return [DataField(0, 'y', AtomicType('INT')),
                 DataField(1, 'm', AtomicType('INT'))]
+
+    def test_query_auth_java_golden_roundtrips_exactly(self):
+        frame = (Path(__file__).parent / 'resources' / 'split_v1_query_auth.bin').read_bytes()
+        split = deserialize_split_v1(frame, self._partition_fields(),
+                                     key_fields=[DataField(0, 'k', AtomicType('BIGINT'))])
+        self.assertIsInstance(split, QueryAuthSplit)
+        self.assertEqual(split.auth_result.filter, ['row甲🙂\x00'])
+        self.assertEqual(split.auth_result.column_masking, {'𐀀': 'supplementary', '\ue000': 'bmp'})
+        self.assertEqual(serialize_split_v1(split), frame)
+
+    def test_query_auth_matches_java_utf8_and_utf16_map_order(self):
+        # Captured from Java QueryAuthSplit: int-length UTF-8 strings, including
+        # a literal NUL, and TreeMap ordering by UTF-16 rather than code point.
+        tail = bytes.fromhex(
+            "0101000000010000000b726f77e794b2f09f9982000100000002"
+            "00000004f09080800000000d737570706c656d656e74617279"
+            "00000003ee808000000003626d70")
+        inner = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, self._partition_fields())
+        auth = TableQueryAuthResult(["row甲🙂\x00"], {"\ue000": "bmp", "𐀀": "supplementary"})
+        frame = serialize_split_v1(QueryAuthSplit(inner, auth))
+        expected = struct.pack('>qii', 0x53504C49545F5631, 1, 5) + serialize_split_v1(inner) + tail
+        self.assertEqual(frame, expected)
+        copy = deserialize_split_v1(frame, self._partition_fields())
+        self.assertIsInstance(copy, QueryAuthSplit)
+        self.assertEqual(copy.auth_result.filter, auth.filter)
+        self.assertEqual(copy.auth_result.column_masking, auth.column_masking)
+        self.assertEqual(copy.row_count, inner.row_count)
+        self.assertIsNone(copy.merged_row_count())
+        self.assertEqual(serialize_split_v1(copy), frame)
+
+    def test_query_auth_nullable_empty_and_large_policy(self):
+        inner = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, self._partition_fields())
+        for auth in [None, TableQueryAuthResult(None, None), TableQueryAuthResult([], {}),
+                     TableQueryAuthResult(["甲" * 30000], {"value": "🙂" * 20000})]:
+            with self.subTest(auth=auth):
+                frame = serialize_split_v1(QueryAuthSplit(inner, auth))
+                copy = deserialize_split_v1(frame, self._partition_fields())
+                self.assertEqual(serialize_split_v1(copy), frame)
+                if auth is None:
+                    self.assertIsNone(copy.auth_result)
+                else:
+                    self.assertEqual(copy.auth_result.filter, auth.filter)
+                    self.assertEqual(copy.auth_result.column_masking, auth.column_masking)
+
+    def test_query_auth_preserves_indexed_selection_and_scores(self):
+        inner = deserialize_split_v1(_GOLDEN_INDEXED_SPLIT_V1, self._partition_fields())
+        frame = serialize_split_v1(QueryAuthSplit(inner, TableQueryAuthResult([], {})))
+        copy = deserialize_split_v1(frame, self._partition_fields())
+        self.assertIsInstance(copy.split, IndexedSplit)
+        self.assertEqual(copy.split.row_ranges(), inner.row_ranges())
+        self.assertEqual(copy.split.scores(), inner.scores())
+        self.assertEqual(serialize_split_v1(copy), frame)
+
+    def test_query_auth_malformed_frame_never_becomes_a_plain_split(self):
+        inner = serialize_split_v1(deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, self._partition_fields()))
+        header = struct.pack('>qii', 0x53504C49545F5631, 1, 5)
+        valid = header + inner + b'\x01\x00\x00'
+        self.assertIsInstance(deserialize_split_v1(valid, self._partition_fields()), QueryAuthSplit)
+        malformed = [valid[:-1], valid + b'\x00', header + inner + b'\x01\x01' + struct.pack('>i', -1),
+                     header + inner + b'\x01\x01' + struct.pack('>i', 2147483647),
+                     header + inner + b'\x01\x01' + struct.pack('>ii', 1, -1) + b'\x00',
+                     header * 33 + inner + b'\x00' * 33]
+        for frame in malformed:
+            with self.subTest(frame=frame[-16:]), self.assertRaises(ValueError):
+                deserialize_split_v1(frame, self._partition_fields())
 
     def test_deserialize_data_split_v1_golden(self):
         split = deserialize_split_v1(_GOLDEN_DATA_SPLIT_V1, self._partition_fields())

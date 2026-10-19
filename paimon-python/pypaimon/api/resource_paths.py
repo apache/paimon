@@ -33,7 +33,6 @@ class ResourcePaths:
     FUNCTION_DETAILS = "function-details"
     TAGS = "tags"
     BRANCHES = "branches"
-    RENAME = "rename"
     FORWARD = "forward"
     PERMISSIONS = "permissions"
     POLICIES = "policies"
@@ -134,10 +133,6 @@ class ResourcePaths:
             self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
             self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES,
             RESTUtil.encode_string(branch_name))
-
-    def rename_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
-        return "{}/{}".format(
-            self.branch(database_name, table_name, branch_name), self.RENAME)
 
     def forward_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
         return "{}/{}".format(

@@ -338,7 +338,9 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
             limit,
             has_non_partition_filter=False,
             data_evolution=False,
-            deletion_vectors_enabled=False):
+            deletion_vectors_enabled=False,
+            explicit_partition_filter=False,
+            has_row_filter=False):
         from pypaimon.read.scanner.file_scanner import FileScanner
 
         class _FakeScanner:
@@ -349,6 +351,8 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
         scanner.data_evolution = data_evolution
         scanner.deletion_vectors_enabled = deletion_vectors_enabled
         scanner.auth_has_non_partition_filter = False
+        scanner._explicit_partition_filter = explicit_partition_filter
+        scanner.predicate = object() if has_row_filter else None
         scanner._has_non_partition_filter = lambda: has_non_partition_filter
         return FileScanner._apply_push_down_limit(scanner, splits)
 
@@ -406,6 +410,17 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
         result = self._apply(
             [s_raw, s_raw, s_raw], limit=5, has_non_partition_filter=True)
         self.assertEqual(len(result), 3)
+
+    def test_explicit_partition_selector_defers_limit_until_ordinary_filter(self):
+        first = self._split(raw_convertible=True, row_count=10, merged_row_count=10)
+        later = self._split(raw_convertible=True, row_count=10, merged_row_count=10)
+        splits = [first, later]
+        self.assertEqual(self._apply(splits, limit=1, explicit_partition_filter=True,
+                                     has_row_filter=True), splits)
+        # Without a residual row filter, the explicit selection has already
+        # constrained every split, so merged-row-count LIMIT remains safe.
+        self.assertEqual(self._apply(splits, limit=1, explicit_partition_filter=True), [first])
+        self.assertEqual(self._apply(splits, limit=1, has_row_filter=True), [first])
 
     def test_data_evolution_deletion_vectors_disable_limit_pushdown(self):
         s_raw = self._split(raw_convertible=True, row_count=10, merged_row_count=10)

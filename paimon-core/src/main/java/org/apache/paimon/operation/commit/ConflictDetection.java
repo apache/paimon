@@ -653,11 +653,13 @@ public abstract class ConflictDetection {
         String baseEntriesString =
                 "Base entries are:\n"
                         + baseEntries.stream()
-                                .map(Object::toString)
+                                .map(this::fileEntryToString)
                                 .collect(Collectors.joining("\n"));
         String changesString =
                 "Changes are:\n"
-                        + changes.stream().map(Object::toString).collect(Collectors.joining("\n"));
+                        + changes.stream()
+                                .map(this::fileEntryToString)
+                                .collect(Collectors.joining("\n"));
 
         RuntimeException fullException =
                 new RuntimeException(
@@ -679,12 +681,12 @@ public abstract class ConflictDetection {
                     "Base entries are:\n"
                             + baseEntries.subList(0, Math.min(baseEntries.size(), maxEntry))
                                     .stream()
-                                    .map(Object::toString)
+                                    .map(this::fileEntryToString)
                                     .collect(Collectors.joining("\n"));
             changesString =
                     "Changes are:\n"
                             + changes.subList(0, Math.min(changes.size(), maxEntry)).stream()
-                                    .map(Object::toString)
+                                    .map(this::fileEntryToString)
                                     .collect(Collectors.joining("\n"));
             simplifiedException =
                     new RuntimeException(
@@ -704,6 +706,24 @@ public abstract class ConflictDetection {
         } else {
             return Pair.of(fullException, fullException);
         }
+    }
+
+    /**
+     * Converts a file entry to a string with a readable partition, falling back to its original
+     * representation if partition formatting fails.
+     */
+    protected final String fileEntryToString(SimpleFileEntry entry) {
+        if (partitionType.getFieldCount() == 0) {
+            return entry.toStringWithPartition("<non-partitioned>");
+        }
+        String partitionString;
+        try {
+            partitionString = pathFactory.getPartitionString(entry.partition());
+        } catch (RuntimeException e) {
+            // fallback to original representation
+            return entry.toString();
+        }
+        return entry.toStringWithPartition(partitionString);
     }
 
     /** Factory to create {@link ConflictDetection}. */

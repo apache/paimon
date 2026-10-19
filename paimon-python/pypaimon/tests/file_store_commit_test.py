@@ -494,6 +494,38 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit.commit_scanner.read_incremental_changes.assert_not_called()
         read_all.assert_called_once()
 
+    def test_conflict_rollback_failure_preserves_original_conflict(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        conflict = RuntimeError("conflicting compaction")
+        latest_snapshot = Mock(id=3)
+        file_store_commit.commit_scanner.read_all_entries_from_changed_partitions = Mock(
+            return_value=[]
+        )
+        file_store_commit.conflict_detection.check_conflicts = Mock(
+            return_value=conflict
+        )
+        file_store_commit.rollback = Mock()
+        file_store_commit.rollback.try_to_rollback.return_value = False
+
+        with self.assertRaises(RuntimeError) as failure:
+            file_store_commit._try_commit_once(
+                retry_result=None,
+                commit_kind="APPEND",
+                commit_entries=[Mock()],
+                changelog_entries=[],
+                commit_identifier=11,
+                latest_snapshot=latest_snapshot,
+                detect_conflicts=True,
+                allow_rollback=True,
+            )
+
+        self.assertIs(failure.exception, conflict)
+        file_store_commit.rollback.try_to_rollback.assert_called_once_with(latest_snapshot)
+        self.mock_snapshot_commit.commit.assert_not_called()
+        mock_manifest_file_manager.return_value.write.assert_not_called()
+        mock_manifest_list_manager.return_value.write.assert_not_called()
+
     def test_commit_fail_retry_missing_snapshot_still_fails_closed(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         """Every id the scan would have to inspect is unreadable, so whether
@@ -1359,3 +1391,52 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
         self.assertEqual(outcomes, [False])
         self.assertEqual(self._rows(), [1, 2])
+
+
+@pytest.mark.parametrize('on_first_attempt', [True, False])
+def test_overwrite_recovery_checks_prepared_indexes(tmp_path, on_first_attempt):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    data = pa.table({'id': pa.array([1, 2], pa.int64()), 'value': ['a', 'b']})
+    catalog.create_table('default.overwrite_indexes', Schema.from_pyarrow_schema(
+        data.schema, primary_keys=['id'], options={
+            'bucket': '-1', 'read.native.enabled': 'false',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        }), False)
+    table = catalog.get_table('default.overwrite_indexes')
+    builder = table.new_batch_write_builder().overwrite()
+    writer = builder.new_write()
+    committer = builder.new_commit(dedup=CommitDedup(on_first_attempt=on_first_attempt))
+    try:
+        writer.write_arrow(data)
+        messages = writer.prepare_commit()
+        indexes = [entry for message in messages for entry in message.index_adds]
+        assert indexes
+
+        def remove_indexes():
+            for entry in indexes:
+                table.file_io.delete(table.path_factory().bucket_index_path(
+                    tuple(entry.partition.values), entry.bucket, entry.index_file))
+
+        snapshot_committer = committer.file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        attempts = []
+
+        def fail_first_commit(base_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            if not on_first_attempt and len(attempts) == 1:
+                remove_indexes()
+                return False
+            return original_commit(base_uuid, snapshot, statistics)
+
+        if on_first_attempt:
+            remove_indexes()
+        with patch.object(snapshot_committer, 'commit', side_effect=fail_first_commit), \
+                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+            with pytest.raises(RuntimeError, match='required file is missing'):
+                committer.commit(messages)
+        assert len(attempts) == (0 if on_first_attempt else 1)
+        assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+        committer.close()

@@ -120,6 +120,10 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaManager,
                 schema,
                 valueType,
+                dataSchema ->
+                        KeyValue.createKeyValueFields(
+                                keyValueFieldsExtractor.keyFields(dataSchema),
+                                keyValueFieldsExtractor.valueFields(dataSchema)),
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 options);

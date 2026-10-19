@@ -380,6 +380,55 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(blob.is_resolved())
         self.assertEqual(blob.view_struct, view_struct)
 
+    def test_blob_view_struct_construct_by_field_name(self):
+        from types import SimpleNamespace
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.schema.data_types import AtomicType, DataField, RowType
+
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(7, "picture", AtomicType("BLOB")),
+        ]
+        row_type = RowType(True, fields)
+        fake_table = SimpleNamespace(
+            identifier=Identifier.from_string("test_db.source_table"),
+            fields=fields,
+        )
+
+        expected = BlobViewStruct("test_db.source_table", 7, 42)
+        self.assertEqual(
+            BlobViewStruct.of("test_db.source_table", row_type, "picture", 42),
+            expected,
+        )
+        self.assertEqual(
+            BlobViewStruct.of(fake_table, "picture", 42),
+            expected,
+        )
+        self.assertEqual(
+            Blob.from_view("test_db.source_table", 7, 42),
+            Blob.from_view(expected),
+        )
+        self.assertEqual(
+            Blob.from_view("test_db.source_table", row_type, "picture", 42),
+            Blob.from_view(expected),
+        )
+        self.assertEqual(
+            Blob.from_view(fake_table, "picture", 42),
+            Blob.from_view(expected),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Cannot find blob field missing in upstream table test_db\.source_table\.",
+        ):
+            BlobViewStruct.of(fake_table, "missing", 42)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Field id in upstream table test_db\.source_table is not a BLOB field\.",
+        ):
+            BlobViewStruct.of(fake_table, "id", 42)
+
     def test_blob_fallback_batch_reader_respects_batch_size(self):
         created_readers = []
 
@@ -3508,8 +3557,12 @@ class BlobEndToEndTest(unittest.TestCase):
                              (values[0].to_descriptor().offset, values[0].to_descriptor().length))
             self.assertIsNone(values[1])
             self.assertIs(Blob.PLACE_HOLDER, values[2])
-            with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-                descriptor_reader.read_arrow_batch()
+            descriptor_values = descriptor_reader.read_arrow_batch().column(0).to_pylist()
+            last_descriptor = BlobDescriptor.deserialize(descriptor_values[0])
+            self.assertEqual(path, last_descriptor.uri)
+            self.assertEqual(len(b"last"), last_descriptor.length)
+            self.assertIsNone(descriptor_values[1])
+            self.assertIsNone(descriptor_values[2])
             with self.assertRaises(IndexError):
                 FormatBlobReader(
                     file_io, path, [field.name], [field], None, True,
@@ -4445,8 +4498,9 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertIsNone(next(iterator).values[0])
         self.assertEqual(next(iterator).values[0].to_data(), b"world")
 
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        self.assertEqual(
+            [b"hello", None, None, b"world"],
+            reader.read_arrow_batch().column(0).to_pylist())
         reader.close()
 
     def test_placeholder_blob_read_as_descriptor(self):
@@ -4473,8 +4527,11 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=True
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        values = reader.read_arrow_batch().column(0).to_pylist()
+        self.assertIsNone(values[0])
+        descriptor = BlobDescriptor.deserialize(values[1])
+        self.assertEqual(blob_file_path, descriptor.uri)
+        self.assertEqual(len(b"world"), descriptor.length)
         reader.close()
 
     def test_array_blob_write_read(self):
@@ -4785,8 +4842,9 @@ class BlobEndToEndTest(unittest.TestCase):
         )
         self.assertEqual(next(iterator).values[0][0].to_data(), b"hello")
         self.assertIs(next(iterator).values[0], Blob.ARRAY_PLACE_HOLDER)
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            reader.read_arrow_batch()
+        self.assertEqual(
+            [[b"hello"], None],
+            reader.read_arrow_batch().column(0).to_pylist())
         reader.close()
 
     def test_reject_malformed_array_blob_payloads(self):
@@ -5386,8 +5444,9 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=False,
             row_indices=[1],
         )
-        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
-            placeholder_reader.read_arrow_batch()
+        self.assertEqual(
+            [None],
+            placeholder_reader.read_arrow_batch().column(0).to_pylist())
         placeholder_reader.close()
 
     def test_reject_duplicate_map_blob_key_on_write(self):
@@ -6745,6 +6804,44 @@ class OffsetInputStreamTest(unittest.TestCase):
             stream.close()
         finally:
             os.remove(tmp_path)
+
+
+class BlobFromViewBackwardCompatibilityTest(unittest.TestCase):
+    """Test backward compatibility of Blob.from_view keyword argument."""
+
+    def test_from_view_keyword_argument_backward_compatible(self):
+        """Test that existing keyword-argument calls still work."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_compat"), 1, 42)
+        blob_view = Blob.from_view(view_struct=view_struct)
+
+        self.assertEqual(blob_view.view_struct.identifier.get_full_name(), "default.test_compat")
+        self.assertEqual(blob_view.view_struct.field_id, 1)
+        self.assertEqual(blob_view.view_struct.row_id, 42)
+
+    def test_from_view_positional_argument_still_works(self):
+        """Test that positional argument form still works."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_pos"), 2, 100)
+        blob_view = Blob.from_view(view_struct)
+
+        self.assertEqual(blob_view.view_struct.identifier.get_full_name(), "default.test_pos")
+        self.assertEqual(blob_view.view_struct.field_id, 2)
+        self.assertEqual(blob_view.view_struct.row_id, 100)
+
+    def test_from_view_cannot_mix_keyword_and_positional(self):
+        """Test that mixing keyword and positional is rejected."""
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        view_struct = BlobViewStruct(Identifier.from_string("default.test_mix"), 3, 200)
+        with self.assertRaises(ValueError) as cm:
+            Blob.from_view(view_struct, view_struct=view_struct)
+        self.assertIn("Cannot provide both", str(cm.exception))
 
 
 if __name__ == '__main__':

@@ -70,5 +70,8 @@ class SystemTableScan:
         self.system_table = system_table
 
     def plan(self) -> Plan:
-        arrow_table = self.system_table._build_arrow_table()
+        from pypaimon.table.system.native_system_table import try_read_native_system_table
+        arrow_table = try_read_native_system_table(self.system_table)
+        if arrow_table is None:
+            arrow_table = self.system_table._build_arrow_table()
         return Plan(_splits=[SystemSplit(arrow_table)])

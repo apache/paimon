@@ -161,6 +161,7 @@ class GlobalIndexBuilder:
                     "Column '%s' does not exist in table '%s'."
                     % (column, self._table.identifier)
                 )
+        self._validate_unaware_bucket_table()
         if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
             self._validate_generic_index_table()
 
@@ -184,7 +185,7 @@ class GlobalIndexBuilder:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
         scan = read_builder.new_scan()
-        plan = scan.plan_for_write()
+        plan = scan.plan_all_files()
         splits = plan.splits()
         if not splits:
             return []
@@ -504,15 +505,20 @@ class GlobalIndexBuilder:
             )
         raise ValueError("Unsupported generic global index type: %s" % self._index_type)
 
-    def _validate_generic_index_table(self) -> None:
-        bucket = self._core_options.bucket()
+    def _validate_unaware_bucket_table(self) -> None:
+        # Global index files live in bucket 0 and are keyed by the table-wide
+        # _ROW_ID, so every index type needs an unaware-bucket table. Check the
+        # table options: caller options only tune the index build.
+        bucket = self._table.options.bucket()
         if bucket != -1:
             raise ValueError(
-                "Generic global index only supports unaware-bucket tables "
+                "Global index only supports unaware-bucket tables "
                 "(bucket = -1), but table '%s' has bucket = %s."
                 % (self._table.identifier, bucket)
             )
-        if (self._core_options.deletion_vectors_enabled()
+
+    def _validate_generic_index_table(self) -> None:
+        if (self._table.options.deletion_vectors_enabled()
                 and not (self._index_type in VINDEX_IDENTIFIERS
                          and self._table.options.data_evolution_enabled())):
             raise ValueError(

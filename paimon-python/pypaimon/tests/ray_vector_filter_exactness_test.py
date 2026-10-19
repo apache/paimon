@@ -141,6 +141,7 @@ def test_worker_filters_overlapping_scalar_shards_at_planned_snapshot(tmp_path, 
 
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("mode", ["exact", "candidate", "unavailable"])
+@pytest.mark.python_plan
 def test_shared_scalar_index_is_evaluated_once_on_ray(table, tmp_path, ray_cluster, batch, mode):
     import os
     from pathlib import Path

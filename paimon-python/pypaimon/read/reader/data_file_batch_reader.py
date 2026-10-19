@@ -21,7 +21,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
-from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
+from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution, read_arrow_schema
 from pypaimon.common.file_io import FileIO
 from pypaimon.utils.arrow_utils import zero_column_batch
 from pypaimon.data.map_shared_shredding import (
@@ -68,6 +68,10 @@ def _constructed_to_string_array(array, file_type):
     ROW -> ``{v1, v2}``, ARRAY -> ``[e1, e2]``, MAP -> ``{k1 -> v1, k2 -> v2}``.
     Sub-values are rendered recursively; a NULL sub-value renders as the
     literal ``null`` while a NULL container row stays NULL."""
+    from pypaimon.casting.schema_evolution import _native_schema_cast
+    native = _native_schema_cast(array, pa.string(), file_type, AtomicType('STRING'))
+    if native is not None:
+        return native
     array = _unslice(array)
     valid = pc.is_valid(array).to_pylist()
     out = []
@@ -172,7 +176,7 @@ class DataFileBatchReader(RecordBatchReader):
         self._file_data_field_map = {
             field.name: field for field in source_fields
         }
-        self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
+        self.schema_map = {field.name: field for field in read_arrow_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
         self.row_id_offsets = row_id_offsets
@@ -264,6 +268,11 @@ class DataFileBatchReader(RecordBatchReader):
         """Return *array* converted to *target_type*, matching ROW sub-fields by
         field id (reorder, pad missing with NULL, follow renames, cast changed
         types) recursively, transparently through ARRAY/MAP wrappers."""
+        from pypaimon.casting.schema_evolution import _native_schema_cast
+        native = _native_schema_cast(
+            array, PyarrowFieldParser.from_paimon_type(target_type), file_type, target_type)
+        if native is not None:
+            return native
         if isinstance(target_type, RowType) and isinstance(file_type, RowType):
             n = len(array)
             file_id_to_pos = {f.id: i for i, f in enumerate(file_type.fields)}

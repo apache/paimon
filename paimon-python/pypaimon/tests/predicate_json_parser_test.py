@@ -19,6 +19,7 @@
 import datetime
 import json
 import unittest
+from pathlib import Path
 
 import pyarrow as pa
 
@@ -177,6 +178,18 @@ class TestCompoundPredicates(unittest.TestCase):
             "id": [1, 2, 3, 4, 5],
         })
 
+    def test_short_circuit_only_evaluates_rows_reaching_each_child(self):
+        batch = pa.RecordBatch.from_pydict({'id': [1, 2], 's': ['abc', 'xyz'], 'position': [1, 2147483648]})
+        first = json.loads(_make_leaf('id', 'EQUAL', [1]))
+        second = {'kind': 'LEAF', 'function': 'EQUAL', 'literals': ['a'], 'transform': {
+            'name': 'SUBSTRING', 'inputs': [
+                {'name': 's', 'type': 'STRING'}, {'name': 'position', 'type': 'BIGINT'}, 1]}}
+        for function, compare, expected in [('AND', 1, [True, False]), ('OR', 2, [True, True])]:
+            first['literals'] = [compare]
+            rule = {'kind': 'COMPOUND', 'function': function, 'children': [first, second]}
+            with self.subTest(function=function):
+                self.assertEqual(parse_predicate_to_batch_filter(json.dumps(rule))(batch).to_pylist(), expected)
+
     def test_and(self):
         pred = json.dumps({
             "kind": "COMPOUND",
@@ -195,6 +208,22 @@ class TestCompoundPredicates(unittest.TestCase):
         f = parse_predicate_to_batch_filter(pred)
         self.assertEqual(f(self.batch).to_pylist(), [False, False, True, True, False])
 
+    def test_nested_compounds_keep_original_mixed_row_positions(self):
+        batch = pa.RecordBatch.from_pydict({
+            'id': [1, 2, 3, 4], 's': ['x', 'abc', '', None], 'position': [2147483648, 1, 0, 2147483648]})
+
+        def guard(id_):
+            return {'kind': 'LEAF', 'function': 'EQUAL', 'literals': [id_],
+                    'transform': {'name': 'FIELD_REF', 'fieldRef': {'name': 'id', 'type': 'BIGINT'}}}
+
+        substring = {'kind': 'LEAF', 'function': 'EQUAL', 'literals': ['a'], 'transform': {
+            'name': 'SUBSTRING', 'inputs': [
+                {'name': 's', 'type': 'STRING'}, {'name': 'position', 'type': 'BIGINT'}, 1]}}
+        rule = {'kind': 'COMPOUND', 'function': 'OR', 'children': [guard(1), {
+            'kind': 'COMPOUND', 'function': 'AND', 'children': [guard(2), substring]}]}
+        self.assertEqual(parse_predicate_to_batch_filter(json.dumps(rule))(batch).to_pylist(),
+                         [True, True, False, False])
+
     def test_or(self):
         pred = json.dumps({
             "kind": "COMPOUND",
@@ -212,6 +241,47 @@ class TestCompoundPredicates(unittest.TestCase):
         })
         f = parse_predicate_to_batch_filter(pred)
         self.assertEqual(f(self.batch).to_pylist(), [True, False, False, False, True])
+
+    def test_unused_literals_and_unreachable_children_still_validate(self):
+        batch = pa.RecordBatch.from_pydict({'s': ['abc', None]})
+        for function in ['TRUE', 'FALSE', 'IS_NULL', 'IS_NOT_NULL', 'EQUAL', 'NOT_EQUAL', 'IN']:
+            for literals in [['bad'], [None, 'bad']]:
+                rule = {'kind': 'LEAF', 'transform': {'name': 'LENGTH', 'inputs': [{'name': 's', 'type': 'STRING'}]},
+                        'function': function, 'literals': literals}
+                unreachable = {'kind': 'COMPOUND', 'function': 'OR', 'children': [
+                    {'kind': 'LEAF', 'transform': {'name': 'NULL'}, 'function': 'TRUE', 'literals': []}, rule]}
+                for definition in [rule, unreachable]:
+                    with self.subTest(function=function, literals=literals), self.assertRaises((ValueError, TypeError)):
+                        parse_predicate_to_batch_filter(json.dumps(definition))(batch)
+
+    def test_unary_and_constant_literals_can_be_null_or_omitted(self):
+        batch = pa.RecordBatch.from_pydict({'s': ['abc', None]})
+        for function, expected in [('TRUE', [True, True]), ('FALSE', [False, False]),
+                                   ('IS_NULL', [False, True]), ('IS_NOT_NULL', [True, False])]:
+            rule = {'kind': 'LEAF', 'transform': {'name': 'LENGTH', 'inputs': [{'name': 's', 'type': 'STRING'}]},
+                    'function': function, 'literals': None}
+            self.assertEqual(parse_predicate_to_batch_filter(json.dumps(rule))(batch).to_pylist(), expected)
+            rule.pop('literals')
+            self.assertEqual(parse_predicate_to_batch_filter(json.dumps(rule))(batch).to_pylist(), expected)
+
+    def test_invalid_compound_never_becomes_allow_all(self):
+        for function, children in [('AND', []), ('OR', []), ('NOT', [])]:
+            with self.assertRaises(ValueError):
+                parse_predicate_to_batch_filter(json.dumps({'kind': 'COMPOUND', 'function': function,
+                                                           'children': children}))
+
+    def test_binary_predicate_literals_follow_java_rejection(self):
+        batch = pa.RecordBatch.from_pydict({'s': ['abc', None]})
+        for type_ in ['BINARY(3)', 'VARBINARY(3)']:
+            transform = {'name': 'CAST', 'fieldRef': {'name': 's', 'type': 'STRING'}, 'type': type_}
+            rule = {'kind': 'LEAF', 'transform': transform, 'function': 'IS_NULL', 'literals': []}
+            self.assertEqual(parse_predicate_to_batch_filter(json.dumps(rule))(batch).to_pylist(), [False, True])
+            rule.update(function='EQUAL', literals=[None])
+            self.assertEqual(parse_predicate_to_batch_filter(json.dumps(rule))(batch).to_pylist(), [False, False])
+            for function in ['EQUAL', 'TRUE', 'IS_NULL']:
+                rule.update(function=function, literals=['YQAA'])
+                with self.subTest(type=type_, function=function), self.assertRaises(ValueError):
+                    parse_predicate_to_batch_filter(json.dumps(rule))(batch)
 
 
 class TestPredicateTransforms(unittest.TestCase):
@@ -301,6 +371,65 @@ class TestPredicateTransforms(unittest.TestCase):
         })
         f = parse_predicate_to_batch_filter(pred)
         self.assertEqual(f(batch).to_pylist(), [True, False])
+
+    def test_cast_enforces_java_character_and_byte_widths(self):
+        batch = pa.RecordBatch.from_pydict({'s': ['🙂中', 'a', None]})
+        for type_, expected in [
+            ('VARCHAR(1)', ['🙂', 'a', None]), ('CHAR(3)', ['🙂中 ', 'a  ', None]),
+            ('BINARY(6)', ['🙂中'.encode('utf8')[:6], b'a' + b'\x00' * 5, None]),
+            ('VARBINARY(1)', [b'\xf0', b'a', None]),
+            ('VARCHAR', ['🙂', 'a', None]), ('CHAR', ['🙂', 'a', None]),
+            ('BINARY', [b'\xf0', b'a', None]), ('VARBINARY', [b'\xf0', b'a', None]),
+            ('CHAR(3) NULL', ['🙂中 ', 'a  ', None]), ('CHAR(3)NOT NULL', ['🙂中 ', 'a  ', None]),
+        ]:
+            transform = {'name': 'CAST', 'fieldRef': {'name': 's', 'type': 'STRING'}, 'type': type_}
+            with self.subTest(type=type_):
+                self.assertEqual(_apply_predicate_transform(transform, batch).to_pylist(), expected)
+
+    def test_rebound_cast_keeps_original_java_runtime_class(self):
+        transform = {'name': 'CAST', 'fieldRef': {'name': 's', 'type': 'STRING'}, 'type': 'VARCHAR(5)'}
+        with self.assertRaises(ValueError):
+            _apply_predicate_transform(transform, pa.RecordBatch.from_pydict({'s': [42]}))
+        nulls = pa.RecordBatch.from_pydict({'s': pa.array([None], type=pa.int32())})
+        self.assertEqual(_apply_predicate_transform(transform, nulls).to_pylist(), [None])
+        # NumericToString accepts Object, including a rebound string column.
+        transform['fieldRef']['type'] = 'INT'
+        strings = pa.RecordBatch.from_pydict({'s': ['abc', None]})
+        self.assertEqual(_apply_predicate_transform(transform, strings).to_pylist(), ['abc', None])
+
+    def test_rebound_numeric_to_string_uses_java_internal_temporal_values(self):
+        transform = {'name': 'CAST', 'fieldRef': {'name': 's', 'type': 'INT'}, 'type': 'STRING'}
+        for type_, values, expected in [
+            (pa.date32(), [0, -1, None], ['0', '-1', None]),
+            (pa.time32('ms'), [0, 3600001, None], ['0', '3600001', None]),
+            (pa.time64('us'), [0, 3600001123, None], ['0', '3600001', None]),
+        ]:
+            batch = pa.RecordBatch.from_pydict({'s': pa.array(values, type=type_)})
+            with self.subTest(type=type_):
+                self.assertEqual(_apply_predicate_transform(transform, batch).to_pylist(), expected)
+
+    def test_rebound_numeric_to_string_uses_decimal_plain_text(self):
+        from decimal import Decimal
+        transform = {'name': 'CAST', 'fieldRef': {'name': 's', 'type': 'INT'}, 'type': 'STRING'}
+        values = ['0.0000000123', '0.0000000000', '-0.0000000123', None]
+        array = pa.array([Decimal(v) if v is not None else None for v in values], type=pa.decimal128(38, 10))
+        batch = pa.RecordBatch.from_pydict({'s': array})
+        self.assertEqual(_apply_predicate_transform(transform, batch).to_pylist(), values)
+        transform['type'] = 'VARCHAR(3)'
+        self.assertEqual(_apply_predicate_transform(transform, batch).to_pylist(), ['0.0', '0.0', '-0.', None])
+
+    def test_rebound_numeric_to_string_refuses_other_object_formatting(self):
+        transform = {'name': 'CAST', 'fieldRef': {'name': 's', 'type': 'INT'}, 'type': 'STRING'}
+        for array in [pa.array([0, None], type=pa.timestamp('ms')), pa.array([b'a', None]),
+                      pa.array([1.0, None], type=pa.float64())]:
+            with self.subTest(type=array.type), self.assertRaises(ValueError):
+                _apply_predicate_transform(transform, pa.RecordBatch.from_pydict({'s': array}))
+            nulls = pa.RecordBatch.from_pydict({'s': pa.nulls(2, type=array.type)})
+            self.assertEqual(_apply_predicate_transform(transform, nulls).to_pylist(), [None, None])
+
+    def test_empty_concat_is_the_empty_string(self):
+        self.assertEqual(_apply_predicate_transform({'name': 'CONCAT', 'inputs': []}, self.batch).to_pylist(),
+                         [''] * len(self.batch))
 
 
 class TestPaimonTypeToArrow(unittest.TestCase):
@@ -861,6 +990,70 @@ class TestDateExtractTransforms(unittest.TestCase):
         self.assertEqual(self._apply("MONTH", batch, "d", "DATE"), [1, None])
         self.assertEqual(self._apply("HOUR", batch, "d", "DATE"), [0, None])
 
+    def test_calendar_parts_match_java_golden_for_every_storage_unit(self):
+        parts = ['YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'QUARTER', 'DAY_OF_YEAR',
+                 'WEEKDAY', 'ISO_DAY_OF_WEEK', 'DAY_OF_WEEK', 'WEEK', 'YEAR_OF_WEEK']
+        golden = Path(__file__).parent / 'resources' / 'calendar_extract_java.jsonl'
+        for line in golden.read_text().splitlines():
+            case = json.loads(line)
+            unit = case['unit']
+            type_ = pa.date32() if unit == 'date' else pa.timestamp(unit)
+            wire = 'DATE' if unit == 'date' else 'TIMESTAMP(9)'
+            batch = pa.RecordBatch.from_pydict({'t': pa.array([case['value'], None], type=type_)})
+            for part, expected in zip(parts, case['parts']):
+                with self.subTest(unit=unit, value=case['value'], part=part):
+                    self.assertEqual(self._apply(part, batch, 't', wire), [expected, None])
+
+    def test_empty_and_all_null_calendar_batches(self):
+        for unit in ['date', 's', 'ms', 'us', 'ns']:
+            type_ = pa.date32() if unit == 'date' else pa.timestamp(unit)
+            wire = 'DATE' if unit == 'date' else 'TIMESTAMP(9)'
+            for values in [[], [None, None]]:
+                batch = pa.RecordBatch.from_pydict({'t': pa.array(values, type=type_)})
+                for part in ['YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'QUARTER', 'DAY_OF_YEAR',
+                             'WEEKDAY', 'ISO_DAY_OF_WEEK', 'DAY_OF_WEEK', 'WEEK', 'YEAR_OF_WEEK']:
+                    with self.subTest(unit=unit, values=values, part=part):
+                        self.assertEqual(self._apply(part, batch, 't', wire), values)
+
+    def test_calendar_operand_is_a_dependency_even_if_hidden(self):
+        for part in ['YEAR', 'MONTH', 'DAY', 'HOUR', 'MINUTE', 'SECOND', 'QUARTER', 'DAY_OF_YEAR',
+                     'WEEKDAY', 'ISO_DAY_OF_WEEK', 'DAY_OF_WEEK', 'WEEK', 'YEAR_OF_WEEK']:
+            rule = {'name': part, 'fieldRef': {'name': 'hidden', 'index': 99, 'type': 'DATE'}}
+            predicate = {'kind': 'LEAF', 'function': 'IS_NULL', 'transform': rule}
+            self.assertEqual(extract_referenced_fields(json.dumps(predicate)), {'hidden'})
+
+    def test_stored_and_rebound_calendar_types_are_validated(self):
+        for stored in ['INT', 'BIGINT', 'TIME(3)', 'TIMESTAMP_LTZ(3)', 'TIMESTAMP(10)', 'DATENULL',
+                       'TIMESTAMP(٣)', 'TIMESTAMP(３)',
+                       'TIMESTAMP(3) WITHOUT TIME ZONENULL',
+                       'TIMESTAMP(3) WITHOUT TIME ZONENOT NULL',
+                       {'type': 'DATE'}, {'type': 'TIMESTAMP(6)'}, None]:
+            with self.subTest(stored=stored), self.assertRaises(ValueError):
+                self._apply('YEAR', self._ts_batch(), 't', stored)
+        for type_, value in [(pa.int32(), 1), (pa.time32('ms'), 1), (pa.timestamp('ms', tz='UTC'), 1)]:
+            batch = pa.RecordBatch.from_pydict({'t': pa.array([value], type=type_)})
+            with self.subTest(type=type_), self.assertRaises(ValueError):
+                self._apply('YEAR', batch, 't', 'DATE')
+        # As in Java copyWithNewInputs, DATE and local TIMESTAMP may rebind to
+        # one another; the actual column decides the executed calendar value.
+        for stored in ['DATE', 'DATE NULL', 'TIMESTAMP(3)NOT NULL', 'TIMESTAMP WITHOUT TIME ZONE',
+                       'TIMESTAMP(3) WITHOUT TIME ZONE',
+                       'TIMESTAMP(3)WITHOUT TIME ZONE']:
+            with self.subTest(stored=stored):
+                self.assertEqual(self._apply('YEAR', self._ts_batch(), 't', stored), [2024, 2024, None])
+
+    def test_full_date32_domain_does_not_require_a_timestamp_cast(self):
+        batch = pa.RecordBatch.from_pydict({"d": pa.array([2147483647, -2147483648, None], type=pa.date32())})
+        self.assertEqual(self._apply("HOUR", batch, "d", "DATE"), [0, 0, None])
+
+    def test_timestamp_epoch_day_narrows_as_java_int_before_calendar_extraction(self):
+        # Java Timestamp narrows its millisecond epoch day to a signed int.
+        ticks = (2147483648 * 86400000)
+        batch = pa.RecordBatch.from_pydict({"t": pa.array([ticks, -1, None], type=pa.timestamp("ms"))})
+        days = pa.RecordBatch.from_pydict({"d": pa.array([-2147483648, -1, None], type=pa.date32())})
+        self.assertEqual(self._apply("YEAR", batch, "t", "TIMESTAMP(3)"),
+                         self._apply("YEAR", days, "d", "DATE"))
+
     def test_wired_through_a_leaf_filter(self):
         pred = json.dumps({
             "kind": "LEAF",
@@ -942,6 +1135,31 @@ class TestStringTransforms(unittest.TestCase):
                 {"name": "PAD", "inputs": [self._field(), 3, "x"], "direction": "LEFT"},
                 ["hello"]),
             ["hel"])
+
+    def test_integer_overflow_is_eager_even_with_null_string_inputs(self):
+        for rule in [
+            {"name": "PAD", "direction": "LEFT", "inputs": [None, 2147483648, "x"]},
+            {"name": "OVERLAY", "inputs": [None, "x", 2147483648, None]},
+            {"name": "OVERLAY", "inputs": [None, "x", None, 2147483648]},
+        ]:
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                self._apply(rule, [None])
+
+    def test_field_types_are_checked_before_rebinding(self):
+        batch = pa.RecordBatch.from_pydict({"s": ["abc"], "n": [2]})
+        for name, inputs in [
+            ("PAD", [self._field(), {"name": "n", "type": "STRING"}, "x"]),
+            ("OVERLAY", [self._field(), "x", {"name": "n", "type": "STRING"}]),
+            ("TRANSLATE", [{"name": "s", "type": "INT"}, "a", "b"]),
+            ("LENGTH", [{"name": "s", "type": "INT"}]),
+            ("BIT_LENGTH", [{"name": "s", "type": "INT"}]),
+        ]:
+            rule = {"name": name, "inputs": inputs, "direction": "LEFT"}
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                _apply_predicate_transform(rule, batch)
+        for value in ["2", True, 1.5]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self._apply({"name": "PAD", "inputs": [None, value, "x"], "direction": "LEFT"}, [None])
 
     def test_length_wired_through_a_leaf_filter(self):
         pred = json.dumps({

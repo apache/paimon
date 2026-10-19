@@ -92,11 +92,6 @@ public class MockRESTMessage {
                             current == null ? null : current.snapshot().id(),
                             request.getFromSnapshot()));
         }
-        if (request.getFromSnapshotUuid() != null
-                && (current == null
-                        || !request.getFromSnapshotUuid().equals(current.snapshot().uuid()))) {
-            throw new IllegalStateException("Latest snapshot UUID changed");
-        }
     }
 
     public static String databaseName() {
@@ -294,11 +289,11 @@ public class MockRESTMessage {
     }
 
     public static RollbackTableRequest rollbackTableRequestBySnapshot(long snapshotId) {
-        return new RollbackTableRequest(Instant.snapshot(snapshotId), null, null, null, null);
+        return new RollbackTableRequest(Instant.snapshot(snapshotId), null, null);
     }
 
     public static RollbackTableRequest rollbackTableRequestByTag(String tagName) {
-        return new RollbackTableRequest(Instant.tag(tagName), null, null, null, null);
+        return new RollbackTableRequest(Instant.tag(tagName), null, null);
     }
 
     public static AlterViewRequest alterViewRequest() {

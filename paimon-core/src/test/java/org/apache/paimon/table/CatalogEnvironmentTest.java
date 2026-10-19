@@ -67,7 +67,7 @@ class CatalogEnvironmentTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"main", "dev"})
-    void testCatalogTableRollbackUsesRuntimeBranchAndOwner(String branch) throws Exception {
+    void testCatalogTableRollbackUsesRuntimeBranch(String branch) throws Exception {
         Catalog catalog = mock(Catalog.class);
         CatalogEnvironment environment =
                 new CatalogEnvironment(
@@ -80,20 +80,13 @@ class CatalogEnvironmentTest {
                         true,
                         false);
         Instant instant = Instant.snapshot(1L);
-        environment.catalogTableRollback(branch, "writer").rollbackTo(instant, 2L, "head-uuid");
-        verify(catalog)
-                .rollbackTo(
-                        new Identifier("db", "table", branch),
-                        "table-id",
-                        instant,
-                        2L,
-                        "head-uuid",
-                        "writer");
+        environment.catalogTableRollback(branch).rollbackTo(instant, 2L);
+        verify(catalog).rollbackTo(new Identifier("db", "table", branch), "table-id", instant, 2L);
     }
 
     @ParameterizedTest
     @CsvSource({"main,table-id", "dev,table-id", "main,", "dev,"})
-    void testCatalogTableRollbackWithoutOwnerPreservesTableUuid(String branch, String tableUuid)
+    void testCatalogTableRollbackPreservesTableUuid(String branch, String tableUuid)
             throws Exception {
         Catalog catalog = mock(Catalog.class);
         CatalogEnvironment environment =
@@ -107,15 +100,8 @@ class CatalogEnvironmentTest {
                         true,
                         false);
         Instant instant = Instant.tag("tag-1");
-        environment.catalogTableRollback(null, null).rollbackTo(instant, null, null);
-        verify(catalog)
-                .rollbackTo(
-                        new Identifier("db", "table", branch),
-                        tableUuid,
-                        instant,
-                        null,
-                        null,
-                        null);
+        environment.catalogTableRollback(null).rollbackTo(instant, null);
+        verify(catalog).rollbackTo(new Identifier("db", "table", branch), tableUuid, instant, null);
     }
 
     @ParameterizedTest
@@ -142,18 +128,18 @@ class CatalogEnvironmentTest {
         CatalogEnvironment copied = environment.copy(targetIdentifier);
 
         Instant snapshot = Instant.snapshot(1L);
-        copied.catalogTableRollback(null, null).rollbackTo(snapshot, 2L, "head-uuid");
-        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, snapshot, 2L, "head-uuid", null);
+        copied.catalogTableRollback(null).rollbackTo(snapshot, 2L);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, snapshot, 2L);
 
         Instant tag = Instant.tag("checkpoint");
         copied.snapshotLoader().rollback(tag);
-        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, tag, null, null, null);
+        verify(catalog).rollbackTo(targetIdentifier, expectedUuid, tag, null);
         assertThat(environment.uuid()).isEqualTo(sourceUuid);
     }
 
     @Test
     void testCatalogTableRollbackWithoutCatalogReturnsNull() {
-        assertThat(CatalogEnvironment.empty().catalogTableRollback(null, null)).isNull();
+        assertThat(CatalogEnvironment.empty().catalogTableRollback(null)).isNull();
     }
 
     @Test
@@ -161,9 +147,26 @@ class CatalogEnvironmentTest {
         Catalog catalog = mock(Catalog.class);
         CatalogEnvironment environment =
                 new CatalogEnvironment(null, null, () -> catalog, null, null, null, false, false);
-        assertThat(environment.catalogTableRollback(null, null)).isNull();
-        assertThat(environment.catalogTableRollback("dev", "writer")).isNull();
+        assertThat(environment.catalogTableRollback(null)).isNull();
+        assertThat(environment.catalogTableRollback("dev")).isNull();
         verifyNoInteractions(catalog);
+    }
+
+    @Test
+    void testSnapshotLoaderWithoutVersionManagementReturnsNull() {
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("db", "table"),
+                        "table-uuid",
+                        () -> {
+                            throw new AssertionError("Catalog should not be loaded");
+                        },
+                        null,
+                        null,
+                        null,
+                        false,
+                        false);
+        assertThat(environment.snapshotLoader()).isNull();
     }
 
     @Test

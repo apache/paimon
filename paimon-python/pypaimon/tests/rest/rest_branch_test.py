@@ -17,6 +17,7 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -78,6 +79,15 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         with self.assertRaises(TagNotExistException):
             self.rest_catalog.create_branch(
                 self._identifier(), "b1", tag_name="missing")
+
+    def test_create_branch_preserves_unknown_missing_resource(self):
+        from pypaimon.api.rest_exception import NoSuchResourceException
+
+        error = NoSuchResourceException('OTHER', 'resource', 'unknown resource missing')
+        with patch.object(self.rest_catalog.rest_api, 'create_branch', side_effect=error):
+            with self.assertRaises(NoSuchResourceException) as raised:
+                self.rest_catalog.create_branch(self._identifier(), 'new')
+        self.assertIs(raised.exception, error)
 
     def test_branch_table_uses_branch_schema_manager(self):
         identifier = self._identifier()
@@ -157,27 +167,11 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         self.assertEqual(
             sorted(self.rest_catalog.list_branches(identifier)), ["b1", "b2"])
 
-    def test_rename_branch_happy(self):
-        identifier = self._identifier()
-        self.rest_catalog.create_branch(identifier, "b1")
-        self.rest_catalog.rename_branch(identifier, "b1", "b2")
-        result = self.rest_catalog.list_branches(identifier)
-        self.assertNotIn("b1", result)
-        self.assertIn("b2", result)
-
-    def test_rename_branch_to_existing_raises(self):
-        identifier = self._identifier()
-        self.rest_catalog.create_branch(identifier, "b1")
-        self.rest_catalog.create_branch(identifier, "b2")
-        with self.assertRaises(BranchAlreadyExistException) as cm:
-            self.rest_catalog.rename_branch(identifier, "b1", "b2")
-        self.assertEqual(cm.exception.branch, "b2")
-
-    def test_rename_branch_from_missing_raises(self):
-        identifier = self._identifier()
-        with self.assertRaises(BranchNotExistException) as cm:
-            self.rest_catalog.rename_branch(identifier, "absent", "b2")
-        self.assertEqual(cm.exception.branch, "absent")
+    def test_rename_branch_is_unsupported_without_a_request(self):
+        with patch.object(self.rest_catalog.rest_api.client, 'post',
+                          side_effect=AssertionError('REST rename must not send a request')):
+            with self.assertRaises(NotImplementedError):
+                self.rest_catalog.rename_branch(self._identifier(), 'old', 'new')
 
     def test_drop_branch_happy(self):
         identifier = self._identifier()

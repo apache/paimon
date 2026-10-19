@@ -37,31 +37,34 @@ case class TruncatePaimonTableWithFilterExec(
 
   override def run(): Seq[InternalRow] = {
     val commit = table.newBatchWriteBuilder().newCommit()
-
-    partitionPredicate match {
-      case Some(p) =>
-        table match {
-          case fileStoreTable: FileStoreTable =>
-            val matchedPartitions =
-              fileStoreTable.newSnapshotReader().withPartitionFilter(p).partitions().asScala
-            if (matchedPartitions.nonEmpty) {
-              val partitionComputer = new InternalRowPartitionComputer(
-                fileStoreTable.coreOptions().partitionDefaultName(),
-                fileStoreTable.schema().logicalPartitionType(),
-                fileStoreTable.partitionKeys.asScala.toArray,
-                fileStoreTable.coreOptions().legacyPartitionName()
-              )
-              val dropPartitions =
-                matchedPartitions.map(partitionComputer.generatePartValues(_).asScala.asJava)
-              commit.truncatePartitions(dropPartitions.asJava)
-            } else {
-              commit.commit(JCollections.emptyList())
-            }
-          case _ =>
-            throw new UnsupportedOperationException("Unsupported truncate table")
-        }
-      case _ =>
-        commit.truncateTable()
+    try {
+      partitionPredicate match {
+        case Some(p) =>
+          table match {
+            case fileStoreTable: FileStoreTable =>
+              val matchedPartitions =
+                fileStoreTable.newSnapshotReader().withPartitionFilter(p).partitions().asScala
+              if (matchedPartitions.nonEmpty) {
+                val partitionComputer = new InternalRowPartitionComputer(
+                  fileStoreTable.coreOptions().partitionDefaultName(),
+                  fileStoreTable.schema().logicalPartitionType(),
+                  fileStoreTable.partitionKeys.asScala.toArray,
+                  fileStoreTable.coreOptions().legacyPartitionName()
+                )
+                val dropPartitions =
+                  matchedPartitions.map(partitionComputer.generatePartValues(_).asScala.asJava)
+                commit.truncatePartitions(dropPartitions.asJava)
+              } else {
+                commit.commit(JCollections.emptyList())
+              }
+            case _ =>
+              throw new UnsupportedOperationException("Unsupported truncate table")
+          }
+        case _ =>
+          commit.truncateTable()
+      }
+    } finally {
+      commit.close()
     }
     Nil
   }

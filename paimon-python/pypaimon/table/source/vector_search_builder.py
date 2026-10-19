@@ -97,6 +97,8 @@ class VectorSearchBuilder(ABC):
 class AbstractVectorSearchBuilderImpl:
     """Shared state and filter/partition handling for the vector search builders."""
 
+    _native_batch_search = False
+
     def __init__(self, table):
         self._table = table
         self._limit = 0
@@ -223,13 +225,15 @@ class AbstractVectorSearchBuilderImpl:
         if self._is_primary_key_vector_search():
             from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
             scan_class = PrimaryKeyVectorScan
-        return scan_class(
+        scan = scan_class(
             self._table,
             self._vector_column,
             filter_=self._filter,
             partition_filter=self._partition_filter,
             options=self._options,
         )
+        from pypaimon.table.source.native_search_plan import native_vector_scan
+        return native_vector_scan(self, scan, self._native_batch_search)
 
     def _is_primary_key_vector_search(self):
         if self._vector_column is None:
@@ -270,7 +274,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         if self._is_primary_key_vector_search():
             from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
             read_class = PrimaryKeyVectorRead
-        return read_class(
+        reader = read_class(
             self._table,
             self._limit,
             self._vector_column,
@@ -279,3 +283,5 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             partition_filter=self._partition_filter,
             options=self._options,
         )
+        from pypaimon.table.source.native_search_plan import native_vector_read
+        return native_vector_read(self, reader)

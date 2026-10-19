@@ -21,10 +21,13 @@ package org.apache.paimon.hive;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonOutputCommitter;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
+import org.apache.paimon.hive.utils.HiveSplitGenerator;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.HiveStorageHandler;
 import org.apache.hadoop.hive.ql.metadata.HiveStoragePredicateHandler;
@@ -81,6 +84,13 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
         Properties properties = tableDesc.getProperties();
         String paimonLocation = LocationKeyExtractor.getPaimonLocation(conf, properties);
         map.put(LocationKeyExtractor.INTERNAL_LOCATION, paimonLocation);
+        // always set, so that a value left by another table of the same query cannot leak in
+        map.put(
+                HiveSplitGenerator.HIVE_PARTITIONED,
+                String.valueOf(
+                        !StringUtils.isEmpty(
+                                properties.getProperty(
+                                        hive_metastoreConstants.META_TABLE_PARTITION_COLUMNS))));
         String dataFieldJsonStr = getDataFieldsJsonStr(conf, properties);
         tableDesc.getProperties().put(PAIMON_TABLE_FIELDS, dataFieldJsonStr);
     }

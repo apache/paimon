@@ -25,6 +25,5 @@ import javax.annotation.Nullable;
 /** Rollback table to instant from snapshot. */
 public interface TableRollback {
 
-    void rollbackTo(
-            Instant instant, @Nullable Long fromSnapshot, @Nullable String fromSnapshotUuid);
+    void rollbackTo(Instant instant, @Nullable Long fromSnapshot);
 }

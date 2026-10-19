@@ -549,6 +549,12 @@ under the License.
             <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.merged-read.stats-pushdown.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to push filters down into a row-id range whose columns are merged from several data files. The rows which may match are computed from the file statistics and page indexes of the files holding the latest values of the filtered columns, then every file of the range reads only these rows. Only Parquet files are supported.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.nested-field.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -717,10 +723,16 @@ under the License.
             <td>Default aggregate function of all fields for partial-update and aggregate merge function.</td>
         </tr>
         <tr>
+            <td><h5>file-index.format.version</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.</td>
+        </tr>
+        <tr>
             <td><h5>file-index.in-manifest-threshold</h5></td>
             <td style="word-wrap: break-word;">500 bytes</td>
             <td>MemorySize</td>
-            <td>The threshold to store file index bytes in manifest.</td>
+            <td>The threshold to store file index bytes in manifest. Valid range: 0 to 2,147,483,647 bytes.</td>
         </tr>
         <tr>
             <td><h5>file-index.read.enabled</h5></td>

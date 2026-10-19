@@ -146,7 +146,7 @@ public interface KeyFactory {
 
     Chunk createChunk(Object key, int code, int offset, int limitedSerializedSizeInBytes);
 
-    Chunk mmapChunk(ByteBuffer buffer, int offset, SeekableInputStream in);
+    Chunk mmapChunk(ByteBuffer buffer, long offset, SeekableInputStream in);
 
     /** The key serializer. */
     interface KeySerializer {
@@ -176,7 +176,7 @@ public interface KeyFactory {
         }
 
         @Override
-        public Chunk mmapChunk(ByteBuffer buffer, int offset, SeekableInputStream in) {
+        public Chunk mmapChunk(ByteBuffer buffer, long offset, SeekableInputStream in) {
             return new FixedLengthChunk(
                     buffer, offset, in, createDeserializer(), createComparator());
         }
@@ -198,7 +198,7 @@ public interface KeyFactory {
         }
 
         @Override
-        public Chunk mmapChunk(ByteBuffer buffer, int offset, SeekableInputStream in) {
+        public Chunk mmapChunk(ByteBuffer buffer, long offset, SeekableInputStream in) {
             return new VariableLengthChunk(
                     buffer, offset, in, createDeserializer(), createComparator());
         }

@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.multimodal.table import MultimodalTable, text_route, vector_route
-from pypaimon.read.native_plan import _native_table, native_method_available, _predicate_to_native
+from pypaimon.read.native_plan import _native_table, native_runtime_available, _predicate_to_native
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
@@ -35,7 +35,7 @@ from pypaimon.tests.vector_search_filter_test import match_query, boost_query
 
 rest_catalog = indexes.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_hybrid_search_builder'), reason='Rust hybrid API required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 SCHEMA = pa.schema([('id', pa.int32()), ('content', pa.string()),
                     ('embedding', pa.list_(pa.float32())), ('label', pa.string()), ('pt', pa.int32())])
 
@@ -202,7 +202,9 @@ def test_one_authoritative_rest_snapshot_for_all_routes_without_retry(rest_catal
     first = table.snapshot_manager().get_latest_snapshot()
     indexes._append(table, _rows(8, 4), schema=SCHEMA)
     if response == 'error':
-        reply, code = ErrorResponse('TABLE', 'indexes', 'snapshot unavailable', 503), 503
+        # Use a non-retryable HTTP status to isolate repeated snapshot lookup
+        # by the search operation from the client's legitimate 503 retries.
+        reply, code = ErrorResponse('TABLE', 'indexes', 'snapshot unavailable', 500), 500
     else:
         reply = (GetTableSnapshotResponse(TableSnapshot(first, 1, 0, 7, first.time_millis))
                  if response == 'first' else GetTableSnapshotResponse())

@@ -1142,13 +1142,6 @@ public class BlobTableTest extends TableTestBase {
                                 2, BinaryString.fromString("row2"), new BlobData(imageBytes2)),
                         GenericRow.of(3, BinaryString.fromString("row3"), null)));
 
-        int imageFieldId =
-                upstreamTable.rowType().getFields().stream()
-                        .filter(f -> f.name().equals("image"))
-                        .findFirst()
-                        .orElseThrow(() -> new RuntimeException("image field not found"))
-                        .id();
-
         RowTrackingTable upstreamRowTracking = new RowTrackingTable(upstreamTable);
         ReadBuilder rowIdReader =
                 upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 3});
@@ -1180,7 +1173,7 @@ public class BlobTableTest extends TableTestBase {
         catalog.createTable(identifier(downstreamTableName), downstreamSchema.build(), true);
 
         FileStoreTable downstreamTable = getTable(identifier(downstreamTableName));
-        String upstreamFullName = database + "." + upstreamTableName;
+        Identifier upstreamIdentifier = Identifier.fromString(database + "." + upstreamTableName);
         writeRows(
                 downstreamTable,
                 Arrays.asList(
@@ -1188,26 +1181,26 @@ public class BlobTableTest extends TableTestBase {
                                 1,
                                 BinaryString.fromString("label1"),
                                 Blob.fromView(
-                                        new BlobViewStruct(
-                                                Identifier.fromString(upstreamFullName),
-                                                imageFieldId,
-                                                idToRowId.get(1)))),
+                                        upstreamIdentifier,
+                                        upstreamTable.rowType(),
+                                        "image",
+                                        idToRowId.get(1))),
                         GenericRow.of(
                                 2,
                                 BinaryString.fromString("label2"),
                                 Blob.fromView(
-                                        new BlobViewStruct(
-                                                Identifier.fromString(upstreamFullName),
-                                                imageFieldId,
-                                                idToRowId.get(2)))),
+                                        upstreamIdentifier,
+                                        upstreamTable.rowType(),
+                                        "image",
+                                        idToRowId.get(2))),
                         GenericRow.of(
                                 3,
                                 BinaryString.fromString("label3"),
                                 Blob.fromView(
-                                        new BlobViewStruct(
-                                                Identifier.fromString(upstreamFullName),
-                                                imageFieldId,
-                                                idToRowId.get(3))))));
+                                        upstreamIdentifier,
+                                        upstreamTable.rowType(),
+                                        "image",
+                                        idToRowId.get(3)))));
 
         ReadBuilder downstreamReadBuilder = downstreamTable.newReadBuilder();
         downstreamReadBuilder
@@ -1248,7 +1241,6 @@ public class BlobTableTest extends TableTestBase {
                         GenericRow.of(1, new BlobData(imageBytes1)),
                         GenericRow.of(2, new BlobData(imageBytes2))));
 
-        int imageFieldId = upstreamTable.rowType().getField("image").id();
         RowTrackingTable upstreamRowTracking = new RowTrackingTable(upstreamTable);
         ReadBuilder rowIdReader =
                 upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 2});
@@ -1270,13 +1262,13 @@ public class BlobTableTest extends TableTestBase {
         firstViewSchema.option(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
         catalog.createTable(identifier(firstViewTableName), firstViewSchema.build(), true);
 
-        String upstreamFullName = database + "." + upstreamTableName;
+        Identifier upstreamIdentifier = Identifier.fromString(database + "." + upstreamTableName);
         BlobViewStruct viewStruct1 =
-                new BlobViewStruct(
-                        Identifier.fromString(upstreamFullName), imageFieldId, idToRowId.get(1));
+                BlobViewStruct.of(
+                        upstreamIdentifier, upstreamTable.rowType(), "image", idToRowId.get(1));
         BlobViewStruct viewStruct2 =
-                new BlobViewStruct(
-                        Identifier.fromString(upstreamFullName), imageFieldId, idToRowId.get(2));
+                BlobViewStruct.of(
+                        upstreamIdentifier, upstreamTable.rowType(), "image", idToRowId.get(2));
         FileStoreTable firstViewTable = getTable(identifier(firstViewTableName));
         writeRows(
                 firstViewTable,

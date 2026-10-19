@@ -32,7 +32,6 @@ import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -2377,23 +2376,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
 
         // rollback to snapshot 2 from snapshot
-        assertThatThrownBy(
-                        () ->
-                                catalog.rollbackTo(
-                                        identifier,
-                                        null,
-                                        Instant.snapshot(2L),
-                                        3L,
-                                        "stale-head-uuid",
-                                        "writer"))
-                .hasMessageContaining("Latest snapshot UUID changed");
-        assertThat(table.latestSnapshot().get().id()).isEqualTo(3);
-        assertThatThrownBy(
-                        () ->
-                                catalog.rollbackTo(
-                                        identifier, null, Instant.snapshot(2L), 4L, null, null))
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 4L))
                 .hasMessageContaining("Latest snapshot 3 is not 4");
-        catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 3L, null, null);
+        catalog.rollbackTo(identifier, null, Instant.snapshot(2L), 3L);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 
@@ -4812,7 +4797,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.write(
                 GenericRow.of(
                         BinaryString.fromString("d1"),
-                        Blob.fromView(new BlobViewStruct(identifier, 1, 0L))));
+                        Blob.fromView(identifier, table.rowType(), "image", 0L)));
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(write.prepareCommit());
         write.close();

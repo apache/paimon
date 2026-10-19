@@ -31,7 +31,8 @@ from pypaimon.table.source.vector_search_read import (
 
 def _execute_batch_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    reader = builder.new_batch_vector_search_read()
+    from pypaimon.table.source.native_search_plan import python_search_reader
+    reader = python_search_reader(builder.new_batch_vector_search_read())
     if (type(reader) is not BatchVectorSearchReadImpl
             or not reader._table.options.data_evolution_enabled()):
         raise ValueError("Ray vector search supports only data-evolution tables.")

@@ -1224,6 +1224,107 @@ public class FileStoreCommitTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAbortPreservesReusedCompactionFiles(boolean external) throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+        Path compactNewPath = pathFactory.newPath();
+        // External files may share a name with a different physical file in the bucket directory.
+        Path reusedPath =
+                external
+                        ? new Path(tempDir.resolve(compactNewPath.getName()).toUri())
+                        : pathFactory.newPath();
+        DataFileMeta reused = createDataFileWithExtraFile(store, reusedPath, external);
+        DataFileMeta compactNew = createDataFileWithExtraFile(store, compactNewPath, false);
+        Path newLookupPath = new Path(reusedPath.getParent(), "new-lookup.sst");
+        store.fileIO().newOutputStream(newLookupPath, false).close();
+        List<String> upgradedExtraFiles = new ArrayList<>(reused.extraFiles());
+        upgradedExtraFiles.add(newLookupPath.getName());
+        DataFileMeta upgraded = reused.upgrade(1).copy(upgradedExtraFiles);
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.singletonList(reused),
+                                Arrays.asList(upgraded, compactNew),
+                                Collections.emptyList()));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.abort(Collections.singletonList(commitMessage));
+            commit.abort(Collections.singletonList(commitMessage));
+        }
+
+        for (Path path : reused.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).as("reused file %s", path).isTrue();
+        }
+        for (Path path : compactNew.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).as("new compaction file %s", path).isFalse();
+        }
+        assertThat(store.fileIO().exists(newLookupPath))
+                .as("new lookup file %s", newLookupPath)
+                .isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NONE", "INPUT", "FULL_COMPACTION"})
+    public void testAbortCleansUncommittedCompactionInputs(String changelogProducer)
+            throws Exception {
+        TestFileStore store =
+                createStore(false, 1, CoreOptions.ChangelogProducer.valueOf(changelogProducer));
+        KeyValue first = gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "first");
+        BinaryRow partition = gen.getPartition(first);
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+
+        AbstractFileStoreWrite<KeyValue> write = store.newWrite();
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            write.write(partition, 0, first);
+            write.compact(partition, 0, false);
+            write.write(partition, 0, first);
+            write.compact(partition, 0, true);
+            List<CommitMessage> messages = write.prepareCommit(true, 0);
+            assertThat(messages).hasSize(1);
+            CommitMessageImpl message = (CommitMessageImpl) messages.get(0);
+            assertThat(message.newFilesIncrement().newFiles()).hasSize(2);
+            assertThat(message.compactIncrement().compactBefore())
+                    .containsExactlyInAnyOrderElementsOf(message.newFilesIncrement().newFiles());
+            assertThat(message.compactIncrement().compactAfter()).hasSize(1);
+
+            List<DataFileMeta> pendingFiles =
+                    new ArrayList<>(message.newFilesIncrement().newFiles());
+            pendingFiles.addAll(message.newFilesIncrement().changelogFiles());
+            pendingFiles.addAll(message.compactIncrement().compactAfter());
+            pendingFiles.addAll(message.compactIncrement().changelogFiles());
+            List<Path> pendingPaths =
+                    pendingFiles.stream()
+                            .flatMap(file -> file.collectFiles(pathFactory).stream())
+                            .collect(Collectors.toList());
+            for (Path path : pendingPaths) {
+                assertThat(store.fileIO().exists(path)).as("pending file %s", path).isTrue();
+            }
+            assertThat(store.snapshotManager().latestSnapshotId()).isNull();
+
+            commit.abort(messages);
+            commit.abort(messages);
+
+            for (Path path : pendingPaths) {
+                assertThat(store.fileIO().exists(path)).as("aborted file %s", path).isFalse();
+            }
+            assertThat(store.snapshotManager().latestSnapshotId()).isNull();
+        } finally {
+            write.close();
+        }
+    }
+
     private static DataFileMeta createDataFileWithExtraFile(
             TestAppendFileStore store, Path path, boolean external) throws Exception {
         store.fileIO().newOutputStream(path, false).close();

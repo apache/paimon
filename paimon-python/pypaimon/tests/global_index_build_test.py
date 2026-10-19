@@ -34,8 +34,12 @@ from pypaimon.globalindex.build_plan import (
     split_by_global_index_shard as _split_by_global_index_shard,
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
+from pypaimon import Schema
+from pypaimon.common.json_util import JSON
+from pypaimon.globalindex.bitmap.bitmap_index_writer import BITMAP_IDENTIFIER
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
+from pypaimon.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
     FULL_TEXT_IDENTIFIER,
@@ -221,6 +225,33 @@ class GlobalIndexBuildTest(
         'bucket': '-1',
         'file.format': 'parquet',
     }
+
+    def test_sorted_build_indexes_deleted_physical_rows_like_java(self):
+        for kind in (BTREE_IDENTIFIER, BITMAP_IDENTIFIER):
+            with self.subTest(kind=kind):
+                options = dict(self.table_options)
+                options.update({'deletion-vectors.enabled': 'true', 'write.native.enabled': 'false'})
+                table = self._create_table(options=options)
+                self._write_arrow(table, pa.table({
+                    'id': [1, 2, 3], 'name': ['a', 'b', 'a'],
+                    'age': [10, 20, 30], 'city': ['x', 'y', 'z'],
+                }, schema=self.pa_schema))
+                builder = table.new_batch_write_builder()
+                commit = builder.new_commit()
+                try:
+                    commit.commit(builder.new_update().delete_by_row_id([0, 2]))
+                finally:
+                    commit.close()
+                # Both deleted keys and the live key belong to index coverage.
+                self.assertEqual(1, table.create_global_index('name', index_type=kind))
+                entries = [e for e in IndexFileHandler(table).scan(None) if e.index_file.index_type == kind]
+                self.assertEqual(3, sum(e.index_file.row_count for e in entries))
+                self.assertEqual([(0, 2)], [(e.index_file.global_index_meta.row_range_start,
+                                            e.index_file.global_index_meta.row_range_end) for e in entries])
+                read = table.new_read_builder()
+                rows = read.new_read().to_arrow(read.new_scan().plan().splits())
+                self.assertEqual([2], rows.column('id').to_pylist())
+                self.assertEqual(0, table.create_global_index('name', index_type=kind))
 
     def test_create_btree_global_index_from_python(self):
         table = self._create_table()
@@ -1029,20 +1060,54 @@ class GlobalIndexBuildTest(
                 index_type=FULL_TEXT_IDENTIFIER,
             )
 
+    def _create_legacy_fixed_bucket_table(self, bucket):
+        # Older pypaimon versions skipped row tracking schema validation, so a
+        # row tracking table with a fixed bucket may already exist on disk.
+        # Simulate it by rewriting the committed schema file directly.
+        name = self._unique_name()
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            self.pa_schema, options=self.table_options), False)
+        table = self.catalog.get_table(name)
+        legacy_options = dict(table.table_schema.options)
+        legacy_options['bucket'] = str(bucket)
+        legacy_schema = table.table_schema.copy(new_options=legacy_options)
+        schema_file = table.schema_manager._to_schema_path(legacy_schema.id)
+        table.file_io.overwrite_file_utf8(
+            schema_file, JSON.to_json(legacy_schema, indent=2))
+        table.schema_manager.schema_cache.pop(legacy_schema.id, None)
+
+        legacy_table = self.catalog.get_table(name)
+        self.assertEqual(bucket, legacy_table.options.bucket())
+        self.assertTrue(legacy_table.options.row_tracking_enabled())
+        return legacy_table
+
+    def test_create_sorted_global_index_rejects_legacy_fixed_bucket_table(self):
+        table = self._create_legacy_fixed_bucket_table(bucket=4)
+        # A caller provided bucket only tunes the index build, so it must not be
+        # able to pass the validation on behalf of the table.
+        for index_type in (BTREE_IDENTIFIER, BITMAP_IDENTIFIER):
+            for options in (None, {'bucket': '-1'}):
+                with self.subTest(index_type=index_type, options=options):
+                    with self.assertRaisesRegex(
+                            ValueError,
+                            'Global index only supports unaware-bucket tables '
+                            r'\(bucket = -1\), but table .* has bucket = 4'):
+                        table.create_global_index(
+                            'id', index_type=index_type, options=options)
+        # Rejected before building, so no index snapshot is committed.
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
     def test_create_vindex_global_index_rejects_generic_unsupported_tables(self):
         schema = pa.schema([
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
+        # Row tracking tables with a fixed bucket are rejected at schema validation,
+        # so they can no longer reach the global index builder.
         bucket_options = dict(self.table_options)
         bucket_options['bucket'] = '1'
-        bucket_table = self._create_table(pa_schema=schema, options=bucket_options)
-        with self.assertRaisesRegex(ValueError, 'unaware-bucket'):
-            bucket_table.create_global_index(
-                'embedding',
-                index_type='ivf-flat',
-                options={'ivf-flat.dimension': '2'},
-            )
+        with self.assertRaisesRegex(ValueError, 'it only support bucket = -1'):
+            self._create_table(pa_schema=schema, options=bucket_options)
 
         dv_options = dict(self.table_options)
         dv_options['deletion-vectors.enabled'] = 'true'
@@ -1055,6 +1120,20 @@ class GlobalIndexBuildTest(
             )
         with self.assertRaisesRegex(ValueError, 'deletion vectors'):
             dv_table.create_global_index('embedding', index_type=FULL_TEXT_IDENTIFIER)
+
+    def test_build_options_cannot_change_table_deletion_vector_eligibility(self):
+        for enabled in (False, True):
+            with self.subTest(deletion_vectors=enabled):
+                table_options = dict(self.table_options)
+                table_options['deletion-vectors.enabled'] = str(enabled).lower()
+                table = self._create_table(options=table_options)
+                build_options = {'deletion-vectors.enabled': str(not enabled).lower()}
+                if enabled:
+                    with self.assertRaisesRegex(ValueError, 'deletion vectors'):
+                        GlobalIndexBuilder(table, 'name', index_type=FULL_TEXT_IDENTIFIER, options=build_options)
+                else:
+                    self.assertEqual([], GlobalIndexBuilder(
+                        table, 'name', index_type=FULL_TEXT_IDENTIFIER, options=build_options).build())
 
     def test_vindex_native_options_follow_java_mapping(self):
         data_type = ArrayType(True, AtomicType('FLOAT'))
@@ -1213,6 +1292,16 @@ class GlobalIndexBuildTest(
             [['a'], ['b', 'c'], ['d']],
             [[file.file_name for file in s.files] for s in splits],
         )
+
+    def test_sorted_build_splits_omit_deletion_vectors_like_java(self):
+        split = _FakeSplit([_FakeFile('a', 0, 2), _FakeFile('b', 4, 2)])
+        deletion_files = [object(), object()]
+        split.data_deletion_files = deletion_files
+        splits = _split_one_by_contiguous_row_range(split)
+        self.assertEqual([['a'], ['b']], [[file.file_name for file in s.files] for s in splits])
+        self.assertTrue(all(s.data_deletion_files is None for s in splits))
+        # Planning a physical build must not alter the original query split.
+        self.assertIs(split.data_deletion_files, deletion_files)
 
     def test_split_by_global_index_shard_matches_java_default_builder(self):
         split = _FakeSplit([

@@ -124,7 +124,7 @@ class PartitionsTableTest(unittest.TestCase):
         for count in arrow_table.column("file_count").to_pylist():
             self.assertGreaterEqual(count, 1)
         for total_buckets in arrow_table.column("total_buckets").to_pylist():
-            self.assertGreaterEqual(total_buckets, 1)
+            self.assertEqual(total_buckets, -1)
         # FileSystem catalog does not maintain a "done" flag.
         for done in arrow_table.column("done").to_pylist():
             self.assertFalse(done)
@@ -191,6 +191,29 @@ class PartitionsTableTest(unittest.TestCase):
         ))
         self.assertEqual(3, deleted_counts["dt=2024-01-01"])
         self.assertIsNone(deleted_counts["dt=2024-01-02"])
+
+    def test_creation_times_use_java_gap_and_overlap_resolution(self):
+        import os
+        import time
+        from pypaimon.table.system.system_table import metadata_epoch_millis, metadata_local_millis
+        original = os.environ.get('TZ')
+        try:
+            os.environ['TZ'] = 'America/New_York'
+            time.tzset()
+            # 02:55 lies in the spring gap: Java shifts to 03:55 EDT, 07:55 UTC.
+            gap_wall = 1710039300123
+            self.assertEqual(1710057300123, metadata_epoch_millis(gap_wall))
+            self.assertEqual(1710042900123, metadata_local_millis(metadata_epoch_millis(gap_wall)))
+            # 01:30 occurs twice in the fall overlap. Java chooses 05:30 UTC (EDT).
+            overlap_wall = 1730597400456
+            self.assertEqual(1730611800456, metadata_epoch_millis(overlap_wall))
+            self.assertEqual(overlap_wall, metadata_local_millis(metadata_epoch_millis(overlap_wall)))
+        finally:
+            if original is None:
+                os.environ.pop('TZ', None)
+            else:
+                os.environ['TZ'] = original
+            time.tzset()
 
 
 if __name__ == "__main__":

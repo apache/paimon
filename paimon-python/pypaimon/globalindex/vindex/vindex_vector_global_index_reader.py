@@ -111,6 +111,7 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
         self._reader = None
         self._metadata = None
         self._search_params_type = None
+        self._native_reader = False
         self._load_lock = threading.Lock()
 
     def visit_vector_search(self, vector_search):
@@ -133,6 +134,12 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
 
     def _run_search(self, vectors, limit, include_row_ids, query_options):
         self._ensure_loaded()
+
+        if self._native_reader:
+            results = self._reader.search(
+                vectors, limit, filter_bytes=_filter_bytes(include_row_ids),
+                options={str(key): str(value) for key, value in (query_options or {}).items()})
+            return [DictBasedScoredIndexResult(scores) if scores else None for scores in results]
 
         queries = self._validate_queries(vectors)
         n = len(queries)
@@ -180,6 +187,8 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
 
     def vector_metric(self):
         self._ensure_loaded()
+        if self._native_reader:
+            return self._reader.metric()
         return self._metadata.metric
 
     def _effective_k(self, limit, include_row_ids):
@@ -200,13 +209,6 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
             if self._reader is not None:
                 return
 
-            try:
-                from paimon_vindex import SearchParams, VectorIndexReader
-            except ImportError as e:
-                raise ImportError(
-                    "paimon-vindex is required to read vindex vector indexes. "
-                    "Install paimon-vindex==0.5.0 or pypaimon[vindex].") from e
-
             file_path = (self._io_meta.external_path
                          if self._io_meta.external_path
                          else os.path.join(self._index_path, self._io_meta.file_name))
@@ -216,12 +218,26 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
             index_input = None
             try:
                 index_input = PaimonVindexInput(stream, parallelism)
-                reader = VectorIndexReader(index_input)
-                self._metadata = reader.metadata()
-                reader.optimize_for_search()
+                native_reader = _native_reader_type()
+                if native_reader is not None:
+                    reader = native_reader(
+                        index_input, file_path, self._io_meta.file_size,
+                        {str(key): str(value) for key, value in self._options.items()})
+                    self._native_reader = True
+                else:
+                    try:
+                        from paimon_vindex import SearchParams, VectorIndexReader
+                    except ImportError as e:
+                        raise ImportError(
+                            "paimon-vindex is required to read vindex vector indexes. "
+                            "Install paimon-vindex==0.5.0 or pypaimon[vindex].") from e
+                    reader = VectorIndexReader(index_input)
+                    self._metadata = reader.metadata()
+                    reader.optimize_for_search()
+                    self._search_params_type = SearchParams
+                    self._native_reader = False
                 self._index_input = index_input
                 self._reader = reader
-                self._search_params_type = SearchParams
                 self._stream = stream
             except BaseException:
                 try:
@@ -274,10 +290,16 @@ def _read_parallelism(options, file_path):
     return parallelism
 
 
+def _native_reader_type():
+    from pypaimon.read.native_plan import native_runtime_available
+    if not native_runtime_available():
+        return None
+    from pypaimon_rust.datafusion import VindexVectorGlobalIndexReader as NativeReader
+    return NativeReader
+
+
 def _filter_bytes(include_row_ids):
     if include_row_ids is None:
-        return None
-    if include_row_ids.cardinality() == 0:
         return None
     return include_row_ids.serialize()
 
@@ -359,7 +381,14 @@ def _int_parameter(options, key):
     if value is None:
         return None
     try:
-        return int(value)
+        text = str(value)
+        digits = text[1:] if text[:1] in ('+', '-') else text
+        if not digits or any(ord(char) > 0xffff or not char.isdecimal() for char in digits):
+            raise ValueError('Invalid Java integer text')
+        number = int(text)
+        if not -(1 << 31) <= number < (1 << 31):
+            raise ValueError('Java integer overflow')
+        return number
     except (TypeError, ValueError) as e:
         raise ValueError(
             "Invalid value for '%s': %s. Must be an integer." % (key, value)) from e

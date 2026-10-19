@@ -548,7 +548,6 @@ class TestBlobType:
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                "bucket": "1",
                 "file.format": "parquet",
                 "row-tracking.enabled": "true",
                 "data-evolution.enabled": "true",
@@ -588,7 +587,6 @@ class TestBlobType:
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                "bucket": "1",
                 "file.format": "parquet",
                 "row-tracking.enabled": "true",
                 "data-evolution.enabled": "true",
@@ -641,7 +639,6 @@ class TestBlobType:
         paimon_schema = pypaimon.Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                "bucket": "1",
                 "file.format": "parquet",
                 "row-tracking.enabled": "true",
                 "data-evolution.enabled": "true",

@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
-from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
+from pypaimon.schema.arrow_schema import (
+    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
@@ -33,6 +34,19 @@ from pypaimon.write.file_store_write import FileStoreWrite
 
 if TYPE_CHECKING:
     from ray.data import Dataset
+
+
+def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
+               hash_fixed_precluster='auto', static_partition=None):
+    """Share Ray coordination without constructing another local data writer."""
+    from pypaimon.write.ray_datasink import write_paimon_dataset
+
+    overwrite_partition = writer.static_partition if static_partition is None else static_partition
+    return write_paimon_dataset(
+        dataset, writer.table, overwrite=overwrite, static_partition=overwrite_partition,
+        concurrency=concurrency, ray_remote_args=ray_remote_args,
+        hash_fixed_precluster=hash_fixed_precluster,
+        **writer._distributed_write_options(overwrite=overwrite or overwrite_partition is not None))
 
 
 class TableWrite:
@@ -72,7 +86,7 @@ class TableWrite:
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
-        self._validate_pyarrow_schema(data.schema)
+        data = self._prepare_arrow_schema(data)
         if isinstance(data, pa.RecordBatch):
             return self.write_arrow_batch(data, bucket)
         for batch in data.to_batches():
@@ -82,6 +96,8 @@ class TableWrite:
         if bucket is not None:
             return self._write_precomputed_bucket(data, bucket)
         data = self._prepare_arrow_data(data)
+        if data.num_rows == 0:
+            return
 
         for partition, bucket, row_indices in \
                 self.row_key_extractor.extract_partition_bucket_groups(data):
@@ -115,6 +131,11 @@ class TableWrite:
         self.file_store_write.roll_before_group_if_needed(row_count)
 
     def _write_partition_bucket_batch(self, partition, bucket, data):
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            # Keep routing columns available for full-schema inputs, then
+            # write only the columns and order recorded in the file metadata.
+            data = data.select(write_cols)
         self.file_store_write.write(partition, bucket, data)
 
     def _write_precomputed_bucket(self, data, bucket):
@@ -188,10 +209,16 @@ class TableWrite:
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
+        write_cols = list(write_cols)
         for col in write_cols:
             if col not in self.table_pyarrow_schema.names:
                 raise ValueError(f"Column {col} is not in table schema.")
-        if len(write_cols) == len(self.table_pyarrow_schema.names):
+        full_names = self.table_pyarrow_schema.names
+        # Java preserves the declared append column order in writeCols. PK
+        # writes still require the complete table layout in the Python buffer.
+        full_pk_type = (self.table.is_primary_key_table and len(write_cols) == len(full_names)
+                        and set(write_cols) == set(full_names))
+        if write_cols == full_names or full_pk_type:
             write_cols = None
         self.file_store_write.write_cols = write_cols
         return self
@@ -241,24 +268,10 @@ class TableWrite:
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
         """
-        from pypaimon.write.ray_datasink import write_paimon_dataset
+        _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
+                   hash_fixed_precluster, static_partition)
 
-        overwrite_partition = self.static_partition
-        if static_partition is not None:
-            overwrite_partition = static_partition
-
-        write_paimon_dataset(
-            dataset,
-            self.table,
-            overwrite=overwrite,
-            static_partition=overwrite_partition,
-            concurrency=concurrency,
-            ray_remote_args=ray_remote_args,
-            hash_fixed_precluster=hash_fixed_precluster,
-            **self._distributed_write_options(),
-        )
-
-    def _distributed_write_options(self) -> Dict[str, Any]:
+    def _distributed_write_options(self, *, overwrite=False) -> Dict[str, Any]:
         """Return options forwarded by ``write_ray`` to the Ray writer."""
         return {}
 
@@ -308,8 +321,7 @@ class TableWrite:
             release()
 
     def _prepare_arrow_data(self, data):
-        self._validate_pyarrow_schema(data.schema)
-        data = normalize_arrow_strings(data)
+        data = self._prepare_arrow_schema(data)
         # Schema-only writers can normalize input without table options.
         table = getattr(self, 'table', None)
         if table is None:
@@ -317,6 +329,18 @@ class TableWrite:
         data = self._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
         return filter_write_batch(table, data)
+
+    def _prepare_arrow_schema(self, data):
+        data = normalize_arrow_strings(data)
+        target = self.table_pyarrow_schema
+        if data.schema.names != target.names and self.file_store_write.write_cols is not None:
+            target = self._write_cols_pyarrow_schema(self.file_store_write.write_cols)
+        validated = normalize_arrow_write_nullability(data, target)
+        self._validate_pyarrow_schema(validated.schema)
+        # Core checks only visible NOT NULL children. PyArrow's Parquet writer
+        # also rejects hidden NULL children under NULL ROW parents when their
+        # Arrow field is nonnullable, so retain the input's transport metadata.
+        return data
 
     def _normalize_arrow_write_schema(self, data):
         # Compatible input batches may differ in top-level nullability or

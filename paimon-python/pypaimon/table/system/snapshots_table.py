@@ -22,7 +22,7 @@ from typing import List, Optional
 import pyarrow
 
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_local_millis
 
 
 TABLE_TYPE = RowType(False, [
@@ -85,7 +85,7 @@ class SnapshotsTable(SystemTable):
             commit_users.append(snap.commit_user)
             commit_identifiers.append(int(snap.commit_identifier))
             commit_kinds.append(snap.commit_kind)
-            commit_times.append(int(snap.time_millis))
+            commit_times.append(metadata_local_millis(snap.time_millis))
             base_manifest_lists.append(snap.base_manifest_list)
             delta_manifest_lists.append(snap.delta_manifest_list)
             changelog_manifest_lists.append(snap.changelog_manifest_list)

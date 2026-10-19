@@ -211,7 +211,9 @@ class VindexInputTest(unittest.TestCase):
             native.close.side_effect = error
         module = mock.Mock()
         module.VectorIndexReader.side_effect = open_reader
-        with mock.patch.dict("sys.modules", {"paimon_vindex": module}):
+        with mock.patch.dict("sys.modules", {"paimon_vindex": module}), mock.patch(
+                'pypaimon.globalindex.vindex.vindex_vector_global_index_reader._native_reader_type',
+                return_value=None):
             reader = VindexVectorGlobalIndexReader(
                 io_, "s3://bucket", [GlobalIndexIOMeta(file_name="index", file_size=2)])
             if phase in ("constructor", "initialize"):

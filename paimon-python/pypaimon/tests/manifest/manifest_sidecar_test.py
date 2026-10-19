@@ -568,6 +568,7 @@ class ManifestSidecarScanTest(existing.ManifestEntryIdentifierTest):
             pa.schema([('p', pa.int32()), ('q', pa.string()), ('value', pa.string())]),
             partition_keys=['p', 'q'],
             options={'manifest.sidecar.enabled': 'true',
+                     'row-tracking.enabled': 'true',
                      'data-evolution.enabled': 'true'})
         self.catalog.create_table('default.explain_sidecar', schema, False)
         self.table = self.catalog.get_table('default.explain_sidecar')

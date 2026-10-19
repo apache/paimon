@@ -20,9 +20,12 @@
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from decimal import Decimal
+import os
 from unittest.mock import patch
+from urllib.parse import unquote, urlparse
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from pypaimon import Schema
@@ -83,6 +86,34 @@ def _read(table, native, predicate=None, projection=None):
         plan = scan.plan()
         result = builder.new_read().to_arrow(plan.splits())
     return result.sort_by([('id', 'ascending')])
+
+
+def test_large_utf8_old_parquet_reads_as_integer_without_native_fallback(rest_catalog):
+    catalog, _ = rest_catalog
+    _table(catalog, 'append', pa.string(), ['1.9', '-2.5', None])
+    catalog.alter_table('default.t', [SchemaChange.update_column_type('v', AtomicType('INT'))], False)
+    table = catalog.get_table('default.t')
+    # Plan once before rewriting the disposable old file. Preserve its logical
+    # STRING schema while storing the supported LargeUtf8 Arrow representation.
+    planning_table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'})
+    splits = planning_table.new_read_builder().new_scan().plan().splits()
+    assert splits
+    for split in splits:
+        for meta in split.files:
+            path = meta.file_path
+            if path.startswith('file:'):
+                path = unquote(urlparse(path).path)
+            physical = pq.read_table(path)
+            index = physical.schema.get_field_index('v')
+            physical = physical.set_column(index, 'v', physical.column('v').cast(pa.large_string()))
+            pq.write_table(physical, path)
+            meta.file_size = os.stat(path).st_size
+            assert pq.read_schema(path).field('v').type == pa.large_string()
+    reader = table.copy({'read.native.enabled': 'true'}).new_read_builder().new_read()
+    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+               side_effect=AssertionError('Native read fell back')):
+        result = reader.to_arrow(splits).sort_by([('id', 'ascending')])
+    assert result.column('v').to_pylist() == [1, -2, None]
 
 
 _TEMPORAL_STRING_CASES = [

@@ -1019,6 +1019,59 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         Collections.singletonList(partition)));
     }
 
+    @Test
+    public void testAlterPartitionsOnBranchUpdatesHmsUnderBareTableName() throws Exception {
+        // alterPartitions must call HMS with the bare table name (getTableName), not the
+        // branch-suffixed getObjectName(). A branch identifier's object name is
+        // "tableName$branch_<name>", while the partition is registered in HMS under the bare
+        // table name, so handing the suffixed name to getPartition/alter_partition throws
+        // NoSuchObjectException (swallowed) and the branch partition's statistics are never
+        // updated in HMS.
+        String databaseName = "testAlterPartitionsBranch";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        String tableName = "t";
+        Identifier mainId = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                mainId,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        Map<String, String> spec = Collections.singletonMap("dt", "20250101");
+        catalog.createPartitions(mainId, Collections.singletonList(spec));
+
+        // Create the branch so loadTableSchema can resolve its schema.
+        ((FileStoreTable) catalog.getTable(mainId)).createBranch("dev");
+
+        // The branch identifier carries the "$branch_<name>" suffix that used to be handed
+        // straight to HMS.
+        Identifier branchId = new Identifier(databaseName, tableName, "dev");
+        assertThat(branchId.getObjectName()).isEqualTo(tableName + "$branch_dev");
+
+        long fileCreationTime = System.currentTimeMillis();
+        PartitionStatistics stats = new PartitionStatistics(spec, 11, 22, 3, fileCreationTime, 4);
+        catalog.alterPartitions(branchId, Collections.singletonList(stats));
+
+        org.apache.hadoop.hive.metastore.api.Partition hmsPartition =
+                ((HiveCatalog) catalog)
+                        .getHmsClient()
+                        .getPartition(
+                                databaseName, tableName, Collections.singletonList("20250101"));
+        Map<String, String> params = hmsPartition.getParameters();
+        // numFiles/totalSize are recomputed by HMS from the (empty) storage descriptor, so assert
+        // the parameters HMS does NOT recompute: numRows and totalBuckets. Before the fix the
+        // branch-suffixed name made getPartition throw NoSuchObjectException (swallowed), so none
+        // of these parameters were ever written.
+        assertThat(params).containsEntry("numRows", "11");
+        assertThat(params).containsEntry("totalBuckets", "4");
+        assertThat(params).containsEntry("lastUpdateTime", String.valueOf(fileCreationTime / 1000));
+    }
+
     @Override
     protected boolean supportsAlterDatabase() {
         return true;

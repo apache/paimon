@@ -39,15 +39,11 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests rollback routing and optional writer context through a delegated REST catalog. */
+/** Tests rollback routing and optional table UUID through a delegated REST catalog. */
 class RollbackProtocolTest {
     @ParameterizedTest
-    @CsvSource({
-        "owned,snapshot", "unowned,snapshot", "without-uuid,snapshot",
-        "owned,tag", "unowned,tag", "without-uuid,tag"
-    })
-    void testRollbackCarriesTableUuidIndependentlyOfWriterContext(String context, String kind)
-            throws Exception {
+    @CsvSource({"table-id,snapshot", ",snapshot", "table-id,tag", ",tag"})
+    void testRollbackCarriesOptionalTableUuid(String tableUuid, String kind) throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
             Options options = new Options();
@@ -70,9 +66,7 @@ class RollbackProtocolTest {
                                 .setResponseCode(200)
                                 .setHeader("Content-Type", "application/json")
                                 .setBody("{}"));
-                String tableUuid = "without-uuid".equals(context) ? null : "table-id";
-                String commitUser = "owned".equals(context) ? "Writer-1" : null;
-                catalog.rollbackTo(identifier, tableUuid, instant, 2L, "head-uuid", commitUser);
+                catalog.rollbackTo(identifier, tableUuid, instant, 2L);
                 RecordedRequest recorded = server.takeRequest(10, TimeUnit.SECONDS);
                 assertThat(recorded.getMethod()).isEqualTo("POST");
                 assertThat(recorded.getPath())
@@ -82,7 +76,6 @@ class RollbackProtocolTest {
                 assertThat(payload.get("instant").get("type").asText()).isEqualTo(kind);
                 RollbackTableRequest request = RESTApi.fromJson(body, RollbackTableRequest.class);
                 assertThat(request.getFromSnapshot()).isEqualTo(2L);
-                assertThat(request.getFromSnapshotUuid()).isEqualTo("head-uuid");
                 if ("snapshot".equals(kind)) {
                     assertThat(((Instant.SnapshotInstant) request.getInstant()).getSnapshotId())
                             .isEqualTo(1L);
@@ -95,13 +88,9 @@ class RollbackProtocolTest {
                 } else {
                     assertThat(payload.has("tableId")).isFalse();
                 }
-                if (commitUser != null) {
-                    assertThat(request.getCommitUser()).isEqualTo(commitUser);
-                } else {
-                    assertThat(payload.has("commitUser")).isFalse();
-                }
-                assertThat(payload.size())
-                        .isEqualTo(3 + (tableUuid == null ? 0 : 1) + (commitUser == null ? 0 : 1));
+                assertThat(payload.has("commitUser")).isFalse();
+                assertThat(payload.has("fromSnapshotUuid")).isFalse();
+                assertThat(payload.size()).isEqualTo(2 + (tableUuid == null ? 0 : 1));
             }
         }
     }

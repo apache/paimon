@@ -19,22 +19,75 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests that {@link FileIndexPredicate} always releases the stream it is handed. */
 public class FileIndexPredicateCloseTest {
 
     private static final RowType ROW_TYPE = RowType.of(DataTypes.INT());
+
+    @Test
+    public void testV1DoesNotLoadFileStatus() throws IOException {
+        FileIO fileIO = mock(FileIO.class);
+        Path path = new Path("file:/index");
+        when(fileIO.newInputStream(path)).thenReturn(new ByteArraySeekableStream(container(1)));
+
+        try (FileIndexPredicate ignored = new FileIndexPredicate(path, fileIO, ROW_TYPE)) {
+            verify(fileIO).newInputStream(path);
+            verify(fileIO, never()).getFileStatus(path);
+        }
+    }
+
+    @Test
+    public void testV2LoadsFileStatus() throws IOException {
+        FileIO fileIO = mock(FileIO.class);
+        Path path = new Path("file:/index");
+        byte[] container = container(2);
+        FileStatus fileStatus = mock(FileStatus.class);
+        when(fileIO.newInputStream(path)).thenReturn(new ByteArraySeekableStream(container));
+        when(fileIO.getFileStatus(path)).thenReturn(fileStatus);
+        when(fileStatus.getLen()).thenReturn((long) container.length);
+
+        try (FileIndexPredicate ignored = new FileIndexPredicate(path, fileIO, ROW_TYPE)) {
+            verify(fileIO).newInputStream(path);
+            verify(fileIO).getFileStatus(path);
+        }
+    }
+
+    @Test
+    public void testV2FileStatusFailureReleasesStream() throws IOException {
+        FileIO fileIO = mock(FileIO.class);
+        Path path = new Path("file:/index");
+        AtomicInteger closed = new AtomicInteger();
+        when(fileIO.newInputStream(path)).thenReturn(tracking(container(2), closed));
+        IOException exception = new IOException("Failed to get file status");
+        when(fileIO.getFileStatus(path)).thenThrow(exception);
+
+        assertThatThrownBy(() -> new FileIndexPredicate(path, fileIO, ROW_TYPE))
+                .isSameAs(exception);
+
+        verify(fileIO).newInputStream(path);
+        verify(fileIO).getFileStatus(path);
+        assertThat(closed).hasValue(1);
+    }
 
     /**
      * The reader rejects a file whose magic does not match, and at that point nothing else holds a
@@ -45,7 +98,12 @@ public class FileIndexPredicateCloseTest {
         AtomicInteger closed = new AtomicInteger();
         byte[] notAnIndexFile = new byte[64];
 
-        assertThatThrownBy(() -> new FileIndexPredicate(tracking(notAnIndexFile, closed), ROW_TYPE))
+        assertThatThrownBy(
+                        () ->
+                                new FileIndexPredicate(
+                                        tracking(notAnIndexFile, closed),
+                                        ROW_TYPE,
+                                        notAnIndexFile.length))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Exception happens while construct file index reader.")
                 .hasRootCauseMessage("This file is not file index file.");
@@ -83,5 +141,13 @@ public class FileIndexPredicateCloseTest {
                 delegate.close();
             }
         };
+    }
+
+    private static byte[] container(int version) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(output, version)) {
+            writer.finish();
+        }
+        return output.toByteArray();
     }
 }

@@ -248,11 +248,12 @@ The following table lists the type mapping from Paimon type to Lance (Arrow) typ
 | DATE | DATE32 |
 | TIME | TIME32 / TIME64 |
 | TIMESTAMP(P) | TIMESTAMP (unit based on precision) |
+| TIMESTAMP_LOCAL_ZONE(P) | TIMESTAMP (unit based on precision, UTC time zone) |
 | ARRAY | LIST |
 | ROW | STRUCT |
 
 Limitations:
-1. Lance file format does not support `MAP`, `MULTISET`, `TIMESTAMP_LOCAL_ZONE` or `VARIANT` types.
+1. Lance file format does not support `MAP`, `MULTISET` or `VARIANT` types.
 2. Lance file format does not support `BLOB` fields stored inline in data files (`blob-descriptor-field` or `blob-view-field`). Regular `BLOB` fields are written to dedicated blob files and are not affected.
 
 ## Vortex
