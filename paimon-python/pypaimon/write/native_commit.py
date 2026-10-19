@@ -17,6 +17,8 @@
 
 """Optional native commits using the Java CommitMessage v14 bridge."""
 
+import json
+
 from pypaimon.common.json_util import JSON
 from pypaimon.read.native_plan import (
     native_runtime_available, _catalog_context_options, _catalog_metastore, _option_value_to_string,
@@ -45,7 +47,7 @@ def native_messages_supported(table, messages) -> bool:
     return True
 
 
-def create_native_commit(table, commit_user, overwrite_partition=None):
+def create_native_commit(table, commit_user, overwrite_partition=None, *, batch=False):
     """Return a native committer only when its publication protocol matches Python."""
     if not _rest_catalog_supported(table) or not native_runtime_available():
         return None
@@ -59,10 +61,11 @@ def create_native_commit(table, commit_user, overwrite_partition=None):
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
-    if overwrite_partition is not None:
-        return (native_table.new_batch_write_builder()
-                ._with_commit_user(commit_user)
-                .with_overwrite(overwrite_partition).new_commit())
+    if batch or overwrite_partition is not None:
+        builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
+        if overwrite_partition is not None:
+            builder = builder.with_overwrite(overwrite_partition)
+        return builder.new_commit()
     # Append commits use the stream committer with the Python writer's identity;
     # Python enforces each mode's lifecycle and empty-commit rules.
     return native_table.new_stream_write_builder().with_commit_user(commit_user).new_commit()
@@ -72,7 +75,7 @@ def _rest_catalog_supported(table):
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
     from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.filesystem.local_file_io import LocalFileIO
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
     from pypaimon.filesystem.oss_file_io import OssFileIO
     from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
     from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
@@ -86,26 +89,47 @@ def _rest_catalog_supported(table):
         file_io = file_io._delegate
     return (type(table) is FileStoreTable
             and type(environment) is CatalogEnvironment
-            and type(file_io) in (LocalFileIO, PyArrowFileIO, OssFileIO,
+            and type(file_io) in (LocalFileIO, FuseLocalFileIO, PyArrowFileIO, OssFileIO,
                                   ResolvingFileIO, RESTTokenFileIO)
             and environment.supports_version_management
-            and environment.uuid is not None
+            and _rest_source_uuid(table) is not None
             and context is not None
             and context.options is not None
             and all(getattr(context, attr, None) is None for attr in (
                 'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')))
 
 
+def _rest_source_uuid(table):
+    """Identity of the catalog table used to reconstruct a copied FUSE view."""
+    if table.catalog_environment.uuid is not None:
+        return table.catalog_environment.uuid
+    from pypaimon.read.native_plan import _resolved_rest_table_response, _validate_native_fuse_binding
+    try:
+        original = _validate_native_fuse_binding(table)
+        if original is None or original == table.identifier:
+            return None
+        response = _resolved_rest_table_response(table, original)
+        uuid = json.loads(response).get('id') if response is not None else None
+        return uuid if isinstance(uuid, str) and uuid else None
+    except (ValueError, RuntimeError):
+        return None
+
+
 def _native_rest_table(table, schema_json):
     from pypaimon_rust.datafusion import PaimonCatalog as NativeCatalog
+    from pypaimon.read.native_plan import _validate_native_fuse_binding
 
+    identifier = _validate_native_fuse_binding(table) or table.identifier
     catalog_options = _catalog_context_options(table)
     catalog_options['metastore'] = 'rest'
     native_table = NativeCatalog(catalog_options, config_required=False).get_table((
-        table.identifier.get_database_name(), table.identifier.get_object_name()))
+        identifier.get_database_name(), identifier.get_object_name()))
     if (native_table.location() != table.table_path
-            or native_table.rest_table_uuid() != table.catalog_environment.uuid
-            or native_table.branch() != table.current_branch()):
+            or native_table.rest_table_uuid() != _rest_source_uuid(table)):
+        return None
+    if identifier != table.identifier:
+        native_table = native_table.copy({'branch': table.current_branch()})
+    if native_table.location() != table.table_path or native_table.branch() != table.current_branch():
         return None
     return native_table.copy_with_resolved_schema(schema_json)
 
