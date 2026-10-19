@@ -150,11 +150,15 @@ class NativeTableWrite:
             return self._python_writer.with_write_type(write_cols)
         if self._written:
             raise RuntimeError('with_write_type must be called before writing; after native data it cannot change')
+        names = list(write_cols)
         if self.table.is_primary_key_table:
+            if len(names) == len(self._table_schema.names) and set(names) == set(self._table_schema.names):
+                # Python treats a complete PK write type as the unchanged table
+                # schema. It does not configure a PK column-subset writer.
+                return self
             # Core's write type is an append-table operation. Keep the existing
             # Python writer contract for PK setters before any data is staged.
-            return self._switch_to_python().with_write_type(write_cols)
-        names = list(write_cols)
+            return self._switch_to_python().with_write_type(names)
         self._native_writer.with_write_type(names)
         self._schema = pa.schema([self._table_schema.field(name) for name in names])
         self._write_cols = names
@@ -241,6 +245,26 @@ class NativeTableWrite:
             return self._python_writer.write_pandas(dataframe)
         self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=self._schema))
 
+    def write_ray(self, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
+                  hash_fixed_precluster='auto', static_partition=None):
+        if self._python_writer is not None:
+            return self._python_writer.write_ray(
+                dataset, overwrite, concurrency, ray_remote_args, hash_fixed_precluster, static_partition)
+        from pypaimon.write.table_write import _write_ray
+        _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
+                   hash_fixed_precluster, static_partition)
+
+    def _distributed_write_options(self, *, overwrite=False):
+        return {}
+
+    def roll_before_group_if_needed(self, row_count):
+        if self._python_writer is not None:
+            return self._python_writer.roll_before_group_if_needed(row_count)
+        if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count <= 0:
+            raise ValueError('Group row count must be a positive integer.')
+        # Python's group boundary only affects packed video writers. Native
+        # selection excludes video, so ordinary Parquet/BLOB writes do not roll.
+
     def write_row(self, row):
         if self._python_writer is not None:
             return self._python_writer.write_row(row)
@@ -321,3 +345,10 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
         from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
         return self._configure_python_writer(PostponeFixedBucketBatchTableWrite(
             self.table, self.commit_user, self.static_partition, self._bucket_plan))
+
+    def _distributed_write_options(self, *, overwrite=False):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+        return {'postpone_bucket_planner': PostponeBucketPlanner(
+            self.table, known_num_buckets=(
+                self._bucket_plan.as_dict() if self._bucket_plan is not None
+                else {} if overwrite else None))}

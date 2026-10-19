@@ -36,6 +36,19 @@ if TYPE_CHECKING:
     from ray.data import Dataset
 
 
+def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
+               hash_fixed_precluster='auto', static_partition=None):
+    """Share Ray coordination without constructing another local data writer."""
+    from pypaimon.write.ray_datasink import write_paimon_dataset
+
+    overwrite_partition = writer.static_partition if static_partition is None else static_partition
+    return write_paimon_dataset(
+        dataset, writer.table, overwrite=overwrite, static_partition=overwrite_partition,
+        concurrency=concurrency, ray_remote_args=ray_remote_args,
+        hash_fixed_precluster=hash_fixed_precluster,
+        **writer._distributed_write_options(overwrite=overwrite or overwrite_partition is not None))
+
+
 class TableWrite:
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
                  *, restore_snapshot_id=None):
@@ -242,24 +255,10 @@ class TableWrite:
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
         """
-        from pypaimon.write.ray_datasink import write_paimon_dataset
+        _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
+                   hash_fixed_precluster, static_partition)
 
-        overwrite_partition = self.static_partition
-        if static_partition is not None:
-            overwrite_partition = static_partition
-
-        write_paimon_dataset(
-            dataset,
-            self.table,
-            overwrite=overwrite,
-            static_partition=overwrite_partition,
-            concurrency=concurrency,
-            ray_remote_args=ray_remote_args,
-            hash_fixed_precluster=hash_fixed_precluster,
-            **self._distributed_write_options(),
-        )
-
-    def _distributed_write_options(self) -> Dict[str, Any]:
+    def _distributed_write_options(self, *, overwrite=False) -> Dict[str, Any]:
         """Return options forwarded by ``write_ray`` to the Ray writer."""
         return {}
 

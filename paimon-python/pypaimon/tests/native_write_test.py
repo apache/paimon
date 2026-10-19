@@ -492,12 +492,13 @@ def test_blob_only_partial_write_uses_native_and_updates_existing_range(tmp_path
 
 @requires_native
 @pytest.mark.parametrize('streaming', [False, True])
-def test_primary_key_full_write_type_selects_writer_before_staging(tmp_path, streaming):
+def test_primary_key_full_write_type_keeps_native_writer(tmp_path, streaming):
     table = _table(tmp_path, primary_key=True)
     builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
     writer = builder.new_write()
     try:
-        assert writer.with_write_type(table.field_names) is writer._python_writer
+        assert writer.with_write_type(table.field_names) is writer
+        assert writer._python_writer is None
         writer.write_arrow_batch(_batch([1], ['a']))
         messages = writer.prepare_commit(7) if streaming else writer.prepare_commit()
         commit = builder.new_commit()

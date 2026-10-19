@@ -45,6 +45,9 @@ def _native_update_table(table):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
+            # These operations read target rows before staging changes. Pure
+            # write/commit support must not select an unsupported guarded read.
+            or table.options.query_auth_enabled
             or not _native_update_formats_supported(table)
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
