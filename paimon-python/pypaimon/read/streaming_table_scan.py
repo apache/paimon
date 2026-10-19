@@ -35,7 +35,7 @@ from pypaimon.consumer.consumer import Consumer
 from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.native_plan import _QUERY_AUTH_UNSET, _raise_if_native_fork_safety_error
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.read.scanner.append_table_split_generator import \
@@ -82,8 +82,7 @@ class AsyncStreamingTableScan:
         bucket_filter: Optional[Callable[[int], bool]] = None,
         prefetch_enabled: bool = True,
         diff_threshold: int = 10,
-        consumer_id: Optional[str] = None,
-        *, _query_auth=_QUERY_AUTH_UNSET
+        consumer_id: Optional[str] = None
     ):
         """Initialize the streaming table scan."""
         self.table = table
@@ -113,8 +112,8 @@ class AsyncStreamingTableScan:
         # Consumer management for persisting streaming progress
         self._consumer_id = consumer_id
         self._read_type = None
-        self._query_auth_fn = (self.table.catalog_environment.table_query_auth(
-            self.table.options, self.table.identifier) if _query_auth is _QUERY_AUTH_UNSET else _query_auth)
+        self._query_auth_fn = self.table.catalog_environment.table_query_auth(
+            self.table.options, self.table.identifier)
         self._consumer_manager = (
             ConsumerManager(table.file_io, table.table_path)
             if consumer_id else None
@@ -473,15 +472,13 @@ class StreamTableScan:
     """
 
     def __init__(self, table, predicate=None, read_type=None, poll_interval_ms=1000,
-                 bucket_filter=None, consumer_id=None, *, _query_auth=_QUERY_AUTH_UNSET):
-        from pypaimon.read.native_plan import _native_query_auth, native_stream_scan
+                 bucket_filter=None, consumer_id=None):
+        from pypaimon.read.native_plan import native_stream_scan
         self.table = table
         self.poll_interval = poll_interval_ms / 1000.0
-        self._native_auth_state = _native_query_auth(table) if _query_auth is _QUERY_AUTH_UNSET else _query_auth
         self._scan = native_stream_scan(
             table, predicate=predicate, read_type=read_type,
-            bucket_filter=bucket_filter, consumer_id=consumer_id,
-            _query_auth=self._native_auth_state)
+            bucket_filter=bucket_filter, consumer_id=consumer_id)
         self._pending_consumer_snapshot = None
 
     @property
@@ -514,8 +511,7 @@ class StreamTableScan:
         if native_plan is None:
             return None
         try:
-            return _from_native_plan(
-                self.table, native_plan, retain_native_splits=self._native_auth_state[1] is None)
+            return _from_native_plan(self.table, native_plan)
         except Exception:
             self._scan.restore(checkpoint)
             raise

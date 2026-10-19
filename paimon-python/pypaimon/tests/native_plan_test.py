@@ -69,7 +69,6 @@ def _scan(native_enabled, file_scanner):
     scan.table.table_schema.id = 1
     scan.table.schema_manager.latest.return_value.id = 1   # loaded schema is latest
     scan.table.identifier.get_database_name.return_value = 'default'
-    scan.table.catalog_environment.table_query_auth.return_value = None
     scan.table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
         CatalogContext.create_from_options(Options({})))           # filesystem catalog
     file_scanner.idx_of_this_subtask = None       # no shard
@@ -344,7 +343,7 @@ class NativePlanTest(unittest.TestCase):
 
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
-            row_ranges=None, _query_auth=(True, None))
+            row_ranges=None)
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [keep])
 
@@ -396,7 +395,6 @@ class NativePlanTest(unittest.TestCase):
             limit=5,
             projection=['k', 'dt'],
             row_ranges=None,
-            _query_auth=(True, None),
         )
 
     def test_plan_forwards_global_index_result(self):
@@ -417,7 +415,6 @@ class NativePlanTest(unittest.TestCase):
             projection=None,
             row_ranges=None,
             global_index_result=fs._global_index_result,
-            _query_auth=(True, None),
         )
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [split])
@@ -438,7 +435,6 @@ class NativePlanTest(unittest.TestCase):
             projection=None,
             row_ranges=None,
             global_index_result=fs._global_index_result,
-            _query_auth=(True, None),
         )
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [])
@@ -677,7 +673,7 @@ class NativePlanTest(unittest.TestCase):
         self.assertIs(plan.stats(), counters)
         np.assert_called_once_with(
             scan.table, predicate=None, limit=None, projection=None,
-            row_ranges=None, _query_auth=(True, None))
+            row_ranges=None)
         fs.scan_with_stats.assert_not_called()
         fs.scan.assert_not_called()
 
@@ -929,7 +925,6 @@ class NativePlanTest(unittest.TestCase):
         table = Mock()
         table.identifier = Identifier('db', 't', branch='dev')
         table.table_path = 'oss://bucket/t'
-        table.options.query_auth_enabled = False
         table.current_branch.return_value = 'dev'
         table.catalog_environment = CatalogEnvironment(
             identifier=table.identifier, uuid='uuid', catalog_loader=loader,
@@ -1011,7 +1006,7 @@ class NativePlanTest(unittest.TestCase):
         cache = _NativeRestTableCache()
         with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
             with ThreadPoolExecutor(max_workers=4) as pool:
-                tables = list(pool.map(lambda _, cache=cache: cache.get('response', 'db', 't', {}), range(8)))
+                tables = list(pool.map(lambda _: cache.get('response', 'db', 't', {}), range(8)))
             self.assertTrue(all(table is tables[0] for table in tables))
             fake_df.Table.from_rest_response.assert_called_once()
             reference = weakref.ref(tables[0])

@@ -68,10 +68,10 @@ class TableScan:
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
-        native_auth = ((self._query_auth_fn is not None or self.table.options.query_auth_enabled)
+        native_auth = (self.table.options.query_auth_enabled
                        and self._native_requested() and self._native_plan_supported())
         if native_auth:
-            # Rust asks the catalog authorizer and carries its complete response in
+            # Rust asks the REST server and carries its complete response in
             # QueryAuthSplit. Both readers then enforce that captured policy.
             native = self._try_native_plan()
             if native is not None:
@@ -88,15 +88,6 @@ class TableScan:
                 return native
         plan = self.file_scanner.scan()
         return wrap_plan_with_auth(auth_result, plan)
-
-    def _native_query_auth_state(self):
-        # The factory belongs to scan construction; only the returned policy
-        # callback is refreshed while planning. Never resolve a different hook
-        # during a capability probe or Native table installation.
-        if '_native_auth_state' not in vars(self):
-            from pypaimon.read.native_plan import _native_query_auth
-            self._native_auth_state = _native_query_auth(self.table, self._query_auth_fn)
-        return self._native_auth_state
 
     def _native_requested(self) -> bool:
         if self.table.options.native_plan_enabled():
@@ -118,7 +109,7 @@ class TableScan:
         """Fall back to the Python scanner for scans native can't carry:
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; Rust rejects this schema), unsupported time travel selectors,
-        a missing pypaimon-rust, or a catalog / identifier Rust
+        custom authorization, a missing pypaimon-rust, or a catalog / identifier Rust
         cannot reconstruct. Keep this capability gate in sync when adding scan
         features."""
         from pypaimon.read.native_plan import (
@@ -150,13 +141,14 @@ class TableScan:
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-        if self._query_auth_fn is not None or self.table.options.query_auth_enabled:
+        if self.table.options.query_auth_enabled:
             # The filesystem path has no catalog-issued authorization session.
             loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
             from pypaimon.read.native_plan import _catalog_metastore
             if loader is None or _catalog_metastore(loader) != 'rest':
                 return False
-            if not self._native_query_auth_state()[0]:
+            from pypaimon.read.native_plan import _native_query_auth_supported
+            if not _native_query_auth_supported(self.table):
                 return False
         # Rust rejects schemas whose primary keys are all partition keys.
         if getattr(self.table, 'is_primary_key_table', False) \
@@ -242,7 +234,6 @@ class TableScan:
                     [field.name for field in self._read_type]
                     if self._read_type is not None and chunk_shuffle is None else None),
                 row_ranges=row_ranges,
-                _query_auth=self._native_query_auth_state(),
                 **extra_options,
             )
             splits = plan.splits()
@@ -276,8 +267,8 @@ class TableScan:
         Existing filters and limits still apply. Query authorization must be
         unrestricted, as required by writer restore, overwrite and indexing.
         """
-        if (self._native_requested() and self._native_query_auth_state()[0]
-                and self._native_plan_supported()):
+        from pypaimon.read.native_plan import _native_query_auth_supported
+        if self._native_requested() and _native_query_auth_supported(self.table) and self._native_plan_supported():
             plan = self._try_native_plan(all_files=True)
             if plan is not None:
                 return plan
@@ -304,7 +295,7 @@ class TableScan:
         keeps going through :meth:`plan`. Native scans always collect lightweight
         counters in the same core planning pass, without opening data files.
         """
-        native_auth = ((self._query_auth_fn is not None or self.table.options.query_auth_enabled)
+        native_auth = (self.table.options.query_auth_enabled
                        and self._native_requested() and self._native_plan_supported())
         if native_auth:
             native = self._try_native_plan()

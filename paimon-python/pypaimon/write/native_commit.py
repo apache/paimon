@@ -80,17 +80,10 @@ def _rest_catalog_supported(table):
     file_io = table.file_io
     if type(file_io) is CachingFileIO:
         file_io = file_io._delegate
-    # A query authorization hook retains the catalog publication protocol.
-    # Custom snapshot loading or publication changes the commit base/visibility
-    # and cannot be replaced by REST.
     return (type(table) is FileStoreTable
-            and isinstance(environment, CatalogEnvironment)
+            and type(environment) is CatalogEnvironment
             and type(file_io) in (LocalFileIO, FuseLocalFileIO, PyArrowFileIO, OssFileIO,
                                   ResolvingFileIO, RESTTokenFileIO)
-            and getattr(environment.snapshot_commit, '__func__', None) is CatalogEnvironment.snapshot_commit
-            and getattr(environment.snapshot_commit, '__self__', None) is environment
-            and getattr(environment.snapshot_loader, '__func__', None) is CatalogEnvironment.snapshot_loader
-            and getattr(environment.snapshot_loader, '__self__', None) is environment
             and environment.supports_version_management
             and _rest_source_uuid(table) is not None
             and context is not None
@@ -99,9 +92,8 @@ def _rest_catalog_supported(table):
 
 def _rest_source_uuid(table):
     """Identity of the catalog table used to reconstruct a copied FUSE view."""
-    uuid = table.catalog_environment.uuid
-    if uuid is not None:
-        return uuid if isinstance(uuid, str) and uuid else None
+    if table.catalog_environment.uuid is not None:
+        return table.catalog_environment.uuid
     from pypaimon.read.native_plan import _resolved_rest_table_response, _validate_native_fuse_binding
     try:
         original = _validate_native_fuse_binding(table)
@@ -143,10 +135,9 @@ def create_native_write_table(table):
 
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
-            or not isinstance(environment, CatalogEnvironment)):
+            or type(environment) is not CatalogEnvironment):
         return None
 
-    from pypaimon.read.native_plan import _native_query_auth, _with_native_query_auth
     from pypaimon_rust.datafusion import Table as NativeTable
     # Preserve the resolved schema and all effective table options, including
     # copy() overrides. Do not inject scan options or reload catalog schemas.
@@ -165,12 +156,11 @@ def create_native_write_table(table):
     if environment.supports_version_management:
         if not _rest_catalog_supported(table):
             return None
-        native_table = _native_rest_table(table, schema_json)
-        return _with_native_query_auth(table, native_table) if native_table is not None else None
+        return _native_rest_table(table, schema_json)
     if type(table.file_io) not in (LocalFileIO, PyArrowFileIO, ResolvingFileIO):
         return None
     file_io_options = _resolved_schema_file_io_options(table)
-    if file_io_options is None or not _native_query_auth(table)[0]:
+    if file_io_options is None:
         return None
     return NativeTable.from_resolved_schema(
         table.table_path, schema_json,
