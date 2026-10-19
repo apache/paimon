@@ -29,7 +29,7 @@ try:
 except ImportError:  # pragma: no cover - supported fastavro versions provide these
     _read_bytes = _read_long = _read_record = _skip_record = None
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pypaimon.filesystem.caching_file_io import (
     CachingInputStream, _open_input_stream_with_known_size)
@@ -265,15 +265,16 @@ class ManifestFileManager:
                 max_values=BinaryRow(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
-            # fastavro returns UTC-aware datetime for timestamp-millis, we need to convert properly
+            # Avro exposes the stored local TIMESTAMP fields as a UTC datetime.
+            # Keep integer millisecond precision, without applying the system zone.
             from pypaimon.data.timestamp import Timestamp
             creation_time_value = file_dict['_CREATION_TIME']
             creation_time_ts = None
             if creation_time_value is not None:
                 if isinstance(creation_time_value, datetime):
                     if creation_time_value.tzinfo:
-                        epoch_millis = int(creation_time_value.timestamp() * 1000)
-                        creation_time_ts = Timestamp.from_epoch_millis(epoch_millis)
+                        creation_time_ts = Timestamp.from_local_date_time(
+                            creation_time_value.astimezone(timezone.utc).replace(tzinfo=None))
                     else:
                         creation_time_ts = Timestamp.from_local_date_time(creation_time_value)
                 elif isinstance(creation_time_value, (int, float)):

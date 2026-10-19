@@ -117,7 +117,7 @@ class VectorWriter(AppendOnlyDataWriter):
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
-            creation_time=Timestamp.now(),
+            creation_time=Timestamp.now().to_millis_timestamp(),
             delete_row_count=0,
             file_source=0,
             value_stats_cols=None,

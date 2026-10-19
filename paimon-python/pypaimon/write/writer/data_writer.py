@@ -382,7 +382,7 @@ class DataWriter(ABC):
         else:
             min_seq = self.sequence_generator.start
             max_seq = self.sequence_generator.current
-        creation_time = Timestamp.now()
+        creation_time = Timestamp.now().to_millis_timestamp()
         return dict(min_key=min_key, max_key=max_key, key_stats=key_stats,
                     value_stats=value_stats, min_seq=min_seq, max_seq=max_seq,
                     creation_time=creation_time, value_stats_enabled=value_stats_enabled)
@@ -424,7 +424,7 @@ class DataWriter(ABC):
             max_sequence_number=max_sequence_number,
             schema_id=self.table.table_schema.id, level=0,
             extra_files=extra_files if extra_files is not None else [],
-            creation_time=creation_time if creation_time is not None else Timestamp.now(),
+            creation_time=creation_time if creation_time is not None else Timestamp.now().to_millis_timestamp(),
             delete_row_count=delete_row_count, file_source=0,
             value_stats_cols=None if self.options.metadata_stats_enabled() else [],
             external_path=file_path if self.external_path_provider is not None else None,

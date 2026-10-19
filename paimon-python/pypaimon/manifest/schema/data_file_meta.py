@@ -18,7 +18,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
-import time
 
 from pypaimon.utils.range import Range
 from pypaimon.data.timestamp import Timestamp
@@ -75,12 +74,13 @@ class DataFileMeta:
     def creation_time_epoch_millis(self) -> Optional[int]:
         if self.creation_time is None:
             return None
-        local_dt = self.creation_time.to_local_date_time()
-        local_time_struct = local_dt.timetuple()
-        local_timestamp = time.mktime(local_time_struct)
-        utc_timestamp = time.mktime(time.gmtime(local_timestamp))
-        tz_offset_seconds = int(local_timestamp - utc_timestamp)
-        return int((local_timestamp - tz_offset_seconds) * 1000)
+        from pypaimon.casting.temporal_utils import _local_to_utc_seconds
+
+        # Java stores Timestamp.now() as local wall-clock fields, then resolves
+        # LocalDateTime.atZone(systemDefault()) when an epoch instant is needed.
+        # Preserve the millisecond remainder, including for pre-epoch values.
+        seconds, millis = divmod(self.creation_time.get_millisecond(), 1000)
+        return _local_to_utc_seconds(seconds) * 1000 + millis
 
     def creation_time_as_datetime(self) -> Optional[datetime]:
         if self.creation_time is None:
@@ -114,7 +114,8 @@ class DataFileMeta:
         write_cols_sequences: Optional[List[int]] = None,
     ) -> 'DataFileMeta':
         if creation_time is None:
-            creation_time = Timestamp.now()
+            # Java forAppend/forLevel0 factories persist TIMESTAMP(3).
+            creation_time = Timestamp.now().to_millis_timestamp()
 
         return cls(
             file_name=file_name,
