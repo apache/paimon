@@ -24,6 +24,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.CompactIncrement;
@@ -406,6 +407,107 @@ public class MultipleBlobTableTest extends TableTestBase {
         assertThat(blob.next()).containsExactly("[s1, 7]", "[s2, 7]");
     }
 
+    @Test
+    public void testIncrementalReadOfBlobOnlyDeltasKeepsRowVersions() throws Exception {
+        createTableDefault();
+        RowType rowType = getTableDefault().rowType();
+        writeColumns(
+                Arrays.asList("f0", "f1"),
+                null,
+                GenericRow.of(0, BinaryString.fromString("a")),
+                GenericRow.of(1, BinaryString.fromString("b")));
+        writeColumns(
+                Collections.singletonList("f2"),
+                0L,
+                GenericRow.of(new BlobData(SMALL_BLOB_1)),
+                GenericRow.of(new BlobData(SMALL_BLOB_1)));
+        long secondSeq = deltaFiles().get(0).maxSequenceNumber();
+        writeColumns(
+                Collections.singletonList("f2"), 1L, GenericRow.of(new BlobData(SMALL_BLOB_2)));
+        long thirdSeq = deltaFiles().get(0).maxSequenceNumber();
+        assertThat(thirdSeq).isNotEqualTo(secondSeq);
+
+        // Both deltas hold only f2 files. Row 0 was last written by the second snapshot and row 1
+        // by the third, whether or not f2 is read.
+        RowType tracking = RowType.of(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER);
+        assertThat(readIncremental("1,3", tracking))
+                .containsExactly("[0, " + secondSeq + "]", "[1, " + thirdSeq + "]");
+        assertThat(
+                        readIncremental(
+                                "1,3",
+                                RowType.of(
+                                        rowType.getField("f0"),
+                                        SpecialFields.ROW_ID,
+                                        SpecialFields.SEQUENCE_NUMBER)))
+                .containsExactly("[null, 0, " + secondSeq + "]", "[null, 1, " + thirdSeq + "]");
+        assertThat(
+                        readIncremental(
+                                "1,3",
+                                RowType.of(
+                                        SpecialFields.ROW_ID,
+                                        SpecialFields.SEQUENCE_NUMBER,
+                                        rowType.getField("f2"))))
+                .containsExactly("[0, " + secondSeq + ", s1]", "[1, " + thirdSeq + ", s2]");
+    }
+
+    @Test
+    public void testIncrementalReadOfBlobOnlyDeltaWithPlaceholders() throws Exception {
+        createTableDefault();
+        RowType rowType = getTableDefault().rowType();
+        writeColumns(
+                Arrays.asList("f0", "f1"),
+                null,
+                GenericRow.of(0, BinaryString.fromString("a")),
+                GenericRow.of(1, BinaryString.fromString("b")));
+        writeColumns(
+                Collections.singletonList("f2"),
+                0L,
+                GenericRow.of(new BlobData(SMALL_BLOB_1)),
+                GenericRow.of(new BlobData(SMALL_BLOB_1)));
+        long secondSeq = deltaFiles().get(0).maxSequenceNumber();
+        // Like a Flink partial update of row 1: the file covers both rows and holds a placeholder
+        // for row 0, which it did not update.
+        writeColumns(
+                Collections.singletonList("f2"),
+                0L,
+                GenericRow.of(BlobPlaceholder.INSTANCE),
+                GenericRow.of(new BlobData(SMALL_BLOB_2)));
+        long thirdSeq = deltaFiles().get(0).maxSequenceNumber();
+
+        RowType tracking = RowType.of(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER);
+        RowType trackingAndBlob =
+                RowType.of(
+                        SpecialFields.ROW_ID,
+                        SpecialFields.SEQUENCE_NUMBER,
+                        rowType.getField("f2"));
+        // Row 0 keeps the version of the second snapshot.
+        assertThat(readIncremental("1,3", tracking))
+                .containsExactly("[0, " + secondSeq + "]", "[1, " + thirdSeq + "]");
+        assertThat(readIncremental("1,3", trackingAndBlob))
+                .containsExactly("[0, " + secondSeq + ", s1]", "[1, " + thirdSeq + ", s2]");
+        // The third snapshot alone holds no value for row 0.
+        assertThat(readIncremental("2,3", tracking))
+                .containsExactly("[0, -1]", "[1, " + thirdSeq + "]");
+        assertThat(readIncremental("2,3", trackingAndBlob))
+                .containsExactly("[0, -1, null]", "[1, " + thirdSeq + ", s2]");
+    }
+
+    private List<String> readIncremental(String between, RowType readType) throws Exception {
+        ReadBuilder readBuilder =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.INCREMENTAL_BETWEEN.key(), between))
+                        .newReadBuilder()
+                        .withReadType(readType);
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> rows.add(format(readType, row)));
+        }
+        return rows;
+    }
+
     private String blobName(byte[] bytes) {
         if (Arrays.equals(bytes, blobBytes1)) {
             return "b1";
@@ -445,27 +547,27 @@ public class MultipleBlobTableTest extends TableTestBase {
             List<String> rows = new ArrayList<>();
             try (RecordReader<InternalRow> reader =
                     readBuilder.newRead().createReader(scan.plan())) {
-                reader.forEachRemaining(row -> rows.add(format(row)));
+                reader.forEachRemaining(row -> rows.add(format(readType, row)));
             }
             return rows;
         }
+    }
 
-        private String format(InternalRow row) {
-            List<String> fields = new ArrayList<>();
-            for (int i = 0; i < readType.getFieldCount(); i++) {
-                if (row.isNullAt(i)) {
-                    fields.add("null");
-                } else if (readType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
-                    byte[] bytes = row.getBlob(i).toData();
-                    fields.add(blobName(bytes));
-                } else if (readType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BIGINT) {
-                    fields.add(String.valueOf(row.getLong(i)));
-                } else {
-                    fields.add(String.valueOf(row.getInt(i)));
-                }
+    private String format(RowType readType, InternalRow row) {
+        List<String> fields = new ArrayList<>();
+        for (int i = 0; i < readType.getFieldCount(); i++) {
+            if (row.isNullAt(i)) {
+                fields.add("null");
+            } else if (readType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                byte[] bytes = row.getBlob(i).toData();
+                fields.add(blobName(bytes));
+            } else if (readType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BIGINT) {
+                fields.add(String.valueOf(row.getLong(i)));
+            } else {
+                fields.add(String.valueOf(row.getInt(i)));
             }
-            return fields.toString();
         }
+        return fields.toString();
     }
 
     private void writeColumns(List<String> columns, Long firstRowId, InternalRow... rows)

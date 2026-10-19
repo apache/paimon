@@ -46,6 +46,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.io.FileIndexEvaluator;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionFileReader;
@@ -69,6 +70,7 @@ import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -91,6 +93,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static java.util.Collections.reverseOrder;
 import static java.util.Comparator.comparingLong;
@@ -101,7 +104,6 @@ import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -132,8 +134,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileIO fileIO;
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
+    // Reads blobs as descriptors, for the sequence numbers of blob files read without their blob.
+    private final FileFormatDiscover blobDescriptorFormatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+    // Built from blobDescriptorFormatDiscover, so kept apart from formatReaderMappings.
+    private final Map<FormatKey, FormatReaderMapping> blobVersionReaderMappings;
     // Kept apart from formatReaderMappings: the single file path pushes per file filters into the
     // mapping, so it must not share entries with the merge path, which pushes none.
     private final Map<SingleFileKey, FormatReaderMapping> singleFileReaderMappings;
@@ -161,9 +167,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;
         this.formatDiscover = FileFormatDiscover.of(coreOptions);
+        Options descriptorOptions = Options.fromMap(coreOptions.toMap());
+        descriptorOptions.set(CoreOptions.BLOB_AS_DESCRIPTOR, true);
+        this.blobDescriptorFormatDiscover =
+                FileFormatDiscover.of(new CoreOptions(descriptorOptions));
         this.coreOptions = coreOptions;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
+        this.blobVersionReaderMappings = new HashMap<>();
         this.singleFileReaderMappings = new HashMap<>();
         this.candidateReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
@@ -261,19 +272,23 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
-            if (needMergeFiles.size() == 1 || readRowType.getFields().isEmpty()) {
+            // A single blob file, read without its normal file (an incremental scan, blob
+            // compaction), may hold placeholders, so it is merged like a group of several blob
+            // files.
+            boolean singleFile =
+                    needMergeFiles.size() == 1 && !isBlobFile(needMergeFiles.get(0).fileName());
+            if (singleFile || readRowType.getFields().isEmpty()) {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
                         () -> {
                             DataFileMeta file = needMergeFiles.get(0);
-                            if (isBlobFile(file.fileName()) && readsNoColumnOf(file, readRowType)) {
+                            if (isBlobFile(file.fileName())) {
                                 // A group with no normal file, which an incremental scan can see.
                                 return blobRowsWithoutBlobField(
                                         enclosingRowIdRange(needMergeFiles),
-                                        needMergeFiles,
                                         rowRanges,
                                         readRowType,
-                                        readDeletionVector(needMergeFiles, deletionVectorFactory));
+                                        null);
                             }
                             FileIndexResult fileIndexResult =
                                     evaluateFileIndex(filters, file, dataFilePathFactory);
@@ -555,12 +570,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             if (bunch instanceof BlobFileBunch && findBlobFieldIndex(partialReadRowType) < 0) {
                 // Only row-tracking fields, as in a group with no normal file.
                 fileRecordReaders[i] =
-                        blobRowsWithoutBlobField(
-                                ((BlobFileBunch) bunch).logicalRange(),
-                                bunch.files(),
-                                rowRanges,
-                                partialReadRowType,
-                                deletionVector);
+                        partialReadRowType.containsField(SpecialFields.SEQUENCE_NUMBER.name())
+                                ? blobRowVersions(
+                                        partition,
+                                        (BlobFileBunch) bunch,
+                                        bunchDataSchemas[i],
+                                        dataFilePathFactory,
+                                        rowRanges,
+                                        partialReadRowType,
+                                        deletionVector)
+                                : blobRowsWithoutBlobField(
+                                        ((BlobFileBunch) bunch).logicalRange(),
+                                        rowRanges,
+                                        partialReadRowType,
+                                        deletionVector);
                 continue;
             }
             DataFileMeta firstFile = bunch.files().get(0);
@@ -621,11 +644,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         if (bunch instanceof BlobFileBunch) {
             // A group with no normal file: the blob files provide only its row range.
             return blobRowsWithoutBlobField(
-                    ((BlobFileBunch) bunch).logicalRange(),
-                    bunch.files(),
-                    rowRanges,
-                    readRowType,
-                    deletionVector);
+                    ((BlobFileBunch) bunch).logicalRange(), rowRanges, readRowType, deletionVector);
         }
         DataFileMeta firstFile = bunch.files().get(0);
         FileReadTarget readTarget =
@@ -809,28 +828,75 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     /**
-     * Emits the rows of blob files for a read type with no blob field, without opening them: the
-     * blob format cannot be read without one.
+     * Emits the rows of blob files for a read type with neither a blob field nor the sequence
+     * number, without opening them: the blob format cannot be read without a blob field.
      */
     private FileRecordReader<InternalRow> blobRowsWithoutBlobField(
             Range range,
-            List<DataFileMeta> files,
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector) {
-        long sequenceNumber =
-                files.stream().mapToLong(DataFileMeta::maxSequenceNumber).max().getAsLong();
         return applyDeletionVector(
                 new AllPlaceholdersRecordReader(
-                        range.from, range.count(), rowRanges, readRowType, -1, sequenceNumber),
+                        range.from, range.count(), rowRanges, readRowType, -1, -1L),
                 range,
                 rowRanges,
                 deletionVector);
     }
 
-    private boolean readsNoColumnOf(DataFileMeta file, RowType readRowType) {
-        Set<Integer> fileFieldIds = fileFieldIds(schemaFetcher.apply(file.schemaId()), file);
-        return readRowType.getFields().stream().noneMatch(f -> fileFieldIds.contains(f.id()));
+    /**
+     * Reads the row-tracking fields of a blob bunch for a read type without its blob field. A row
+     * takes the sequence number of the newest file holding a value for it, as when the blob is
+     * read. A file can hold placeholders for rows it did not update, so the files are read, with
+     * the blob as a descriptor so that no payload is loaded.
+     */
+    private RecordReader<InternalRow> blobRowVersions(
+            BinaryRow partition,
+            BlobFileBunch bunch,
+            TableSchema dataSchema,
+            DataFilePathFactory dataFilePathFactory,
+            List<Range> rowRanges,
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
+            throws IOException {
+        DataFileMeta firstFile = bunch.files().get(0);
+        List<DataField> fields = new ArrayList<>(readRowType.getFields());
+        fields.add(dataSchema.logicalRowType().getField(firstFile.writeCols().get(0)));
+        RowType withBlob = new RowType(fields);
+        String formatIdentifier = DataFilePathFactory.formatIdentifier(firstFile.fileName());
+        boolean nestedFieldEnabled = nestedFieldEnabledFor(bunch.files());
+        FormatReaderMapping mapping =
+                blobVersionReaderMappings.computeIfAbsent(
+                        new FormatKey(
+                                firstFile.schemaId(),
+                                formatIdentifier,
+                                readerCacheKey(fields, dataSchema.fields(), nestedFieldEnabled)),
+                        key ->
+                                formatBuilder(
+                                                blobDescriptorFormatDiscover,
+                                                withBlob,
+                                                null,
+                                                nestedFieldEnabled)
+                                        .build(
+                                                formatIdentifier,
+                                                schema,
+                                                dataSchema,
+                                                fields,
+                                                false));
+        // drop the blob field appended above
+        ProjectedRow projected =
+                ProjectedRow.from(IntStream.range(0, readRowType.getFieldCount()).toArray());
+        return createFieldBunchReader(
+                        partition,
+                        bunch,
+                        dataFilePathFactory,
+                        mapping,
+                        rowRanges,
+                        withBlob,
+                        deletionVector,
+                        null,
+                        null)
+                .transform(projected::replaceRow);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -903,12 +969,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 positionalRowFormat
                         ? positionalRowFormatBuilder(readRowType, fileFilters, nestedFieldEnabled)
                         : formatBuilder(readRowType, fileFilters, nestedFieldEnabled);
-        // The blob format puts its value at the first blob field of the read type, so map only the
-        // column this file wrote.
-        TableSchema readerDataSchema =
-                positionalRowFormat || isBlobFile(file.fileName())
-                        ? physicalDataSchema
-                        : fileSchema;
+        TableSchema readerDataSchema = positionalRowFormat ? physicalDataSchema : fileSchema;
         FormatReaderMapping formatReaderMapping =
                 singleFileReaderMappings.computeIfAbsent(
                         new SingleFileKey(
@@ -1452,6 +1513,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     private Builder formatBuilder(
             RowType readRowType, @Nullable List<Predicate> filters, boolean nestedFieldEnabled) {
+        return formatBuilder(formatDiscover, readRowType, filters, nestedFieldEnabled);
+    }
+
+    private static Builder formatBuilder(
+            FileFormatDiscover formatDiscover,
+            RowType readRowType,
+            @Nullable List<Predicate> filters,
+            boolean nestedFieldEnabled) {
         return new Builder(
                 formatDiscover,
                 readRowType.getFields(),
@@ -1801,8 +1870,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         Map<Integer, BlobFileBunch> blobBunchMap = new HashMap<>();
         Map<VectorStoreBunchKey, VectorFileBunch> vectorStoreBunchMap = new TreeMap<>();
         long rowCount = -1;
-        // A group of only blob files, which an incremental scan can see, spans the rows of all its
-        // files.
+        // A group of only blob files spans the rows of all its files.
         Range rowRange =
                 !needMergeFiles.isEmpty() && isBlobOnly(needMergeFiles)
                         ? enclosingRowIdRange(needMergeFiles)
