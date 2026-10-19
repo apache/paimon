@@ -21,7 +21,7 @@ import json
 
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
@@ -45,13 +45,11 @@ def _native_update_table(table):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            # These operations read target rows before staging changes. Pure
-            # write/commit support must not select an unsupported guarded read.
-            or table.options.query_auth_enabled
             or not _native_update_formats_supported(table)
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
-            or not native_runtime_available()):
+            or not native_runtime_available()
+            or not _native_query_auth_supported(table)):
         return None
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if not _native_partition_types_supported(

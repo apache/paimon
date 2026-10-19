@@ -178,15 +178,15 @@ def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_cata
     assert schema['options']['query-auth.enabled'] == 'true'
 
 
-def test_read_based_updates_keep_existing_guarded_selection(rest_catalog):
+def test_read_based_updates_delegate_standard_rest_authorization_to_core(rest_catalog):
     from pypaimon.write.native_update import _native_row_id_table
 
     catalog, _ = rest_catalog
     table = _table(None, 'data-evolution', catalog, use_native=True, guarded=True)
     with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_update.create_native_write_table') as create:
-        assert _native_row_id_table(table) is None
-    create.assert_not_called()
+        assert _native_row_id_table(table) is create.return_value
+    create.assert_called_once_with(table)
 
 
 def _rows(table):

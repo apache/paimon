@@ -84,7 +84,12 @@ Standard REST tables with `query-auth.enabled=true` can write and commit
 without requesting SELECT permission. The REST server still authorizes snapshot
 publication. Row filters and column masks continue to apply to explicit reads;
 internal sequence-number and HASH-index restoration reads manifest metadata.
-Predicate updates and deletes retain their existing read authorization checks.
+For query-authorized targets, Native row-ID updates, predicate updates/deletes,
+upserts, shard updates and MERGE require an unrestricted whole-table SELECT grant
+before reading target rows or evaluating assignments. A row filter, column mask
+or denied grant rejects the operation; ordinary writes still require no SELECT
+grant. MERGE table sources obtain their own grants independently from the target,
+including historical snapshots and branches.
 Query-authorized cross-partition index bootstrap remains unsupported.
 
 `write_ray()` uses the shared Python coordinator and lets workers select Native

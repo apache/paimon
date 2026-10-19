@@ -82,11 +82,8 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
             return None
         if source.options.query_auth_enabled:
             from pypaimon.read.native_plan import _native_query_auth_supported, _native_table
-            from pypaimon.snapshot.time_travel_util import SCAN_KEYS
             from pypaimon.write.native_commit import _rest_catalog_supported
-            if (not _rest_catalog_supported(source) or not _native_query_auth_supported(source)
-                    or source.current_branch() != 'main' or '_read_snapshot' in vars(source)
-                    or any(source.table_schema.options.get(key) is not None for key in SCAN_KEYS)):
+            if not _rest_catalog_supported(source) or not _native_query_auth_supported(source):
                 return None
             # A source is a read, not a write. Core obtains a fresh REST grant
             # and requires it to be unrestricted, as Python plan_all_files does.
