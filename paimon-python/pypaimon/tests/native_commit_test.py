@@ -539,7 +539,7 @@ def test_disabled_option_never_initializes_native(tmp_path):
     commit.close()
 
 
-@pytest.mark.parametrize('kind', ['custom-env', 'custom-publisher'])
+@pytest.mark.parametrize('kind', ['custom-env', 'custom-publisher', 'custom-io'])
 def test_incompatible_publication_environment_is_not_reconstructed(
         tmp_path, native_rest_catalog, kind):
     table = _table(tmp_path, catalog=native_rest_catalog)
@@ -547,12 +547,24 @@ def test_incompatible_publication_environment_is_not_reconstructed(
         class CustomEnvironment(CatalogEnvironment):
             pass
         table.catalog_environment = CustomEnvironment()
-    else:
+    elif kind == 'custom-publisher':
         table.catalog_environment.snapshot_commit = Mock()
+    else:
+        table.file_io = Mock()
     with patch('pypaimon.write.native_commit.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
+
+
+@pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])
+def test_inactive_context_loader_fields_do_not_disable_native_commit(tmp_path, native_rest_catalog, option):
+    from pypaimon.write.native_commit import _rest_catalog_supported
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    unused = Mock(side_effect=AssertionError('Inactive IO loader was invoked'))
+    setattr(table.catalog_environment.catalog_loader.context(), option, unused)
+    assert _rest_catalog_supported(table)
+    unused.assert_not_called()
 
 
 def test_missing_runtime_falls_back_without_reconstructing_table(

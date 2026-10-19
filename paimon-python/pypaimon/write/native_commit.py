@@ -66,16 +66,27 @@ def create_native_commit(table, commit_user, overwrite_partition=None, *, batch=
 
 def _rest_catalog_supported(table):
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
+    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.filesystem.caching_file_io import CachingFileIO
+    from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
+    from pypaimon.filesystem.oss_file_io import OssFileIO
+    from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+    from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
     from pypaimon.table.file_store_table import FileStoreTable
 
     environment = table.catalog_environment
     loader = getattr(environment, 'catalog_loader', None)
     context = loader.context() if _catalog_metastore(loader) == 'rest' else None
-    # A custom storage provider and authorization hook do not change the
-    # catalog publication protocol. Custom snapshot loading or publication
-    # changes the commit base/visibility and cannot be replaced by REST.
+    file_io = table.file_io
+    if type(file_io) is CachingFileIO:
+        file_io = file_io._delegate
+    # A query authorization hook retains the catalog publication protocol.
+    # Custom snapshot loading or publication changes the commit base/visibility
+    # and cannot be replaced by REST.
     return (type(table) is FileStoreTable
             and isinstance(environment, CatalogEnvironment)
+            and type(file_io) in (LocalFileIO, FuseLocalFileIO, PyArrowFileIO, OssFileIO,
+                                  ResolvingFileIO, RESTTokenFileIO)
             and getattr(environment.snapshot_commit, '__func__', None) is CatalogEnvironment.snapshot_commit
             and getattr(environment.snapshot_commit, '__self__', None) is environment
             and getattr(environment.snapshot_loader, '__func__', None) is CatalogEnvironment.snapshot_loader
@@ -91,9 +102,9 @@ def _rest_source_uuid(table):
     uuid = table.catalog_environment.uuid
     if uuid is not None:
         return uuid if isinstance(uuid, str) and uuid else None
-    from pypaimon.read.native_plan import _resolved_rest_table_response, _native_rest_identifier
+    from pypaimon.read.native_plan import _resolved_rest_table_response, _validate_native_fuse_binding
     try:
-        original = _native_rest_identifier(table)
+        original = _validate_native_fuse_binding(table)
         if original is None or original == table.identifier:
             return None
         response = _resolved_rest_table_response(table, original)
@@ -105,22 +116,13 @@ def _rest_source_uuid(table):
 
 def _native_rest_table(table, schema_json):
     from pypaimon_rust.datafusion import PaimonCatalog as NativeCatalog
-    from pypaimon.read.native_plan import (
-        _native_file_io, _native_rest_identifier, _rest_table_response)
+    from pypaimon.read.native_plan import _validate_native_fuse_binding
 
-    identifier = _native_rest_identifier(table)
+    identifier = _validate_native_fuse_binding(table) or table.identifier
     catalog_options = _catalog_context_options(table)
     catalog_options['metastore'] = 'rest'
-    file_io = _native_file_io(table)
-    if file_io is None:
-        native_table = NativeCatalog(catalog_options, config_required=False).get_table((
-            identifier.get_database_name(), identifier.get_object_name()))
-    else:
-        from pypaimon_rust.datafusion import Table as NativeTable
-        native_table = NativeTable.from_rest_response(
-            _rest_table_response(table, identifier),
-            database=identifier.get_database_name(), table=identifier.get_object_name(),
-            rest_options=catalog_options, file_io=file_io)
+    native_table = NativeCatalog(catalog_options, config_required=False).get_table((
+        identifier.get_database_name(), identifier.get_object_name()))
     if (native_table.location() != table.table_path
             or native_table.rest_table_uuid() != _rest_source_uuid(table)):
         return None

@@ -239,60 +239,6 @@ def _resolved_rest_table_response(table, identifier=None):
     return response
 
 
-def _native_file_io(table):
-    """Reuse resolved custom routing, including the caller's storage loaders."""
-    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-    from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
-    from pypaimon.filesystem.oss_file_io import OssFileIO
-    from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-    from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-
-    file_io = table.file_io
-    delegate = file_io._delegate if type(file_io) is CachingFileIO else file_io
-    loader = table.catalog_environment.catalog_loader
-    context = loader.context() if _catalog_metastore(loader) == 'rest' else None
-    if (type(delegate) in (LocalFileIO, FuseLocalFileIO, PyArrowFileIO, OssFileIO,
-                           ResolvingFileIO, RESTTokenFileIO)
-            and not any(getattr(context, attr, None) is not None for attr in (
-                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'))):
-        return None
-    return file_io
-
-
-def _native_rest_identifier(table):
-    if _native_file_io(table) is None:
-        return _validate_native_fuse_binding(table) or table.identifier
-    # A copied view retains its resolved FileIO, which may be bound to the main
-    # table. Construct that catalog identity before selecting the branch.
-    from pypaimon.common.identifier import Identifier
-    response = table.catalog_environment.rest_table_response
-    if isinstance(response, str):
-        metadata = json.loads(response)
-        name = metadata.get('name')
-        if isinstance(name, str):
-            original = Identifier.create(table.identifier.get_database_name(), name)
-            if (metadata.get('path') == table.table_path
-                    and metadata.get('database', original.get_database_name()) == original.get_database_name()
-                    and original.get_table_name() == table.identifier.get_table_name()):
-                return original
-    return table.identifier
-
-
-def _rest_table_response(table, identifier):
-    response = _resolved_rest_table_response(table, identifier)
-    if response is not None:
-        return response
-    from pypaimon.common.json_util import JSON
-    # Fetch metadata without rerunning the FileIO loaders or replacing the
-    # already bound Python provider. Snapshot reads/publication remain REST.
-    catalog = table.catalog_environment.catalog_loader.load()
-    response = catalog.rest_api.get_table(identifier)
-    if (response.path != table.table_path or response.id != table.catalog_environment.uuid):
-        raise RuntimeError('Native catalog resolved a different table identity')
-    return JSON.to_json(response)
-
-
 class _NativeRestTableCache:
     """One process-local native table, discarded during worker serialization."""
 
@@ -318,13 +264,10 @@ class _NativeRestTableCache:
                 state.entry = (key, create())
             return state.entry[1]
 
-    def get(self, response, database, table, options, token_loader=None, file_io=None):
+    def get(self, response, database, table, options, token_loader=None):
         from pypaimon_rust.datafusion import Table
 
         def create():
-            if file_io is not None:
-                return Table.from_rest_response(
-                    response, database=database, table=table, rest_options=options, file_io=file_io)
             token = token_loader() if token_loader else None
             if token is None:
                 return Table.from_rest_response(
@@ -333,7 +276,7 @@ class _NativeRestTableCache:
                 response, database=database, table=table, rest_options=options,
                 data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
 
-        key = (response, database, table, tuple(sorted(options.items())), id(file_io))
+        key = (response, database, table, tuple(sorted(options.items())))
         return self.get_or_create(key, create)
 
 
@@ -399,14 +342,13 @@ def _validate_native_fuse_binding(table):
 
 def _native_table(table):
     """Transport the resolved schema, shared FileIO and captured read view."""
-    if _native_file_io(table) is None:
-        _validate_native_fuse_binding(table)
+    _validate_native_fuse_binding(table)
     if ('_read_snapshot' in vars(table)
             and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
         from pypaimon.common.json_util import JSON
         environment = table.catalog_environment
         cache = vars(table).setdefault('_native_pinned_table_cache', _NativeRestTableCache())
-        key = (table.table_path, table.identifier.get_full_name(), id(table.file_io),
+        key = (table.table_path, table.identifier.get_full_name(), table.file_io,
                environment.uuid, environment.rest_table_response,
                tuple(sorted(_catalog_options(table).items())),
                JSON.to_json(table._read_snapshot) if table._read_snapshot is not None else None)
@@ -419,11 +361,8 @@ def _native_table(table):
 
 
 def _load_native_table(table):
-    file_io = _native_file_io(table) if _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest' else None
-    identifier = _native_rest_identifier(table) if file_io is not None else (
-        _validate_native_fuse_binding(table) or table.identifier)
-    rest_response = (_rest_table_response(table, identifier) if file_io is not None
-                     else _resolved_rest_table_response(table, identifier))
+    identifier = _validate_native_fuse_binding(table) or table.identifier
+    rest_response = _resolved_rest_table_response(table, identifier)
     file_io_options = _resolved_schema_file_io_options(table)
     if rest_response is not None:
         cache = table.catalog_environment.__dict__.setdefault(
@@ -433,7 +372,7 @@ def _load_native_table(table):
             database=identifier.get_database_name(),
             table=identifier.get_object_name(),
             options=_catalog_options(table),
-            token_loader=lambda: _rest_data_token(table), file_io=file_io)
+            token_loader=lambda: _rest_data_token(table))
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
         rt = Table.from_resolved_schema(

@@ -551,11 +551,8 @@ Writer restore, overwrite and index construction use this entrypoint and delegat
 planning to Rust core when Native planning is enabled.
 Native planning remains optional and is disabled by default.
 
-REST tables with custom FileIO or catalog IO loaders reuse the already resolved
-Python storage provider for native reads, writes and updates. Rust still owns
-planning, mutation processing and REST snapshot publication. Custom catalog query
-authorizers use the same core policy validation and unrestricted-update checks
-as standard REST authorization. Custom snapshot loaders or publishers retain the
+Custom catalog query authorizers use Rust core's policy validation and
+unrestricted-update checks. Custom snapshot loaders or publishers retain the
 Python mutation path.
 
 Binary partition keys use UTF-8 text and normal partition escaping in both

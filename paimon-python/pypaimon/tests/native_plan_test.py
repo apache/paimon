@@ -926,8 +926,6 @@ class NativePlanTest(unittest.TestCase):
         table = Mock()
         table.identifier = Identifier('db', 't', branch='dev')
         table.table_path = 'oss://bucket/t'
-        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-        table.file_io = ResolvingFileIO(Options({}))
         table.options.query_auth_enabled = False
         table.current_branch.return_value = 'dev'
         table.catalog_environment = CatalogEnvironment(
@@ -1275,8 +1273,6 @@ class NativePlanTest(unittest.TestCase):
                 table.options = CoreOptions(Options(table.table_schema.options))
                 table.catalog_environment.catalog_loader = loader_type(
                     CatalogContext.create_from_options(Options({})))
-                from pypaimon.filesystem.local_file_io import LocalFileIO
-                table.file_io = LocalFileIO()
                 incomplete_table = SimpleNamespace(
                     location=lambda: table.table_path, new_read_builder=Mock())
                 with patch('pypaimon_rust.datafusion.Table', type('Table', (), {}), create=True), \
