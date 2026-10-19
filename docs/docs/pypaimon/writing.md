@@ -79,6 +79,9 @@ to use Rust for Parquet/BLOB writes and `commit.native.enabled=true` to use
 Rust for REST snapshot publication. Batch and stream writers retain the same
 prepare-and-commit lifecycle. Native commits also support overwrite,
 `truncate_table()`, `truncate_partitions()` and commit callbacks.
+Overwrite and truncate record an OVERWRITE snapshot even when no files match,
+and remove index metadata for the replaced partitions. Physical files remain
+available to historical snapshots. Changelog-only commits also publish a snapshot.
 
 Standard REST tables with `query-auth.enabled=true` can write and commit
 without requesting SELECT permission. The REST server still authorizes snapshot
@@ -97,6 +100,12 @@ writers. For postpone fixed-bucket writes, overwrite plans use the new input
 unless an explicit bucket plan was supplied. A complete primary-key
 `with_write_type()` leaves the writer unchanged; primary-key column subsets
 remain unsupported.
+
+Append `with_write_type()` preserves the selected column order. Both the full
+table schema and the selected schema are accepted as Arrow input; only selected
+columns are written. For fixed-bucket tables, `write_arrow(data, bucket=...)`
+can omit hash-key columns from the write type when the bucket was assigned
+upstream. Automatic bucket assignment still requires those columns.
 
 Native commit selection requires a standard REST catalog and a reconstructible
 built-in FileIO. Other catalogs and custom Python FileIO implementations retain

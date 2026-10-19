@@ -20,6 +20,7 @@
 import json
 from contextlib import ExitStack
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -43,6 +44,12 @@ _SCHEMA = pa.schema([('id', pa.int32()), ('value', pa.int32()), ('name', pa.stri
 _ROWS = [dict(id=1, value=10, name='a'), dict(id=2, value=20, name='b'), dict(id=3, value=30, name='c')]
 _OPERATIONS = ['row-id', 'grouped', 'incremental', 'predicate', 'upsert', 'row-upsert',
                'row-delete', 'predicate-delete', 'shard', 'merge']
+
+
+def _files(table, pattern='*'):
+    root = Path(unquote(urlparse(table.table_path).path))
+    assert root.is_dir(), table.table_path
+    return set(root.rglob(pattern))
 
 
 def _append(table, rows):
@@ -208,7 +215,7 @@ def _restricted(server, table, policy):
 def test_restricted_target_refuses_before_callable_or_staging(rest_catalog, use_native, policy, operation):
     catalog, server = rest_catalog
     table = _table(catalog, use_native)
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     snapshot_id = table.snapshot_manager().get_latest_snapshot().id
     assignment = Mock(side_effect=AssertionError('assignment ran before authorization'))
     with _restricted(server, table, policy) as authorize:
@@ -218,7 +225,7 @@ def test_restricted_target_refuses_before_callable_or_staging(rest_catalog, use_
                 _operate(table.new_batch_write_builder().new_update(), operation, assignment=assignment)
         assert authorize.call_count >= 1
     assignment.assert_not_called()
-    assert set(Path(table.table_path).rglob('*')) == before
+    assert _files(table) == before
     assert table.snapshot_manager().get_latest_snapshot().id == snapshot_id
 
 
@@ -227,10 +234,10 @@ def test_restricted_target_refuses_before_callable_or_staging(rest_catalog, use_
 def test_authorized_delete_still_requires_deletion_vectors(rest_catalog, use_native, operation):
     catalog, _ = rest_catalog
     table = _table(catalog, use_native, deletion_vectors=False)
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     with pytest.raises(NotImplementedError, match='deletion-vectors.enabled'):
         _operate(table.new_batch_write_builder().new_update(), operation)
-    assert set(Path(table.table_path).rglob('*')) == before
+    assert _files(table) == before
 
 
 def test_guarded_native_update_resolves_the_rest_table_instead_of_switching_to_python(rest_catalog):
@@ -250,7 +257,7 @@ def test_partition_delete_optimization_keeps_whole_table_authorization(rest_cata
     table = _table(catalog, use_native, partitioned=True)
     builder = table.new_batch_write_builder()
     predicate = builder.new_update().new_predicate_builder().equal('name', 'a')
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     with ExitStack() as stack:
         authorize = stack.enter_context(
             patch.object(server, '_table_query_auth_handle', wraps=server._table_query_auth_handle)
@@ -262,7 +269,7 @@ def test_partition_delete_optimization_keeps_whole_table_authorization(rest_cata
         else:
             with pytest.raises(Exception, match='[Pp]ermission|denied|unrestricted|restrict|[Mm]ask|query.auth'):
                 builder.new_update().delete_by_predicate(predicate)
-            assert set(Path(table.table_path).rglob('*')) == before
+            assert _files(table) == before
         assert authorize.call_count >= 1
     if policy == 'whole':
         builder.new_commit().commit(messages)
@@ -276,7 +283,7 @@ def test_empty_target_merge_authorizes_before_insert_callable(rest_catalog, use_
     table = _table(catalog, use_native, seed=False)
     assignment = Mock(side_effect=AssertionError('insert ran before target authorization'))
     source = pa.Table.from_pylist(_ROWS[:1], schema=_SCHEMA)
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     with _restricted(server, table, policy) as authorize:
         with ExitStack() as stack:
             _native_only(stack, use_native)
@@ -286,7 +293,7 @@ def test_empty_target_merge_authorizes_before_insert_callable(rest_catalog, use_
                         WhenNotMatched({'value': assignment, 'name': 'insert'})])
         assert authorize.call_count >= 1
     assignment.assert_not_called()
-    assert set(Path(table.table_path).rglob('*')) == before
+    assert _files(table) == before
     assert table.snapshot_manager().get_latest_snapshot() is None
 
 
@@ -333,7 +340,7 @@ def test_merge_keeps_source_and_target_grants_separate(rest_catalog, use_native,
     source = catalog.get_table('default.source')
     _append(source, _ROWS[:1])
     assignment = Mock(side_effect=lambda batch: pc.add(batch['s.value'], 1))
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     original = server._table_query_auth_handle
     guarded = source if restricted_side == 'source' else table
 
@@ -358,7 +365,7 @@ def test_merge_keeps_source_and_target_grants_separate(rest_catalog, use_native,
                 builder.new_update().merge_into(
                     source, on=['id'], when_matched=[WhenMatched.update({'value': assignment})])
             assignment.assert_not_called()
-            assert set(Path(table.table_path).rglob('*')) == before
+            assert _files(table) == before
         assert any(call.args[2] == guarded.identifier for call in authorize.call_args_list)
     if policy == 'whole':
         assert assignment.call_count == 1
@@ -423,7 +430,7 @@ def test_authorized_blob_row_id_updates_preserve_untouched_payload_references(
         [b'changed' * 15] if column == 'payload' else [111],
         type=pa.large_binary() if column == 'payload' else pa.int32())})
     builder = table.new_batch_write_builder()
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     with ExitStack() as stack:
         if policy == 'mask':
             stack.enter_context(_restricted(server, table, policy))
@@ -431,7 +438,7 @@ def test_authorized_blob_row_id_updates_preserve_untouched_payload_references(
         if policy == 'mask':
             with pytest.raises(Exception, match='[Pp]ermission|denied|unrestricted|restrict|[Mm]ask|query.auth'):
                 builder.new_update().update_by_arrow_with_row_id(data)
-            assert set(Path(table.table_path).rglob('*')) == before
+            assert _files(table) == before
             return
         messages = builder.new_update().update_by_arrow_with_row_id(data)
     builder.new_commit().commit(messages)
@@ -504,7 +511,7 @@ def test_authorized_merge_branch_source_checks_its_own_grant(rest_catalog, use_n
     catalog, server = rest_catalog
     table = _table(catalog, use_native)
     source = _merge_source_view(catalog, 'loaded-branch')
-    before = set(Path(table.table_path).rglob('*'))
+    before = _files(table)
     assignment = Mock(side_effect=AssertionError('branch source was read without authorization'))
     original = server._table_query_auth_handle
 
@@ -528,4 +535,4 @@ def test_authorized_merge_branch_source_checks_its_own_grant(rest_catalog, use_n
         assert any(unquote(call.args[1]).endswith('/source$branch_dev/auth')
                    for call in requests.call_args_list)
     assignment.assert_not_called()
-    assert set(Path(table.table_path).rglob('*')) == before
+    assert _files(table) == before
