@@ -62,12 +62,15 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
 /** Compact for incremental clustering. */
@@ -90,6 +93,15 @@ public class IncrementalClusterCompact {
             PartitionPredicate partitionPredicate,
             @Nullable Boolean fullCompaction) {
         this.env = env;
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Map<String, String> rewriteOptions = new HashMap<>();
+            // Rewrite stored references, including views whose upstream value is currently null.
+            rewriteOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
+            // Sorted outputs must reach the clustering committer without another rewrite or commit.
+            rewriteOptions.put(PRECOMMIT_COMPACT.key(), "false");
+            rewriteOptions.put(SINK_COORDINATOR_COMMIT_ENABLED.key(), "false");
+            table = table.copy(rewriteOptions);
+        }
         this.table = table;
         this.clusterManager = new IncrementalClusterManager(table, partitionPredicate);
         Options options = new Options(table.options());
@@ -322,7 +334,7 @@ public class IncrementalClusterCompact {
                         },
                         InternalTypeInfo.fromRowType(rowType))
                 .setParallelism(sinkParallelism)
-                .map(FlinkRowData::new, input.getType())
+                .map(row -> new FlinkRowData(row, rowType), input.getType())
                 .setParallelism(sinkParallelism);
     }
 

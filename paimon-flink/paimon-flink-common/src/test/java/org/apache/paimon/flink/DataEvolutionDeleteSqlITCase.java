@@ -42,6 +42,7 @@ import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
@@ -109,9 +110,14 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"global-sort", "local-sort"})
-    public void testIncrementalClusteringProcedurePreservesUnselectedPartitionIndexes(String mode)
-            throws Exception {
+    @CsvSource({
+        "global-sort,",
+        "local-sort,",
+        "global-sort,precommit-compact=true",
+        "local-sort,sink.coordinator-commit.enabled=true"
+    })
+    public void testIncrementalClusteringProcedurePreservesUnselectedPartitionIndexes(
+            String mode, String ingestionOption) throws Exception {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         createTable();
         sql(
@@ -126,11 +132,18 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                         + "'source.split.target-size' = '1 b', "
                         + "'sink.parallelism' = '1', "
                         + "'num-sorted-run.compaction-trigger' = '10')");
-        // Interleaved source ranges distinguish the range shuffle from per-reader local sorting.
-        sql("INSERT INTO T VALUES (3, 'three', 'A'), (1, 'one', 'A'), (5, 'five', 'A')");
+        // Keep more distinct rows than shuffle ranges so duplicate maximum sample boundaries do
+        // not randomly send every row to one writer. Both readers still see overlapping ranges.
+        List<String> oddValues = new ArrayList<>();
+        List<String> evenValues = new ArrayList<>();
+        for (int id = 39; id >= 1; id -= 2) {
+            oddValues.add("(" + id + ", 'value-" + id + "', 'A')");
+            evenValues.add("(" + (id + 1) + ", 'value-" + (id + 1) + "', 'A')");
+        }
+        sql("INSERT INTO T VALUES " + String.join(", ", oddValues));
         updateFirstGroupNames(paimonTable("T"));
-        sql("INSERT INTO T VALUES (6, 'six', 'A'), (4, 'four', 'A'), (2, 'two', 'A')");
-        sql("INSERT INTO T VALUES (7, 'seven', 'B')");
+        sql("INSERT INTO T VALUES " + String.join(", ", evenValues));
+        sql("INSERT INTO T VALUES (41, 'value-41', 'B')");
         sql("DELETE FROM T WHERE id = 2");
         createGlobalIndex();
 
@@ -143,28 +156,155 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         assertThat(table.latestSnapshot().get().id()).isEqualTo(beforeSnapshot);
         sql(
                 "CALL sys.compact(`table` => 'default.T', partitions => 'dt=A', "
-                        + "compact_strategy => 'full')");
+                        + "compact_strategy => 'full'"
+                        + (ingestionOption == null ? "" : ", options => '" + ingestionOption + "'")
+                        + ")");
 
+        List<Row> expectedRows = new ArrayList<>();
+        List<Row> expectedRowIds = new ArrayList<>();
+        for (int id = 1; id <= 40; id++) {
+            if (id != 2) {
+                expectedRows.add(Row.of(id, (id % 2 == 1 ? "updated-" : "value-") + id, "A"));
+                expectedRowIds.add(Row.of(nextRowId + expectedRowIds.size()));
+            }
+        }
+        expectedRows.add(Row.of(41, "value-41", "B"));
         assertThat(sql("SELECT id, name, dt FROM T ORDER BY id"))
-                .containsExactly(
-                        Row.of(1, "updated-one", "A"),
-                        Row.of(3, "updated-three", "A"),
-                        Row.of(4, "four", "A"),
-                        Row.of(5, "updated-five", "A"),
-                        Row.of(6, "six", "A"),
-                        Row.of(7, "seven", "B"));
+                .containsExactlyElementsOf(expectedRows);
         assertThat(sql("SELECT _ROW_ID FROM T$row_tracking " + "WHERE dt = 'A' ORDER BY _ROW_ID"))
+                .containsExactlyElementsOf(expectedRowIds);
+        assertClusteredFileOrder(table, mode);
+        assertThat(deletionVectorCardinality(table)).isZero();
+        assertThat(globalIndexPartitions(table)).containsExactly("B");
+        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'full')");
+        assertThat(sql("SELECT id FROM T WHERE name = 'updated-3'")).containsExactly(Row.of(3));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"global-sort", "local-sort"})
+    public void testIncrementalClusteringPreservesInlineBlobViews(String mode) throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE upstream_blob (id INT, picture BYTES) WITH ("
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'blob-field' = 'picture', 'sink.parallelism' = '1')");
+        sql("INSERT INTO upstream_blob VALUES (3, X'03'), (1, X'01'), (5, X'05')");
+        sql("INSERT INTO upstream_blob VALUES (6, X'06'), (4, X'04'), (2, CAST(NULL AS BYTES))");
+        sql(
+                "CREATE TABLE blob_views (id INT, image_ref BYTES) WITH ("
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'blob-view-field' = 'image_ref', "
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', 'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = '"
+                        + mode
+                        + "', 'scan.parallelism' = '2', 'source.split.target-size' = '1 b', "
+                        + "'sink.parallelism' = '1')");
+        for (String ids : new String[] {"1, 3, 5", "2, 4, 6"}) {
+            sql(
+                    "INSERT INTO blob_views SELECT id, "
+                            + "sys.blob_view('default.upstream_blob', 'picture', _ROW_ID) "
+                            + "FROM `upstream_blob$row_tracking` WHERE id IN ("
+                            + ids
+                            + ")");
+        }
+        String rawReferences =
+                "SELECT id, image_ref FROM blob_views "
+                        + "/*+ OPTIONS('blob-view.resolve.enabled'='false') */ ORDER BY id";
+        List<Row> references = sql(rawReferences);
+        assertThat(references).hasSize(6);
+        assertThat(references).allSatisfy(row -> assertThat(row.getField(1)).isNotNull());
+        FileStoreTable table = paimonTable("blob_views");
+        long nextRowId = table.latestSnapshot().get().nextRowId();
+
+        sql("CALL sys.compact(`table` => 'default.blob_views', compact_strategy => 'full')");
+
+        // A currently null upstream value must not erase the non-null stored reference.
+        assertThat(sql(rawReferences)).containsExactlyElementsOf(references);
+        assertThat(sql("SELECT id, image_ref FROM blob_views ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, new byte[] {1}),
+                        Row.of(2, null),
+                        Row.of(3, new byte[] {3}),
+                        Row.of(4, new byte[] {4}),
+                        Row.of(5, new byte[] {5}),
+                        Row.of(6, new byte[] {6}));
+        assertThat(sql("SELECT _ROW_ID FROM blob_views$row_tracking ORDER BY _ROW_ID"))
                 .containsExactly(
                         Row.of(nextRowId),
                         Row.of(nextRowId + 1),
                         Row.of(nextRowId + 2),
                         Row.of(nextRowId + 3),
-                        Row.of(nextRowId + 4));
-        assertClusteredFileOrder(table, mode);
-        assertThat(deletionVectorCardinality(table)).isZero();
-        assertThat(globalIndexPartitions(table)).containsExactly("B");
-        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'full')");
-        assertThat(sql("SELECT id FROM T WHERE name = 'updated-three'")).containsExactly(Row.of(3));
+                        Row.of(nextRowId + 4),
+                        Row.of(nextRowId + 5));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"global-sort,parquet", "local-sort,parquet", "global-sort,row", "local-sort,row"})
+    public void testIncrementalClusteringPreservesInlineVectors(String mode, String format)
+            throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE vectors (id INT, embedding ARRAY<FLOAT>) WITH ("
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'file.format' = '"
+                        + format
+                        + "', "
+                        + "'vector-field' = 'embedding', 'field.embedding.vector-dim' = '3', "
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', 'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = '"
+                        + mode
+                        + "', 'scan.parallelism' = '2', 'source.split.target-size' = '1 b', "
+                        + "'sink.parallelism' = '1')");
+        sql(
+                "INSERT INTO vectors VALUES "
+                        + "(3, CAST(ARRAY[0, 3, 4] AS ARRAY<FLOAT>)), "
+                        + "(1, CAST(ARRAY[0, 1, 2] AS ARRAY<FLOAT>)), "
+                        + "(5, CAST(ARRAY[0, 5, 6] AS ARRAY<FLOAT>))");
+        sql(
+                "INSERT INTO vectors VALUES "
+                        + "(6, CAST(ARRAY[0, 6, 7] AS ARRAY<FLOAT>)), "
+                        + "(4, CAST(ARRAY[0, 4, 5] AS ARRAY<FLOAT>)), "
+                        + "(2, CAST(NULL AS ARRAY<FLOAT>))");
+        FileStoreTable table = paimonTable("vectors");
+        long nextRowId = table.latestSnapshot().get().nextRowId();
+
+        sql("CALL sys.compact(`table` => 'default.vectors', compact_strategy => 'full')");
+
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                table.newRead().createReader(table.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            rows.add(
+                                    row.getInt(0)
+                                            + "|"
+                                            + (row.isNullAt(1)
+                                                    ? "null"
+                                                    : Arrays.toString(
+                                                            row.getVector(1).toFloatArray()))));
+        }
+        Collections.sort(rows);
+        assertThat(rows)
+                .containsExactly(
+                        "1|[0.0, 1.0, 2.0]",
+                        "2|null",
+                        "3|[0.0, 3.0, 4.0]",
+                        "4|[0.0, 4.0, 5.0]",
+                        "5|[0.0, 5.0, 6.0]",
+                        "6|[0.0, 6.0, 7.0]");
+        assertThat(sql("SELECT _ROW_ID FROM vectors$row_tracking ORDER BY _ROW_ID"))
+                .containsExactly(
+                        Row.of(nextRowId),
+                        Row.of(nextRowId + 1),
+                        Row.of(nextRowId + 2),
+                        Row.of(nextRowId + 3),
+                        Row.of(nextRowId + 4),
+                        Row.of(nextRowId + 5));
     }
 
     @Test
@@ -363,12 +503,12 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
             // Partial rows do not contain the partition field at its full-schema position.
             FileStoreWrite<InternalRow> fileStoreWrite =
                     ((TableWriteImpl<InternalRow>) write).getWrite();
-            for (String name : new String[] {"three", "one", "five"}) {
+            for (int id = 39; id >= 1; id -= 2) {
                 fileStoreWrite.write(
                         partition,
                         0,
                         GenericRow.of(
-                                BinaryString.fromString("updated-" + name),
+                                BinaryString.fromString("updated-" + id),
                                 BinaryString.fromString("A")));
             }
             List<CommitMessage> messages = write.prepareCommit();

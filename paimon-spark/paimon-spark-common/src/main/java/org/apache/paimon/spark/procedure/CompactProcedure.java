@@ -37,6 +37,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
+import org.apache.paimon.spark.SparkTable;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.DataEvolutionCompactMergeConflictRewriter;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
@@ -75,6 +76,7 @@ import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
@@ -874,6 +876,27 @@ public class CompactProcedure extends BaseProcedure {
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
                 incrementalClusterManager.toSplitsAndRewriteDvFiles(compactUnits);
 
+        final FileStoreTable clusterTable;
+        final DataSourceV2Relation clusterRelation;
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Map<String, String> clusterOptions = new HashMap<>();
+            // Preserve inline references and the layout already produced by the sorter.
+            clusterOptions.put(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true");
+            clusterOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
+            clusterOptions.put(CoreOptions.PARTITION_SINK_STRATEGY.key(), "none");
+            clusterOptions.put(CoreOptions.CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE.key(), "false");
+            clusterTable = table.copy(clusterOptions);
+            clusterRelation =
+                    SparkShimLoader.shim()
+                            .copyDataSourceV2Relation(
+                                    relation,
+                                    ((SparkTable) relation.table()).copy(clusterTable),
+                                    relation.output());
+        } else {
+            clusterTable = table;
+            clusterRelation = relation;
+        }
+
         // sort in partition
         TableSorter sorter =
                 TableSorter.getSorter(
@@ -901,7 +924,7 @@ public class CompactProcedure extends BaseProcedure {
                                                     spark(),
                                                     ScanPlanHelper$.MODULE$.createNewScanPlan(
                                                             splits.toArray(new DataSplit[0]),
-                                                            relation));
+                                                            clusterRelation));
                                     // Use sortLocal() for LOCAL_SORT, sort() for GLOBAL_SORT
                                     if (mode == CoreOptions.ClusteringIncrementalMode.LOCAL_SORT) {
                                         return sorter.sortLocal(dataset);
@@ -913,7 +936,7 @@ public class CompactProcedure extends BaseProcedure {
                         .orElse(null);
         // set to write only to prevent invoking compaction
         // do not use overwrite, we don't need to overwrite the whole partition
-        PaimonSparkWriter writer = PaimonSparkWriter.apply(table).writeOnly();
+        PaimonSparkWriter writer = PaimonSparkWriter.apply(clusterTable).writeOnly();
         List<CommitMessage> commitMessages =
                 datasetForWrite == null
                         ? Collections.emptyList()
