@@ -20,14 +20,16 @@
 from contextlib import ExitStack
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
 from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_update import _native_upsert_key_type_compatible
+from pypaimon.write.native_update import (
+    _native_upsert_key_compatible, _native_upsert_key_type_compatible, create_native_upsert,
+)
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -224,5 +226,67 @@ def test_typed_null_union_children_match_existing_null_keys(
     assert _read(table) == [
         dict(key=1, p='a', value=90, keep='duplicate'), dict(key=1, p='a', value=90, keep='first'),
         dict(key=None, p='a', value=91, keep='null'), dict(key=1, p='b', value=40, keep='other-partition'),
+        dict(key=2, p='a', value=20, keep='second'),
+    ]
+
+
+def _typed_null_keys(kind, value_type):
+    if kind == 'plain':
+        return pa.nulls(3, type=value_type)
+    unused = 'not an integer' if pa.types.is_string(value_type) else {'unused': 'not an integer'}
+    values = pa.array([unused, None, unused], type=value_type)
+    if kind == 'nested_dictionary':
+        values = pa.DictionaryArray.from_arrays(pa.array([0, 1, 2], type=pa.int8()), values)
+    return pa.DictionaryArray.from_arrays(pa.array([0, 1, None, 1, 2], type=pa.int8()), values).slice(1, 3)
+
+
+def test_unrelated_non_null_key_types_still_use_the_existing_python_path():
+    for source in [pa.array([None, '1']), pa.array([True]), pa.array([{'unused': 'value'}])]:
+        assert not _native_upsert_key_compatible(source, pa.int32())
+    source = pa.DictionaryArray.from_arrays(
+        pa.array([0, 1], type=pa.int8()), pa.array([None, '1']))
+    assert not _native_upsert_key_compatible(source, pa.int32())
+    assert not _native_upsert_key_compatible(pa.chunked_array([source.slice(0, 1), source]), pa.int32())
+    # Already compatible types do not inspect value or kernel availability.
+    with patch('pypaimon.write.native_update.pc.take', side_effect=AssertionError('unnecessary take')):
+        assert _native_upsert_key_compatible(pa.array([1], type=pa.int32()), pa.int32())
+
+
+@pytest.mark.parametrize('kind', ['plain', 'dictionary', 'nested_dictionary'])
+@pytest.mark.parametrize('value_type', [pa.string(), pa.struct([('unused', pa.string())])])
+def test_all_null_key_columns_select_native_even_with_an_unrelated_physical_type(
+        native_rest_catalog, kind, value_type):
+    table = _table(native_rest_catalog, pa.int32(), [1, 2], False, True)
+    keys = _typed_null_keys(kind, value_type)
+    source = pa.table({'key': keys, 'p': ['a'] * 3, 'value': pa.array([90, 91, 92], type=pa.int32())})
+    source = pa.concat_tables([source.slice(0, 1), source.slice(1)])
+    native_table = MagicMock()
+    with patch('pypaimon.write.native_update._native_row_id_table', return_value=native_table):
+        selected = create_native_upsert(table, 'null-keys', source, ['key'], ['value'])
+    assert selected is not None
+    native_table.new_batch_write_builder.assert_called_once()
+
+
+@pytest.mark.parametrize('native', _ENGINES)
+@pytest.mark.parametrize('kind', ['plain', 'dictionary', 'nested_dictionary'])
+@pytest.mark.parametrize('value_type', [pa.string(), pa.struct([('unused', pa.string())])])
+def test_all_null_key_columns_update_existing_null_rows(
+        native_rest_catalog, native, kind, value_type):
+    table = _table(native_rest_catalog, pa.int32(), [1, 2], native, True)
+    keys = _typed_null_keys(kind, value_type)
+    source = pa.table({'key': keys, 'p': ['a'] * 3, 'value': pa.array([90, 91, 92], type=pa.int32())})
+    source = pa.concat_tables([source.slice(0, 1), source.slice(1)])
+    builder = table.new_batch_write_builder()
+    with ExitStack() as stack:
+        _native_only(stack, native)
+        messages = builder.new_update().with_update_type(['value']).upsert_by_arrow_with_key(source, ['key'])
+    commit = builder.new_commit()
+    try:
+        commit.commit(messages)
+    finally:
+        commit.close()
+    assert _read(table) == [
+        dict(key=1, p='a', value=11, keep='duplicate'), dict(key=1, p='a', value=10, keep='first'),
+        dict(key=None, p='a', value=92, keep='null'), dict(key=1, p='b', value=40, keep='other-partition'),
         dict(key=2, p='a', value=20, keep='second'),
     ]

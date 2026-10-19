@@ -258,7 +258,7 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
         with patch('pypaimon.write.commit.overwrite_changes_provider.FileScanner') as mock_cls:
             mock_cls.return_value.read_manifest_entries.return_value = []
             commit.manifest_list_manager.read_all.return_value = []
-            entries_plan(Mock(id=1))
+            entries_plan(Mock(id=1, index_manifest=None))
             return mock_cls.call_args[1]['partition_predicate']
 
     def test_overwrite_rejects_mismatched_partition(self, *_):

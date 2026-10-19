@@ -82,6 +82,11 @@ prepare-and-commit lifecycle. Native commits also support overwrite,
 Overwrite and truncate record an OVERWRITE snapshot even when no files match,
 and remove index metadata for the replaced partitions. Physical files remain
 available to historical snapshots. Changelog-only commits also publish a snapshot.
+For Parquet tables, both paths support `manifest.compression=null`, `deflate`,
+`snappy`, `zstd`, `bzip2` and `xz`, including manifests retained from earlier
+snapshots. Overwrite and truncate partition specs convert textual values to the
+declared partition type. `None` and the configured default partition name select
+NULL partitions; malformed values are rejected before publication.
 
 Standard REST tables with `query-auth.enabled=true` can write and commit
 without requesting SELECT permission. The REST server still authorizes snapshot
@@ -94,6 +99,10 @@ or denied grant rejects the operation; ordinary writes still require no SELECT
 grant. MERGE table sources obtain their own grants independently from the target,
 including historical snapshots and branches.
 Query-authorized cross-partition index bootstrap remains unsupported.
+
+Whole-partition predicate deletes can use Native on primary-key tables configured
+with input changelogs. Native upserts also accept fully NULL source key columns
+with a different physical type, including selected NULL dictionary values.
 
 `write_ray()` uses the shared Python coordinator and lets workers select Native
 writers. For postpone fixed-bucket writes, overwrite plans use the new input
