@@ -46,7 +46,7 @@ from pypaimon.write.commit.row_id_conflict_rewriter import (
     RowIdConflictRewriter,
     RowIdRewriteResult,
 )
-from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesProvider
+from pypaimon.write.commit.overwrite_changes_provider import OverwriteChanges, OverwriteChangesProvider
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
@@ -298,24 +298,18 @@ class FileStoreCommit:
 
         # Partition filter is built from dynamic or static partition according to options.
         if len(self.table.partition_keys) > 0 and self.table.options.dynamic_partition_overwrite():
-            if not commit_messages:
-                # In dynamic mode, if there are no changes to commit, no data will be deleted
+            data_messages = [message for message in commit_messages
+                             if message.new_files or message.deleted_files]
+            if not data_messages:
+                # Java derives dynamic overwrite targets from table-file
+                # changes. Index/changelog-only messages do not replace data.
                 skip_overwrite = True
             else:
-                partition_filter = self._create_dynamic_partition_filter(commit_messages)
+                partition_filter = self._create_dynamic_partition_filter(data_messages)
         else:
             partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 
-        index_adds = [
-            entry for message in commit_messages for entry in message.index_adds
-        ]
-        index_deletes = [
-            entry for message in commit_messages for entry in message.index_deletes
-        ]
         if not skip_overwrite:
-            index_deletes = self._overwrite_hash_index_deletes(
-                partition_filter, index_deletes
-            )
             provider = self._overwrite_changes_provider(partition_filter, commit_messages)
             self._try_commit(
                 commit_kind="OVERWRITE",
@@ -324,39 +318,10 @@ class FileStoreCommit:
                 changelog_entries=[],
                 detect_conflicts=True,
                 allow_rollback=False,
-                index_deletes=index_deletes,
-                index_adds=index_adds,
                 snapshot_properties=snapshot_properties,
                 # Java records static/table overwrite even when no files match.
                 allow_empty_commit=True,
             )
-
-    def _overwrite_hash_index_deletes(self, partition_filter, deletes):
-        """Delete HASH indexes for every partition replaced by overwrite."""
-        from pypaimon.index.dynamic_bucket import HASH_INDEX
-        from pypaimon.index.index_file_handler import IndexFileHandler
-        from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
-        from pypaimon.table.bucket_mode import BucketMode
-
-        if self.table.bucket_mode() != BucketMode.HASH_DYNAMIC:
-            return deletes
-
-        by_file_name = {entry.index_file.file_name: entry for entry in deletes}
-        snapshot = self.snapshot_manager.get_latest_snapshot()
-        for entry in IndexFileHandler(self.table).scan(snapshot):
-            if entry.index_file.index_type != HASH_INDEX:
-                continue
-            if partition_filter is not None and not partition_filter.test(
-                entry.partition
-            ):
-                continue
-            by_file_name[entry.index_file.file_name] = IndexManifestEntry(
-                kind=1,
-                partition=entry.partition,
-                bucket=entry.bucket,
-                index_file=entry.index_file,
-            )
-        return list(by_file_name.values())
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
         if not partitions:
@@ -404,6 +369,8 @@ class FileStoreCommit:
             commit_entries_plan=provider.provide,
             detect_conflicts=True,
             allow_rollback=False,
+            # Java records a partition overwrite even when no files match.
+            allow_empty_commit=True,
         )
 
     def truncate_table(self, commit_identifier: int) -> None:
@@ -415,6 +382,7 @@ class FileStoreCommit:
             commit_entries_plan=provider.provide,
             detect_conflicts=True,
             allow_rollback=False,
+            allow_empty_commit=True,
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
@@ -438,15 +406,23 @@ class FileStoreCommit:
                     commit_kind,
                     notify_callbacks=True):
                 break
-            commit_entries = (
+            changes = (
                 rewritten_commit_entries
                 if rewritten_commit_entries is not None
                 else commit_entries_plan(latest_snapshot)
             )
+            if isinstance(changes, OverwriteChanges):
+                commit_entries = changes.table_files
+                attempt_index_adds = changes.index_adds
+                attempt_index_deletes = changes.index_deletes
+            else:
+                commit_entries = changes
+                attempt_index_adds = index_adds
+                attempt_index_deletes = index_deletes
 
             # Callers opt in when the operation records an empty snapshot.
-            if (not allow_empty_commit and not commit_entries
-                    and not index_deletes and not index_adds):
+            if (not allow_empty_commit and not commit_entries and not changelog_entries
+                    and not attempt_index_deletes and not attempt_index_adds):
                 break
 
             result = self._try_commit_once(
@@ -458,8 +434,8 @@ class FileStoreCommit:
                 latest_snapshot=latest_snapshot,
                 detect_conflicts=detect_conflicts,
                 allow_rollback=allow_rollback,
-                index_deletes=index_deletes,
-                index_adds=index_adds,
+                index_deletes=attempt_index_deletes,
+                index_adds=attempt_index_adds,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
                 snapshot_properties=snapshot_properties,
             )

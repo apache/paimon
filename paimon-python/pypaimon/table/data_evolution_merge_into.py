@@ -106,6 +106,10 @@ def merge_into(
         if native is not None:
             return native.prepare_commit()
 
+    # Empty-target INSERT skips the target scan, but still needs the same
+    # unrestricted whole-table grant before any user callback or staging.
+    from pypaimon.write.table_update import _authorize_update
+    _authorize_update(target_table)
     base_snapshot = target_table.snapshot_manager().get_latest_snapshot()
     source_table, matched_specs, not_matched_specs, ctx = _prepare(
         target_table,

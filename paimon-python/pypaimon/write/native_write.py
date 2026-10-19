@@ -225,19 +225,16 @@ class NativeTableWrite:
         data = normalize_arrow_strings(data)
         target = self._table_schema if data.schema.names == self._table_schema.names else self._schema
         data = normalize_arrow_write_nullability(data, target)
-        if self._write_cols is not None and arrow_schemas_compatible(
-                data.schema, self._table_schema, check_top_level_nullability=False,
-                allow_binary_compatibility=True):
-            # Python accepts either the table schema or the selected schema.
-            # Project the input before handing its actual write type to core.
-            data = data.select(self._write_cols)
-        if not arrow_schemas_compatible(
-                data.schema, self._schema, check_top_level_nullability=False,
-                allow_binary_compatibility=True):
+        compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True)
+        if not (arrow_schemas_compatible(data.schema, self._schema, **compatible)
+                or (self._write_cols is not None
+                    and arrow_schemas_compatible(data.schema, self._table_schema, **compatible))):
             raise ValueError(
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 f"Write cols is: {self._write_cols}")
+        # Full input can carry routing columns outside the physical write type.
+        # Core routes rows first and writes only the selected columns.
         return data
 
     def write_pandas(self, dataframe):
@@ -275,6 +272,18 @@ class NativeTableWrite:
         from pypaimon.write.row_kind import skip_write_row, with_row_kind
         if skip_write_row(self.table, values, row.get_row_kind()):
             return
+        if self._write_cols is not None:
+            routing = list(self.table.partition_keys)
+            if ((self.table.bucket_mode() == BucketMode.HASH_FIXED and self.table.options.bucket() > 1)
+                    or isinstance(self, NativePostponeFixedBucketTableWrite)):
+                routing.extend(self.table.table_schema.bucket_keys)
+            require_columns(values, routing, 'write_row')
+            if not set(routing).issubset(names):
+                retained = set(names) | set(routing)
+                names = self._table_schema.names
+                # Only routing and written values need transport. In particular,
+                # an unwritten Blob object must not be opened or encoded.
+                values = {name: values.get(name) if name in retained else None for name in names}
         try:
             data = (self._blob_rows.to_batch(self.table, [values], names)
                     if self._blob_rows is not None else

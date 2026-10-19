@@ -96,6 +96,8 @@ class TableWrite:
         if bucket is not None:
             return self._write_precomputed_bucket(data, bucket)
         data = self._prepare_arrow_data(data)
+        if data.num_rows == 0:
+            return
 
         for partition, bucket, row_indices in \
                 self.row_key_extractor.extract_partition_bucket_groups(data):
@@ -129,6 +131,11 @@ class TableWrite:
         self.file_store_write.roll_before_group_if_needed(row_count)
 
     def _write_partition_bucket_batch(self, partition, bucket, data):
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            # Keep routing columns available for full-schema inputs, then
+            # write only the columns and order recorded in the file metadata.
+            data = data.select(write_cols)
         self.file_store_write.write(partition, bucket, data)
 
     def _write_precomputed_bucket(self, data, bucket):
@@ -202,10 +209,16 @@ class TableWrite:
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
+        write_cols = list(write_cols)
         for col in write_cols:
             if col not in self.table_pyarrow_schema.names:
                 raise ValueError(f"Column {col} is not in table schema.")
-        if len(write_cols) == len(self.table_pyarrow_schema.names):
+        full_names = self.table_pyarrow_schema.names
+        # Java preserves the declared append column order in writeCols. PK
+        # writes still require the complete table layout in the Python buffer.
+        full_pk_type = (self.table.is_primary_key_table and len(write_cols) == len(full_names)
+                        and set(write_cols) == set(full_names))
+        if write_cols == full_names or full_pk_type:
             write_cols = None
         self.file_store_write.write_cols = write_cols
         return self

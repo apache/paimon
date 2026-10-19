@@ -159,6 +159,21 @@ def test_pk_complete_write_type_keeps_table_order_and_native_writer(tmp_path, na
     assert writer._python_writer is None
 
 
+@pytest.mark.parametrize('full_input', [False, True])
+def test_append_write_type_preserves_input_routing_columns_for_core(tmp_path, full_input):
+    underlying = Mock()
+    writer = _writer(_table(tmp_path), underlying).with_write_type(['value'])
+    data = pa.Table.from_pylist([{'id': 1, 'pt': 'a', 'value': 'x'}], schema=SCHEMA)
+    if not full_input:
+        data = data.select(['value'])
+    writer.write_arrow(data)
+    actual, bucket = underlying.write_arrow.call_args[0]
+    assert actual.schema.names == data.schema.names
+    assert actual.to_pylist() == data.to_pylist()
+    assert bucket is None
+    assert writer._python_writer is None
+
+
 def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog):
     catalog, _ = rest_catalog
     table = _table(None, catalog=catalog, guarded=True)
@@ -178,15 +193,15 @@ def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_cata
     assert schema['options']['query-auth.enabled'] == 'true'
 
 
-def test_read_based_updates_keep_existing_guarded_selection(rest_catalog):
+def test_read_based_updates_delegate_standard_rest_authorization_to_core(rest_catalog):
     from pypaimon.write.native_update import _native_row_id_table
 
     catalog, _ = rest_catalog
     table = _table(None, 'data-evolution', catalog, use_native=True, guarded=True)
     with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_update.create_native_write_table') as create:
-        assert _native_row_id_table(table) is None
-    create.assert_not_called()
+        assert _native_row_id_table(table) is create.return_value
+    create.assert_called_once_with(table)
 
 
 def _rows(table):

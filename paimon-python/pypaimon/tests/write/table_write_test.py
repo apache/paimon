@@ -233,7 +233,7 @@ class TableWriteTest(unittest.TestCase):
         table_write.table_pyarrow_schema = schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
-        table_write.file_store_write = Mock()
+        table_write.file_store_write = Mock(write_cols=None)
         table_write.row_key_extractor.extract_partition_bucket_groups.side_effect = (
             lambda data: TableWriteTest._groups_from_rows(
                 partitions, buckets, data.num_rows))
@@ -308,7 +308,7 @@ class TableWriteTest(unittest.TestCase):
         table_write.table = Mock(is_primary_key_table=False)
         table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
-        table_write.file_store_write = Mock()
+        table_write.file_store_write = Mock(write_cols=None)
         table_write.row_key_extractor = Mock()
         table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p1',), 0, pa.array([0, 2, 3], type=pa.int64())),
@@ -334,7 +334,7 @@ class TableWriteTest(unittest.TestCase):
         table_write.table = Mock(is_primary_key_table=False)
         table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
-        table_write.file_store_write = Mock()
+        table_write.file_store_write = Mock(write_cols=None)
         table_write.row_key_extractor = Mock()
         table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p0',), 0, pa.array([0], type=pa.int64())),

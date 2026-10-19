@@ -21,7 +21,7 @@ import json
 
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
 from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
@@ -45,13 +45,11 @@ def _native_update_table(table):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            # These operations read target rows before staging changes. Pure
-            # write/commit support must not select an unsupported guarded read.
-            or table.options.query_auth_enabled
             or not _native_update_formats_supported(table)
             or table.options.changelog_producer() != ChangelogProducer.NONE
             or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
-            or not native_runtime_available()):
+            or not native_runtime_available()
+            or not _native_query_auth_supported(table)):
         return None
     schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     if not _native_partition_types_supported(
@@ -167,7 +165,22 @@ def _dictionary_value_type(data_type):
 
 def _native_upsert_key_type_compatible(source, target):
     """Qualify layouts; exact values and conversion bounds belong to core."""
+    dictionary = pa.types.is_dictionary(source)
     source = _dictionary_value_type(source)
+    if dictionary:
+        # Python's take kernel can select dictionary indices even when it
+        # cannot take the underlying view/run-end values directly. These
+        # layouts are therefore valid existing matched-upsert inputs.
+        while getattr(pa.types, 'is_run_end_encoded', lambda _: False)(source):
+            source = _dictionary_value_type(source.value_type)
+        if getattr(pa.types, 'is_string_view', lambda _: False)(source):
+            source = pa.string()
+        elif getattr(pa.types, 'is_binary_view', lambda _: False)(source):
+            source = pa.binary()
+    if pa.types.is_union(source):
+        # A Union can contain unused children of unrelated types. Qualify a
+        # possible match here; core validates only the active values exactly.
+        return any(_native_upsert_key_type_compatible(field.type, target) for field in source)
     if pa.types.is_null(source):
         return True
 
