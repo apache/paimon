@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -46,13 +45,13 @@ import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
@@ -90,7 +89,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
-    @Nullable private final KeyValueFieldsExtractor keyValueFieldsExtractor;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -106,26 +104,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             CoreOptions coreOptions) {
-        this(
-                fileIO,
-                schemaManager,
-                schema,
-                rowType,
-                formatDiscover,
-                pathFactory,
-                coreOptions,
-                null);
-    }
-
-    public RawFileSplitRead(
-            FileIO fileIO,
-            SchemaManager schemaManager,
-            TableSchema schema,
-            RowType rowType,
-            FileFormatDiscover formatDiscover,
-            FileStorePathFactory pathFactory,
-            CoreOptions coreOptions,
-            @Nullable KeyValueFieldsExtractor keyValueFieldsExtractor) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -138,7 +116,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
         this.readRowType = rowType;
-        this.keyValueFieldsExtractor = keyValueFieldsExtractor;
     }
 
     @Override
@@ -290,25 +267,20 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return new Builder(
                 formatDiscover,
                 outputRowType.getFields(),
-                schema -> {
-                    if ("row".equals(formatIdentifier) && keyValueFieldsExtractor != null) {
-                        // ROW decodes fields by position, so raw primary-key reads need the
-                        // historical key and merge columns even when only values are projected.
-                        return KeyValue.createKeyValueFields(
-                                keyValueFieldsExtractor.keyFields(schema),
-                                keyValueFieldsExtractor.valueFields(schema));
-                    }
-                    if (rowTrackingEnabled) {
-                        // maybe file has no row id and sequence number, but in manifest entry
-                        return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
-                                .getFields();
-                    }
-                    return schema.fields();
-                },
+                dataSchema -> dataFields(dataSchema, formatIdentifier),
                 filters,
                 pushDownTopN,
                 pushDownLimit,
                 nestedFieldEnabled);
+    }
+
+    /** Returns the complete fields used to decode a file with the given schema and format. */
+    protected List<DataField> dataFields(TableSchema dataSchema, String formatIdentifier) {
+        if (rowTrackingEnabled) {
+            // maybe file has no row id and sequence number, but in manifest entry
+            return rowTypeWithRowTracking(dataSchema.logicalRowType(), true, true).getFields();
+        }
+        return dataSchema.fields();
     }
 
     @Nullable

@@ -40,6 +40,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -122,8 +123,18 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
-                options,
-                keyValueFieldsExtractor);
+                options) {
+            @Override
+            protected List<DataField> dataFields(TableSchema dataSchema, String formatIdentifier) {
+                if ("row".equals(formatIdentifier)) {
+                    // Positional ROW reads need the complete historical KV layout.
+                    return KeyValue.createKeyValueFields(
+                            keyValueFieldsExtractor.keyFields(dataSchema),
+                            keyValueFieldsExtractor.valueFields(dataSchema));
+                }
+                return super.dataFields(dataSchema, formatIdentifier);
+            }
+        };
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
