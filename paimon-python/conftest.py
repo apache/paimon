@@ -163,9 +163,9 @@ def pytest_configure(config):
 
         original_prepare = TableCommit._prepare_native_commit
 
-        def tracked_prepare(self, messages):
+        def tracked_prepare(self, messages, *args, **kwargs):
             global _native_commit_count
-            prepared = original_prepare(self, messages)
+            prepared = original_prepare(self, messages, *args, **kwargs)
             if prepared is not None and _force_native_commit_for_test:
                 _native_commit_count += 1
             return prepared

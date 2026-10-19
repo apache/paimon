@@ -471,19 +471,18 @@ def test_partition_set_predicates_follow_java_null_semantics(rest_catalog, kind,
 
 @pytest.mark.parametrize('restricted', [False, True])
 def test_query_authorization_remains_on_python_build_path(rest_catalog, restricted):
-    from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+    from pypaimon.api.api_response import AuthTableQueryResponse
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
 
-    catalog, _ = rest_catalog
+    catalog, server = rest_catalog
     table = _create(catalog)
     _append(table, ROWS)
     table = table.copy({'query-auth.enabled': 'true'})
-    auth = TableQueryAuthResult(None, {'name': '{"name":"NULL"}'} if restricted else None)
+    server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
+        column_masking={'name': '{"name":"NULL"}'} if restricted else None)
     original = GlobalIndexBuilder._build_sorted_index
-    with patch.object(RESTCatalog, 'auth_table_query', return_value=auth), \
-            patch('pypaimon.globalindex.native_index_build._native_table',
-                  side_effect=AssertionError('native auth build')), \
+    with patch('pypaimon.globalindex.native_index_build._native_table',
+               side_effect=AssertionError('native auth build')), \
             patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         if restricted:
             with pytest.raises(TableNoPermissionException):

@@ -204,7 +204,9 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         self._flush_pending_inputs()
         return self._prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
-    def _distributed_write_options(self) -> Dict[str, Any]:
+    def _distributed_write_options(self, *, overwrite=False) -> Dict[str, Any]:
+        if overwrite and not self._plan_provided:
+            return {"postpone_bucket_planner": PostponeBucketPlanner(self.table, known_num_buckets={})}
         return {"postpone_bucket_planner": self._planner}
 
     def close(self):

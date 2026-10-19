@@ -72,6 +72,32 @@ Use `new_postpone_fixed_bucket_write_builder()` to write real buckets. New
 partitions are buffered until `prepare_commit()`; existing ones are incremental.
 This builder currently supports `bucket-function.type=default` only.
 
+### Native Write and Commit
+
+With the `pypaimon-rust` extension installed, set `write.native.enabled=true`
+to use Rust for Parquet/BLOB writes and `commit.native.enabled=true` to use
+Rust for REST snapshot publication. Batch and stream writers retain the same
+prepare-and-commit lifecycle. Native commits also support overwrite,
+`truncate_table()`, `truncate_partitions()` and commit callbacks.
+
+Standard REST tables with `query-auth.enabled=true` can write and commit
+without requesting SELECT permission. The REST server still authorizes snapshot
+publication. Row filters and column masks continue to apply to explicit reads;
+internal sequence-number and HASH-index restoration reads manifest metadata.
+Predicate updates and deletes retain their existing read authorization checks.
+Query-authorized cross-partition index bootstrap remains unsupported.
+
+`write_ray()` uses the shared Python coordinator and lets workers select Native
+writers. For postpone fixed-bucket writes, overwrite plans use the new input
+unless an explicit bucket plan was supplied. A complete primary-key
+`with_write_type()` leaves the writer unchanged; primary-key column subsets
+remain unsupported.
+
+Native commit selection requires a standard REST catalog and a reconstructible
+built-in FileIO. Other catalogs and custom Python FileIO implementations retain
+the Python path. Binary partition keys require `partition.legacy-name=false` for
+portable names across implementations.
+
 To replace data, configure overwrite on the write builder before creating the
 writer and commit object:
 

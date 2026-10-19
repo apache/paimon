@@ -258,7 +258,8 @@ def test_authorized_python_and_serialized_splits_use_native_reader(guarded_table
     source = table.copy({'scan.native-plan.enabled': str(transport == 'wire').lower(), 'read.native.enabled': 'false'})
     splits = source.new_read_builder().new_scan().plan().splits()
     if transport == 'wire':
-        splits = [deserialize_split_v1(serialize_split_v1(split), []) for split in splits]
+        splits = [deserialize_split_v1(serialize_split_v1(split), [], table.trimmed_primary_keys_fields)
+                  for split in splits]
     assert all(getattr(split, '_native_split', None) is None for split in splits)
     builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(['id', 'value'])
     with patch('pypaimon.read.table_read.TableRead._create_split_read',

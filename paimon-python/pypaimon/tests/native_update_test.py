@@ -655,6 +655,8 @@ def test_predicate_assignment_order_with_later_partial_file(
         'row-tracking.enabled': 'true',
         'data-evolution.enabled': 'true',
         'write.native.enabled': str(native).lower(),
+        # Compare against Python's scan order, independently of the CI lane.
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
     }), False)
     table = catalog.get_table('default.t')
     for ids in ([1, 2], [3, 4]):

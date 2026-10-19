@@ -144,8 +144,7 @@ def create_native_write_table(table):
 
     environment = table.catalog_environment
     if (type(table) is not FileStoreTable
-            or type(environment) is not CatalogEnvironment
-            or table.options.query_auth_enabled):
+            or type(environment) is not CatalogEnvironment):
         return None
 
     from pypaimon_rust.datafusion import Table as NativeTable
