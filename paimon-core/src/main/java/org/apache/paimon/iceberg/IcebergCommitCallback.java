@@ -1405,28 +1405,37 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         RowType partitionType = table.schema().logicalPartitionType();
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(partitionType, modifiedPartitions);
+        // the fields where a modified partition is NaN, which manifest bounds never cover
+        boolean[] modifiedNan = new boolean[partitionType.getFieldCount()];
+        for (BinaryRow partition : modifiedPartitions) {
+            for (int i = 0; i < modifiedNan.length; i++) {
+                modifiedNan[i] |= isNaN(partition, i, partitionType.getTypeAt(i));
+            }
+        }
 
         for (IcebergManifestFileMeta fileMeta : baseManifestFileMetas) {
             // use partition predicate to only check modified partitions
             int numFields = partitionType.getFieldCount();
             GenericRow minValues = new GenericRow(numFields);
             GenericRow maxValues = new GenericRow(numFields);
-            long[] nullCounts = new long[numFields];
+            Long[] nullCounts = new Long[numFields];
             for (int i = 0; i < numFields; i++) {
                 IcebergPartitionSummary summary = fileMeta.partitions().get(i);
                 DataType fieldType = partitionType.getTypeAt(i);
-                // an omitted bound means the value is unknown; keep the slot null
-                byte[] lowerBound = summary.lowerBound();
-                byte[] upperBound = summary.upperBound();
+                // an omitted bound means the value is unknown; keep the slot null. NaN is never
+                // in the bounds, so they cannot rule out a NaN partition of a summary that saw NaN
+                boolean boundsMissNan = modifiedNan[i] && summary.containsNan();
+                byte[] lowerBound = boundsMissNan ? null : summary.lowerBound();
+                byte[] upperBound = boundsMissNan ? null : summary.upperBound();
                 if (lowerBound != null) {
                     minValues.setField(i, IcebergConversions.toPaimonObject(fieldType, lowerBound));
                 }
                 if (upperBound != null) {
                     maxValues.setField(i, IcebergConversions.toPaimonObject(fieldType, upperBound));
                 }
-                // IcebergPartitionSummary only has `containsNull` field and does not have the
-                // exact number of nulls.
-                nullCounts[i] = summary.containsNull() ? 1 : 0;
+                // `contains_null` does not give the number of nulls, so the count is unknown;
+                // a count of 1 would make a manifest with one live row look all null
+                nullCounts[i] = summary.containsNull() ? null : 0L;
             }
 
             if (predicate == null
@@ -1496,6 +1505,20 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         newManifestFileMetas.addAll(
                 createNewlyAddedManifestFileMetas(addedFiles, currentSnapshotId));
         return Pair.of(newManifestFileMetas, operation);
+    }
+
+    private static boolean isNaN(BinaryRow row, int pos, DataType type) {
+        if (row.isNullAt(pos)) {
+            return false;
+        }
+        switch (type.getTypeRoot()) {
+            case FLOAT:
+                return Float.isNaN(row.getFloat(pos));
+            case DOUBLE:
+                return Double.isNaN(row.getDouble(pos));
+            default:
+                return false;
+        }
     }
 
     // -------------------------------------------------------------------------------------
