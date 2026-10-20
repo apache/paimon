@@ -106,7 +106,7 @@ options = {
     "local-cache.block-size": "1mb",
 }
 
-catalog = pypaimon.create_catalog(options)
+catalog = pypaimon.CatalogFactory.create(options)
 
 # Eligible file reads from tables loaded by this catalog use the cache
 table = catalog.get_table("db.my_table")
