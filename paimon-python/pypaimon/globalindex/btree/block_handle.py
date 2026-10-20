@@ -15,26 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Entry represents a key value."""
+"""Public imports for the shared B-tree file format."""
 
-from dataclasses import dataclass
+from pypaimon.globalindex.btree_format.block_handle import (
+    BlockHandle,
+)
 
-
-@dataclass
-class BlockHandle:
-    """Handle for a data block."""
-
-    def __init__(self, offset: int, size: int):
-        """
-        Initialize the block handle.
-
-        Args:
-            offset: Offset of the block in the file
-            size: Size of the block in bytes
-        """
-        self.offset = offset
-        self.size = size
-
-    def is_null(self) -> bool:
-        """Check if this handle represents a null block."""
-        return self.offset == 0 and self.size == 0
+__all__ = [
+    'BlockHandle',
+]

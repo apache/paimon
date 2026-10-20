@@ -146,7 +146,7 @@ def test_per_shard_top_k_preserves_global_ranking_and_duplicate_precedence(overl
         def close(self):
             pass
 
-    with patch("pypaimon.table.source.full_text_read._create_full_text_reader",
+    with patch("pypaimon.execution.python.read.search.full_text_read._create_full_text_reader",
                side_effect=lambda kind, io, path, metas, bound: Reader(int(metas[0].file_name))):
         read = DataEvolutionFullTextRead(_StubTable([field], entries), 1, field, match_query("paimon"))
         result = read._eval_column_query({"text": splits}, None)

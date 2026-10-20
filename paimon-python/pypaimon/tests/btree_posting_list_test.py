@@ -22,7 +22,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from pypaimon.globalindex.btree.btree_posting_list import add_row_ids
+from pypaimon.globalindex.btree_format.btree_posting_list import add_row_ids
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 

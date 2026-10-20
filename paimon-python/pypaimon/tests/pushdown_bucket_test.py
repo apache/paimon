@@ -60,6 +60,8 @@ from pypaimon.execution.python.read.scanner.bucket_select_converter import (MAX_
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.execution.python.write.row_key_extractor import (
     FixedBucketRowKeyExtractor,
+)
+from pypaimon.write.input_routing import (
     _bucket_from_hash,
     _hash_bytes_by_words,
 )

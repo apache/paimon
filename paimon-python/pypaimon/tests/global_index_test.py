@@ -28,7 +28,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
-from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
+from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
@@ -126,7 +126,9 @@ def _coverage_index_file(field_id, start, end, extra_field_ids=None):
 class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
     def test_fast_mode_does_not_return_unindexed_ranges(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable(GlobalIndexSearchMode.FAST)
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -139,7 +141,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([], coverage.unindexed_ranges(0))
 
     def test_full_mode_uses_snapshot_next_row_id(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -152,7 +156,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges(0))
 
     def test_full_mode_accepts_multiple_field_ids(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -168,7 +174,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges([0, 1]))
 
     def test_full_mode_intersects_coverage_for_all_predicate_fields(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -193,7 +201,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         )
 
     def test_extra_fields_count_as_index_coverage(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -206,7 +216,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([], coverage.unindexed_ranges(1))
 
     def test_detail_mode_uses_table_data_ranges(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("detail", data_ranges=[Range(0, 2), Range(7, 9)])
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -330,7 +342,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
+                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner), unittest.mock.patch.object(
                     GlobalIndexResult,
                     "from_ranges",
@@ -413,7 +426,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
+                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner):
             result = scanner._eval_global_index(snapshot=object())
 

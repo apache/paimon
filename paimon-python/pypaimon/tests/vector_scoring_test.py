@@ -125,7 +125,7 @@ class VectorScoringTest(unittest.TestCase):
                         expected = [[None if row is None else _compute_score(query, row, metric)
                                      for row in values[2:2052]] for query in queries]
                         actual = [[] for _ in queries]
-                        with mock.patch("pypaimon.table.source.vector_search_read._compute_score",
+                        with mock.patch("pypaimon.execution.python.read.search.vector_search_read._compute_score",
                                         side_effect=AssertionError("valid rows must use vectorized scoring")):
                             for start, query_index, scores in _iter_arrow_batch_scores(vectors, queries, metric):
                                 self.assertEqual(start, len(actual[query_index]))
@@ -155,7 +155,7 @@ class VectorScoringTest(unittest.TestCase):
         vectors = pa.Array.from_buffers(
             pa.list_(pa.float32(), 2), 2, [pa.py_buffer(b"\x02")],
             children=[pa.array([float("nan"), None, 1.0, 2.0], type=pa.float32())])
-        with mock.patch("pypaimon.table.source.vector_search_read._compute_score",
+        with mock.patch("pypaimon.execution.python.read.search.vector_search_read._compute_score",
                         side_effect=AssertionError("null children must not disable the fast path")):
             result = list(_iter_arrow_batch_scores(vectors, [[1.0, 2.0]], "l2"))
         self.assertEqual([(0, 0, [None, 1.0])], result)

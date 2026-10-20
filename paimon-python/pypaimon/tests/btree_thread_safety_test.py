@@ -23,9 +23,9 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
-from pypaimon.globalindex.btree.btree_file_meta_selector import BTreeFileMetaSelector
-from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
-from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
+from pypaimon.execution.python.globalindex.btree.btree_file_meta_selector import BTreeFileMetaSelector
+from pypaimon.globalindex.btree_format.btree_index_meta import BTreeIndexMeta
+from pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -93,7 +93,7 @@ class LazyFilteredBTreeReaderThreadTest(unittest.TestCase):
                     for i in range(num_files)]
         executor = ThreadPoolExecutor(max_workers=pool_size)
 
-        import pypaimon.globalindex.btree.lazy_filtered_btree_reader as mod
+        import pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader as mod
         original = mod.BTreeIndexReader
         mod.BTreeIndexReader = reader_cls
         reader = LazyFilteredBTreeReader(

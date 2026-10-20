@@ -1,0 +1,416 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+
+from pypaimon.table.source.search_types import (FullTextRead)
+"""Full-text read to read index files."""
+
+from copy import copy
+from concurrent.futures import wait
+from io import BytesIO
+from typing import Dict, List
+
+from pypaimon.globalindex.full_text_search import FullTextSearch
+from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
+from pypaimon.globalindex.vector_search_result import (
+    DictBasedScoredIndexResult,
+    ScoredGlobalIndexResult,
+)
+from pypaimon.execution.python.read.search import global_index_live_row_filter
+from pypaimon.table.source.full_text_search_split import (
+    FullTextSearchSplit,
+    IndexFullTextSearchSplit,
+    RawFullTextSearchSplit,
+)
+from pypaimon.execution.python.read.search.full_text_scan import FullTextScanPlan
+from pypaimon.utils.range import Range
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+_UNSET = object()
+
+
+class DataEvolutionFullTextRead(FullTextRead):
+    """Implementation for FullTextRead."""
+
+    def __init__(
+        self,
+        table: 'FileStoreTable',
+        limit: int,
+        text_column,
+        query: str,
+        partition_filter=None,
+        filter_=None,
+    ):
+        self._table = table
+        self._limit = limit
+        self._text_columns = text_column if isinstance(text_column, list) else [text_column]
+        if len(self._text_columns) != 1:
+            raise ValueError(
+                "Full-text search expects exactly one text column, got: %s"
+                % self._text_columns)
+        self._query = query
+        self._partition_filter = partition_filter
+        self._filter = filter_
+
+    def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
+        reader = copy(self)
+        reader._table = global_index_live_row_filter.table_at_snapshot(self._table, plan.snapshot())
+        reader._snapshot = plan.snapshot()
+        return reader.read(plan.splits())
+
+    def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
+        index_splits, raw_splits = _split_search_splits(splits)
+        if not index_splits and not raw_splits:
+            return GlobalIndexResult.create_empty()
+
+        splits_by_column: Dict[str, List[IndexFullTextSearchSplit]] = {}
+        for split in index_splits:
+            splits_by_column.setdefault(split.column_name, []).append(split)
+        live_rows = global_index_live_row_filter.live_rows(
+            self._table, self._partition_filter)
+        matched = self._matched_indexed_rows(index_splits, live_rows)
+        indexed_result = self._eval_column_query(splits_by_column, matched if self._filter is not None else live_rows)
+        raw_ranges = _raw_row_ranges(raw_splits)
+        if self._filter is None:
+            raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits))
+        else:
+            candidates = GlobalIndexResult.from_ranges(raw_ranges).results()
+            if live_rows is not None:
+                candidates = RoaringBitmap64.and_(candidates, live_rows)
+            matched = self._matching_rows(candidates)
+            raw_result = self._read_raw_search(raw_ranges, _index_type(index_splits), matched)
+        return indexed_result.or_(raw_result).top_k(self._limit)
+
+    def _matching_rows(self, candidates):
+        from pypaimon.execution.python.read.search.global_index_row_filter import matching_rows
+
+        table = self._table.copy({'scalar-index.search-mode': 'full'})
+        return matching_rows(table, self._filter, candidates, self._partition_filter)
+
+    def _matched_indexed_rows(self, splits, live_rows, scalar_result=_UNSET):
+        if self._filter is None:
+            return live_rows
+        from pypaimon.common.options.core_options import GlobalIndexSearchMode
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        from pypaimon.execution.python.read.search.global_index_row_filter import is_exact
+
+        covered = RoaringBitmap64()
+        files = {}
+        for split in splits:
+            covered.add_range(split.row_range_start, split.row_range_end)
+            files.update((file.file_name, file) for file in split.scalar_index_files)
+        if live_rows is not None:
+            covered = RoaringBitmap64.and_(covered, live_rows)
+        if covered.is_empty():
+            return covered
+        snapshot = getattr(self, '_snapshot', None)
+        if snapshot is None:
+            snapshot = TimeTravelUtil.resolve_snapshot(self._table)
+        mode = self._table.options.scalar_index_search_mode()
+        scalar_files = list(files.values())
+        coverage = DataEvolutionGlobalIndexCoverage(self._table, snapshot, self._partition_filter, scalar_files)
+        raw_ranges = coverage.unindexed_ranges(self._table.fields, self._filter, mode)
+        unindexed = RoaringBitmap64.and_(GlobalIndexResult.from_ranges(raw_ranges).results(), covered)
+        decided = RoaringBitmap64.remove_all(covered, unindexed)
+        matched = RoaringBitmap64()
+        if not decided.is_empty():
+            if scalar_result is _UNSET:
+                scalar_result = self._scalar_index_result(scalar_files, snapshot)
+            if scalar_result is not None:
+                candidates = RoaringBitmap64.and_(scalar_result.results(), decided)
+                if is_exact(self._filter, scalar_result):
+                    matched = candidates
+                elif self._table.options.global_index_filter_refine_from_data():
+                    matched = self._matching_rows(candidates)
+            elif mode != GlobalIndexSearchMode.FAST:
+                unindexed = RoaringBitmap64.or_(unindexed, decided)
+        return RoaringBitmap64.or_(matched, self._matching_rows(unindexed))
+
+    def _scalar_index_result(self, scalar_files, snapshot):
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
+        )
+
+        scanner = DataEvolutionGlobalIndexScanner.create(
+            self._table, index_files=scalar_files, snapshot=snapshot, partition_filter=self._partition_filter)
+        if scanner is None:
+            return None
+        try:
+            evaluation = scanner.scan_with_coverage(self._filter)
+            return None if evaluation is None else evaluation.result
+        finally:
+            scanner.close()
+
+    def _eval_column_query(
+            self,
+            splits_by_column: Dict[str, List[IndexFullTextSearchSplit]],
+            live_rows
+    ) -> ScoredGlobalIndexResult:
+        column = self._text_columns[0].name
+        splits = splits_by_column.get(column, [])
+        if not splits:
+            return ScoredGlobalIndexResult.create_empty()
+        reader = copy(self)
+        reader._limit = _index_candidate_limit(splits, self._limit)
+        futures = []
+        for split in splits:
+            include_row_ids = global_index_live_row_filter.for_range(
+                live_rows, split.row_range_start, split.row_range_end)
+            if include_row_ids is not None and include_row_ids.is_empty():
+                continue
+            futures.append(reader._eval(
+                split.row_range_start, split.row_range_end,
+                split.full_text_index_files,
+                include_row_ids,
+            ))
+        if not futures:
+            return ScoredGlobalIndexResult.create_empty()
+
+        wait(futures)
+
+        merged_scores = {}
+        for future in futures:
+            split_result = future.result()
+            if split_result is not None:
+                score_getter = split_result.score_getter()
+                for row_id in split_result.results():
+                    if row_id not in merged_scores:
+                        merged_scores[row_id] = score_getter(row_id)
+
+        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
+
+    def _eval(self, row_range_start, row_range_end, full_text_index_files,
+              include_row_ids):
+        index_io_meta_list = []
+        for index_file in full_text_index_files:
+            meta = index_file.global_index_meta
+            assert meta is not None
+            index_io_meta_list.append(
+                GlobalIndexIOMeta(
+                    file_name=index_file.file_name,
+                    file_size=index_file.file_size,
+                    metadata=meta.index_meta,
+                    external_path=index_file.external_path,
+                )
+            )
+
+        index_type = full_text_index_files[0].index_type
+        index_path = self._table.path_factory().global_index_path_factory().index_path()
+        file_io = self._table.file_io
+
+        reader = _create_full_text_reader(
+            index_type, file_io, index_path,
+            index_io_meta_list, row_range_end - row_range_start + 1
+        )
+
+        full_text_search = FullTextSearch(
+            field_name=self._text_columns[0].name,
+            query=self._query,
+            limit=min(self._limit, row_range_end - row_range_start + 1),
+        )
+        if include_row_ids is not None:
+            full_text_search = full_text_search.with_include_row_ids(include_row_ids)
+
+        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        try:
+            future = offset_reader.visit_full_text_search(full_text_search)
+        except BaseException:
+            reader.close()
+            raise
+        future.add_done_callback(lambda _: reader.close())
+        return future
+
+    def _read_raw_search(self, raw_row_ranges, index_type, include_row_ids=None):
+        raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
+        if not raw_row_ranges:
+            return DictBasedScoredIndexResult({})
+        if index_type is not None and not _supports_full_text_search(index_type):
+            raise ValueError(f"Unsupported full-text index type: '{index_type}'")
+
+        row_range_start = raw_row_ranges[0].from_
+        search_kwargs = {}
+        if include_row_ids is not None:
+            raw_rows = GlobalIndexResult.from_ranges(raw_row_ranges).results()
+            include_row_ids = RoaringBitmap64.and_(include_row_ids, raw_rows)
+            if include_row_ids.is_empty():
+                return DictBasedScoredIndexResult({})
+            search_kwargs["include_row_ids"] = include_row_ids
+        # Build the same corpus as an unfiltered query so BM25 statistics stay
+        # unchanged. Filter row IDs in the native search, before selecting hits.
+        table = self._read_raw_rows(raw_row_ranges)
+        if table is None or table.num_rows == 0:
+            return DictBasedScoredIndexResult({})
+
+        from pypaimon.table.special_fields import SpecialFields
+
+        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        texts = table.column(self._text_columns[0].name).to_pylist()
+        index_bytes = self._build_raw_index(row_ids, texts, row_range_start)
+        if index_bytes is None:
+            return DictBasedScoredIndexResult({})
+
+        return _search_raw_full_text(
+            index_bytes,
+            row_range_start,
+            self._query,
+            min(self._limit, sum(row_range.count() for row_range in raw_row_ranges)),
+            max_candidates=table.num_rows,
+            **search_kwargs,
+        ).top_k(self._limit)
+
+    def _read_raw_rows(self, raw_row_ranges):
+        read_builder = self._table.new_read_builder()
+        if self._partition_filter is not None:
+            read_builder = read_builder.with_partition_filter(self._partition_filter)
+
+        from pypaimon.table.special_fields import SpecialFields
+
+        projection = [self._text_columns[0].name, SpecialFields.ROW_ID.name]
+        read_builder = read_builder.with_projection(projection)
+        plan = read_builder.new_scan().with_row_ranges(raw_row_ranges).plan()
+        return read_builder.new_read().to_arrow(plan.splits())
+
+    def _build_raw_index(self, row_ids, texts, row_range_start):
+        try:
+            from paimon_ftindex import FullTextIndexWriter
+        except ImportError as e:
+            raise ImportError(
+                "paimon-ftindex is required to search uncovered full-text "
+                "row ranges. Install paimon-ftindex==0.1.0 or "
+                "pypaimon[full-text]."
+            ) from e
+
+        from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
+
+        writer = FullTextIndexWriter(
+            NativeFullTextIndexOptions.from_options(
+                _raw_search_options(self._table)).to_native_options())
+        indexed = False
+        try:
+            for row_id, text in zip(row_ids, texts):
+                if text is None:
+                    continue
+                writer.add_document(
+                    int(row_id) - row_range_start,
+                    _materialize_text(text),
+                )
+                indexed = True
+            if not indexed:
+                return None
+            output = BytesIO()
+            writer.write(output)
+            return output.getvalue()
+        finally:
+            writer.close()
+
+
+def _index_candidate_limit(splits, limit):
+    ranges = sorted((split.row_range_start, split.row_range_end) for split in splits)
+    if any(start <= previous_end for (_, previous_end), (start, _) in zip(ranges, ranges[1:])):
+        # Overlapping shards may assign different scores to the same row.
+        # Preserve first-shard precedence before truncating the global result.
+        return min(max(end - start + 1 for start, end in ranges), 2147483647)
+    return limit
+
+
+def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
+    """Create a global index reader for full-text search."""
+    from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
+    if index_type == FULL_TEXT_IDENTIFIER:
+        from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
+        return NativeFullTextGlobalIndexReader(file_io, index_path, index_io_meta_list, max_candidates)
+    raise ValueError(f"Unsupported full-text index type: '{index_type}'")
+
+
+def _supports_full_text_search(index_type):
+    from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
+    return index_type == FULL_TEXT_IDENTIFIER
+
+
+def _split_search_splits(splits):
+    index_splits = []
+    raw_splits = []
+    for split in splits:
+        if isinstance(split, IndexFullTextSearchSplit):
+            index_splits.append(split)
+        elif isinstance(split, RawFullTextSearchSplit):
+            raw_splits.append(split)
+        else:
+            raise ValueError(
+                "Unsupported full-text search split: %s"
+                % type(split).__name__)
+    return index_splits, raw_splits
+
+
+def _raw_row_ranges(raw_splits):
+    ranges = []
+    for split in raw_splits:
+        ranges.extend(split.row_ranges)
+    return Range.sort_and_merge_overlap(ranges, True)
+
+
+def _index_type(index_splits):
+    for split in index_splits:
+        if split.full_text_index_files:
+            return split.full_text_index_files[0].index_type
+    return None
+
+
+def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_row_ids=None, max_candidates=None):
+    from paimon_ftindex import FullTextIndexReader
+    from pypaimon.execution.python.read.native_full_text_global_index_reader import (
+        PaimonFullTextInput,
+        _search_top_k,
+    )
+
+    reader = FullTextIndexReader(PaimonFullTextInput(BytesIO(index_bytes)))
+    try:
+        search_kwargs = {}
+        if include_row_ids is not None:
+            relative_ids = GlobalIndexResult.create(include_row_ids).offset(-row_range_start).results()
+            search_kwargs["filter_bytes"] = relative_ids.serialize()
+        result = _search_top_k(reader, query, limit, max_candidates=max_candidates, **search_kwargs)
+        return DictBasedScoredIndexResult(
+            {
+                row_range_start + row_id: result.score_getter()(row_id)
+                for row_id in result.results()
+            })
+    finally:
+        reader.close()
+
+
+def _raw_search_options(table):
+    table_options = getattr(getattr(table, "options", None), "options", None)
+    if table_options is not None:
+        options = dict(table_options.to_map())
+    else:
+        options = dict(getattr(getattr(table, "table_schema", None), "options", {}) or {})
+    options["full-text.searcher-pool.max-size"] = "0"
+    return options
+
+
+def _materialize_text(value) -> str:
+    if hasattr(value, "as_py"):
+        value = value.as_py()
+    if not isinstance(value, str):
+        raise ValueError("Unsupported field type: %s" % type(value).__name__)
+    return value

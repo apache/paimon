@@ -138,3 +138,47 @@ def _parse_incremental_timestamp_window(value):
     if not all(-(1 << 63) <= timestamp < (1 << 63) for timestamp in (start, end)):
         raise ValueError('incremental-between-timestamp milliseconds must be signed 64-bit integers')
     return start, end
+
+
+def resolve_scan_snapshot_range(table):
+    """Validate public scan inputs and resolve incremental snapshot boundaries.
+
+    This is metadata selection shared by both planners. Manifest readers and
+    execution resources are created only by the selected backend.
+    """
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+
+    _validate_scan_mode(table)
+    options = table.options.options
+    has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
+    if not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+        return None
+    if has_time_travel:
+        raise ValueError(
+            "incremental-between-timestamp cannot be used together with "
+            "point-in-time scan options: %s" % SCAN_KEYS)
+    start_timestamp, end_timestamp = _parse_incremental_timestamp_window(
+        options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
+    snapshot_manager = table.snapshot_manager()
+    latest_snapshot = snapshot_manager.get_latest_snapshot()
+    earliest_snapshot = snapshot_manager.try_get_earliest_snapshot() if latest_snapshot is not None else None
+    if earliest_snapshot is None or latest_snapshot is None:
+        return None
+    if start_timestamp > end_timestamp:
+        raise ValueError(
+            "Ending timestamp %s should be >= starting timestamp %s."
+            % (end_timestamp, start_timestamp))
+    if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
+            or end_timestamp < earliest_snapshot.time_millis):
+        return None
+
+    starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
+    earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
+    if starting_snapshot is None or (earliest_snapshot and earliest_snapshot.time_millis > start_timestamp):
+        start_id = earliest_snapshot.id - 1 if earliest_snapshot else -1
+    else:
+        start_id = starting_snapshot.id
+    end_snapshot = snapshot_manager.earlier_or_equal_time_mills(end_timestamp)
+    latest_snapshot = snapshot_manager.get_latest_snapshot()
+    end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
+    return start_id, end_id

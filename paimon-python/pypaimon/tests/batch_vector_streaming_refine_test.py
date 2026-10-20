@@ -30,7 +30,7 @@ from pypaimon.table.source.vector_search_read import (
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
 from pypaimon.utils.range import Range
 
-MODULE = "pypaimon.table.source.vector_search_read"
+MODULE = "pypaimon.execution.python.read.search.vector_search_read"
 
 
 def make_read(queries, limit=2, metric="l2"):

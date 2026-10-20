@@ -32,7 +32,7 @@ from pypaimon.table.source.vector_search_read import (
 from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field, _entry, _bitmap
 
-MODULE = "pypaimon.table.source.vector_search_read"
+MODULE = "pypaimon.execution.python.read.search.vector_search_read"
 
 
 def make_read(batch, table_options=None, count=4):

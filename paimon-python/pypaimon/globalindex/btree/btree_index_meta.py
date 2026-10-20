@@ -15,9 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Compatibility alias for sorted global index file metadata."""
+"""Public imports for the shared B-tree file format."""
 
-from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
+from pypaimon.globalindex.btree_format.btree_index_meta import (
+    BTreeIndexMeta,
+)
 
-
-BTreeIndexMeta = SortedIndexFileMeta
+__all__ = [
+    'BTreeIndexMeta',
+]

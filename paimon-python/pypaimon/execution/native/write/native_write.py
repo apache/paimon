@@ -321,8 +321,8 @@ class NativeTableWrite:
 class NativePostponeFixedBucketTableWrite(NativeTableWrite):
     """Fixed-bucket batches retain the standard native ownership contract.
 
-    A distributed coordinator can use Python planning before receiving data;
-    workers use the same shared plan through the Rust fixed-bucket writer.
+    A distributed coordinator reads bucket metadata through Rust and groups
+    inputs with shared arithmetic before workers use the fixed-bucket writer.
     """
 
     def __init__(self, table, commit_user, static_partition, bucket_plan, native_writer):

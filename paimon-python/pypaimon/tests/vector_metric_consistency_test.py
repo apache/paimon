@@ -201,14 +201,16 @@ class VectorMetricResolutionTest(unittest.TestCase):
                     previous = Mock(spec=['vector_metric'])
                     previous.vector_metric.return_value = 'cosine'
                     reader._record_index_metric(previous, 'ivf-flat')
-                with patch('pypaimon.table.source.vector_search_read._create_vector_reader', return_value=native):
+                with patch('pypaimon.execution.python.read.search.vector_search_read._create_vector_reader',
+                           return_value=native):
                     with self.assertRaises((RuntimeError, ValueError, KeyboardInterrupt)):
                         reader._open_offset_reader([entry.index_file], 0, 1)
                 native.close.assert_called_once_with()
 
     def test_lumina_open_closes_stream_on_interrupt(self):
         from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-        from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import LuminaVectorGlobalIndexReader
+        from pypaimon.execution.python.globalindex.lumina.lumina_vector_global_index_reader import (
+            LuminaVectorGlobalIndexReader)
 
         stream, native, file_io = Mock(), Mock(), Mock()
         file_io.new_input_stream.return_value = stream

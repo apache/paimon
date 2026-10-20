@@ -38,7 +38,7 @@ def prepare_native_commit(owner, messages, *, batch=False):
         return None
     native_messages = to_native_commit_messages(owner.table, messages)
     # Callbacks may be registered after the native committer is created.
-    # FileStoreCommit owns their close lifecycle in either execution path.
+    # The public commit lifecycle owns callback closure in either execution path.
     if owner._commit_callbacks and not owner._native_callbacks_registered:
         owner._native_commit.add_commit_callback(native_commit_callback(owner.table, owner._commit_callbacks))
         owner._native_callbacks_registered = True

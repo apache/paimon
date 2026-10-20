@@ -28,15 +28,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
-from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
-from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
-from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
+from pypaimon.globalindex.btree_format.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.btree.btree_index_reader import BTreeIndexReader
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef
 from pypaimon.globalindex.key_serializer import create_serializer
-from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
-from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
+from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
+from pypaimon.execution.python.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.schema.data_types import AtomicType
 

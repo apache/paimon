@@ -33,17 +33,16 @@ from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
-from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.push_down_utils import (
     exclude_predicate_with_fields,
     predicate_for_physical_fields,
     remove_row_id_filter,
-    rewrite_predicate_indices,
-    trim_and_transform_predicate,
-    trim_predicate_by_fields)
+    trim_and_transform_predicate)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scan_request import (
-    apply_push_down_limit, has_non_partition_filter, validate_chunk_shuffle_compat)
+    apply_push_down_limit, has_non_partition_filter, validate_chunk_shuffle_compat,
+    normalize_row_ranges, scan_partition_predicate, validate_chunk_shuffle,
+    validate_global_index_selection, validate_shard_selection, validate_slice_selection)
 from pypaimon.execution.python.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.execution.python.read.scanner.bucket_select_converter import \
@@ -286,13 +285,7 @@ class FileScanner:
             self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES | set(self.table.partition_keys))
         self.primary_key_predicate = trim_and_transform_predicate(
             physical, self.table.field_names, self.table.trimmed_primary_keys)
-        if self._partition_predicate is None:
-            self.partition_key_predicate = trim_and_transform_predicate(
-                physical, self.table.field_names, self.table.partition_keys)
-        else:
-            self.partition_key_predicate = rewrite_predicate_indices(
-                trim_predicate_by_fields(self._partition_predicate, self.table.partition_keys),
-                self.table.partition_keys_fields)
+        self.partition_key_predicate = scan_partition_predicate(self.table, predicate, self._partition_predicate)
         self._bucket_selector = self._init_bucket_selector()
 
     def _schema_fields(self, schema_id: int):
@@ -434,7 +427,7 @@ class FileScanner:
         from pypaimon.table.source.primary_key_sorted_index_result import (
             PrimaryKeySortedIndexResult,
         )
-        from pypaimon.table.source import primary_key_sorted_index_scan
+        from pypaimon.execution.python.read.search import primary_key_sorted_index_scan
 
         definitions = PrimaryKeyIndexDefinitions.create(self.table.table_schema).definitions
         if not definitions:
@@ -559,7 +552,8 @@ class FileScanner:
         if not self.table.options.global_index_enabled():
             return None
 
-        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner)
 
         try:
             scanner = DataEvolutionGlobalIndexScanner.create(
@@ -662,39 +656,24 @@ class FileScanner:
         return self
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
-        validate_shard(idx_of_this_subtask, number_of_para_subtasks)
-        if self.start_pos_of_this_subtask is not None:
-            raise ValueError("with_shard and with_slice cannot be used simultaneously")
+        validate_shard_selection(idx_of_this_subtask, number_of_para_subtasks, self.start_pos_of_this_subtask)
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
     def with_slice(self, start_pos: int, end_pos: int) -> 'FileScanner':
-        validate_slice(start_pos, end_pos)
-        if self.table.is_primary_key_table:
-            raise NotImplementedError("Primary key tables do not support with_slice(); use with_shard instead")
-        if self.idx_of_this_subtask is not None:
-            raise ValueError("with_slice and with_shard cannot be used simultaneously")
+        validate_slice_selection(start_pos, end_pos, self.table.is_primary_key_table, self.idx_of_this_subtask)
         self.start_pos_of_this_subtask = start_pos
         self.end_pos_of_this_subtask = end_pos
         return self
 
     def with_global_index_result(self, result) -> 'FileScanner':
-        if self._row_ranges is not None:
-            raise ValueError(
-                "with_global_index_result and with_row_ranges are mutually exclusive")
+        validate_global_index_selection(self._row_ranges)
         self._global_index_result = result
         return self
 
     def with_row_ranges(self, row_ranges) -> 'FileScanner':
-        if not self.data_evolution:
-            raise ValueError("Row ranges are only supported for data evolution tables")
-        if row_ranges is None:
-            raise ValueError("row_ranges cannot be None")
-        if self._global_index_result is not None:
-            raise ValueError(
-                "with_row_ranges and with_global_index_result are mutually exclusive")
-        self._row_ranges = Range.sort_and_merge_overlap(list(row_ranges), True)
+        self._row_ranges = normalize_row_ranges(row_ranges, self.data_evolution, self._global_index_result)
         return self
 
     def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
@@ -712,10 +691,7 @@ class FileScanner:
         return plan, self.scan_stats
 
     def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'FileScanner':
-        if not isinstance(seed, int):
-            raise ValueError("chunk_shuffle seed must be an int")
-        if not isinstance(chunk_size, int) or chunk_size <= 0:
-            raise ValueError("chunk_shuffle chunk_size must be a positive int")
+        validate_chunk_shuffle(seed, chunk_size)
         self.chunk_shuffle = (seed, chunk_size)
         return self
 

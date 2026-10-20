@@ -24,8 +24,10 @@ from unittest.mock import patch
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
+from pypaimon.globalindex.vindex_reader import (
     VindexVectorGlobalIndexReader,
+)
+from pypaimon.execution.python.globalindex.vindex.vindex_vector_global_index_reader import (
     _build_scores,
     _search_params,
 )
@@ -142,7 +144,7 @@ class VindexVectorIndexTest(unittest.TestCase):
             DictBasedScoredIndexResult(scores).top_k(2).results().to_list(),
         )
 
-    @patch('pypaimon.globalindex.vindex.vindex_vector_global_index_reader._native_reader_type',
+    @patch('pypaimon.execution.native.read.vindex_reader._native_reader_type',
            return_value=None)
     def test_batch_search_uses_native_batch_api(self, _native_reader):
         old_module = sys.modules.get("paimon_vindex")

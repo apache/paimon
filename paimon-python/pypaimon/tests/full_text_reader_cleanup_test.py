@@ -40,7 +40,7 @@ def test_full_text_reader_lifetime(mode):
         if mode == "completed":
             future.set_result(DictBasedScoredIndexResult({1: 0.5}))
 
-    with patch("pypaimon.table.source.full_text_read._create_full_text_reader", return_value=native):
+    with patch("pypaimon.execution.python.read.search.full_text_read._create_full_text_reader", return_value=native):
         read = DataEvolutionFullTextRead(table, 1, field, "query")
         if mode.startswith("sync_"):
             with pytest.raises(type(failure)) as exc:

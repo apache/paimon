@@ -17,13 +17,17 @@
 
 """Captured scan configuration and metadata-only rules shared by backends."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, List, Optional, Sequence, Tuple
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.read.push_down_utils import _get_all_fields, predicate_matches_physical_names
+from pypaimon.read.push_down_utils import (
+    _get_all_fields, predicate_for_physical_fields, predicate_matches_physical_names,
+    rewrite_predicate_indices, trim_and_transform_predicate, trim_predicate_by_fields)
+from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import DataField
+from pypaimon.utils.range import Range
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,40 @@ class ScanRequest:
     partition_filter: Optional[Predicate] = None
     read_type: Optional[Tuple[DataField, ...]] = None
     incremental_snapshot_range: Optional[Tuple[int, int]] = None
+
+    @classmethod
+    def for_table(cls, table, predicate=None, limit=None, partition_predicate=None):
+        return cls(
+            is_primary_key_table=table.is_primary_key_table,
+            partition_keys=tuple(table.partition_keys or ()),
+            predicate=predicate,
+            user_predicate=predicate,
+            partition_key_predicate=scan_partition_predicate(table, predicate, partition_predicate),
+            explicit_partition_filter=partition_predicate is not None,
+            limit=limit,
+            data_evolution=table.options.data_evolution_enabled(),
+            deletion_vectors_enabled=table.options.deletion_vectors_enabled(),
+        )
+
+    def with_shard(self, index, count):
+        validate_shard_selection(index, count, self.start_pos_of_this_subtask)
+        return replace(self, idx_of_this_subtask=index, number_of_para_subtasks=count)
+
+    def with_slice(self, start, end):
+        validate_slice_selection(start, end, self.is_primary_key_table, self.idx_of_this_subtask)
+        return replace(self, start_pos_of_this_subtask=start, end_pos_of_this_subtask=end)
+
+    def with_global_index_result(self, result):
+        validate_global_index_selection(self.row_ranges)
+        return replace(self, global_index_result=result)
+
+    def with_row_ranges(self, row_ranges):
+        ranges = normalize_row_ranges(row_ranges, self.data_evolution, self.global_index_result)
+        return replace(self, row_ranges=tuple((range_.from_, range_.to) for range_ in ranges))
+
+    def with_chunk_shuffle(self, seed, chunk_size):
+        validate_chunk_shuffle(seed, chunk_size)
+        return replace(self, chunk_shuffle=(seed, chunk_size))
 
     def validate_chunk_shuffle_compat(self) -> None:
         validate_chunk_shuffle_compat(
@@ -155,3 +193,49 @@ def has_non_partition_filter(predicate: Optional[Predicate], partition_keys: Seq
         return True
     partition_keys = set(partition_keys or [])
     return not _get_all_fields(predicate).issubset(partition_keys)
+
+
+def scan_partition_predicate(table, predicate, partition_predicate):
+    """Bind the public partition selection without constructing a scanner."""
+    if partition_predicate is None:
+        physical = predicate_for_physical_fields(predicate, table.fields)
+        return trim_and_transform_predicate(physical, table.field_names, table.partition_keys)
+    return rewrite_predicate_indices(
+        trim_predicate_by_fields(partition_predicate, table.partition_keys),
+        table.partition_keys_fields)
+
+
+def validate_shard_selection(index, count, slice_start):
+    validate_shard(index, count)
+    if slice_start is not None:
+        raise ValueError("with_shard and with_slice cannot be used simultaneously")
+
+
+def validate_slice_selection(start, end, is_primary_key_table, shard_index):
+    validate_slice(start, end)
+    if is_primary_key_table:
+        raise NotImplementedError("Primary key tables do not support with_slice(); use with_shard instead")
+    if shard_index is not None:
+        raise ValueError("with_slice and with_shard cannot be used simultaneously")
+
+
+def validate_global_index_selection(row_ranges):
+    if row_ranges is not None:
+        raise ValueError("with_global_index_result and with_row_ranges are mutually exclusive")
+
+
+def normalize_row_ranges(row_ranges, data_evolution, global_index_result):
+    if not data_evolution:
+        raise ValueError("Row ranges are only supported for data evolution tables")
+    if row_ranges is None:
+        raise ValueError("row_ranges cannot be None")
+    if global_index_result is not None:
+        raise ValueError("with_row_ranges and with_global_index_result are mutually exclusive")
+    return Range.sort_and_merge_overlap(list(row_ranges), True)
+
+
+def validate_chunk_shuffle(seed, chunk_size):
+    if not isinstance(seed, int):
+        raise ValueError("chunk_shuffle seed must be an int")
+    if not isinstance(chunk_size, int) or chunk_size <= 0:
+        raise ValueError("chunk_shuffle chunk_size must be a positive int")

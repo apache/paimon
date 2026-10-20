@@ -18,11 +18,10 @@
 """Builder to build vector search."""
 
 from abc import ABC, abstractmethod
+from copy import copy
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 
@@ -221,19 +220,24 @@ class AbstractVectorSearchBuilderImpl:
         reject_search_under_query_auth(self._table)
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
+        from pypaimon.execution.native.read.native_search_plan import native_vector_scan
+        execution = copy(self)
+        execution._options = dict(self._options)
+        return native_vector_scan(self, execution._new_python_vector_scan, self._native_batch_search)
+
+    def _new_python_vector_scan(self):
+        from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
         scan_class = DataEvolutionVectorScan
         if self._is_primary_key_vector_search():
-            from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
+            from pypaimon.execution.python.read.search.primary_key_vector_scan import PrimaryKeyVectorScan
             scan_class = PrimaryKeyVectorScan
-        scan = scan_class(
+        return scan_class(
             self._table,
             self._vector_column,
             filter_=self._filter,
             partition_filter=self._partition_filter,
             options=self._options,
         )
-        from pypaimon.execution.native.read.native_search_plan import native_vector_scan
-        return native_vector_scan(self, scan, self._native_batch_search)
 
     def _is_primary_key_vector_search(self):
         if self._vector_column is None:
@@ -270,11 +274,18 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Vector column must be set via with_vector_column()")
         if self._query_vector is None:
             raise ValueError("Query vector must be set via with_query_vector()")
+        from pypaimon.execution.native.read.native_search_plan import native_vector_read
+        execution = copy(self)
+        execution._options = dict(self._options)
+        return native_vector_read(self, execution._new_python_vector_read)
+
+    def _new_python_vector_read(self):
+        from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead
         read_class = DataEvolutionVectorRead
         if self._is_primary_key_vector_search():
-            from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
+            from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
             read_class = PrimaryKeyVectorRead
-        reader = read_class(
+        return read_class(
             self._table,
             self._limit,
             self._vector_column,
@@ -283,5 +294,3 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             partition_filter=self._partition_filter,
             options=self._options,
         )
-        from pypaimon.execution.native.read.native_search_plan import native_vector_read
-        return native_vector_read(self, reader)

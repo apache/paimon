@@ -23,7 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.data_evolution_global_index_scanner import (
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
     DataEvolutionGlobalIndexScanner,
     is_supported_scalar_index,
 )

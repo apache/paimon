@@ -23,10 +23,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from unittest import mock
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
+from pypaimon.globalindex.vindex_input import (
     PaimonVindexInput,
-    VindexVectorGlobalIndexReader,
     _read_parallelism,
+)
+from pypaimon.globalindex.vindex_reader import (
+    VindexVectorGlobalIndexReader,
 )
 
 
@@ -212,7 +214,7 @@ class VindexInputTest(unittest.TestCase):
         module = mock.Mock()
         module.VectorIndexReader.side_effect = open_reader
         with mock.patch.dict("sys.modules", {"paimon_vindex": module}), mock.patch(
-                'pypaimon.globalindex.vindex.vindex_vector_global_index_reader._native_reader_type',
+                'pypaimon.execution.native.read.vindex_reader._native_reader_type',
                 return_value=None):
             reader = VindexVectorGlobalIndexReader(
                 io_, "s3://bucket", [GlobalIndexIOMeta(file_name="index", file_size=2)])

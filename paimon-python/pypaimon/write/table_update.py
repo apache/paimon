@@ -24,7 +24,6 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.execution.dispatch import prepare_native_write_operation
 from pypaimon.execution.python.write.table_update import (
     PythonTableUpdateMixin, ShardTableUpdator, SingleWriter)
-from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
@@ -102,21 +101,7 @@ class TableUpdate(PythonTableUpdateMixin):
     def _update_by_arrow_batches_with_row_id(
             self, tables: Iterable[pa.Table], commit_identifier: int
     ) -> List[CommitMessage]:
-        updater = None
-        try:
-            for table in tables:
-                cols = self.update_cols if self.update_cols is not None else [
-                    c for c in table.column_names
-                    if c != SpecialFields.ROW_ID.name
-                ]
-                if updater is None:
-                    updater = self._new_row_id_updater(commit_identifier)
-                updater.update_columns(table, cols)
-            return [] if updater is None else updater.commit_messages
-        except Exception:
-            # Never delete files from CommitMessage on failure.
-            # A commit can succeed even when its response raises an exception.
-            raise
+        return super()._update_by_arrow_batches_with_row_id(tables, commit_identifier)
 
     def _upsert_by_arrow_with_key(
             self,
@@ -229,32 +214,8 @@ class TableUpdate(PythonTableUpdateMixin):
                 return native.delete_by_row_id(row_ids)
         return self._delete_rows_with_python(row_ids)
 
-    def _matched_delete_row_ids(
-            self, predicate: Optional[Predicate]) -> List[int]:
-        scan_table = self._matched_update_scan_table()
-        read_builder = scan_table.new_read_builder()
-        if predicate is not None:
-            read_builder.with_filter(predicate)
-            read_builder.with_projection(
-                list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
-            )
-        else:
-            read_builder.with_projection([SpecialFields.ROW_ID.name])
-
-        scan = read_builder.new_scan()
-        splits = scan.plan_all_files().splits()
-        if (splits
-                and self.table.options.native_write_enabled()
-                and not any(isinstance(split, QueryAuthSplit)
-                            for split in splits)):
-            from pypaimon.execution.dispatch import try_native_predicate_row_ids
-            row_ids = try_native_predicate_row_ids(scan_table, predicate, splits)
-            if row_ids is not None:
-                return row_ids
-        matched = read_builder.new_read().to_arrow(splits)
-        if matched.num_rows == 0:
-            return []
-        return matched[SpecialFields.ROW_ID.name].to_pylist()
+    def _matched_delete_row_ids(self, predicate: Optional[Predicate]) -> List[int]:
+        return super()._matched_delete_row_ids(predicate)
 
     _predicate_fields = staticmethod(predicate_fields)
 

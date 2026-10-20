@@ -147,13 +147,15 @@ class FileStoreCommit:
     """
 
     def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
-                 commit_callbacks: Optional[List[CommitCallback]] = None):
+                 commit_callbacks: Optional[List[CommitCallback]] = None,
+                 close_commit_callbacks: bool = True):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.snapshot_commit = snapshot_commit
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
+        self.close_commit_callbacks = close_commit_callbacks
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -1032,11 +1034,12 @@ class FileStoreCommit:
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
-        for callback in self.commit_callbacks:
-            try:
-                callback.close()
-            except Exception:
-                pass
+        if self.close_commit_callbacks:
+            for callback in self.commit_callbacks:
+                try:
+                    callback.close()
+                except Exception:
+                    pass
         if hasattr(self.snapshot_commit, 'close'):
             self.snapshot_commit.close()
 

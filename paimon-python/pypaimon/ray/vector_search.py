@@ -25,14 +25,14 @@ import threading
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.vector_search_read import (
+from pypaimon.execution.python.read.search.vector_search_read import (
     DataEvolutionVectorRead,
     _filtered_raw_row_ranges,
     _offer_score,
     _scored_result,
     _split_search_splits,
 )
-from pypaimon.table.source import global_index_live_row_filter
+from pypaimon.execution.python.read.search import global_index_live_row_filter
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 

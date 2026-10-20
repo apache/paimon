@@ -21,9 +21,7 @@ from typing import Dict, List, Optional, Sequence, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
-from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.globalindex.index_types import BTREE_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -93,72 +91,12 @@ class GlobalIndexDropper:
         messages = self._native_build(partition_filter)
         if messages is not None:
             return messages
-
-        snapshot = self._table.snapshot_manager().get_latest_snapshot()
-        if snapshot is None:
-            return []
-
-        target_field_ids = [
-            self._table.field_dict[column].id for column in self._index_columns
-        ]
-
-        def should_delete(entry: IndexManifestEntry) -> bool:
-            index_file = entry.index_file
-            global_meta = index_file.global_index_meta
-            if index_file.index_type.lower().strip() != self._index_type or global_meta is None:
-                return False
-            if _indexed_field_ids(global_meta) != target_field_ids:
-                return False
-            return partition_filter is None or partition_filter.test(entry.partition)
-
-        entries = IndexFileHandler(self._table).scan(snapshot, should_delete)
-        if not entries:
-            return []
-
-        by_partition = {}
-        for entry in entries:
-            key = tuple(entry.partition.values)
-            by_partition.setdefault(key, []).append(
-                IndexManifestEntry(
-                    kind=1,
-                    partition=entry.partition,
-                    bucket=entry.bucket,
-                    index_file=entry.index_file,
-                )
-            )
-
-        return [
-            CommitMessage(
-                partition=partition,
-                bucket=0,
-                new_files=[],
-                index_deletes=deletes,
-            )
-            for partition, deletes in by_partition.items()
-        ]
+        from pypaimon.execution.python.globalindex.drop_global_index import build_global_index_drop
+        return build_global_index_drop(self, partition_filter)
 
     def _native_build(self, partition_filter):
-        from pypaimon.execution.native.table import (_native_table)
-        from pypaimon.execution.native.read.builder import (_predicate_to_native)
-        from pypaimon.execution.native.runtime import (native_runtime_available)
-        from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
-
-        table = self._table
-        if (not table.options.native_write_enabled()
-                or table.options.query_auth_enabled
-                or not native_runtime_available()
-                or not _rest_catalog_supported(table)):
-            return None
-        from pypaimon_rust.datafusion import GlobalIndexDropBuilder
-        if not GlobalIndexDropBuilder.supports_index_type(self._index_type):
-            return None
-        native = _native_table(table).new_global_index_drop_builder()
-        native.with_index_columns(self._index_columns).with_index_type(self._index_type)
-        if partition_filter is not None:
-            native.with_partition_filter(_predicate_to_native(partition_filter))
-        # Preparing deletion messages is read-only. Python retains explicit
-        # commit and dry-run ownership; failures must not remove index files.
-        return from_native_commit_messages(table, native.build())
+        from pypaimon.execution.native.write.native_index_drop import build_native_global_index_drop
+        return build_native_global_index_drop(self, partition_filter)
 
     def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
@@ -198,7 +136,5 @@ def _normalize_index_columns(index_column: Union[str, Sequence[str]]) -> List[st
 
 
 def _indexed_field_ids(global_meta) -> List[int]:
-    field_ids = [global_meta.index_field_id]
-    if global_meta.extra_field_ids:
-        field_ids.extend(global_meta.extra_field_ids)
-    return field_ids
+    from pypaimon.execution.python.globalindex.drop_global_index import _indexed_field_ids as execute
+    return execute(global_meta)

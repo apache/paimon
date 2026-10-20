@@ -91,21 +91,15 @@ class TableRead(PythonTableReadMixin, NativeTableReadMixin):
         output_projection=None,
         limit: Optional[int] = None,
     ):
-        from pypaimon.execution.python.read.merge_engine_support import check_supported
+        from pypaimon.read.merge_engine_support import check_sequence_field_valid
         from pypaimon.table.file_store_table import FileStoreTable
 
-        # Invalid configurations still fail immediately. Rust supports merge
-        # options outside the Python subset; defer only that capability check
-        # until a read actually needs the Python implementation.
-        self._python_merge_validation_pending = False
-        try:
-            check_supported(table)
-        except NotImplementedError:
-            if not table.options.native_read_enabled():
-                raise
-            self._python_merge_validation_pending = True
-
+        if table.is_primary_key_table:
+            check_sequence_field_valid(table)
+        self._python_merge_validation_pending = True
         self.table: FileStoreTable = table
+        if not table.options.native_read_enabled():
+            self._check_python_merge_supported()
         self.predicate = predicate
         self.read_type = read_type
         self.output_projection = output_projection

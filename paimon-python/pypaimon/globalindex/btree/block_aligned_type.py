@@ -15,21 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Aligned type for block."""
+"""Public imports for the shared B-tree file format."""
 
-from enum import Enum
+from pypaimon.globalindex.btree_format.block_aligned_type import (
+    BlockAlignedType,
+)
 
-
-class BlockAlignedType(Enum):
-    """Aligned type for block."""
-    
-    ALIGNED = 0
-    UNALIGNED = 1
-    
-    @classmethod
-    def from_byte(cls, b: int) -> 'BlockAlignedType':
-        """Create BlockAlignedType from byte value."""
-        for aligned_type in cls:
-            if aligned_type.value == b:
-                return aligned_type
-        raise ValueError(f"Illegal block aligned type: {b}")
+__all__ = [
+    'BlockAlignedType',
+]

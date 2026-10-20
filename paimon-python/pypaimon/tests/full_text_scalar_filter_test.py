@@ -108,7 +108,7 @@ def test_partition_and_data_predicates_keep_boolean_semantics(docs, predicate, e
 
 
 def test_partition_only_filter_keeps_existing_path(docs):
-    with patch("pypaimon.table.source.global_index_row_filter.matching_rows",
+    with patch("pypaimon.execution.python.read.search.global_index_row_filter.matching_rows",
                side_effect=AssertionError("partition-only data read")):
         assert len(docs.search("paimon", column="text", pre_filter="pt = 'a'").limit(10).to_list()) == 3
 
@@ -166,7 +166,7 @@ def test_commit_during_filter_read_keeps_execution_snapshot(docs):
         docs.update("id = 2", {"label": "changed"})
         return matching_rows(table, predicate, candidates, partition_filter, snapshot)
 
-    with patch("pypaimon.table.source.global_index_row_filter.matching_rows", verify):
+    with patch("pypaimon.execution.python.read.search.global_index_row_filter.matching_rows", verify):
         assert search.to_list() == [{"id": 2}]
     assert search.to_list() == []
 

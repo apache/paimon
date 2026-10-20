@@ -15,19 +15,22 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from dataclasses import replace
 from typing import Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.execution.native.read.plan import NativeTableScanMixin
 from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
 from pypaimon.read.auth_support import (
     authorize, latest_auth_fields, prune_scanner_by_auth, validate_auth_rules)
 from pypaimon.read.plan import Plan
-from pypaimon.read.query_auth_split import wrap_plan_with_auth
-from pypaimon.read.scan_config import _validate_scan_mode, _parse_incremental_timestamp_window
+from pypaimon.read.scan_config import (
+    _validate_scan_mode, _parse_incremental_timestamp_window, resolve_scan_snapshot_range)
 from pypaimon.read.scan_request import ScanRequest
 from pypaimon.read.scan_stats import ScanStats
+from pypaimon.utils.range import Range
 
 
 class TableScan(PythonTableScanMixin, NativeTableScanMixin):
@@ -49,11 +52,51 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
         self._read_type = None
         self._query_auth_fn = self.table.catalog_environment.table_query_auth(
             self.table.options, self.table.identifier)
-        self.file_scanner = self._create_file_scanner()
+        self._file_scanner = None
+        self._incremental_snapshot_range = resolve_scan_snapshot_range(self.table)
+        empty_incremental = (
+            self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+            and self._incremental_snapshot_range is None)
+        # Empty incremental scanners historically carry no row predicate or LIMIT.
+        self._scan_configuration = ScanRequest.for_table(
+            table, None if empty_incremental else predicate,
+            None if empty_incremental else limit, partition_predicate)
+
+    @property
+    def file_scanner(self):
+        """Create the Python scanner when callers explicitly request its API."""
+        if self._file_scanner is None:
+            scanner = self._create_file_scanner()
+            request = self._scan_configuration
+            if request.idx_of_this_subtask is not None:
+                scanner.with_shard(request.idx_of_this_subtask, request.number_of_para_subtasks)
+            if request.start_pos_of_this_subtask is not None:
+                scanner.with_slice(request.start_pos_of_this_subtask, request.end_pos_of_this_subtask)
+            if request.global_index_result is not None:
+                scanner.with_global_index_result(request.global_index_result)
+            if request.row_ranges is not None:
+                scanner.with_row_ranges([Range(start, end) for start, end in request.row_ranges])
+            if request.chunk_shuffle is not None:
+                scanner.with_chunk_shuffle(*request.chunk_shuffle)
+            self._file_scanner = scanner
+        return self._file_scanner
+
+    @file_scanner.setter
+    def file_scanner(self, scanner):
+        self._file_scanner = scanner
 
     def _scan_request(self) -> ScanRequest:
         """Capture current public scanner configuration for one preparation."""
-        scanner = self.file_scanner
+        scanner = self._file_scanner
+        if scanner is None:
+            return replace(
+                self._scan_configuration,
+                read_predicate=self.predicate,
+                read_limit=self.limit,
+                partition_filter=self.partition_predicate,
+                read_type=tuple(self._read_type) if self._read_type is not None else None,
+                incremental_snapshot_range=self._incremental_snapshot_range,
+            )
         row_ranges = getattr(scanner, '_row_ranges', None)
         chunk_shuffle = getattr(scanner, 'chunk_shuffle', None)
         return ScanRequest(
@@ -92,8 +135,8 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
             if native is not None:
                 return native
         auth_result = self.__auth_query()
-        if self._query_auth_fn is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
+        if self._query_auth_fn is not None and self._file_scanner is not None:
+            prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
         # The native planner bypasses the auth-aware file scanner. Resolve auth
         # before selecting a planning backend.
         if (not native_auth and auth_result is None and self._native_requested()
@@ -101,8 +144,7 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
             native = self._try_native_plan()
             if native is not None:
                 return native
-        plan = self.file_scanner.scan()
-        return wrap_plan_with_auth(auth_result, plan)
+        return self._python_plan(auth_result)
 
     def plan_all_files(self) -> Plan:
         """Plan matching files including L0 and all data-evolution column files.
@@ -117,15 +159,7 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
                 return plan
         if self.__auth_query(all_columns=True) is not None:
             raise TableNoPermissionException(self.table.identifier)
-        if self._query_auth_fn is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, None)
-        # Writer restore/overwrite must see L0 even when batch reads hide it.
-        skip_level0 = self.file_scanner.skip_level0
-        try:
-            self.file_scanner.skip_level0 = False
-            return self.file_scanner.scan()
-        finally:
-            self.file_scanner.skip_level0 = skip_level0
+        return self._python_plan_all_files()
 
     def __auth_query(self, all_columns=False):
         return authorize(self.table, self._query_auth_fn, None if all_columns else self._read_type,
@@ -145,38 +179,53 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
             if native is not None:
                 return native, native.stats()
         auth_result = self.__auth_query()
-        if self._query_auth_fn is not None:
-            prune_scanner_by_auth(self.table, self.file_scanner, auth_result)
+        if self._query_auth_fn is not None and self._file_scanner is not None:
+            prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
         if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
             native = self._try_native_plan()
             if native is not None:
                 return native, native.stats()
-        plan, stats = self.file_scanner.scan_with_stats()
-        return wrap_plan_with_auth(auth_result, plan), stats
+        return self._python_scan_with_stats(auth_result)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
-        self.file_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
+        if self._file_scanner is None:
+            self._scan_configuration = self._scan_configuration.with_shard(idx_of_this_subtask, number_of_para_subtasks)
+        else:
+            self._file_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self
 
     def with_slice(self, start_pos, end_pos) -> 'TableScan':
-        self.file_scanner.with_slice(start_pos, end_pos)
+        if self._file_scanner is None:
+            self._scan_configuration = self._scan_configuration.with_slice(start_pos, end_pos)
+        else:
+            self._file_scanner.with_slice(start_pos, end_pos)
         return self
 
     def with_global_index_result(self, result) -> 'TableScan':
-        self.file_scanner.with_global_index_result(result)
+        if self._file_scanner is None:
+            self._scan_configuration = self._scan_configuration.with_global_index_result(result)
+        else:
+            self._file_scanner.with_global_index_result(result)
         return self
 
     def with_row_ranges(self, row_ranges) -> 'TableScan':
-        self.file_scanner.with_row_ranges(row_ranges)
+        if self._file_scanner is None:
+            self._scan_configuration = self._scan_configuration.with_row_ranges(row_ranges)
+        else:
+            self._file_scanner.with_row_ranges(row_ranges)
         return self
 
     def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'TableScan':
-        self.file_scanner.with_chunk_shuffle(seed, chunk_size)
+        if self._file_scanner is None:
+            self._scan_configuration = self._scan_configuration.with_chunk_shuffle(seed, chunk_size)
+        else:
+            self._file_scanner.with_chunk_shuffle(seed, chunk_size)
         return self
 
     def _validate_scan_mode(self):
         _validate_scan_mode(self.table)
+
 
 __all__ = [
     "TableScan", "authorize", "latest_auth_fields", "validate_auth_rules",

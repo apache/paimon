@@ -29,13 +29,12 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.read.split_serializer import deserialize_split_v1
 from pypaimon.execution.native.table import (_partition_fields)
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.source.full_text_scan import FullTextScanPlan
-from pypaimon.table.source.primary_key_full_text_scan import (
+from pypaimon.table.source.search_types import (
+    FullTextScanPlan, VectorSearchScanPlan,
     PrimaryKeyFullTextScanPlan, PrimaryKeyFullTextSearchSplit,
+    PrimaryKeyVectorScanPlan, PrimaryKeyVectorSearchSplit,
 )
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
-from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan, PrimaryKeyVectorSearchSplit
-from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message_serializer import _index_from_row
 
@@ -129,12 +128,13 @@ def _result(table, value, primary_key):
 
 
 class _NativeScan:
-    def __init__(self, table, scan, full_text, primary_key, python, source_modes):
+    def __init__(self, table, scan, full_text, primary_key, python_factory, source_modes):
         self._table = table
         self._scan = scan
         self._full_text = full_text
         self._primary_key = primary_key
-        self._python = python
+        self._python_factory = python_factory
+        self._python_executor = None
         self._source_modes = source_modes
 
     def __getstate__(self):
@@ -144,24 +144,31 @@ class _NativeScan:
 
     def scan(self):
         if self._scan is None:
-            return self._python.scan()
+            if self._python_executor is None:
+                self._python_executor = self._python_factory()
+            return self._python_executor.scan()
         return _plan_from_native(self._table, self._scan.scan(), self._full_text, self._primary_key, self._source_modes)
 
 
 class _NativeRead:
-    def __init__(self, table, native, python, primary_key, source_modes):
+    def __init__(self, table, native, python_factory, primary_key, source_modes):
         self._table = table
         self._native = native
-        self._python = python
+        self._python_factory = python_factory
+        self._python_executor = None
         self._primary_key = primary_key
         self._source_modes = source_modes
         self._table_options = dict(table.options.options.to_map())
 
     def __getattr__(self, name):
-        python = self.__dict__.get('_python')
-        if python is None:
+        if name.startswith('__') or '_python_factory' not in self.__dict__:
             raise AttributeError(name)
-        return getattr(python, name)
+        return getattr(self._python_reader(), name)
+
+    def _python_reader(self):
+        if self._python_executor is None:
+            self._python_executor = self._python_factory()
+        return self._python_executor
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -173,7 +180,7 @@ class _NativeRead:
         if native is not None and self._native is not None:
             # Once execution starts, propagate errors without a second search.
             return _result(self._table, self._native.read_plan(native), self._primary_key)
-        reader = copy(self._python)
+        reader = copy(self._python_reader())
         if plan.snapshot() is not None:
             reader._table = reader._table._copy_with_snapshot(plan.snapshot())
         return reader.read_plan(plan)
@@ -182,7 +189,7 @@ class _NativeRead:
         native = self._native_plan(plan)
         if native is not None and self._native is not None:
             return [_result(self._table, result, False) for result in self._native.read_batch_plan(native)]
-        reader = copy(self._python)
+        reader = copy(self._python_reader())
         if plan.snapshot() is not None:
             reader._table = reader._table._copy_with_snapshot(plan.snapshot())
         return reader.read_batch_plan(plan)
@@ -206,42 +213,44 @@ def _source_modes(builder, full_text=False):
 
 def python_search_reader(reader):
     """Keep the existing Ray split workers independent of a live native reader."""
-    return reader._python if isinstance(reader, _NativeRead) else reader
+    return reader._python_reader() if isinstance(reader, _NativeRead) else reader
 
 
-def native_vector_scan(builder, python, batch=False):
+def native_vector_scan(builder, python_factory, batch=False):
     from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
     native = _native_vector_builder(builder, batch)
-    return python if native is None else _NativeScan(
-        builder._table, native.new_vector_search_scan(), False, builder._is_primary_key_vector_search(), python,
+    return python_factory() if native is None else _NativeScan(
+        builder._table, native.new_vector_search_scan(), False, builder._is_primary_key_vector_search(), python_factory,
         _source_modes(builder))
 
 
-def native_vector_read(builder, python, batch=False):
+def native_vector_read(builder, python_factory, batch=False):
     from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
     native = _native_vector_builder(builder, batch)
     if native is None:
-        return python
+        return python_factory()
     if batch:
         native.with_query_vectors(builder._query_vectors)
         reader = native.new_batch_vector_search_read()
     else:
         native.with_query_vector(builder._query_vector)
         reader = native.new_vector_search_read()
-    return _NativeRead(builder._table, reader, python, builder._is_primary_key_vector_search(), _source_modes(builder))
+    return _NativeRead(
+        builder._table, reader, python_factory, builder._is_primary_key_vector_search(), _source_modes(builder))
 
 
-def native_full_text_scan(builder, python):
+def native_full_text_scan(builder, python_factory):
     from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder, require_limit=False)
-    return python if native is None else _NativeScan(
+    return python_factory() if native is None else _NativeScan(
         builder._table, native.new_full_text_scan(), True,
-        builder._primary_key_full_text_definition() is not None, python, _source_modes(builder, True))
+        builder._primary_key_full_text_definition() is not None, python_factory, _source_modes(builder, True))
 
 
-def native_full_text_read(builder, python):
+def native_full_text_read(builder, python_factory):
     from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder)
-    return python if native is None else _NativeRead(
-        builder._table, native.new_full_text_read(), python, builder._primary_key_full_text_definition() is not None,
+    return python_factory() if native is None else _NativeRead(
+        builder._table, native.new_full_text_read(), python_factory,
+        builder._primary_key_full_text_definition() is not None,
         _source_modes(builder, True))

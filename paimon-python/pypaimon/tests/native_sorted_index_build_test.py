@@ -28,7 +28,7 @@ import pytest
 from pypaimon import Schema
 from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)

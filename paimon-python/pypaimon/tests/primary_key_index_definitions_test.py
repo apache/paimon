@@ -370,10 +370,10 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                 return []
 
         with mock.patch(
-                "pypaimon.table.source.primary_key_vector_scan."
+                "pypaimon.execution.python.read.search.primary_key_vector_scan."
                 "TimeTravelUtil.try_travel_to_snapshot",
                 return_value=snapshot), mock.patch(
-                "pypaimon.table.source.primary_key_vector_scan.IndexFileHandler",
+                "pypaimon.execution.python.read.search.primary_key_vector_scan.IndexFileHandler",
                 _IndexHandler):
             plan = PrimaryKeyVectorScan(
                 _Table(), schema.fields[0], index_type="vindex").scan()

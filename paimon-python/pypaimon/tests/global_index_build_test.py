@@ -29,30 +29,30 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
-from pypaimon.globalindex.build_plan import (
+from pypaimon.execution.python.globalindex.build_plan import (
     filter_non_indexable_splits as _filter_non_indexable_splits,
     split_by_global_index_shard as _split_by_global_index_shard,
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
 from pypaimon import Schema
 from pypaimon.common.json_util import JSON
-from pypaimon.globalindex.bitmap.bitmap_index_writer import BITMAP_IDENTIFIER
+from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import BITMAP_IDENTIFIER
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
-from pypaimon.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
+from pypaimon.globalindex.btree_format.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text_options import (
     FULL_TEXT_IDENTIFIER,
     NativeFullTextIndexOptions,
 )
 from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
-from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
+from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
     _iter_training_batches,
     native_options,
     train_sample_ratio,
 )
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -1474,7 +1474,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         self.generator = generate()
         reader = pa.RecordBatchReader.from_batches(self.schema, self.generator)
         self.read._new_arrow_batch_reader.return_value = reader, self.generator
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=[
             (_FakeSplit([]), Range(10, 19)),
         ]), patch(module + '._to_index_manifest_entries', return_value=[]):
@@ -1517,7 +1517,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             written.extend(zip(vectors.to_pylist(), row_ids.to_pylist()))
 
         self.writer.write_batch.side_effect = write_batch
-        with patch('pypaimon.globalindex.create_global_index.ADD_BATCH_SIZE', 2):
+        with patch('pypaimon.execution.python.globalindex.create_global_index.ADD_BATCH_SIZE', 2):
             self._build([
                 self._batch([], []),
                 self._batch([[9.0], [10.0], None, [12.0]], [9, 10, 11, 12]),
@@ -1618,7 +1618,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                     active -= 1
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards):
             messages = self.builder._build_generic_index(
                 [], [], Mock(), self.read, '/unused')
@@ -1658,7 +1658,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             raise RuntimeError('injected shard failure')
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(
@@ -1709,7 +1709,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                     raise RuntimeError("can't start new thread")
             return real_start(thread)
 
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 patch.object(threading.Thread, 'start', failing_start), \
                 self.assertRaisesRegex(RuntimeError, "can't start new thread"):
@@ -1751,7 +1751,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             raise RuntimeError('injected shard failure')
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(

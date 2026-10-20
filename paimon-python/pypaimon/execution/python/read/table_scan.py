@@ -19,65 +19,29 @@
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.scan_config import _parse_incremental_timestamp_window
+from pypaimon.read.auth_support import prune_scanner_by_auth
+from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
 
 
 class PythonTableScanMixin:
     def _create_file_scanner(self) -> FileScanner:
-        self._incremental_snapshot_range = None
         options = self.table.options.options
         snapshot_manager = self.table.snapshot_manager()
         manifest_list_manager = ManifestListManager(self.table)
-
-        self._validate_scan_mode()
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil, SCAN_KEYS
         has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
         has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
 
-        if has_incremental and has_time_travel:
-            raise ValueError(
-                "incremental-between-timestamp cannot be used together with "
-                "point-in-time scan options: %s" % SCAN_KEYS
-            )
-
         if has_incremental:
-            start_timestamp, end_timestamp = _parse_incremental_timestamp_window(
-                options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
-            latest_snapshot = snapshot_manager.get_latest_snapshot()
-            earliest_snapshot = snapshot_manager.try_get_earliest_snapshot() if latest_snapshot is not None else None
-            if earliest_snapshot is None or latest_snapshot is None:
+            if self._incremental_snapshot_range is None:
                 return FileScanner(
                     self.table,
                     lambda: ([], None),
                     partition_predicate=self.partition_predicate,
                 )
-            if start_timestamp > end_timestamp:
-                raise ValueError(
-                    "Ending timestamp %s should be >= starting timestamp %s."
-                    % (end_timestamp, start_timestamp))
-            if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
-                    or end_timestamp < earliest_snapshot.time_millis):
-                return FileScanner(
-                    self.table,
-                    lambda: ([], None),
-                    partition_predicate=self.partition_predicate,
-                )
-
-            starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
-            earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
-
-            # If earliest_snapshot.time_millis > start_timestamp we should include the earliest_snapshot
-            if starting_snapshot is None or (earliest_snapshot and earliest_snapshot.time_millis > start_timestamp):
-                start_id = earliest_snapshot.id - 1 if earliest_snapshot else -1
-            else:
-                start_id = starting_snapshot.id
-
-            end_snapshot = snapshot_manager.earlier_or_equal_time_mills(end_timestamp)
-            latest_snapshot = snapshot_manager.get_latest_snapshot()
-            end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
-            self._incremental_snapshot_range = (start_id, end_id)
+            start_id, end_id = self._incremental_snapshot_range
             # Java's AUTO mode uses physical changelogs when a producer is
             # configured, and APPEND deltas otherwise.
             changelog = self.table.options.changelog_producer() != ChangelogProducer.NONE
@@ -140,3 +104,26 @@ class PythonTableScanMixin:
             partition_predicate=self.partition_predicate,
             skip_level0=self.table.options.batch_scan_skip_level0(),
         )
+
+    def _python_scanner(self, auth_result):
+        scanner = self.file_scanner
+        if self._query_auth_fn is not None:
+            prune_scanner_by_auth(self.table, scanner, auth_result)
+        return scanner
+
+    def _python_plan(self, auth_result):
+        return wrap_plan_with_auth(auth_result, self._python_scanner(auth_result).scan())
+
+    def _python_plan_all_files(self):
+        scanner = self._python_scanner(None)
+        # Writer restore/overwrite must see L0 even when batch reads hide it.
+        skip_level0 = scanner.skip_level0
+        try:
+            scanner.skip_level0 = False
+            return scanner.scan()
+        finally:
+            scanner.skip_level0 = skip_level0
+
+    def _python_scan_with_stats(self, auth_result):
+        plan, stats = self._python_scanner(auth_result).scan_with_stats()
+        return wrap_plan_with_auth(auth_result, plan), stats

@@ -20,10 +20,10 @@
 import unittest
 from unittest.mock import MagicMock
 
-from pypaimon.globalindex.btree.block_handle import BlockHandle
-from pypaimon.globalindex.btree.block_entry import BlockEntry
+from pypaimon.globalindex.btree_format.block_handle import BlockHandle
+from pypaimon.globalindex.btree_format.block_entry import BlockEntry
 from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
-from pypaimon.globalindex.btree.sst_file_reader import SstFileIterator
+from pypaimon.execution.python.globalindex.btree.sst_file_reader import SstFileIterator
 
 
 def _encode_var_len(value):

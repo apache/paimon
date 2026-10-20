@@ -30,7 +30,7 @@ def build_native_global_index(builder, partition_filter):
     Build errors propagate: a failed native build must not start a second build.
     """
     table = builder._table
-    from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
+    from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
     if (builder._index_type not in ('btree', 'bitmap', 'full-text') + tuple(VINDEX_IDENTIFIERS)
             or not table.options.native_write_enabled()
             or (table.options.deletion_vectors_enabled() and builder._index_type == 'full-text')
@@ -52,7 +52,7 @@ def build_native_global_index(builder, partition_filter):
         options.update({'full-text.' + key: value for key, value in
                         NativeFullTextIndexOptions.from_options(builder._options.to_map()).to_native_options().items()})
     elif builder._index_type in VINDEX_IDENTIFIERS:
-        from pypaimon.globalindex.vindex.vindex_vector_index_writer import native_options, train_sample_ratio
+        from pypaimon.globalindex.vindex_options import native_options, train_sample_ratio
         column = builder._index_columns[0]
         # Reuse the Java-compatible option mapping; Rust's low-level builder also
         # accepts native aliases which Python's public API deliberately ignores.

@@ -15,9 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Compatibility alias for sorted global index file pruning."""
+"""Public imports for the Python execution implementation."""
 
-from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
+from pypaimon.execution.python.globalindex.btree.btree_file_meta_selector import (
+    BTreeFileMetaSelector,
+)
 
-
-BTreeFileMetaSelector = SortedFileMetaSelector
+__all__ = [
+    'BTreeFileMetaSelector',
+]

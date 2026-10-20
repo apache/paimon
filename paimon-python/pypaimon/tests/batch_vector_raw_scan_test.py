@@ -127,7 +127,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         original_generator = TableRead._arrow_batch_generator
         generators = []
         batch_sizes = []
-        module = 'pypaimon.table.source.vector_search_read'
+        module = 'pypaimon.execution.python.read.search.vector_search_read'
         from pypaimon.table.source.vector_search_read import _compute_scores
 
         def batches(table_read, splits):

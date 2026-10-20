@@ -152,7 +152,7 @@ def test_java_primary_key_raw_only_uses_column_metric(catalog, metric, expected_
 
 def test_java_primary_key_vector_refinement_matches_scalar(catalog):
     from unittest import mock
-    from pypaimon.table.source import vector_search_read as scoring
+    from pypaimon.execution.python.read.search import vector_search_read as scoring
 
     _require_native("paimon_vindex")
     table = catalog.get_table("default.test_pk_vector_golden")
@@ -176,7 +176,7 @@ def test_java_primary_key_vector_refinement_matches_scalar(catalog):
 def test_java_primary_key_raw_vectors_match_scalar(catalog):
     from dataclasses import replace
     from unittest import mock
-    from pypaimon.table.source import vector_search_read as scoring
+    from pypaimon.execution.python.read.search import vector_search_read as scoring
     from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
 
     table = catalog.get_table("default.test_pk_vector_golden")

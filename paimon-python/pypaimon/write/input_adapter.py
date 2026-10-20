@@ -78,7 +78,7 @@ def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_ar
 
 def postpone_distributed_write_options(table, bucket_plan, overwrite):
     """Build a distributed bucket plan before worker writers receive data."""
-    from pypaimon.write.postpone_bucket import PostponeBucketPlanner
-    return {'postpone_bucket_planner': PostponeBucketPlanner(
+    from pypaimon.execution.dispatch import create_postpone_bucket_planner
+    return {'postpone_bucket_planner': create_postpone_bucket_planner(
         table, known_num_buckets=(bucket_plan.as_dict() if bucket_plan is not None
                                   else {} if overwrite else None))}
