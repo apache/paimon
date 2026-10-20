@@ -18,10 +18,9 @@
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
@@ -30,20 +29,9 @@ from pypaimon.write.native_commit import (
 from pypaimon.write.row_utils import require_columns, row_to_named_values, row_values_to_arrow_table
 
 
-def _native_partition_types_supported(schema, partition_keys, legacy_partition_name=True):
-    """Partition keys which Rust can encode and use to locate existing files."""
-    # Java's legacy byte[].toString() contains an allocation identity, so binary
-    # partitions only have portable names with the cast-based option.
-    return not legacy_partition_name or not any(
-        pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
-        or pa.types.is_fixed_size_binary(data_type)
-        for data_type in (schema.field(name).type for name in partition_keys))
-
-
 def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     # DV tables flush normal level-0 files using the configured merge engine.
     # Batch visibility is controlled by deletion-vectors.merge-on-read.
     if (not native_runtime_available()
@@ -57,8 +45,6 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
                 and table.options.changelog_producer() == ChangelogProducer.INPUT
                 and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
-            or not _native_partition_types_supported(
-                schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME))
             or table.options.video_frame_fields()):
         return None
     native_table = create_native_write_table(table)
@@ -226,10 +212,10 @@ class NativeTableWrite:
         self._native_writer.write_arrow(data, bucket)
 
     def _prepare_native_arrow_data(self, data):
-        data = normalize_arrow_strings(data)
-        target = self._table_schema if data.schema.names == self._table_schema.names else self._schema
-        data = normalize_arrow_write_nullability(data, target)
-        compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True)
+        # Core resolves row kinds and filters ignored events before inspecting
+        # payload values. This facade checks only the logical Arrow schema.
+        compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True,
+                          check_nested_nullability=False)
         if not (arrow_schemas_compatible(data.schema, self._schema, **compatible)
                 or (self._write_cols is not None
                     and arrow_schemas_compatible(data.schema, self._table_schema, **compatible))):
@@ -244,7 +230,9 @@ class NativeTableWrite:
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
             return self._python_writer.write_pandas(dataframe)
-        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=self._schema))
+        from pypaimon.write.table_write import _pandas_write_schema
+        transport = _pandas_write_schema(self.table, self._schema)
+        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=transport))
 
     def write_ray(self, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
                   hash_fixed_precluster='auto', static_partition=None):

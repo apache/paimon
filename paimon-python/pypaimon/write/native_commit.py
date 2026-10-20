@@ -51,13 +51,6 @@ def create_native_commit(table, commit_user, overwrite_partition=None, *, batch=
     """Return a native committer only when its publication protocol matches Python."""
     if not _rest_catalog_supported(table) or not native_runtime_available():
         return None
-    from pypaimon.common.options.core_options import CoreOptions
-    from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.native_write import _native_partition_types_supported
-    if not _native_partition_types_supported(
-            PyarrowFieldParser.from_paimon_schema(table.table_schema.fields), table.partition_keys,
-            table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
-        return None
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
@@ -94,9 +87,7 @@ def _rest_catalog_supported(table):
             and environment.supports_version_management
             and _rest_source_uuid(table) is not None
             and context is not None
-            and context.options is not None
-            and all(getattr(context, attr, None) is None for attr in (
-                'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')))
+            and context.options is not None)
 
 
 def _rest_source_uuid(table):

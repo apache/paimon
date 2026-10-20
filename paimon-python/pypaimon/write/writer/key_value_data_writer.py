@@ -298,6 +298,8 @@ class KeyValueDataWriter(DataWriter):
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
         """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
         num_rows = data.num_rows
+        from pypaimon.write.row_kind import write_value_schema
+        value_schema = write_value_schema(self.table, data.schema)
 
         new_arrays = []
         new_fields = []
@@ -325,7 +327,7 @@ class KeyValueDataWriter(DataWriter):
             if data.schema.field(i).name == SpecialFields.VALUE_KIND.name:
                 continue
             new_arrays.append(data.column(i))
-            new_fields.append(data.schema.field(i))
+            new_fields.append(value_schema.field(i))
 
         return pa.RecordBatch.from_arrays(new_arrays, schema=pa.schema(new_fields))
 

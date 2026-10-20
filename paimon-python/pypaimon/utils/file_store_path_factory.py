@@ -163,7 +163,7 @@ class FileStorePathFactory:
         for i, value in enumerate(partition):
             data_type = self.partition_types[i] if self.partition_types is not None else None
             type_name = str(data_type).split('(', 1)[0].split()[0]
-            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES'):
                 value = _decode_java_utf8(value)
             if value is not None and _is_ltz_type(str(data_type).upper()):
                 # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
@@ -189,7 +189,9 @@ class FileStorePathFactory:
             elif self.legacy_partition_name and type_name.startswith('TIME'):
                 text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
                            + value.microsecond // 1000)
-            elif type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+            elif type_name in ('BINARY', 'VARBINARY', 'BYTES'):
+                # Java uses the binary-to-string cast even in legacy mode:
+                # byte[].toString contains a fresh allocation identity.
                 text = value
             elif data_type is not None and not _is_unsupported(data_type):
                 text = cast_value_to_string(value, data_type)
