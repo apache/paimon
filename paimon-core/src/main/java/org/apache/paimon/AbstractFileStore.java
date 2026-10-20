@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
+import org.apache.paimon.append.dataevolution.DataEvolutionCommitChangesRewriter;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
@@ -311,26 +312,38 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (tableRollback != null) {
             rollback = new CommitRollback(tableRollback);
         }
-        return new FileStoreCommitImpl(
-                snapshotCommit,
-                fileIO,
-                schemaManager,
-                tableName,
-                commitUser,
-                partitionType,
-                options,
-                pathFactory(),
-                snapshotManager,
-                manifestFileFactory(),
-                manifestListFactory(),
-                indexManifestFileFactory(),
-                this::newScan,
-                newStatsFileHandler(),
-                bucketMode(),
-                createCommitPreCallbacks(table),
-                createCommitCallbacks(commitUser, table),
-                conflictDetectFactory,
-                rollback);
+        FileStoreCommitImpl commit =
+                new FileStoreCommitImpl(
+                        snapshotCommit,
+                        fileIO,
+                        schemaManager,
+                        tableName,
+                        commitUser,
+                        partitionType,
+                        options,
+                        pathFactory(),
+                        snapshotManager,
+                        manifestFileFactory(),
+                        manifestListFactory(),
+                        indexManifestFileFactory(),
+                        this::newScan,
+                        newStatsFileHandler(),
+                        bucketMode(),
+                        createCommitPreCallbacks(table),
+                        createCommitCallbacks(commitUser, table),
+                        conflictDetectFactory,
+                        rollback);
+        if (options.dataEvolutionEnabled()) {
+            commit.withCommitChangesRewriter(
+                    new DataEvolutionCommitChangesRewriter(
+                            fileIO,
+                            pathFactory(),
+                            schemaManager,
+                            options,
+                            snapshotManager,
+                            indexManifestFileFactory().create()));
+        }
+        return commit;
     }
 
     @Override

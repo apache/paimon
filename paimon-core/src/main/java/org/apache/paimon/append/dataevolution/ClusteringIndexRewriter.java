@@ -66,6 +66,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.materializedRowIdRanges;
@@ -91,7 +92,7 @@ public final class ClusteringIndexRewriter {
             Set<String> mappedClusteringOutputs,
             Set<String> rowIdPreservingOutputs,
             long newSnapshotId,
-            List<Path> createdFiles)
+            Consumer<Path> createdFiles)
             throws IOException {
         if (indexFiles.stream()
                 .noneMatch(
@@ -383,12 +384,12 @@ public final class ClusteringIndexRewriter {
     }
 
     private static GlobalIndexFileReadWrite trackingIndexIO(
-            FileIO fileIO, IndexPathFactory indexPath, List<Path> createdFiles) {
+            FileIO fileIO, IndexPathFactory indexPath, Consumer<Path> createdFiles) {
         return new GlobalIndexFileReadWrite(fileIO, indexPath) {
             @Override
             public PositionOutputStream newOutputStream(String fileName) throws IOException {
                 // Track before opening: failed writes can leave a partial file without a result.
-                createdFiles.add(indexPath.toPath(fileName));
+                createdFiles.accept(indexPath.toPath(fileName));
                 return super.newOutputStream(fileName);
             }
         };

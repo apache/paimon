@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCommitChangesRewriter;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
@@ -1021,16 +1022,32 @@ public class FileStoreCommitTest {
                                 otherBucketDelete,
                                 nonGlobalDelete));
 
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            CommitChanges refreshed =
-                    commit.compactChangesProvider(
-                                    changes, Collections.singleton(Pair.of(partition, 0)))
-                            .provide(null);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        2,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.singletonList(
+                                        addFile(partition, 0, 2, 0).file().assignFirstRowId(0)),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+        DataEvolutionCommitChangesRewriter rewriter =
+                new DataEvolutionCommitChangesRewriter(
+                        store.fileIO(),
+                        store.pathFactory(),
+                        new FileSystemSchemaManager(store.fileIO(), store.options().path()),
+                        store.options(),
+                        store.snapshotManager(),
+                        store.indexManifestFileFactory().create());
+        CommitChanges refreshed =
+                rewriter.compactChangesProvider(changes, Collections.singletonList(message), false)
+                        .provide(null);
 
-            // Global-index removals from earlier preparation are replaced for the entire bucket,
-            // even if their ranges do not overlap the materialized input.
-            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete, nonGlobalDelete);
-        }
+        // Global-index removals from earlier preparation are replaced for the entire bucket,
+        // even if their ranges do not overlap the materialized input.
+        assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete, nonGlobalDelete);
     }
 
     private static IndexManifestEntry globalIndexDeleteEntry(
@@ -3057,40 +3074,52 @@ public class FileStoreCommitTest {
             List<CommitCallback> callbacks,
             List<CommitPreCallback> preCallbacks) {
         String tableName = store.options().path().getName();
-        return new FileStoreCommitImpl(
-                snapshotCommit,
-                store.fileIO(),
-                new FileSystemSchemaManager(store.fileIO(), store.options().path()),
-                tableName,
-                commitUser,
-                store.partitionType(),
-                options,
-                store.pathFactory(),
-                store.snapshotManager(),
-                store.manifestFileFactory(),
-                store.manifestListFactory(),
-                store.indexManifestFileFactory(),
-                store::newScan,
-                store.newStatsFileHandler(),
-                store.bucketMode(),
-                preCallbacks,
-                callbacks,
-                scanner ->
-                        ConflictDetection.create(
-                                tableName,
-                                commitUser,
-                                store.partitionType(),
-                                store.pathFactory(),
-                                store.newKeyComparator(),
-                                store.bucketMode(),
-                                options.deletionVectorsEnabled(),
-                                dataEvolutionEnabled,
-                                options.dataEvolutionNestedFieldEnabled(),
-                                options.pkClusteringOverride(),
-                                store.newIndexFileHandler(),
-                                store.snapshotManager(),
-                                scanner),
-                null);
+        FileStoreCommitImpl commit =
+                new FileStoreCommitImpl(
+                        snapshotCommit,
+                        store.fileIO(),
+                        new FileSystemSchemaManager(store.fileIO(), store.options().path()),
+                        tableName,
+                        commitUser,
+                        store.partitionType(),
+                        options,
+                        store.pathFactory(),
+                        store.snapshotManager(),
+                        store.manifestFileFactory(),
+                        store.manifestListFactory(),
+                        store.indexManifestFileFactory(),
+                        store::newScan,
+                        store.newStatsFileHandler(),
+                        store.bucketMode(),
+                        preCallbacks,
+                        callbacks,
+                        scanner ->
+                                ConflictDetection.create(
+                                        tableName,
+                                        commitUser,
+                                        store.partitionType(),
+                                        store.pathFactory(),
+                                        store.newKeyComparator(),
+                                        store.bucketMode(),
+                                        options.deletionVectorsEnabled(),
+                                        dataEvolutionEnabled,
+                                        options.dataEvolutionNestedFieldEnabled(),
+                                        options.pkClusteringOverride(),
+                                        store.newIndexFileHandler(),
+                                        store.snapshotManager(),
+                                        scanner),
+                        null);
+        if (dataEvolutionEnabled) {
+            commit.withCommitChangesRewriter(
+                    new DataEvolutionCommitChangesRewriter(
+                            store.fileIO(),
+                            store.pathFactory(),
+                            new FileSystemSchemaManager(store.fileIO(), store.options().path()),
+                            options,
+                            store.snapshotManager(),
+                            store.indexManifestFileFactory().create()));
+        }
+        return commit;
     }
 
     private ManifestCommittable indexCommittable(
