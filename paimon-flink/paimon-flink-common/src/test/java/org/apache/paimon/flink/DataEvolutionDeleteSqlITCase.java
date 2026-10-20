@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -347,6 +348,204 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                         Row.of(30, nextRowId + 2));
         // The sort-key update also changed indexed values, so old keys cannot be reused.
         assertThat(scalarIndexFiles(table, indexType, "A")).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"btree,global-sort", "bitmap,local-sort"})
+    public void testIncrementalClusteringCompactsRepeatedColumnUpdates(
+            String indexType, String mode) throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql(
+                "ALTER TABLE T SET ('write-only' = 'true', "
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', 'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = '"
+                        + mode
+                        + "', 'compaction.min.file-num' = '5', "
+                        + "'scan.parallelism' = '1', 'sink.parallelism' = '1')");
+        sql("INSERT INTO T VALUES (3, 'three', 'A'), (1, 'one', 'A'), (2, 'two', 'A')");
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+        createIdIndex(indexType);
+        sql("DELETE FROM T WHERE id = 2");
+
+        FileStoreTable table = paimonTable("T");
+        DataFileMeta base = table.store().newScan().plan().files().get(0).file();
+        List<String> indexes = scalarIndexFiles(table, indexType, "A");
+        List<Row> originalIds = sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id");
+        for (int version = 0; version < 4; version++) {
+            writePartialGroup(
+                    table,
+                    "name",
+                    base.nonNullFirstRowId(),
+                    "one-" + version,
+                    "two-" + version,
+                    "three-" + version);
+        }
+        Snapshot before = table.latestSnapshot().get();
+        List<String> beforeFiles = plannedFiles(table);
+        assertThat(beforeFiles).hasSize(5);
+
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+
+        Snapshot compacted = table.latestSnapshot().get();
+        assertThat(compacted.id()).isEqualTo(before.id() + 1);
+        assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(compacted.nextRowId()).isEqualTo(before.nextRowId());
+        List<DataFileMeta> afterFiles =
+                table.store().newScan().plan().files().stream()
+                        .map(entry -> entry.file())
+                        .collect(Collectors.toList());
+        assertThat(afterFiles)
+                .singleElement()
+                .satisfies(
+                        file -> {
+                            assertThat(file.nonNullRowIdRange())
+                                    .isEqualTo(base.nonNullRowIdRange());
+                            assertThat(file.level()).isEqualTo(base.level());
+                            assertThat(file.rowCount()).isEqualTo(3);
+                        });
+        assertThat(plannedFiles(table)).doesNotContainAnyElementsOf(beforeFiles);
+        assertThat(scalarIndexFiles(table, indexType, "A")).isEqualTo(indexes);
+        assertThat(deletionVectorCardinality(table)).isEqualTo(1L);
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id"))
+                .containsExactlyElementsOf(originalIds);
+        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')");
+        assertThat(sql("SELECT id, name FROM T WHERE id IN (1, 2, 3) ORDER BY id"))
+                .containsExactly(Row.of(1, "one-3"), Row.of(3, "three-3"));
+
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(compacted.id());
+        assertThat(plannedFiles(table)).containsExactly(afterFiles.get(0).fileName());
+        assertThat(scalarIndexFiles(table, indexType, "A")).isEqualTo(indexes);
+
+        // The compacted file contains all columns, but its id values still predate the index.
+        // Retaining per-column sequences lets later clustering reuse that valid index.
+        sql("INSERT INTO T VALUES (4, 'four', 'A')");
+        Snapshot beforeClustering = table.latestSnapshot().get();
+
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(beforeClustering.id() + 1);
+        assertThat(table.latestSnapshot().get().nextRowId())
+                .isEqualTo(beforeClustering.nextRowId() + 3);
+        assertThat(scalarIndexFiles(table, indexType, "A"))
+                .isNotEmpty()
+                .doesNotContainAnyElementsOf(indexes);
+        assertThat(sql("SELECT id, name FROM T WHERE id IN (1, 2, 3) ORDER BY id"))
+                .containsExactly(Row.of(1, "one-3"), Row.of(3, "three-3"));
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, beforeClustering.nextRowId()),
+                        Row.of(3, beforeClustering.nextRowId() + 1),
+                        Row.of(4, beforeClustering.nextRowId() + 2));
+        assertThat(deletionVectorCardinality(table)).isZero();
+    }
+
+    @Test
+    public void testIncrementalClusteringCombinesCompactionInSamePartition() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql(
+                "ALTER TABLE T SET ('write-only' = 'true', "
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', 'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = 'global-sort', "
+                        + "'compaction.min.file-num' = '5', "
+                        + "'num-sorted-run.compaction-trigger' = '2', "
+                        + "'compaction.max-size-amplification-percent' = '10000', "
+                        + "'compaction.size-ratio' = '0', 'file.compression' = 'none', "
+                        + "'target-file-row-num' = '3', "
+                        + "'scan.parallelism' = '1', 'sink.parallelism' = '1')");
+        FileStoreTable table = paimonTable("T");
+        // A large clustered run must stay outside the minor clustering candidate. Its column
+        // versions still require normal compaction in the same partition and commit.
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int id : new int[] {3, 1, 2}) {
+                Random random = new Random(id);
+                StringBuilder name = new StringBuilder(65536);
+                for (int i = 0; i < 65536; i++) {
+                    name.append((char) ('a' + random.nextInt(26)));
+                }
+                write.write(
+                        GenericRow.of(
+                                id,
+                                BinaryString.fromString(name.toString()),
+                                BinaryString.fromString("A")));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+        createIdIndex("btree");
+        sql("DELETE FROM T WHERE id = 2");
+        DataFileMeta base = table.store().newScan().plan().files().get(0).file();
+        List<String> retainedIndexes = scalarIndexFiles(table, "btree", "A");
+        List<Row> originalIds = sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id");
+        for (int version = 0; version < 4; version++) {
+            writePartialGroup(
+                    table,
+                    "name",
+                    base.nonNullFirstRowId(),
+                    "one-" + version,
+                    "two-" + version,
+                    "three-" + version);
+        }
+        sql("INSERT INTO T VALUES (6, 'six', 'A'), (4, 'four', 'A'), (5, 'five', 'A')");
+        sql("INSERT INTO T VALUES (9, 'nine', 'A'), (7, 'seven', 'A'), (8, 'eight', 'A')");
+        createIdIndex("btree");
+        List<String> allIndexes = scalarIndexFiles(table, "btree", "A");
+        assertThat(allIndexes)
+                .containsAll(retainedIndexes)
+                .hasSizeGreaterThan(retainedIndexes.size());
+        List<String> rewrittenIndexes = new ArrayList<>(allIndexes);
+        rewrittenIndexes.removeAll(retainedIndexes);
+        Snapshot before = table.latestSnapshot().get();
+        List<String> beforeFiles = plannedFiles(table);
+        assertThat(beforeFiles).hasSize(7);
+
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'minor')");
+
+        Snapshot compacted = table.latestSnapshot().get();
+        assertThat(compacted.id()).isEqualTo(before.id() + 1);
+        assertThat(compacted.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(compacted.nextRowId()).isEqualTo(before.nextRowId() + 6);
+        List<DataFileMeta> afterFiles =
+                table.store().newScan().plan().files().stream()
+                        .map(entry -> entry.file())
+                        .collect(Collectors.toList());
+        assertThat(afterFiles).hasSize(3);
+        assertThat(afterFiles)
+                .filteredOn(file -> file.nonNullFirstRowId() == base.nonNullFirstRowId())
+                .singleElement()
+                .satisfies(
+                        file -> {
+                            assertThat(file.level()).isEqualTo(base.level());
+                            assertThat(file.nonNullRowIdRange())
+                                    .isEqualTo(base.nonNullRowIdRange());
+                        });
+        assertThat(plannedFiles(table)).doesNotContainAnyElementsOf(beforeFiles);
+        assertThat(scalarIndexFiles(table, "btree", "A"))
+                .containsAll(retainedIndexes)
+                .doesNotContainAnyElementsOf(rewrittenIndexes);
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking WHERE id <= 3 ORDER BY id"))
+                .containsExactlyElementsOf(originalIds);
+        assertThat(sql("SELECT _ROW_ID FROM T$row_tracking WHERE id >= 4"))
+                .hasSize(6)
+                .allSatisfy(
+                        row ->
+                                assertThat((Long) row.getField(0))
+                                        .isGreaterThanOrEqualTo(before.nextRowId()));
+        assertThat(deletionVectorCardinality(table)).isEqualTo(1L);
+        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')");
+        assertThat(sql("SELECT id, name FROM T WHERE id IN (1, 2, 3, 4, 9) ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, "one-3"),
+                        Row.of(3, "three-3"),
+                        Row.of(4, "four"),
+                        Row.of(9, "nine"));
     }
 
     @ParameterizedTest
@@ -758,6 +957,14 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.create_global_index(`table` => 'default.T', "
                         + "index_column => 'name', index_type => 'btree')");
+    }
+
+    private void createIdIndex(String indexType) {
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "index_column => 'id', index_type => '"
+                        + indexType
+                        + "')");
     }
 
     private void createTable() {

@@ -138,6 +138,8 @@ all table partitions become globally ordered after an incremental run.
 
 Data Evolution uses the same sort modes. Its readers merge the latest column values and apply deletion vectors
 for complete selected file groups before sorting. The rewritten rows receive new row IDs at commit time.
+Already-clustered groups with accumulated non-clustering column versions can instead be compacted in the same job,
+preserving their row IDs and logical deletes; see [Data Evolution clustering](../multimodal-table/data-evolution-maintenance#incremental-clustering).
 
 ## Run Incremental Clustering
 

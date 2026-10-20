@@ -184,8 +184,15 @@ before the existing Spark or Flink clustering pipeline sorts the surviving rows
 and writes new normal files with new row IDs. Unselected groups keep their row IDs.
 The output records the clustering columns and level for subsequent incremental
 selection. Updating only non-clustering columns does not make an already clustered
-group eligible again: its row order remains valid, so even a full clustering call
-can skip it and preserve its row IDs and indexes on unchanged columns.
+group require sorting again: its row order remains valid. Unselected groups with
+at least `compaction.min.file-num` normal files (default 5) are instead compacted
+within the same job and snapshot. This merges their latest column values while
+preserving row IDs, clustering level, logical deletes, and indexes on unchanged
+columns. If minor selection skips a group whose sorting order is no longer
+valid, column-version compaction keeps it at level 0 for later clustering.
+Each such task handles one complete row-ID group; adjacent groups are
+not combined because row-ID order alone does not prove clustering-key order.
+Groups below the threshold can be skipped even by a full clustering call.
 Updating a clustering column
 makes the group eligible again. When a group is selected, all its column versions
 are rewritten together, including newer values of non-clustering columns.
@@ -203,11 +210,15 @@ CALL sys.compact(table => 'default.target_table', compact_strategy => 'minor');
 ```
 
 Use the corresponding Flink `ALTER TABLE ... SET` syntax and run the compact job
-in batch mode. Explicit compact jobs use clustering while this option is enabled.
-To consolidate column versions while preserving row IDs, disable clustering for
-the compact invocation with `options => 'clustering.incremental=false'`.
+in batch mode. Explicit compact jobs combine clustering and column-version
+compaction while this option is enabled. A group selected for clustering is
+rewritten only once. To run ordinary Data Evolution compaction across adjacent
+row-ID groups, disable clustering for the invocation with
+`options => 'clustering.incremental=false'`.
 
-Clustering removes the applied deletion vectors. Flink clustering also rewrites
+The sorting path removes the applied deletion vectors; column-version compaction
+retains logical deletes and moves their vectors to the replacement files.
+Flink clustering also rewrites
 B-tree and bitmap index files with the new row IDs, reusing their stored keys.
 Indexes outside the rewritten row-ID ranges are preserved, including those in
 the same partition. Partially indexed data retains its exact coverage after sorting.
@@ -219,8 +230,8 @@ The job records the old row IDs alongside each output file so that concurrent
 index creation and optimistic commit retries use the final assigned row IDs.
 
 Indexes with stale keys after indexed-column updates, and affected index types
-without RowID rewrite support, are dropped. Spark clustering currently drops
-global indexes in the affected partitions. Rebuild dropped indexes, or use
+without RowID rewrite support, are dropped. Spark clustering drops index files
+whose coverage intersects the row-ID ranges selected for sorting. Rebuild dropped indexes, or use
 `scalar-index.search-mode = full` for complete scalar query results while part
 of the table remains unindexed.
 Concurrent updates or deletes that overlap the selected row-ID groups cause
@@ -237,7 +248,7 @@ the previous files until expiration.
 | Logical delete | Hides IDs without shifting the remaining rows. |
 | Ordinary Data Evolution compaction | Preserves IDs, but may change file-group boundaries. |
 | Deletion-vector materialization | Assigns new IDs to surviving rows in the rewritten ranges. |
-| Data Evolution incremental clustering | Assigns new IDs to surviving rows in the selected groups. |
+| Data Evolution incremental clustering | Assigns new IDs to surviving rows in groups selected for sorting; column-version compaction preserves IDs. |
 | Explicit `reassign_row_id` maintenance | Changes IDs by remapping file metadata. |
 | Overwrite or partition removal | Removes the replaced rows from the current table state; do not assume their IDs remain usable. |
 

@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.append.cluster.DataEvolutionClusterCompaction;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
@@ -857,11 +858,15 @@ public class CompactProcedure extends BaseProcedure {
                 new IncrementalClusterManager(table, partitionPredicate, snapshot);
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.createCompactUnits(fullCompaction);
+        List<DataEvolutionCompactTask> compactionTasks =
+                DataEvolutionClusterCompaction.plan(
+                        table, snapshot, partitionPredicate, compactUnits);
         if (partitionIdleTime != null) {
             Set<BinaryRow> idlePartitions =
                     getPartitionsToCompact(
                             table.newSnapshotReader().withSnapshot(snapshot), partitionIdleTime);
             compactUnits.keySet().retainAll(idlePartitions);
+            compactionTasks.removeIf(task -> !idlePartitions.contains(task.partition()));
         }
         LOG.info(
                 "Planned {} compact units to incrementally cluster for table {}, full compaction {}.",
@@ -869,7 +874,7 @@ public class CompactProcedure extends BaseProcedure {
                 table.fullName(),
                 fullCompaction);
 
-        if (compactUnits.isEmpty()) {
+        if (compactUnits.isEmpty() && compactionTasks.isEmpty()) {
             return;
         }
 
@@ -1000,10 +1005,17 @@ public class CompactProcedure extends BaseProcedure {
         }
 
         if (table.coreOptions().dataEvolutionEnabled()) {
-            List<CommitMessage> preparedMessages =
-                    incrementalClusterManager.prepareCommitMessages(clusterMessages);
             String commitUser = createCommitUser(table.coreOptions().toConfiguration());
             try (TableCommitImpl commit = table.newCommit(commitUser).materializeDvRowIdCheck()) {
+                clusterMessages.addAll(
+                        DataEvolutionRewriteExecutor.executeTasks(
+                                clusterTable,
+                                compactionTasks,
+                                new JavaSparkContext(spark().sparkContext()),
+                                spark(),
+                                commitUser));
+                List<CommitMessage> preparedMessages =
+                        incrementalClusterManager.prepareCommitMessages(clusterMessages);
                 commit.commit(preparedMessages);
             } catch (Exception e) {
                 throw new RuntimeException("Commit data evolution clustering failed.", e);
