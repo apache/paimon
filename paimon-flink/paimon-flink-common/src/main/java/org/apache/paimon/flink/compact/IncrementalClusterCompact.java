@@ -19,7 +19,10 @@
 package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.cluster.DataEvolutionClusterCompaction;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
@@ -27,10 +30,15 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.cluster.DataEvolutionClusterWriteOperator;
 import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.DataEvolutionCommitPreparationOperator;
+import org.apache.paimon.flink.sink.DataEvolutionCompactionTaskTypeInfo;
+import org.apache.paimon.flink.sink.DataEvolutionCompactionWorkerOperator;
+import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.RowAppendTableSink;
 import org.apache.paimon.flink.sorter.SortOperator;
@@ -40,6 +48,7 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
@@ -59,12 +68,20 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM;
+import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
 /** Compact for incremental clustering. */
@@ -80,6 +97,7 @@ public class IncrementalClusterCompact {
     protected final int localSampleMagnification;
     protected final Map<BinaryRow, CompactUnit> compactUnits;
     protected final Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> compactSplits;
+    private final List<DataEvolutionCompactTask> normalCompactTasks;
 
     public IncrementalClusterCompact(
             StreamExecutionEnvironment env,
@@ -87,8 +105,19 @@ public class IncrementalClusterCompact {
             PartitionPredicate partitionPredicate,
             @Nullable Boolean fullCompaction) {
         this.env = env;
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Map<String, String> rewriteOptions = new HashMap<>();
+            // Rewrite stored references, including views whose upstream value is currently null.
+            rewriteOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
+            // Sorted outputs must reach the clustering committer without another rewrite or commit.
+            rewriteOptions.put(PRECOMMIT_COMPACT.key(), "false");
+            rewriteOptions.put(SINK_COORDINATOR_COMMIT_ENABLED.key(), "false");
+            table = table.copy(rewriteOptions);
+        }
         this.table = table;
-        this.clusterManager = new IncrementalClusterManager(table, partitionPredicate);
+        this.clusterManager =
+                new IncrementalClusterManager(
+                        table, partitionPredicate, table.snapshotManager().latestSnapshot());
         Options options = new Options(table.options());
         this.partitionComputer = table.store().partitionComputer();
         this.commitUser = CoreOptions.createCommitUser(options);
@@ -104,11 +133,16 @@ public class IncrementalClusterCompact {
         // non-full strategy as default for incremental clustering
         this.compactUnits =
                 clusterManager.createCompactUnits(fullCompaction != null && fullCompaction);
+        this.normalCompactTasks =
+                clusterManager.snapshot() == null
+                        ? Collections.emptyList()
+                        : DataEvolutionClusterCompaction.plan(
+                                table, clusterManager.snapshot(), partitionPredicate, compactUnits);
         this.compactSplits = clusterManager.toSplitsAndRewriteDvFiles(compactUnits);
     }
 
     public void build() throws Exception {
-        if (compactUnits.isEmpty()) {
+        if (compactUnits.isEmpty() && normalCompactTasks.isEmpty()) {
             env.fromSequence(0, 0).name("Nothing to Cluster Source").sinkTo(new DiscardingSink<>());
             return;
         }
@@ -122,6 +156,24 @@ public class IncrementalClusterCompact {
                             entry.getValue().getKey(),
                             entry.getValue().getRight(),
                             parallelism));
+        }
+        if (!normalCompactTasks.isEmpty()) {
+            Integer workerParallelism =
+                    Options.fromMap(table.options()).get(UNAWARE_BUCKET_COMPACTION_PARALLELISM);
+            dataStreams.add(
+                    env.fromCollection(
+                                    normalCompactTasks, new DataEvolutionCompactionTaskTypeInfo())
+                            .name("Data Evolution Cluster Compaction Tasks")
+                            .rebalance()
+                            .transform(
+                                    "Compact data evolution column versions",
+                                    new CommittableTypeInfo(),
+                                    new DataEvolutionCompactionWorkerOperator.Factory(
+                                            table, commitUser))
+                            .setParallelism(
+                                    workerParallelism == null
+                                            ? env.getParallelism()
+                                            : workerParallelism));
         }
 
         buildCommitOperator(dataStreams);
@@ -152,9 +204,13 @@ public class IncrementalClusterCompact {
         }
 
         DataStream<RowData> sorted;
+        RowType clusterRowType =
+                table.coreOptions().dataEvolutionEnabled()
+                        ? SpecialFields.rowTypeWithRowId(table.rowType())
+                        : table.rowType();
         CoreOptions.ClusteringIncrementalMode mode = clusterManager.clusteringIncrementalMode();
         if (mode == CoreOptions.ClusteringIncrementalMode.LOCAL_SORT) {
-            sorted = localSort(sourcePair.getLeft(), sinkParallelism);
+            sorted = localSort(sourcePair.getLeft(), sinkParallelism, clusterRowType);
         } else {
             // GLOBAL_SORT: range shuffle + local sort (default)
             TableSortInfo sortInfo =
@@ -171,22 +227,34 @@ public class IncrementalClusterCompact {
                                     env,
                                     sourcePair.getLeft(),
                                     table.coreOptions(),
-                                    table.rowType(),
+                                    clusterRowType,
                                     sortInfo)
                             .sort();
         }
 
         // 2.3 write and then reorganize the committable
         // set parallelism to null, and it'll forward parallelism when doWrite()
-        RowAppendTableSink sink = new RowAppendTableSink(table, null, null);
-        DataStream<Committable> written =
-                sink.doWrite(
-                        FlinkSinkBuilder.mapToInternalRow(
-                                sorted,
-                                table.rowType(),
-                                table.catalogEnvironment().catalogContext()),
-                        commitUser,
-                        null);
+        DataStream<InternalRow> rows =
+                FlinkSinkBuilder.mapToInternalRow(
+                        sorted, clusterRowType, table.catalogEnvironment().catalogContext());
+        DataStream<Committable> written;
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            written =
+                    rows.forward()
+                            .transform(
+                                    "Write data evolution cluster row-id mappings",
+                                    new CommittableTypeInfo(),
+                                    new DataEvolutionClusterWriteOperator(
+                                            table, partition, commitUser))
+                            .setParallelism(sinkParallelism);
+            Options writeOptions = Options.fromMap(table.options());
+            if (writeOptions.get(SINK_USE_MANAGED_MEMORY)) {
+                declareManagedMemory(written, writeOptions.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
+            }
+        } else {
+            RowAppendTableSink sink = new RowAppendTableSink(table, null, null);
+            written = sink.doWrite(rows, commitUser, null);
+        }
         DataStream<Committable> clusterCommittable =
                 written.forward()
                         .transform(
@@ -216,9 +284,9 @@ public class IncrementalClusterCompact {
      *
      * <p>Pipeline: add key prefix → SortOperator → remove key prefix → back to RowData
      */
-    private DataStream<RowData> localSort(DataStream<RowData> input, int sinkParallelism) {
+    private DataStream<RowData> localSort(
+            DataStream<RowData> input, int sinkParallelism, RowType rowType) {
         CoreOptions options = table.coreOptions();
-        RowType rowType = table.rowType();
         List<String> clusterKeys = clusterManager.clusterKeys();
 
         final int[] keyProjectionMap = rowType.projectIndexes(clusterKeys);
@@ -319,7 +387,7 @@ public class IncrementalClusterCompact {
                         },
                         InternalTypeInfo.fromRowType(rowType))
                 .setParallelism(sinkParallelism)
-                .map(FlinkRowData::new, input.getType())
+                .map(row -> new FlinkRowData(row, rowType), input.getType())
                 .setParallelism(sinkParallelism);
     }
 
@@ -329,6 +397,20 @@ public class IncrementalClusterCompact {
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));
         }
-        sink.doCommit(dataStream, commitUser);
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Snapshot snapshot = clusterManager.snapshot();
+            dataStream =
+                    dataStream
+                            .transform(
+                                    "Data Evolution Cluster Commit Preparation : " + table.name(),
+                                    new CommittableTypeInfo(),
+                                    DataEvolutionCommitPreparationOperator.Factory.forClustering(
+                                            table, snapshot))
+                            .forceNonParallel();
+            new DataEvolutionDeletionVectorMaterializeSink(table, snapshot)
+                    .doCommit(dataStream, commitUser);
+        } else {
+            sink.doCommit(dataStream, commitUser);
+        }
     }
 }

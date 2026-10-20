@@ -320,6 +320,122 @@ physical file/split boundaries inside those episodes. If context has already
 been divided among ranks, use a local sampler instead of sharding it again
 with a world-size `DistributedSampler`; coordinate rank step counts separately.
 
+### Resuming a CWD training run
+
+Install `torchdata>=0.11,<0.12` alongside your compatible PyTorch installation.
+Use `torchdata.stateful_dataloader.StatefulDataLoader` in place of `DataLoader`.
+With `shuffle=True` it uses TorchData's stateful random sampler. It records the
+batch position delivered to training, including the worker states needed to
+reconstruct prefetched batches. Do not checkpoint a sampler's current index as
+the training position: prefetch can put it ahead of completed optimizer steps.
+
+CWD implements `state_dict()` and `load_state_dict()` for this loader. Its state
+checks the table, branch, resolved snapshot, actual context/anchor index, and
+window settings. Rebuild the same dataset before loading; restoration does not
+silently switch snapshots. Retain the snapshot files with a training tag for
+as long as checkpoints may be resumed. A changed snapshot, context, anchors,
+offsets or padding raises `ValueError`, even when the sample count is unchanged.
+The index identity is cached after its first checkpoint; do not mutate dataset
+configuration or index arrays during the run.
+
+CWD also saves Python, NumPy and Torch CPU global RNG state in each process.
+Transforms and adapters with private RNGs or other mutable state must implement
+both `state_dict()` and `load_state_dict(state)`. Their state is copied before
+it is returned. Keep callback code, normalization and preprocessing settings
+unchanged; CWD cannot infer these from an arbitrary callable. Custom collators
+must be stateless apart from those global RNGs. Reader caches and video decoder
+handles are rebuilt rather than checkpointed.
+
+The training loop must save model, optimizer and loader state together, after
+an optimizer update and before fetching another batch. The following pattern
+uses `make_dataset(snapshot_id)` to rebuild your CWD with the same window and
+preprocessing arguments, via `frames.scan(snapshot_id=snapshot_id)`:
+
+```python
+import os
+import random
+
+import numpy as np
+import torch
+from torchdata.stateful_dataloader import StatefulDataLoader
+
+loader_config = dict(batch_size=32, shuffle=True, drop_last=False,
+                     num_workers=4, prefetch_factor=2,
+                     persistent_workers=True, in_order=True)
+# Include the application's preprocessing/normalization version in this contract.
+run_config = dict(loader=loader_config, preprocessing="train-v1", world_size=1,
+                  sampler="torchdata.RandomSampler", seed=42)
+generator = torch.Generator().manual_seed(42)
+# Load only trusted checkpoint files, and choose their snapshot before planning.
+saved = (torch.load(resume_path, map_location="cpu", weights_only=False)
+         if resume_path is not None else None)
+snapshot_id = saved["snapshot_id"] if saved is not None else training_snapshot_id
+dataset = make_dataset(snapshot_id)
+loader = StatefulDataLoader(dataset, generator=generator, **loader_config)
+epoch, global_step = 0, 0
+
+# Restore model/optimizer/scheduler/scaler before restoring RNGs.
+if saved is not None:
+    if saved["config"] != run_config or saved["snapshot_id"] != dataset.snapshot_id:
+        raise ValueError("Training checkpoint configuration changed")
+    model.load_state_dict(saved["model"])
+    optimizer.load_state_dict(saved["optimizer"])
+    loader.load_state_dict(saved["loader"])
+    epoch, global_step = saved["epoch"], saved["global_step"]
+
+iterator = iter(loader)  # Dataset/worker state is restored here, not at load_state_dict.
+if saved is not None:
+    # Iterator construction consumes RNG; restore these after construction.
+    generator.set_state(saved["loader_generator"])
+    random.setstate(saved["python_rng"])
+    np.random.set_state(saved["numpy_rng"])
+    torch.set_rng_state(saved["torch_rng"])
+    if saved["cuda_rng"] is not None:
+        torch.cuda.set_rng_state_all(saved["cuda_rng"])
+
+for batch in iterator:
+    optimizer.zero_grad(set_to_none=True)
+    loss = training_loss(model, batch)
+    loss.backward()
+    optimizer.step()
+    global_step += 1
+    if should_checkpoint(global_step):
+        checkpoint = dict(
+            config=run_config, snapshot_id=dataset.snapshot_id,
+            epoch=epoch, global_step=global_step,
+            model=model.state_dict(), optimizer=optimizer.state_dict(),
+            loader=loader.state_dict(), loader_generator=generator.get_state(),
+            python_rng=random.getstate(), numpy_rng=np.random.get_state(),
+            torch_rng=torch.get_rng_state(),
+            cuda_rng=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        )
+        # Include scheduler/scaler states here when the trainer uses them.
+        torch.save(checkpoint, checkpoint_path + ".tmp")
+        os.replace(checkpoint_path + ".tmp", checkpoint_path)
+```
+
+Alternatively, use the same retained tag in `make_dataset` and verify its
+resolved ID. Move optimizer state to the training device as required by the
+trainer. The example saves inside the optimizer-step loop,
+including its last batch, before the iterator reports exhaustion. With TorchData
+0.11, saving an already exhausted iterator outside that loop is not equivalent:
+restoring it may immediately start a new epoch and consume another permutation.
+After finishing the restored suffix, start the next epoch with `iter(loader)`.
+
+Keep batch size, `drop_last`, sampler configuration, worker count, prefetch and
+persistent-worker settings unchanged, with `in_order=True`. Keep the same
+PyTorch/TorchData versions; checkpoint compatibility across versions is not
+promised. TorchData may regenerate sampling indices or replay prefetched work
+on restore; CWD does not promise constant-time recovery or zero rereads.
+
+For fixed-topology DDP, use TorchData's `StatefulDistributedSampler`, save one
+loader/generator/RNG state per rank at the same completed global step, and keep
+rank assignment and world size unchanged. Save its seed and epoch in the training
+configuration and call `sampler.set_epoch(saved_epoch)` before restoring the
+loader; the sampler's state does not itself contain the epoch. Cross-rank
+checkpoint publication, gradient-accumulation boundaries, scheduler/scaler state
+and deterministic model execution remain the trainer's responsibility.
+
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

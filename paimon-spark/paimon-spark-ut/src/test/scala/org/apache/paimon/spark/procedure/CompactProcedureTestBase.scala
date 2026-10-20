@@ -18,10 +18,10 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.Snapshot
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionNormalCompactTask}
-import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.data.{BinaryRow, BlobDescriptor, BlobViewStruct}
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.format.blob.BlobFileFormat
 import org.apache.paimon.fs.Path
@@ -2678,6 +2678,391 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: data evolution clustering rewrites partial updates and deletions") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'clustering.incremental' = 'true',
+            |  'clustering.strategy' = 'order',
+            |  'clustering.columns' = 'value',
+            |  'num-sorted-run.compaction-trigger' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES (3, 30), (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20), (4, 40)")
+      sql("UPDATE T SET value = 5 WHERE id = 2")
+      sql("DELETE FROM T WHERE id = 4")
+      val table = loadTable("T")
+      val nextRowId = table.latestSnapshot().get().nextRowId().longValue()
+
+      checkAnswer(sql("CALL sys.compact(table => 'T')"), Row(true) :: Nil)
+
+      checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(2, 5), Row(1, 10), Row(3, 30)))
+      assertDataEvolutionFileOrder("T", "value")
+      assert(
+        sql("SELECT _ROW_ID FROM T ORDER BY _ROW_ID")
+          .collect()
+          .map(_.getLong(0))
+          .sameElements(nextRowId until nextRowId + 3))
+      Assertions.assertThat(deletionVectorCardinality(table)).isZero
+      assert(normalDataFiles(table).forall(_.level() > 0))
+
+      // New partial updates must use the row IDs assigned by clustering.
+      sql("UPDATE T SET value = 15 WHERE id = 2")
+      checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(1, 10), Row(2, 15), Row(3, 30)))
+      sql("INSERT INTO T VALUES (5, 0)")
+      checkAnswer(sql("CALL sys.compact(table => 'T')"), Row(true) :: Nil)
+      checkAnswer(
+        sql("SELECT id, value FROM T"),
+        Seq(Row(5, 0), Row(1, 10), Row(2, 15), Row(3, 30)))
+      assertDataEvolutionFileOrder("T", "value")
+    }
+  }
+
+  Seq("local-sort", "global-sort").foreach {
+    mode =>
+      test(s"Paimon Procedure: data evolution clustering compacts column versions with $mode") {
+        withTable("T") {
+          sql(s"""
+                 |CREATE TABLE T (id INT, value INT, pt STRING)
+                 |PARTITIONED BY (pt)
+                 |TBLPROPERTIES (
+                 |  'bucket' = '-1',
+                 |  'write-only' = 'true',
+                 |  'row-tracking.enabled' = 'true',
+                 |  'data-evolution.enabled' = 'true',
+                 |  'deletion-vectors.enabled' = 'true',
+                 |  'clustering.incremental' = 'true',
+                 |  'clustering.incremental.mode' = '$mode',
+                 |  'clustering.columns' = 'id')
+                 |""".stripMargin)
+          sql(
+            "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
+              "(3, 30, 'a'), (1, 10, 'a'), (2, 20, 'a')")
+          sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
+          val table = loadTable("T")
+          val maxLevel = table.coreOptions().numLevels() - 1
+          val originalIds = sql("SELECT id, _ROW_ID FROM T ORDER BY id").collect().toSeq
+          (1 to 3).foreach(i => sql(s"UPDATE T SET value = ${100 + i} WHERE pt = 'a'"))
+          val belowThreshold = lastSnapshotId(table)
+          sql("CALL sys.compact(table => 'T')")
+          assert(lastSnapshotId(table) == belowThreshold)
+          assert(normalDataFiles(table).size == 4)
+
+          sql("UPDATE T SET value = 104 WHERE pt = 'a'")
+          sql("DELETE FROM T WHERE id = 2")
+          val before = table.latestSnapshot().get()
+          assert(normalDataFiles(table).size == 5)
+          sql(
+            "CALL sys.compact(table => 'T', compact_strategy => 'full', " +
+              "partitions => 'pt=a', partition_idle_time => '0 s')")
+
+          assert(lastSnapshotId(table) == before.id() + 1)
+          assert(table.latestSnapshot().get().nextRowId() == before.nextRowId())
+          assert(normalDataFiles(table).size == 1)
+          assert(normalDataFiles(table).head.level() == maxLevel)
+          assert(normalDataFiles(table).head.rowCount() == 3)
+          assert(deletionVectorCardinality(table) == 1)
+          checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(1, 104), Row(3, 104)))
+          checkAnswer(sql("SELECT id, _ROW_ID FROM T"), originalIds.filter(_.getInt(0) != 2))
+          val compactedSnapshot = lastSnapshotId(table)
+          sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
+          assert(lastSnapshotId(table) == compactedSnapshot)
+
+          // The same invocation also clusters another partition, with one shared commit.
+          (1 to 4).foreach(i => sql(s"UPDATE T SET value = ${200 + i} WHERE pt = 'a'"))
+          sql(
+            "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
+              "(8, 80, 'b'), (6, 60, 'b')")
+          val mixed = table.latestSnapshot().get()
+          sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
+          assert(lastSnapshotId(table) == mixed.id() + 1)
+          assert(table.latestSnapshot().get().nextRowId() == mixed.nextRowId() + 2)
+          assert(normalDataFiles(table).size == 2)
+          assert(normalDataFiles(table).forall(_.level() == maxLevel))
+          assert(deletionVectorCardinality(table) == 1)
+          checkAnswer(
+            sql("SELECT id, _ROW_ID FROM T WHERE pt = 'a'"),
+            originalIds.filter(_.getInt(0) != 2))
+          checkAnswer(
+            sql("SELECT id, value FROM T"),
+            Seq(Row(1, 204), Row(3, 204), Row(6, 60), Row(8, 80)))
+        }
+      }
+  }
+
+  test("Paimon Procedure: data evolution clustering preserves inline blob descriptors") {
+    withTable("cluster_descriptor") {
+      val blobData = "descriptor content".getBytes("UTF-8")
+      val externalFile = new java.io.File(tempDBDir, "clustering_descriptor_blob")
+      java.nio.file.Files.write(externalFile.toPath, blobData)
+      val descriptor = new BlobDescriptor(externalFile.toURI.toString, 0, blobData.length)
+      val descriptorHex = descriptor.serialize().map(value => f"${value & 0xff}%02X").mkString
+      sql("""
+            |CREATE TABLE cluster_descriptor (id INT, picture BINARY)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'blob-descriptor-field' = 'picture',
+            |  'clustering.incremental' = 'true',
+            |  'clustering.columns' = 'id')
+            |""".stripMargin)
+      sql(s"INSERT INTO cluster_descriptor VALUES (3, X'$descriptorHex'), (1, NULL)")
+      val nextRowId = loadTable("cluster_descriptor").latestSnapshot().get().nextRowId().longValue()
+
+      sql("CALL sys.compact(table => 'cluster_descriptor', compact_strategy => 'full')")
+
+      checkAnswer(
+        sql("SELECT id, picture FROM cluster_descriptor"),
+        Seq(Row(1, null), Row(3, blobData)))
+      val descriptorOption =
+        s"spark.paimon.paimon.$dbName0.cluster_descriptor.${CoreOptions.BLOB_AS_DESCRIPTOR.key()}"
+      withSparkSQLConf(descriptorOption -> "true") {
+        val rows = sql("SELECT picture FROM cluster_descriptor ORDER BY id").collect()
+        assert(rows(0).isNullAt(0))
+        assert(util.Arrays.equals(rows(1).getAs[Array[Byte]](0), descriptor.serialize()))
+      }
+      assert(
+        sql("SELECT _ROW_ID FROM cluster_descriptor").collect().forall(_.getLong(0) >= nextRowId))
+      assertDataEvolutionFileOrder("cluster_descriptor", "id")
+      assert(normalDataFiles(loadTable("cluster_descriptor")).forall(_.level() > 0))
+    }
+  }
+
+  test("Paimon Procedure: data evolution clustering preserves inline blob views") {
+    withTable("cluster_view_source", "cluster_view") {
+      sql("""
+            |CREATE TABLE cluster_view_source (id INT, picture BINARY)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'blob-field' = 'picture')
+            |""".stripMargin)
+      sql("INSERT INTO cluster_view_source VALUES (3, X'48656C6C6F'), (1, NULL)")
+      sql("""
+            |CREATE TABLE cluster_view (id INT, picture BINARY)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'blob-view-field' = 'picture',
+            |  'clustering.incremental' = 'true',
+            |  'clustering.columns' = 'id')
+            |""".stripMargin)
+      sql(
+        s"INSERT INTO cluster_view SELECT id, " +
+          s"sys.blob_view('$dbName0.cluster_view_source', 'picture', _ROW_ID) " +
+          "FROM `cluster_view_source$row_tracking`")
+      sql("INSERT INTO cluster_view VALUES (2, NULL)")
+      val preserveViewOption =
+        s"spark.paimon.paimon.$dbName0.cluster_view.${CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()}"
+      var originalReferences = Array.empty[Row]
+      withSparkSQLConf(preserveViewOption -> "false") {
+        originalReferences = sql("SELECT picture FROM cluster_view ORDER BY id").collect()
+      }
+      // A non-null view of an upstream NULL must remain a reference after the rewrite.
+      assert(!originalReferences(0).isNullAt(0))
+      assert(originalReferences(1).isNullAt(0))
+      assert(
+        BlobViewStruct
+          .deserialize(originalReferences(0).getAs[Array[Byte]](0))
+          .identifier()
+          .getFullName == s"$dbName0.cluster_view_source")
+      val nextRowId = loadTable("cluster_view").latestSnapshot().get().nextRowId().longValue()
+
+      sql("CALL sys.compact(table => 'cluster_view', compact_strategy => 'full')")
+
+      checkAnswer(
+        sql("SELECT id, picture FROM cluster_view"),
+        Seq(Row(1, null), Row(2, null), Row(3, "Hello".getBytes("UTF-8"))))
+      withSparkSQLConf(preserveViewOption -> "false") {
+        val rewrittenReferences = sql("SELECT picture FROM cluster_view ORDER BY id").collect()
+        assert(rewrittenReferences.length == originalReferences.length)
+        rewrittenReferences.zip(originalReferences).foreach {
+          case (rewritten, original) =>
+            assert(
+              util.Arrays.equals(rewritten.getAs[Array[Byte]](0), original.getAs[Array[Byte]](0)))
+        }
+      }
+      assert(sql("SELECT _ROW_ID FROM cluster_view").collect().forall(_.getLong(0) >= nextRowId))
+      assertDataEvolutionFileOrder("cluster_view", "id")
+      assert(normalDataFiles(loadTable("cluster_view")).forall(_.level() > 0))
+    }
+  }
+
+  test("Paimon Procedure: data evolution historical clustering applies partition idle filter") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, pt STRING)
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'clustering.incremental' = 'true',
+            |  'clustering.strategy' = 'order',
+            |  'clustering.columns' = 'id',
+            |  'clustering.history-partition.idle-to-full-sort' = '0 s')
+            |""".stripMargin)
+      sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES (3, 'old'), (1, 'old')")
+      sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES (4, 'new'), (2, 'new')")
+      val table = loadTable("T")
+      val nextRowId = table.latestSnapshot().get().nextRowId().longValue()
+
+      checkAnswer(
+        sql(
+          "CALL sys.compact(table => 'T', partitions => 'pt=new', " +
+            "compact_strategy => 'full', partition_idle_time => '0 s')"),
+        Row(true) :: Nil)
+
+      checkAnswer(sql("SELECT id FROM T WHERE pt = 'old'"), Seq(Row(1), Row(3)))
+      checkAnswer(sql("SELECT id FROM T WHERE pt = 'new'"), Seq(Row(2), Row(4)))
+      assertDataEvolutionFileOrder("T", "id")
+      assert(sql("SELECT _ROW_ID FROM T").collect().forall(_.getLong(0) >= nextRowId))
+      assert(normalDataFiles(table).forall(_.level() == table.coreOptions().numLevels() - 1))
+    }
+  }
+
+  test("Paimon Procedure: data evolution clustering respects minor and full strategies") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'clustering.incremental' = 'true',
+            |  'clustering.strategy' = 'order',
+            |  'clustering.columns' = 'id',
+            |  'num-sorted-run.compaction-trigger' = '10')
+            |""".stripMargin)
+      sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES (3), (1), (2)")
+      val table = loadTable("T")
+      val before = lastSnapshotId(table)
+      checkAnswer(sql("CALL sys.compact(table => 'T')"), Row(true) :: Nil)
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(before)
+
+      checkAnswer(
+        sql("CALL sys.compact(table => 'T', compact_strategy => 'full')"),
+        Row(true) :: Nil)
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(before + 1)
+      checkAnswer(sql("SELECT id FROM T"), Seq(Row(1), Row(2), Row(3)))
+      assertDataEvolutionFileOrder("T", "id")
+      assert(normalDataFiles(table).forall(_.level() == table.coreOptions().numLevels() - 1))
+    }
+  }
+
+  Seq("local-sort", "global-sort").foreach {
+    mode =>
+      Seq("", "partition.sink-strategy=hash", "clustering.incremental.optimize-write=true")
+        .foreach {
+          writeOption =>
+            val suffix = if (writeOption.isEmpty) "" else s" with $writeOption"
+            test(s"Paimon Procedure: data evolution clustering uses distributed $mode$suffix") {
+              withSparkSQLConf(
+                "spark.sql.shuffle.partitions" -> "2",
+                "spark.sql.adaptive.enabled" -> "false") {
+                withTable("T") {
+                  sql(s"""
+                         |CREATE TABLE T (id INT, value INT, pt STRING)
+                         |PARTITIONED BY (pt)
+                         |TBLPROPERTIES (
+                         |  'bucket' = '-1',
+                         |  'write-only' = 'true',
+                         |  'row-tracking.enabled' = 'true',
+                         |  'data-evolution.enabled' = 'true',
+                         |  'deletion-vectors.enabled' = 'true',
+                         |  'clustering.incremental' = 'true',
+                         |  'clustering.incremental.mode' = '$mode',
+                         |  'clustering.strategy' = 'order',
+                         |  'clustering.columns' = 'value',
+                         |  'source.split.target-size' = '1 b')
+                         |""".stripMargin)
+                  (0 until 4).foreach {
+                    batch =>
+                      sql(s"""
+                             |INSERT INTO T
+                             |SELECT /*+ REPARTITION(1) */
+                             |  CAST(59 - (id * 4 + $batch) AS INT),
+                             |  CAST((59 - (id * 4 + $batch)) * 10 AS INT), 'A'
+                             |FROM range(15)
+                             |""".stripMargin)
+                  }
+                  sql("UPDATE T SET value = -2 WHERE id = 2")
+                  sql("DELETE FROM T WHERE id = 4")
+                  val table = loadTable("T")
+                  val nextRowId = table.latestSnapshot().get().nextRowId().longValue()
+
+                  checkAnswer(
+                    sql("CALL sys.compact(table => 'T', compact_strategy => 'full', " +
+                      s"options => '$writeOption')"),
+                    Row(true) :: Nil)
+
+                  val expected =
+                    (0 until 60).filter(_ != 4).map(id => Row(id, if (id == 2) -2 else id * 10))
+                  checkAnswer(sql("SELECT id, value FROM T"), expected)
+                  val fileValues = assertDataEvolutionFileOrder("T", "value")
+                  assert(fileValues.size > 1)
+                  val ranges = fileValues.map(values => (values.head, values.last)).sortBy(_._1)
+                  if (mode == "global-sort") {
+                    assert(fileValues.size == 2)
+                    assert(ranges.sliding(2).forall(pair => pair.head._2 < pair.last._1))
+                  } else {
+                    assert(ranges.sliding(2).exists(pair => pair.head._2 > pair.last._1))
+                  }
+                  assert(sql("SELECT _ROW_ID FROM T").collect().forall(_.getLong(0) >= nextRowId))
+                  assert(
+                    normalDataFiles(table).forall(_.level() == table.coreOptions().numLevels() - 1))
+                  Assertions.assertThat(deletionVectorCardinality(table)).isZero
+
+                  sql("UPDATE T SET value = 12 WHERE id = 2")
+                  checkAnswer(sql("SELECT value FROM T WHERE id = 2"), Row(12) :: Nil)
+                }
+              }
+            }
+        }
+  }
+
+  test("Paimon Procedure: data evolution clustering removes fully deleted partitions") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, pt STRING)
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'clustering.incremental' = 'true',
+            |  'clustering.strategy' = 'order',
+            |  'clustering.columns' = 'id')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (3, 'dead'), (1, 'dead'), (4, 'live'), (2, 'live')")
+      sql("DELETE FROM T WHERE id IN (1, 3)")
+      val table = loadTable("T")
+      val beforeFiles = normalDataFiles(table).map(_.fileName()).toSet
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(2)
+
+      checkAnswer(
+        sql("CALL sys.compact(table => 'T', compact_strategy => 'full')"),
+        Row(true) :: Nil)
+
+      checkAnswer(sql("SELECT id, pt FROM T"), Seq(Row(2, "live"), Row(4, "live")))
+      assert(normalDataFiles(table).forall(file => !beforeFiles.contains(file.fileName())))
+      Assertions.assertThat(deletionVectorCardinality(table)).isZero
+      assertDataEvolutionFileOrder("T", "id")
+    }
+  }
+
   test("Paimon Procedure: materialize deletion vectors enables snapshot expiration") {
     withTable("T") {
       sql("""
@@ -2820,6 +3205,23 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       .flatMap(_.afterFiles().asScala)
       .find(file => !BlobFileFormat.isBlobFile(file.fileName()))
       .get
+  }
+
+  private def assertDataEvolutionFileOrder(tableName: String, columnName: String): Seq[Seq[Int]] = {
+    val rows = sql(s"SELECT _ROW_ID, `$columnName` FROM $tableName ORDER BY _ROW_ID")
+      .collect()
+      .map(row => (row.getLong(0), row.getInt(1)))
+    normalDataFiles(loadTable(tableName)).map {
+      file =>
+        val firstRowId = file.nonNullFirstRowId()
+        val values = rows
+          .filter { case (rowId, _) => rowId >= firstRowId && rowId < firstRowId + file.rowCount() }
+          .map(_._2)
+          .toSeq
+        assert(values.size.toLong == file.rowCount())
+        assert(values == values.sorted)
+        values
+    }
   }
 
   private def normalDataFiles(table: FileStoreTable): Seq[DataFileMeta] = {

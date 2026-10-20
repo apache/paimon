@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.schema.arrow_schema import project_arrow_batch
 from pypaimon.schema.data_types import (
     PyarrowFieldParser,
     VectorType,
@@ -347,21 +348,7 @@ class DedicatedFormatWriter(CompositeDataWriter):
 
     @staticmethod
     def _project_columns(data: pa.RecordBatch, column_names: List[str]) -> pa.RecordBatch:
-        indices = [data.schema.get_field_index(name) for name in column_names]
-        missing_columns = [
-            name for name, index in zip(column_names, indices) if index < 0
-        ]
-        if missing_columns:
-            raise KeyError(f"Columns not found in record batch: {missing_columns}")
-
-        projected_schema = pa.schema(
-            [data.schema.field(index) for index in indices],
-            metadata=data.schema.metadata,
-        )
-        return pa.RecordBatch.from_arrays(
-            [data.column(index) for index in indices],
-            schema=projected_schema,
-        )
+        return project_arrow_batch(data, column_names)
 
     def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
         if not self.blob_inline_fields:

@@ -64,9 +64,22 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for incremental clustering action. */
 public class IncrementalClusterActionITCase extends ActionITCaseBase {
+
+    @Test
+    public void testStreamingDataEvolutionClusteringIsRejected() throws Exception {
+        Map<String, String> options = commonOptions();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        createTable(null, options);
+
+        assertThatThrownBy(() -> runAction(true, Collections.emptyList()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Data evolution incremental clustering only supports batch mode yet.");
+    }
 
     @Test
     public void testClusterUnpartitionedTable() throws Exception {

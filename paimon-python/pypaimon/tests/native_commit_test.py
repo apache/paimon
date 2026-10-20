@@ -478,17 +478,17 @@ def test_callbacks_added_after_construction_use_native(
     callback.close.assert_called_once()
 
 
-def test_truncate_uses_python(tmp_path):
+def test_truncate_keeps_python_when_native_publication_is_unavailable(tmp_path):
     table = _table(tmp_path)
     _seed(table)
-    with patch('pypaimon.write.native_commit.create_native_commit') as create:
+    with patch('pypaimon.write.native_commit.create_native_commit', return_value=None) as create:
         for method, args in [('truncate_partitions', ([{'pt': 'a'}],)), ('truncate_table', ())]:
             commit = table.new_batch_write_builder().new_commit()
             try:
                 getattr(commit, method)(*args)
             finally:
                 commit.close()
-        create.assert_not_called()
+        assert create.call_count == 2
     assert _rows(table) == []
 
 
@@ -553,6 +553,16 @@ def test_incompatible_publication_environment_is_not_reconstructed(
             patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
+
+
+@pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])
+def test_inactive_context_loader_fields_do_not_disable_native_commit(tmp_path, native_rest_catalog, option):
+    from pypaimon.write.native_commit import _rest_catalog_supported
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    unused = Mock(side_effect=AssertionError('Inactive IO loader was invoked'))
+    setattr(table.catalog_environment.catalog_loader.context(), option, unused)
+    assert _rest_catalog_supported(table)
+    unused.assert_not_called()
 
 
 def test_missing_runtime_falls_back_without_reconstructing_table(

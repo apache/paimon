@@ -233,6 +233,7 @@ def test_native_read_propagates_native_fork_safety_error():
     split = _Split()
     split._native_split = object()
     with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
+            'pypaimon.read.native_plan.native_runtime_available', return_value=True), patch(
             'pypaimon.read.native_plan.native_read',
             side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
         with pytest.raises(ForkSafetyError):

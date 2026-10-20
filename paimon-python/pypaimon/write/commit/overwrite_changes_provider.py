@@ -15,8 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from dataclasses import dataclass
 from typing import List, Optional
 
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -25,10 +28,19 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.row.generic_row import GenericRow
 
 
+@dataclass
+class OverwriteChanges:
+    table_files: List[ManifestEntry]
+    index_adds: List[IndexManifestEntry]
+    index_deletes: List[IndexManifestEntry]
+
+
 class OverwriteChangesProvider:
-    """Builds the commit entries (DELETE existing + ADD new) for an OVERWRITE,
-    caching the existing files of the target partitions across commit retries
-    to avoid repeated full scans.
+    """Return file and index changes (DELETE existing + ADD new) for OVERWRITE.
+
+    Existing data files of the target partitions are cached across commit
+    retries to avoid repeated full scans. Index entries come from the latest
+    snapshot on every attempt, including changes in partitions without data.
 
     On retry, if the latest snapshot advanced, the cached state is updated by
     applying the target-partition delta manifests. Missing snapshots or
@@ -51,10 +63,10 @@ class OverwriteChangesProvider:
         self.delta_probe_count = 0
         self.delta_apply_count = 0
 
-    def provide(self, latest_snapshot: Optional[Snapshot]) -> List[ManifestEntry]:
+    def provide(self, latest_snapshot: Optional[Snapshot]) -> OverwriteChanges:
         if latest_snapshot is None:
             # Empty table: nothing existing to delete, just add the new files.
-            return self._build_result([])
+            return self._build_result([], None)
 
         if self._cached_snapshot is None:
             self._cached_entries = self._full_scan_manifest_entries(latest_snapshot)
@@ -69,7 +81,7 @@ class OverwriteChangesProvider:
             self._cached_snapshot = latest_snapshot
         # cached_snapshot.id == latest_snapshot.id -> reuse cache as-is
 
-        return self._build_result(self._cached_entries)
+        return self._build_result(self._cached_entries, latest_snapshot)
 
     def _full_scan_manifest_entries(self, latest_snapshot: Snapshot) -> List[ManifestEntry]:
         self.full_scan_count += 1
@@ -119,8 +131,11 @@ class OverwriteChangesProvider:
                 entries.append(entry)
         return entries
 
-    def _build_result(self, existing_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+    def _build_result(self, existing_entries: List[ManifestEntry],
+                      latest_snapshot: Optional[Snapshot]) -> OverwriteChanges:
         entries = []
+        index_adds = []
+        index_deletes = []
         # Existing files of the target partitions become DELETE entries. Build
         # fresh entries so the cached (kind=0) entries are never mutated.
         for entry in existing_entries:
@@ -131,8 +146,19 @@ class OverwriteChangesProvider:
                 total_buckets=entry.total_buckets,
                 file=entry.file,
             ))
+        # Resolve every index type from this attempt's snapshot. A concurrent
+        # writer can replace or add indexes while the data-entry cache remains
+        # reusable; deleting only the first attempt's HASH files would miss it.
+        if latest_snapshot is not None and latest_snapshot.index_manifest:
+            for entry in IndexManifestFile(self.table).read(latest_snapshot.index_manifest):
+                if self.partition_filter is None or self.partition_filter.test(entry.partition):
+                    index_deletes.append(IndexManifestEntry(
+                        kind=1, partition=entry.partition, bucket=entry.bucket,
+                        index_file=entry.index_file))
         # New files being written by this overwrite.
         for msg in self.commit_messages:
+            index_adds.extend(msg.index_adds)
+            index_deletes.extend(msg.index_deletes)
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             total_buckets = (
                 msg.total_buckets
@@ -147,4 +173,4 @@ class OverwriteChangesProvider:
                     total_buckets=total_buckets,
                     file=file,
                 ))
-        return entries
+        return OverwriteChanges(entries, index_adds, index_deletes)

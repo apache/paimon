@@ -26,7 +26,6 @@ from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options.core_options import (
     CoreOptions,
     GlobalIndexSearchMode,
-    StartupMode,
 )
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -44,7 +43,7 @@ from pypaimon.read.scanner.data_evolution_split_generator import (
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
+from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_id_file_index import RowIdFileIndex
@@ -55,6 +54,16 @@ from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _authorize_update(table):
+    """Require the same whole-table grant as plan_all_files for fast paths."""
+    from pypaimon.catalog.catalog_exception import TableNoPermissionException
+    from pypaimon.read.table_scan import authorize
+
+    query_auth = table.catalog_environment.table_query_auth(table.options, table.identifier)
+    if authorize(table, query_auth, None) is not None:
+        raise TableNoPermissionException(table.identifier)
 
 
 def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total_tasks: int) -> List[DataSplit]:
@@ -132,6 +141,9 @@ class TableUpdate:
     def _new_row_id_updater(
             self, commit_identifier: int, _precomputed_files_info=None
     ) -> TableUpdateByRowId:
+        # Authorize outside the native preparation fallback so a denied or
+        # restricted grant cannot be swallowed and retried by another reader.
+        _authorize_update(self.table)
         if _precomputed_files_info is None:
             from pypaimon.write.native_update import create_native_update_by_row_id
             try:
@@ -413,31 +425,11 @@ class TableUpdate:
                 yield group
 
     def _matched_update_scan_table(self):
-        snapshot_manager = self.table.snapshot_manager()
-        snapshot = TimeTravelUtil.try_travel_to_snapshot(
-            self.table.options.options,
-            self.table.tag_manager(),
-            snapshot_manager,
-        )
-        if snapshot is None:
-            snapshot = snapshot_manager.get_latest_snapshot()
-        if snapshot is None:
-            return self.table
-
-        dynamic_options = {
+        snapshot = TimeTravelUtil.resolve_snapshot(self.table)
+        return self.table.copy_without_time_travel({
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
                 GlobalIndexSearchMode.FULL.value,
-            CoreOptions.SCAN_MODE.key(): StartupMode.DEFAULT.value,
-            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
-        }
-        for scan_key in SCAN_KEYS:
-            if (
-                    scan_key != CoreOptions.SCAN_SNAPSHOT_ID.key()
-                    and self.table.options.options.contains_key(scan_key)
-            ):
-                dynamic_options[scan_key] = None
-
-        return self.table.copy(dynamic_options)
+        })._copy_with_snapshot(snapshot)
 
     def _validate_predicate_update(
             self,
@@ -568,7 +560,8 @@ class TableUpdate:
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
-        snapshot = self.table.snapshot_manager().get_latest_snapshot()
+        _authorize_update(self.table)
+        snapshot = TimeTravelUtil.resolve_snapshot(self.table)
         if snapshot is None:
             return []
 

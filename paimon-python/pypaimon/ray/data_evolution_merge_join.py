@@ -113,6 +113,8 @@ def _resolve_source_projection(
 
     for clause in clauses:
         for value in clause.spec.values():
+            if callable(value) and not isinstance(value, type):
+                needed.update(source_field_names)
             if isinstance(value, SourceColumnRef):
                 needed.add(value.column)
         if clause.condition is not None:
@@ -269,6 +271,7 @@ def build_self_merge_update_plan(
     row_id_name = SpecialFields.ROW_ID.name
     needed_cols = set(resolve_target_projection(
         clauses, [row_id_name], update_cols, target_field_names,
+        callable_columns=read_columns or None,
     ))
     needed_cols.update(read_columns)
     for clause in clauses:

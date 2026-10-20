@@ -392,11 +392,11 @@ class HashBucketAssigner:
             read_builder.with_filter(
                 predicate_builder.and_predicates(predicates)
             )
-        return {
-            split.bucket
-            for split in read_builder.new_scan().plan_all_files().splits()
-            if split.files
-        }
+        # HASH validation needs all live data-file buckets, not the subset a
+        # SELECT policy exposes. This internal manifest lookup returns no rows.
+        scanner = read_builder.new_scan().file_scanner
+        scanner.skip_level0 = False
+        return {entry.bucket for entry in scanner.plan_files()}
 
 
 @dataclass
