@@ -253,12 +253,25 @@ def _native_update_columns_supported(table, columns):
     return not names.intersection(table.options.video_frame_fields())
 
 
-def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None):
+def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None, key_names=()):
     """Encode consecutive row shapes without padding absent fields with NULL.
 
     Keep source order, including duplicates across shapes. Key matching,
     last-write-wins and matched/append column validation belong to Rust core.
     """
+    encoded_keys = {}
+    for name in key_names:
+        key_type = schema.field(name).type
+        if not (pa.types.is_integer(key_type) or pa.types.is_floating(key_type)
+                or pa.types.is_decimal(key_type)):
+            continue
+        encoded = pa.array([row[name] for row in rows], type=key_type)
+        # Row constructors can narrow numbers before core sees a match key.
+        # Qualify all keys before encoding any payload: a later unsafe row
+        # must not fall back after an earlier Blob input has been consumed.
+        if any(row[name] != encoded[index].as_py() for index, row in enumerate(rows)):
+            return None
+        encoded_keys[name] = encoded
     batches = []
     start = 0
     while start < len(rows):
@@ -271,12 +284,14 @@ def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None):
         selected = [field for field in fields if field.name in names]
         batch_schema = pa.schema([schema.field(field.name) for field in selected])
         if blob_rows is not None:
-            batches.append(blob_rows.to_batch(table, rows[start:end], batch_schema.names))
+            batch = blob_rows.to_batch(table, rows[start:end], batch_schema.names)
         else:
-            batches.append(pa.RecordBatch.from_pydict({
-                field.name: [value_for_arrow(row[field.name], field) for row in rows[start:end]]
+            batch = pa.RecordBatch.from_pydict({
+                field.name: (encoded_keys[field.name].slice(start, end - start) if field.name in encoded_keys else
+                             [value_for_arrow(row[field.name], field) for row in rows[start:end]])
                 for field in selected
-            }, schema=batch_schema))
+            }, schema=batch_schema)
+        batches.append(batch)
         start = end
     return batches
 
@@ -303,7 +318,10 @@ def create_native_upsert(table, commit_user, data, keys, columns):
                 for field in fields for row in data):
             from pypaimon.write.native_blob_rows import NativeBlobRows
             blob_rows = NativeBlobRows()
-        data = _upsert_row_batches(data, fields, schema, table, blob_rows)
+        data = _upsert_row_batches(
+            data, fields, schema, table, blob_rows, list(dict.fromkeys(keys + table.partition_keys)))
+        if data is None:
+            return None
     else:
         if (len(data.column_names) != len(set(data.column_names))
                 or not set(data.column_names) <= set(schema.names)):
