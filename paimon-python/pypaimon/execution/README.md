@@ -48,8 +48,9 @@ commit messages and input adapters. These contracts stay outside either backend.
 Neither implementation imports the other. Public APIs retain configuration and
 select an executor when needed. Python scanners, readers, writers and committers
 are created only when Python execution is selected. Direct access to a Python
-scanner or committer through an existing public property explicitly selects that
-implementation. Shared index interfaces, options, results and wire formats remain
+scanner, writer router or committer through an existing public property explicitly
+selects that implementation. Attribute inspection and configuration getters do
+not select Python. Shared index interfaces, options, results and wire formats remain
 in `globalindex`; shared search plans and splits remain in `table/source`.
 
 Native adapters convert requests and results and invoke `pypaimon_rust`. General
@@ -57,12 +58,16 @@ execution algorithms belong in Rust Core. The optional extension is loaded only
 when a Native operation is requested. Importing the Python implementation does
 not require or initialize it.
 
-Ray input grouping shares bucket arithmetic, binary-row size estimation and
-hash routing in `write/bucket_planning.py` and `write/input_routing.py`. These
-operators hold input configuration and partition counts, with no file scanner,
-reader or writer. The Native postpone coordinator loads existing bucket counts
-from Rust's complete file plan; the Python coordinator uses its Python metadata
-loader. This selection finishes before Ray materializes or writes input.
+Ray and Daft input grouping share bucket arithmetic, binary-row size estimation
+and fixed/dynamic hash routing in `write/bucket_planning.py` and
+`write/input_routing.py`. These operators hold input configuration and partition
+counts, with no file scanner, reader, writer or index maintainer. Native postpone
+and dynamic bucket coordinators load existing buckets from Rust's complete file
+plan, pinned to the restore snapshot and partition. Dynamic assignment still
+requires a complete HASH index for existing data buckets. Python coordinators
+use their Python metadata loader. Selection finishes before assigning input
+keys. Python's Arrow grouping capability probe runs only when its grouping
+implementation is used.
 
 ## Selection and failure boundaries
 
@@ -86,7 +91,9 @@ another implementation and prepared files are preserved.
 Native search keeps a lazy Python factory for transported plans or Ray split
 workers. Creating a Native scan or reader, executing its Native plan, and
 serializing it do not construct that Python executor. Search execution errors
-propagate without a second search through Python.
+propagate without a second search through Python. Explicit split reads and Ray
+split workers select their Python factory when invoked, not when their methods
+or optional attributes are inspected.
 
 ## Tests
 

@@ -95,6 +95,19 @@ def create_postpone_bucket_planner(table, known_num_buckets=None):
     return PostponeBucketPlanner(table, known_num_buckets=known_num_buckets)
 
 
+def dynamic_bucket_data_buckets(table, partition, snapshot):
+    """Resolve complete bucket metadata before assigning any input keys."""
+    if table.options.native_write_enabled():
+        def prepare():
+            from pypaimon.execution.native.write.bucket_metadata import dynamic_bucket_data_buckets as native_buckets
+            return native_buckets(table, partition, snapshot)
+        native = try_prepare_native(prepare)
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.bucket_metadata import dynamic_bucket_data_buckets as python_buckets
+    return python_buckets(table, partition, snapshot)
+
+
 def prepare_native_commit(owner, messages, *, batch=False):
     if not owner.table.options.native_commit_enabled():
         return None

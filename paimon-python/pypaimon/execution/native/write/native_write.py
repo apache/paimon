@@ -87,6 +87,7 @@ class NativeTableWrite:
         self._native_writer = native_writer
         self._python_writer = None
         self._written = False
+        self._batch_committed = False
         self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
         self._schema = self._table_schema
         self._write_cols = None
@@ -112,6 +113,10 @@ class NativeTableWrite:
         return self._configure_python_writer(writer)
 
     def _configure_python_writer(self, writer):
+        if not self.stream:
+            # Empty batch preparation can leave _written false. Explicit
+            # diagnostics must not reset the one-time preparation guard.
+            writer.batch_committed = self._batch_committed
         if self._write_cols is not None:
             writer.with_write_type(self._write_cols)
         if self._blob_consumer is not None:
@@ -120,10 +125,53 @@ class NativeTableWrite:
             writer.with_blob_uri_reader_factory(self._blob_uri_reader_factory)
         return writer
 
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            raise AttributeError(name)
-        return getattr(self._switch_to_python(), name)
+    @property
+    def file_store_write(self):
+        """Explicitly request the Python writer's diagnostic implementation."""
+        return self._switch_to_python().file_store_write
+
+    @file_store_write.setter
+    def file_store_write(self, writer):
+        self._switch_to_python().file_store_write = writer
+
+    @property
+    def row_key_extractor(self):
+        """Explicitly request the Python writer's routing implementation."""
+        return self._switch_to_python().row_key_extractor
+
+    @row_key_extractor.setter
+    def row_key_extractor(self, extractor):
+        self._switch_to_python().row_key_extractor = extractor
+
+    @property
+    def table_pyarrow_schema(self):
+        return (self._python_writer.table_pyarrow_schema
+                if self._python_writer is not None else self._table_schema)
+
+    @table_pyarrow_schema.setter
+    def table_pyarrow_schema(self, schema):
+        self._switch_to_python().table_pyarrow_schema = schema
+
+    @property
+    def restore_snapshot_id(self):
+        return (self._python_writer.restore_snapshot_id
+                if self._python_writer is not None else self._restore_snapshot_id)
+
+    @restore_snapshot_id.setter
+    def restore_snapshot_id(self, snapshot_id):
+        self._switch_to_python().restore_snapshot_id = snapshot_id
+
+    @property
+    def batch_committed(self):
+        if self._python_writer is not None:
+            return self._python_writer.batch_committed
+        if self.stream:
+            raise AttributeError('batch_committed')
+        return self._batch_committed
+
+    @batch_committed.setter
+    def batch_committed(self, value):
+        self._switch_to_python().batch_committed = value
 
     def with_write_type(self, write_cols):
         if self._python_writer is not None:
@@ -292,6 +340,7 @@ class NativeTableWrite:
         else:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
+            self._batch_committed = True
             try:
                 messages = self._native_writer.prepare_commit()
             finally:

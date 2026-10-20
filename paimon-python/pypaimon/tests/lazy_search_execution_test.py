@@ -109,6 +109,45 @@ def test_native_search_prepares_scans_reads_and_serializes_without_python(search
     (core_read.read_batch_plan if family == 'batch' else core_read.read_plan).assert_called_once_with(plan._native_plan)
 
 
+@pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
+def test_native_search_reader_introspection_does_not_select_python_execution(search_table, family):
+    builder = _builder(search_table, family)
+    native, _, _ = _native_builder(family)
+    _, read_factory = _factories(builder, family)
+    with _forbid_python_execution(), patch(_native_factory(family), return_value=native):
+        reader = read_factory()
+        # Cleanup helpers and interactive frontends probe optional attributes;
+        # observing a reader must not select another execution backend.
+        for name in ('close', '_repr_html_', '_ipython_display_', 'missing_attribute'):
+            assert not hasattr(reader, name)
+        method = 'read_batch' if family == 'batch' else 'read'
+        assert callable(getattr(reader, method))
+        assert not hasattr(reader, 'read' if family == 'batch' else 'read_batch')
+        assert reader._python_executor is None
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
+def test_native_search_split_read_selects_python_only_when_invoked(search_table, family):
+    builder = _builder(search_table, family)
+    native, _, _ = _native_builder(family)
+    _, read_factory = _factories(builder, family)
+    method_name = 'read_batch' if family == 'batch' else 'read'
+    python_method = Mock(return_value='split fallback')
+    python = SimpleNamespace(**{method_name: python_method})
+    factory = ('_new_python_full_text_read' if family == 'text' else
+               '_new_python_batch_vector_read' if family == 'batch' else '_new_python_vector_read')
+    with patch(_native_factory(family), return_value=native), \
+            patch.object(type(builder), factory, return_value=python) as prepare:
+        reader = read_factory()
+        split_read = getattr(reader, method_name)
+        prepare.assert_not_called()
+        splits = ['transported split']
+        assert split_read(splits) == 'split fallback'
+        assert split_read(splits) == 'split fallback'
+    prepare.assert_called_once_with()
+    assert python_method.call_args_list == [((splits,),), ((splits,),)]
+
+
 @pytest.mark.parametrize('phase', ['scan', 'read'])
 def test_native_search_failure_never_creates_python_execution(search_table, phase):
     builder = _builder(search_table, 'vector')

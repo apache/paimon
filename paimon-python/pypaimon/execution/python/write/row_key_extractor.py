@@ -29,16 +29,16 @@ from pypaimon.index.dynamic_bucket import (
     is_my_bucket,
     validate_max_buckets,
 )
-from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.input_routing import (
-    PartitionKeyExtractor, PostponeFixedBucketInputRouter,
-    _bucket_from_hash, _hash_bytes_by_words as _shared_hash_bytes_by_words,
+    DynamicBucketInputRouter, FixedBucketInputRouter, PartitionKeyExtractor, PostponeFixedBucketInputRouter,
+    _bucket_from_hash as _shared_bucket_from_hash, _hash_bytes_by_words as _shared_hash_bytes_by_words,
 )
 
 logger = logging.getLogger(__name__)
 _hash_bytes_by_words = _shared_hash_bytes_by_words
+_bucket_from_hash = _shared_bucket_from_hash
 
 
 def _probe_arrow_group_by() -> bool:
@@ -49,7 +49,7 @@ def _probe_arrow_group_by() -> bool:
     ``hash_list`` aggregate kernel this path relies on only landed in 8.0.0.
     pyarrow 7 therefore *has* ``group_by`` yet raises ``ArrowKeyError`` for
     ``hash_list`` -- and the Python 3.7 dependency range still permits
-    ``pyarrow>=7,<13``. Probe the actual aggregate once at import so both
+    ``pyarrow>=7,<13``. Probe on the first Python grouping operation so both
     pyarrow<7 (no ``group_by``) and pyarrow 7 (no ``hash_list``) fall through to
     the per-row grouping instead of failing every ``write_arrow_batch``.
     """
@@ -68,7 +68,16 @@ def _probe_arrow_group_by() -> bool:
 
 # pyarrow < 7.0.0 has no ``Table.group_by`` and pyarrow 7 has no ``hash_list``
 # aggregate kernel; on either the write path must use per-row grouping.
-_ARROW_GROUP_BY_SUPPORTED = _probe_arrow_group_by()
+_ARROW_GROUP_BY_SUPPORTED = None
+
+
+def _arrow_group_by_supported():
+    # Public facades import the Pure implementation for their shared API, but
+    # Native execution must not initialize Acero kernels just by importing it.
+    global _ARROW_GROUP_BY_SUPPORTED
+    if _ARROW_GROUP_BY_SUPPORTED is None:
+        _ARROW_GROUP_BY_SUPPORTED = _probe_arrow_group_by()
+    return _ARROW_GROUP_BY_SUPPORTED
 
 
 class RowKeyExtractor(PartitionKeyExtractor, ABC):
@@ -102,7 +111,7 @@ class RowKeyExtractor(PartitionKeyExtractor, ABC):
         sequence and side effects regardless of which grouping path runs.
         """
         buckets = self._extract_buckets_batch(data)
-        if _ARROW_GROUP_BY_SUPPORTED:
+        if _arrow_group_by_supported():
             try:
                 return self._group_indices_arrow(data, buckets)
             except (pa.ArrowNotImplementedError, pa.ArrowInvalid):
@@ -188,74 +197,8 @@ class RowKeyExtractor(PartitionKeyExtractor, ABC):
         """Extract bucket number for a single row."""
 
 
-class FixedBucketRowKeyExtractor(RowKeyExtractor):
-    """Fixed bucket mode extractor with configurable number of buckets."""
-
-    def __init__(self, table_schema: TableSchema):
-        super().__init__(table_schema)
-        options = CoreOptions.from_dict(table_schema.options)
-        self.num_buckets = options.bucket()
-        if self.num_buckets <= 0:
-            raise ValueError(f"Fixed bucket mode requires bucket > 0, got {self.num_buckets}")
-
-        # Bucket-key resolution lives on TableSchema (mirrors Java
-        # ``TableSchema.bucketKeys()`` / ``logicalBucketKeyType()``); reuse
-        # it so any reader path that walks the same logic stays in sync.
-        self.bucket_keys = table_schema.bucket_keys
-        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
-        self._bucket_key_fields = table_schema.logical_bucket_key_fields
-        bucket_function = table_schema.options.get('bucket-function.type')
-        self.bucket_function = 'default' if bucket_function is None else str(bucket_function).lower()
-        if self.bucket_function == 'mod':
-            if len(self._bucket_key_fields) != 1:
-                raise ValueError('bucket key must have exactly one field in mod bucket function')
-            key_type = self._bucket_key_fields[0].type
-            if not isinstance(key_type, AtomicType) or key_type.type.upper() not in ('INT', 'INTEGER', 'BIGINT'):
-                raise ValueError(
-                    'bucket key type must be INT or BIGINT in mod bucket function, but got %s' % key_type)
-        elif self.bucket_function not in ('default', 'hive'):
-            raise ValueError('Unsupported bucket function type: %s' % self.bucket_function)
-
-    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
-        self._check_automatic_bucket_function()
-        columns = self._input_columns(data, self.bucket_key_indices)
-        if self.bucket_function == 'mod':
-            return [self._mod_bucket(value.as_py()) for value in columns[0]]
-        return [
-            _bucket_from_hash(
-                self._binary_row_hash_code(
-                    tuple(col[row_idx].as_py() for col in columns),
-                    self._bucket_key_fields,
-                ),
-                self.num_buckets,
-            )
-            for row_idx in range(data.num_rows)
-        ]
-
-    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
-        self._check_automatic_bucket_function()
-        if self.bucket_function == 'mod':
-            return self._mod_bucket(values_by_name[self.bucket_keys[0]])
-        return _bucket_from_hash(
-            self._binary_row_hash_code(
-                tuple(values_by_name[name] for name in self.bucket_keys),
-                self._bucket_key_fields,
-            ),
-            self.num_buckets,
-        )
-
-    def _check_automatic_bucket_function(self):
-        # Explicit buckets do not use this method. A single bucket also keeps
-        # the existing zero result without needing the Hive hash algorithm.
-        if self.bucket_function == 'hive' and self.num_buckets > 1:
-            raise NotImplementedError(
-                'Hive bucket functions require the native writer; enable write.native.enabled')
-
-    def _mod_bucket(self, value):
-        # Java reads the zeroed fixed-width slot for NULL; Python's modulo
-        # with a positive divisor otherwise matches Math.floorMod, even for
-        # Long.MIN_VALUE. Avoid floating-point division for BIGINT values.
-        return 0 if value is None else value % self.num_buckets
+class FixedBucketRowKeyExtractor(FixedBucketInputRouter, RowKeyExtractor):
+    """Fixed-bucket Python writer grouping using the shared input router."""
 
 
 class UnawareBucketRowKeyExtractor(RowKeyExtractor):
@@ -365,7 +308,7 @@ class SimpleHashBucketAssigner:
         return assigned
 
 
-class DynamicBucketRowKeyExtractor(RowKeyExtractor):
+class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
     """Extract dynamic buckets and maintain their persistent hash mapping."""
 
     def __init__(
@@ -380,28 +323,11 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
         base_snapshot_id: Optional[int] = None,
     ):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -1))
-        if num_buckets != -1:
-            raise ValueError(
-                "Only 'bucket' = '-1' is allowed for "
-                f"'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
-            )
-
-        if table_schema.options.get(CoreOptions.BUCKET_KEY.key()) is not None:
-            raise ValueError("Cannot define 'bucket-key' in dynamic bucket mode")
-
         opts = CoreOptions.from_dict(table_schema.options)
         self._table = table
         self.base_snapshot_id = 0
         target_bucket_row_number = opts.dynamic_bucket_target_row_num()
         max_buckets_num = opts.dynamic_bucket_max_buckets()
-
-        self.bucket_keys = table_schema.bucket_keys
-        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
-        self._bucket_key_fields = table_schema.logical_bucket_key_fields
-        self._partition_fields = [
-            table_schema.fields[index] for index in self.partition_indices
-        ]
 
         if table is None:
             self._assigner = SimpleHashBucketAssigner(
@@ -417,16 +343,8 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 HashBucketAssigner,
             )
 
-            if base_snapshot_id is None:
-                snapshot = table.snapshot_manager().get_latest_snapshot()
-            elif base_snapshot_id == 0:
-                snapshot = None
-            else:
-                snapshot = table.snapshot_manager().get_snapshot_by_id(
-                    base_snapshot_id
-                )
-                if snapshot is None:
-                    raise ValueError("Snapshot id '{}' doesn't exist".format(base_snapshot_id))
+            from pypaimon.index.dynamic_bucket import resolve_bucket_snapshot
+            snapshot = resolve_bucket_snapshot(table, base_snapshot_id)
             self.base_snapshot_id = snapshot.id if snapshot is not None else 0
             self._assigner = HashBucketAssigner(
                 table=table,
@@ -447,45 +365,6 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 if maintain_index
                 else None
             )
-
-    def extract_hashes_batch(
-        self, data: pa.RecordBatch
-    ) -> Tuple[List[Tuple], List[int], List[int]]:
-        """Return partitions, BinaryRow partition hashes, and key hashes."""
-        partitions = self._extract_partitions_batch(data)
-        key_hashes = self._extract_key_hashes_batch(data)
-        partition_hash_cache = {}
-        partition_hashes = []
-        for partition in partitions:
-            if partition not in partition_hash_cache:
-                partition_hash_cache[partition] = self._binary_row_hash_code(
-                    partition, self._partition_fields
-                )
-            partition_hashes.append(partition_hash_cache[partition])
-        return partitions, partition_hashes, key_hashes
-
-    def _extract_key_hashes_batch(self, data: pa.RecordBatch) -> List[int]:
-        key_columns = self._input_columns(data, self.bucket_key_indices)
-        return [
-            self._binary_row_hash_code(
-                tuple(column[row_idx].as_py() for column in key_columns),
-                self._bucket_key_fields,
-            )
-            for row_idx in range(data.num_rows)
-        ]
-
-    def extract_assigners_batch(
-        self, data: pa.RecordBatch, num_channels: int, num_assigners: int
-    ) -> List[int]:
-        from pypaimon.index.dynamic_bucket import compute_assigner
-
-        _, partition_hashes, key_hashes = self.extract_hashes_batch(data)
-        return [
-            compute_assigner(
-                partition_hash, key_hash, num_channels, num_assigners
-            )
-            for partition_hash, key_hash in zip(partition_hashes, key_hashes)
-        ]
 
     def extract_partition_bucket_from_hashes_batch(
         self, data: pa.RecordBatch, key_hashes: List[int]

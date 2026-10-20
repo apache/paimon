@@ -160,11 +160,6 @@ class _NativeRead:
         self._source_modes = source_modes
         self._table_options = dict(table.options.options.to_map())
 
-    def __getattr__(self, name):
-        if name.startswith('__') or '_python_factory' not in self.__dict__:
-            raise AttributeError(name)
-        return getattr(self._python_reader(), name)
-
     def _python_reader(self):
         if self._python_executor is None:
             self._python_executor = self._python_factory()
@@ -203,6 +198,18 @@ class _NativeRead:
         return None
 
 
+class _NativeSplitRead(_NativeRead):
+    def read(self, splits):
+        # Explicit split reads select Python only when invoked. Attribute probes
+        # and method inspection must not construct a fallback executor.
+        return self._python_reader().read(splits)
+
+
+class _NativeBatchRead(_NativeRead):
+    def read_batch(self, splits):
+        return self._python_reader().read_batch(splits)
+
+
 def _source_modes(builder, full_text=False):
     options = dict(builder._table.options.options.to_map())
     options.update(getattr(builder, '_options', {}))
@@ -235,7 +242,8 @@ def native_vector_read(builder, python_factory, batch=False):
     else:
         native.with_query_vector(builder._query_vector)
         reader = native.new_vector_search_read()
-    return _NativeRead(
+    read_class = _NativeBatchRead if batch else _NativeSplitRead
+    return read_class(
         builder._table, reader, python_factory, builder._is_primary_key_vector_search(), _source_modes(builder))
 
 
@@ -250,7 +258,7 @@ def native_full_text_scan(builder, python_factory):
 def native_full_text_read(builder, python_factory):
     from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder)
-    return python_factory() if native is None else _NativeRead(
+    return python_factory() if native is None else _NativeSplitRead(
         builder._table, native.new_full_text_read(), python_factory,
         builder._primary_key_full_text_definition() is not None,
         _source_modes(builder, True))
