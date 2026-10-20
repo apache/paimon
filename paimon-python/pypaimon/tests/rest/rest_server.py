@@ -935,7 +935,9 @@ class RESTCatalogServer:
         self.server = HTTPServer(('localhost', 0), handler)
         self.port = self.server.server_port
 
-        self.server_thread = threading.Thread(target=self.server.serve_forever)
+        # A short poll keeps per-test shutdowns from waiting for the 0.5s default.
+        self.server_thread = threading.Thread(
+            target=self.server.serve_forever, kwargs={'poll_interval': 0.01})
         self.server_thread.daemon = True
         self.server_thread.start()
 
