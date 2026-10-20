@@ -175,9 +175,101 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                 .containsExactlyElementsOf(expectedRowIds);
         assertClusteredFileOrder(table, mode);
         assertThat(deletionVectorCardinality(table)).isZero();
-        assertThat(globalIndexPartitions(table)).containsExactly("B");
+        assertThat(globalIndexPartitions(table)).containsExactly("A", "B");
         sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'full')");
         assertThat(sql("SELECT id FROM T WHERE name = 'updated-3'")).containsExactly(Row.of(3));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"btree,global-sort", "btree,local-sort", "bitmap,global-sort", "bitmap,local-sort"})
+    public void testIncrementalClusteringRemapsScalarIndexRowIds(String indexType, String mode)
+            throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql(
+                "ALTER TABLE T SET ("
+                        + "'write-only' = 'true', "
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', "
+                        + "'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = '"
+                        + mode
+                        + "', 'scan.parallelism' = '2', "
+                        + "'source.split.target-size' = '1 b', "
+                        + "'sink.parallelism' = '1', 'target-file-row-num' = '7')");
+        List<String> odds = new ArrayList<>();
+        List<String> evens = new ArrayList<>();
+        for (int id = 39; id >= 1; id -= 2) {
+            odds.add(
+                    "("
+                            + id
+                            + ", "
+                            + (id == 9 ? "CAST(NULL AS STRING)" : "'key-" + id + "'")
+                            + ", 'A')");
+            evens.add("(" + (id + 1) + ", 'key-" + (id + 1) + "', 'A')");
+        }
+        sql("INSERT INTO T VALUES " + String.join(", ", odds));
+        sql("INSERT INTO T VALUES " + String.join(", ", evens));
+        sql("INSERT INTO T VALUES (41, 'key-41', 'B')");
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "index_column => 'name', index_type => '"
+                        + indexType
+                        + "')");
+        // The old postings still contain these rows; the clustering mapping must omit them.
+        sql("DELETE FROM T WHERE id IN (2, 11)");
+        FileStoreTable table = paimonTable("T");
+        List<String> oldAIndexes = scalarIndexFiles(table, indexType, "A");
+        List<String> oldBIndexes = scalarIndexFiles(table, indexType, "B");
+        assertThat(oldAIndexes).isNotEmpty();
+        assertThat(oldBIndexes).isNotEmpty();
+        long beforeSnapshot = table.latestSnapshot().get().id();
+        long firstNewRowId = table.latestSnapshot().get().nextRowId();
+
+        sql(
+                "CALL sys.compact(`table` => 'default.T', partitions => 'dt=A', "
+                        + "compact_strategy => 'full')");
+
+        // Data and remapped indexes become visible atomically, without a second index-build job.
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(beforeSnapshot + 1);
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(scalarIndexFiles(table, indexType, "A"))
+                .isNotEmpty()
+                .doesNotContainAnyElementsOf(oldAIndexes);
+        assertThat(scalarIndexFiles(table, indexType, "B")).isEqualTo(oldBIndexes);
+        assertThat(
+                        table.store().newIndexFileHandler().scan(indexType).stream()
+                                .filter(
+                                        entry ->
+                                                entry.partition()
+                                                        .getString(0)
+                                                        .toString()
+                                                        .equals("A")))
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.indexFile().globalIndexMeta().rowRangeStart())
+                                        .isGreaterThanOrEqualTo(firstNewRowId));
+        assertThat(sql("SELECT _ROW_ID FROM T$row_tracking WHERE dt = 'A'"))
+                .hasSize(38)
+                .allSatisfy(
+                        row ->
+                                assertThat((Long) row.getField(0))
+                                        .isGreaterThanOrEqualTo(firstNewRowId));
+
+        // FAST searches only indexed rows, so data-scan fallback cannot hide missing postings.
+        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')");
+        assertThat(sql("SELECT id FROM T WHERE name IN ('key-5', 'key-2', 'key-11') ORDER BY id"))
+                .containsExactly(Row.of(5));
+        assertThat(sql("SELECT id FROM T WHERE name IS NULL")).containsExactly(Row.of(9));
+        List<Row> negativeMatches = new ArrayList<>();
+        for (int id = 1; id <= 40; id++) {
+            if (id != 2 && id != 11 && id != 5 && id != 9) {
+                negativeMatches.add(Row.of(id));
+            }
+        }
+        assertThat(sql("SELECT id FROM T WHERE dt = 'A' AND name <> 'key-5' ORDER BY id"))
+                .containsExactlyElementsOf(negativeMatches);
     }
 
     @ParameterizedTest
@@ -610,6 +702,15 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         return table.store().newIndexFileHandler().scan("btree").stream()
                 .map(entry -> entry.partition().getString(0).toString())
                 .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    private static List<String> scalarIndexFiles(
+            FileStoreTable table, String indexType, String partition) {
+        return table.store().newIndexFileHandler().scan(indexType).stream()
+                .filter(entry -> entry.partition().getString(0).toString().equals(partition))
+                .map(entry -> entry.indexFile().fileName())
                 .sorted()
                 .collect(Collectors.toList());
     }
