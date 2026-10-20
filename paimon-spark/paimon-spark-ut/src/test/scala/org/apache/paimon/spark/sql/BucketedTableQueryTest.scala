@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.data.{BinaryString, GenericRow}
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.{PaimonBucketedInputPartition, PaimonScan, PaimonSparkTestBase}
 import org.apache.paimon.spark.commands.BucketExpression.quote
@@ -268,7 +269,19 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
         sql(s"""CREATE TABLE t ($quotedKey STRING, seq INT)
                |TBLPROPERTIES ('primary-key'='seq,$key', 'bucket-key'='seq', 'bucket'='1')
                |""".stripMargin)
-        sql("INSERT INTO t VALUES ('b', 1), ('a', 1), ('a', 2)")
+        // Prepare data through the table API to keep this test focused on scan output ordering.
+        val writeBuilder = loadTable("t").newBatchWriteBuilder()
+        val write = writeBuilder.newWrite()
+        val commit = writeBuilder.newCommit()
+        try {
+          write.write(GenericRow.of(BinaryString.fromString("b"), 1))
+          write.write(GenericRow.of(BinaryString.fromString("a"), 1))
+          write.write(GenericRow.of(BinaryString.fromString("a"), 2))
+          commit.commit(write.prepareCommit())
+        } finally {
+          write.close()
+          commit.close()
+        }
 
         for (preserve <- Seq(false, true); v2 <- Seq(false, true)) {
           withSparkSQLConf(
