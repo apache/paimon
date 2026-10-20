@@ -142,6 +142,49 @@ class JavaPyReadWriteTest(unittest.TestCase):
         writer.close()
         commit.close()
 
+    def test_read_java_composite_date_partition(self):
+        for legacy_name in (True, False):
+            suffix = 'legacy' if legacy_name else 'canonical'
+            table = self.catalog.get_table(
+                'default.composite_date_java_to_python_' + suffix)
+            read_builder = table.new_read_builder()
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits())
+            self.assertEqual(result.to_pydict(), {
+                'id': [1],
+                'day': [datetime.date(1970, 1, 2)],
+                'region': ['a/b'],
+            })
+
+    def test_py_write_composite_date_partition(self):
+        arrow_schema = pa.schema([
+            ('id', pa.int32()),
+            ('day', pa.date32()),
+            ('region', pa.string()),
+        ])
+        for legacy_name in (True, False):
+            suffix = 'legacy' if legacy_name else 'canonical'
+            table = self.catalog.get_table(
+                'default.composite_date_java_to_python_' + suffix)
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.table({
+                    'id': [2],
+                    'day': [datetime.date(1970, 1, 2)],
+                    'region': ['a/b'],
+                }, schema=arrow_schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+            read_builder = table.new_read_builder()
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits())
+            self.assertEqual(
+                set(result.to_pydict()['id']), {1, 2})
+
     @parameterized.expand([
         (type_name, order, grouping)
         for type_name in ('float', 'double')

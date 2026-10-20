@@ -128,14 +128,22 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         raw_convertible is True only when each range (pack) contains exactly one file.
         """
         splits = []
+        data_files = [
+            data_file
+            for file_group in flatten_packed_files
+            for data_file in file_group
+        ]
+        self._set_data_file_paths(
+            data_files,
+            file_entries[0].partition,
+            file_entries[0].bucket,
+        )
+
         for i, file_group in enumerate(flatten_packed_files):
             # In Java: rawConvertible = f.stream().allMatch(file -> file.size() == 1)
             # This means raw_convertible is True only when each range contains exactly one file
             pack = packed_files[i] if i < len(packed_files) else []
             raw_convertible = all(len(sub_pack) == 1 for sub_pack in pack)
-
-            self._set_data_file_paths(
-                file_group, file_entries[0].partition, file_entries[0].bucket)
 
             if file_group:
                 # Get deletion files for this split

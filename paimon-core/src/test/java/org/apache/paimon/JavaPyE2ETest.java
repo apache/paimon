@@ -159,7 +159,11 @@ public class JavaPyE2ETest {
             Files.createDirectories(tempDir.resolve("warehouse"));
         }
 
-        warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.resolve("warehouse"));
+        warehouse =
+                new Path(
+                        TraceableFileIO.SCHEME
+                                + "://"
+                                + tempDir.resolve("warehouse").toUri().getPath());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
 
         // Create database if it doesn't exist
@@ -381,6 +385,37 @@ public class JavaPyE2ETest {
                             BinaryString.fromString("java-old"));
             write.write(row, assignDynamicBucket(table, row));
             commit.commit(0, write.prepareCommit(true, 0));
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteCompositeDatePartition() throws Exception {
+        for (boolean legacyName : Arrays.asList(true, false)) {
+            String suffix = legacyName ? "legacy" : "canonical";
+            Identifier identifier = identifier("composite_date_java_to_python_" + suffix);
+            catalog.dropTable(identifier, true);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("day", DataTypes.DATE())
+                            .column("region", DataTypes.STRING())
+                            .partitionKeys("day", "region")
+                            .option("partition.legacy-name", Boolean.toString(legacyName))
+                            .option("bucket", "1")
+                            .option("bucket-key", "id")
+                            .option("write.native.enabled", "false")
+                            .option("commit.native.enabled", "false")
+                            .option("scan.native-plan.enabled", "false")
+                            .build();
+            catalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(1, 1, BinaryString.fromString("a/b")));
+                commit.commit(write.prepareCommit());
+            }
         }
     }
 
@@ -670,6 +705,41 @@ public class JavaPyE2ETest {
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "hello-java, 42, java-new", "python-only, 7, python-only");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonCompositeDatePartition() throws Exception {
+        for (boolean legacyName : Arrays.asList(true, false)) {
+            String suffix = legacyName ? "legacy" : "canonical";
+            FileStoreTable table =
+                    (FileStoreTable)
+                            catalog.getTable(identifier("composite_date_java_to_python_" + suffix));
+            List<String> rows =
+                    getResult(
+                            table.newRead(),
+                            table.newScan().plan().splits(),
+                            row ->
+                                    row.getInt(0)
+                                            + ":"
+                                            + row.getInt(1)
+                                            + ":"
+                                            + row.getString(2).toString());
+            assertThat(rows).containsExactlyInAnyOrder("1:1:a/b", "2:1:a/b");
+
+            table.rollbackTo(1L);
+            List<String> rowsAfterRollback =
+                    getResult(
+                            table.newRead(),
+                            table.newScan().plan().splits(),
+                            row ->
+                                    row.getInt(0)
+                                            + ":"
+                                            + row.getInt(1)
+                                            + ":"
+                                            + row.getString(2).toString());
+            assertThat(rowsAfterRollback).containsExactly("1:1:a/b");
+        }
     }
 
     private int assignDynamicBucket(FileStoreTable table, InternalRow row) {

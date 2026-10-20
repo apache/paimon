@@ -97,6 +97,21 @@ class AbstractSplitGenerator(ABC):
         splits = []
         if not packed_files or not file_entries:
             return splits
+
+        # All packed groups are derived from the same partition and bucket.
+        # Resolve every file together so path compatibility needs at most one
+        # canonical lookup and one historical fallback per partition/bucket.
+        data_files = [
+            data_file
+            for file_group in packed_files
+            for data_file in file_group
+        ]
+        self._set_data_file_paths(
+            data_files,
+            file_entries[0].partition,
+            file_entries[0].bucket,
+        )
+
         for file_group in packed_files:
             if use_optimized_path:
                 raw_convertible = True
@@ -104,9 +119,6 @@ class AbstractSplitGenerator(ABC):
                 raw_convertible = len(file_group) == 1 and self._without_delete_row(file_group[0])
             else:
                 raw_convertible = True
-
-            self._set_data_file_paths(
-                file_group, file_entries[0].partition, file_entries[0].bucket)
 
             if file_group:
                 # Get deletion files for this split
@@ -130,15 +142,87 @@ class AbstractSplitGenerator(ABC):
         return splits
 
     def _set_data_file_paths(self, files, partition: GenericRow, bucket: int):
-        """Resolve Java's partition paths without probing the primary file.
+        """解析规范分区路径，并兼容旧 Python 分区目录。
 
-        A row-sidecar read may not open the primary file at all. Its aligned
-        path must still be correct when that primary file is unavailable.
+        仅当旧、新分区目录不同时才检查文件是否存在。读取 row sidecar 时可能
+        不会打开主数据文件，因此主文件和 sidecar 都要参与目录判定。
         """
         values = tuple(partition.values)
+        path_factory = self.table.path_factory()
+        canonical_bucket = path_factory.bucket_path(values, bucket, canonical_partition=True)
+        legacy_bucket = path_factory.bucket_path(values, bucket)
+
+        if canonical_bucket == legacy_bucket:
+            for data_file in files:
+                if data_file.external_path:
+                    data_file.file_path = data_file.physical_path()
+                else:
+                    data_file.file_path = canonical_data_file_path(
+                        self.table, values, bucket, data_file.file_name)
+            return
+
+        path_candidates = []
+
         for data_file in files:
-            data_file.file_path = data_file.physical_path() if data_file.external_path else canonical_data_file_path(
+            if data_file.external_path:
+                data_file.file_path = data_file.physical_path()
+                continue
+
+            canonical_path = canonical_data_file_path(
                 self.table, values, bucket, data_file.file_name)
+            data_file.file_path = canonical_path
+            canonical_paths = [data_file.physical_path()]
+            canonical_paths.extend(
+                data_file.aligned_file_path(name, canonical_bucket)
+                for name in data_file.extra_files
+            )
+
+            data_file.set_file_path(
+                self.table.table_path,
+                partition,
+                bucket,
+                self.default_part_value,
+                self.table.options.data_file_path_directory(),
+            )
+            legacy_path = data_file.file_path
+            legacy_paths = [data_file.physical_path()]
+            legacy_paths.extend(
+                data_file.aligned_file_path(name, legacy_bucket)
+                for name in data_file.extra_files
+            )
+            path_candidates.append((
+                data_file,
+                canonical_path,
+                legacy_path,
+                canonical_paths,
+                legacy_paths,
+            ))
+            data_file.file_path = canonical_path
+
+        if not path_candidates:
+            return
+
+        canonical_paths = {
+            path for _, _, _, paths, _ in path_candidates for path in paths
+        }
+        existing_canonical_paths = self.table.file_io.exists_batch(list(canonical_paths))
+        legacy_candidates = []
+
+        for candidates in path_candidates:
+            data_file, _, _, canonical_paths, legacy_paths = candidates
+            if any(existing_canonical_paths.get(path, False) for path in canonical_paths):
+                continue
+            legacy_candidates.extend(legacy_paths)
+
+        if not legacy_candidates:
+            return
+
+        existing_legacy_paths = self.table.file_io.exists_batch(list(set(legacy_candidates)))
+        for data_file, _, legacy_path, canonical_paths, legacy_paths in path_candidates:
+            if any(existing_canonical_paths.get(path, False) for path in canonical_paths):
+                continue
+            if any(existing_legacy_paths.get(path, False) for path in legacy_paths):
+                data_file.file_path = legacy_path
 
     def _get_deletion_files_for_split(
         self,
