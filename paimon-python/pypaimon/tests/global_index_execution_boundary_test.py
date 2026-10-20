@@ -94,10 +94,7 @@ import io
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vindex_reader import VindexVectorGlobalIndexReader
-from pypaimon.globalindex.vindex import VindexVectorGlobalIndexReader as PublicVindexReader
 from pypaimon.execution.native.read import vindex_reader
-
-assert PublicVindexReader is VindexVectorGlobalIndexReader
 
 class RustReader:
     failure_phase = None
@@ -162,28 +159,12 @@ assert not any(name.startswith('pypaimon.execution.python.globalindex') for name
 
 
 @pytest.mark.parametrize('public_module,new_module,name', [
-    ('globalindex.btree',
-     'execution.python.globalindex.btree.btree_index_reader', 'BTreeIndexReader'),
-    ('globalindex.btree',
-     'execution.python.globalindex.btree.btree_index_writer', 'BTreeIndexWriter'),
-    ('globalindex.bitmap',
-     'execution.python.globalindex.bitmap.bitmap_index_reader', 'BitmapIndexReader'),
-    ('globalindex.bitmap',
-     'execution.python.globalindex.bitmap.bitmap_index_writer', 'BitmapIndexWriter'),
-    ('globalindex.vindex',
-     'globalindex.vindex_reader', 'VindexVectorGlobalIndexReader'),
-    ('globalindex.vindex',
-     'execution.python.globalindex.vindex.vindex_vector_index_writer', 'VindexVectorIndexWriter'),
-    ('globalindex.lumina',
-     'execution.python.globalindex.lumina.lumina_vector_global_index_reader', 'LuminaVectorGlobalIndexReader'),
     ('globalindex',
      'execution.python.globalindex.global_index_evaluator', 'GlobalIndexEvaluator'),
     ('globalindex',
      'execution.python.globalindex.data_evolution_global_index_scanner', 'DataEvolutionGlobalIndexScanner'),
     ('globalindex', 'execution.python.globalindex.key_serializer', 'KeySerializer'),
     ('globalindex', 'execution.python.globalindex.memory_slice_input', 'MemorySliceInput'),
-    ('globalindex.btree',
-     'execution.python.globalindex.btree.btree_index_meta', 'BTreeIndexMeta'),
 ])
 def test_public_index_exports_resolve_to_canonical_class(public_module, new_module, name):
     public_module, new_module = 'pypaimon.' + public_module, 'pypaimon.' + new_module

@@ -155,6 +155,11 @@ class PackagingTest(unittest.TestCase):
         for name in execution_files:
             self.assertIn(name, names)
         internal_aliases = (
+            "pypaimon/globalindex/bitmap/__init__.py",
+            "pypaimon/globalindex/btree/__init__.py",
+            "pypaimon/globalindex/full_text/__init__.py",
+            "pypaimon/globalindex/lumina/__init__.py",
+            "pypaimon/globalindex/vindex/__init__.py",
             "pypaimon/globalindex/btree/block_reader.py",
             "pypaimon/globalindex/btree_format/block_handle.py",
             "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
