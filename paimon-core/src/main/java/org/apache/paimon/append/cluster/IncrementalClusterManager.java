@@ -81,15 +81,6 @@ public class IncrementalClusterManager {
     private final int numLevels;
     private final @Nullable HistoryPartitionCluster historyPartitionCluster;
 
-    public IncrementalClusterManager(FileStoreTable table) {
-        this(table, null);
-    }
-
-    public IncrementalClusterManager(
-            FileStoreTable table, @Nullable PartitionPredicate specifiedPartitions) {
-        this(table, specifiedPartitions, table.snapshotManager().latestSnapshot());
-    }
-
     public IncrementalClusterManager(
             FileStoreTable table,
             @Nullable PartitionPredicate specifiedPartitions,
