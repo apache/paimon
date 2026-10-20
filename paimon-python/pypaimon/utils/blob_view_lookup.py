@@ -186,11 +186,6 @@ class BlobViewLookup:
         for field_id in table_refs.references_by_field:
             fields.append(self._field_by_id(upstream_table, field_id))
 
-        BlobViewStruct.validate_upstream_row_tracking(
-            table_refs.identifier,
-            BlobViewStruct._extract_options(upstream_table),
-        )
-
         read_fields = SpecialFields.row_type_with_row_id(fields)
         return TableReadPlan(
             table_refs.identifier, upstream_table, read_fields,

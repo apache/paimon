@@ -393,7 +393,6 @@ class BlobTest(unittest.TestCase):
         fake_table = SimpleNamespace(
             identifier=Identifier.from_string("test_db.source_table"),
             fields=fields,
-            options={"row-tracking.enabled": "true"},
         )
 
         expected = BlobViewStruct("test_db.source_table", 7, 42)
@@ -429,66 +428,6 @@ class BlobTest(unittest.TestCase):
             r"Field id in upstream table test_db\.source_table is not a BLOB field\.",
         ):
             BlobViewStruct.of(fake_table, "id", 42)
-
-    def test_validate_upstream_row_tracking(self):
-        from types import SimpleNamespace
-        from pypaimon.common.identifier import Identifier
-        from pypaimon.schema.data_types import AtomicType, DataField, RowType
-
-        identifier = Identifier.from_string("default.source")
-        fields = [
-            DataField(0, "id", AtomicType("INT")),
-            DataField(7, "picture", AtomicType("BLOB")),
-        ]
-        row_type = RowType(True, fields)
-        row_tracking_options = {"row-tracking.enabled": "true"}
-
-        view_struct = BlobViewStruct.of(
-            identifier, row_type, row_tracking_options, "picture", 5
-        )
-        self.assertEqual(view_struct.field_id, 7)
-        self.assertEqual(
-            Blob.from_view(identifier, row_type, row_tracking_options, "picture", 5),
-            Blob.from_view(view_struct),
-        )
-
-        with self.assertRaisesRegex(
-            ValueError,
-            r"Upstream table default\.source referenced by blob view must enable 'row-tracking\.enabled'\.",
-        ):
-            BlobViewStruct.of(identifier, row_type, {}, "picture", 5)
-
-        non_row_tracking_table = SimpleNamespace(
-            identifier=identifier,
-            fields=fields,
-            options={},
-        )
-        with self.assertRaisesRegex(
-            ValueError,
-            r"Upstream table default\.source referenced by blob view must enable 'row-tracking\.enabled'\.",
-        ):
-            BlobViewStruct.of(non_row_tracking_table, "picture", 5)
-
-        callable_options_table = SimpleNamespace(
-            identifier=identifier,
-            fields=fields,
-            options=lambda: {},
-        )
-        with self.assertRaisesRegex(
-            ValueError,
-            r"Upstream table default\.source referenced by blob view must enable 'row-tracking\.enabled'\.",
-        ):
-            BlobViewStruct.of(callable_options_table, "picture", 5)
-
-        schema_only_table = SimpleNamespace(
-            identifier=identifier,
-            table_schema=SimpleNamespace(fields=fields, options={}),
-        )
-        with self.assertRaisesRegex(
-            ValueError,
-            r"Upstream table default\.source referenced by blob view must enable 'row-tracking\.enabled'\.",
-        ):
-            BlobViewStruct.of(schema_only_table, "picture", 5)
 
     def test_blob_fallback_batch_reader_respects_batch_size(self):
         created_readers = []

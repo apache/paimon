@@ -427,51 +427,12 @@ class BlobViewStruct:
             return upstream
         raise TypeError("Expected Table, TableSchema, RowType, or sequence of DataField.")
 
-    @staticmethod
-    def _extract_options(upstream):
-        if hasattr(upstream, 'options') and upstream.options is not None:
-            return upstream.options() if callable(upstream.options) else upstream.options
-        if hasattr(upstream, 'table_schema') and getattr(
-                upstream.table_schema, 'options', None) is not None:
-            return upstream.table_schema.options
-        return None
-
-    @classmethod
-    def validate_upstream_row_tracking(
-            cls,
-            identifier: Union[Identifier, str],
-            upstream_options,
-    ) -> None:
-        from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.common.options.options import Options
-
-        identifier = cls._coerce_identifier(identifier)
-        if isinstance(upstream_options, CoreOptions):
-            core_options = upstream_options
-        elif isinstance(upstream_options, Options):
-            core_options = CoreOptions(upstream_options)
-        elif isinstance(upstream_options, dict):
-            core_options = CoreOptions.from_dict(upstream_options)
-        elif upstream_options is None:
-            core_options = CoreOptions.from_dict({})
-        else:
-            raise TypeError(
-                "Expected upstream_options to be dict, Options, or CoreOptions."
-            )
-        if not core_options.row_tracking_enabled():
-            raise ValueError(
-                f"Upstream table {identifier.get_full_name()} "
-                f"referenced by blob view must enable "
-                f"'{CoreOptions.ROW_TRACKING_ENABLED.key()}'."
-            )
-
     @classmethod
     def resolve_blob_field_id(
             cls,
             identifier: Union[Identifier, str],
             upstream,
             field_name: str,
-            upstream_options=None,
     ) -> int:
         from pypaimon.schema.data_types import is_blob_type
 
@@ -486,18 +447,12 @@ class BlobViewStruct:
                 break
         if matched_field is None:
             raise ValueError(
-                f"Cannot find blob field {field_name} in upstream table "
-                f"{identifier.get_full_name()}."
+                f"Cannot find blob field {field_name} in upstream table {identifier.get_full_name()}."
             )
         if not is_blob_type(matched_field.type):
             raise ValueError(
-                f"Field {field_name} in upstream table "
-                f"{identifier.get_full_name()} is not a BLOB field."
+                f"Field {field_name} in upstream table {identifier.get_full_name()} is not a BLOB field."
             )
-        if upstream_options is None:
-            upstream_options = cls._extract_options(upstream)
-        if upstream_options is not None:
-            cls.validate_upstream_row_tracking(identifier, upstream_options)
         return matched_field.id
 
     @classmethod
@@ -506,37 +461,18 @@ class BlobViewStruct:
             upstream_table, field_name, row_id = args
             if not hasattr(upstream_table, 'identifier'):
                 raise TypeError(
-                    "3-argument BlobViewStruct.of expects an upstream "
-                    "Table with an identifier."
+                    "3-argument BlobViewStruct.of expects an upstream Table with an identifier."
                 )
             identifier = upstream_table.identifier
-            upstream_options = cls._extract_options(upstream_table)
-            if upstream_options is None:
-                upstream_options = {}
-            field_id = cls.resolve_blob_field_id(
-                identifier, upstream_table, field_name,
-                upstream_options=upstream_options
-            )
+            field_id = cls.resolve_blob_field_id(identifier, upstream_table, field_name)
             return cls(identifier, field_id, row_id)
         if len(args) == 4:
             identifier, upstream, field_name, row_id = args
-            field_id = cls.resolve_blob_field_id(
-                identifier, upstream, field_name)
-            return cls(identifier, field_id, row_id)
-        if len(args) == 5:
-            identifier, upstream, upstream_options, field_name, row_id = args
-            if upstream_options is None:
-                upstream_options = {}
-            field_id = cls.resolve_blob_field_id(
-                identifier, upstream, field_name,
-                upstream_options=upstream_options
-            )
+            field_id = cls.resolve_blob_field_id(identifier, upstream, field_name)
             return cls(identifier, field_id, row_id)
         raise TypeError(
-            "BlobViewStruct.of expects (upstream_table, field_name, row_id), "
-            "(identifier, upstream_schema, field_name, row_id), or "
-            "(identifier, upstream_schema, upstream_options, field_name, "
-            "row_id)."
+            "BlobViewStruct.of expects (upstream_table, field_name, row_id) or "
+            "(identifier, upstream_schema, field_name, row_id)."
         )
 
     @property
@@ -813,13 +749,12 @@ class Blob(ABC):
                 return BlobView(BlobViewStruct(target, field, row_id))
             if isinstance(field, str):
                 return BlobView(BlobViewStruct.of(target, field, row_id))
-        if len(args) in (4, 5):
+        if len(args) == 4:
             return BlobView(BlobViewStruct.of(*args))
         raise TypeError(
             "Blob.from_view expects (BlobViewStruct), (identifier, field_id, row_id), "
-            "(upstream_table, field_name, row_id), "
-            "(identifier, upstream_schema, field_name, row_id), or "
-            "(identifier, upstream_schema, upstream_options, field_name, row_id)."
+            "(upstream_table, field_name, row_id), or "
+            "(identifier, upstream_schema, field_name, row_id)."
         )
 
     @staticmethod
