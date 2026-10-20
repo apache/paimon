@@ -54,10 +54,41 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** Tests bucket replacements, rewrite dependencies and new DV references using commit deltas. */
+/** Tests bucket DV versions and final references independently of unaware file/DV checks. */
 class BucketedDeletionVectorConflictTest {
 
     private final Snapshot snapshot = mock(Snapshot.class);
+
+    /** Case 1: A installs the first DV on X before B publishes another DV based on its absence. */
+    @ParameterizedTest
+    @EnumSource(
+            value = Snapshot.CommitKind.class,
+            names = {"COMPACT", "OVERWRITE"})
+    void testConcurrentFirstDvsForSameFile(Snapshot.CommitKind kind) {
+        List<IndexManifestEntry> a = Collections.singletonList(index(ADD, dv("DA", "X")));
+        List<IndexManifestEntry> b = Collections.singletonList(index(ADD, dv("DB", "X")));
+        assertThat(check(detection(null), files("X"), Collections.emptyList(), a, kind)).isEmpty();
+        assertThat(check(detection(null), files("X"), Collections.emptyList(), b, kind)).isEmpty();
+        assertConflict(
+                check(detection(dv("DA", "X")), files("X"), Collections.emptyList(), b, kind),
+                "expected DV file null, current DV file DA");
+    }
+
+    /** Case 2: A and B both replace D0 for X; B must not overwrite A's committed DA. */
+    @ParameterizedTest
+    @EnumSource(
+            value = Snapshot.CommitKind.class,
+            names = {"COMPACT", "OVERWRITE"})
+    void testConcurrentDvReplacementsForSameFile(Snapshot.CommitKind kind) {
+        IndexFileMeta old = dv("D0", "X");
+        List<IndexManifestEntry> a = Arrays.asList(index(DELETE, old), index(ADD, dv("DA", "X")));
+        List<IndexManifestEntry> b = Arrays.asList(index(DELETE, old), index(ADD, dv("DB", "X")));
+        assertThat(check(detection(old), files("X"), Collections.emptyList(), a, kind)).isEmpty();
+        assertThat(check(detection(old), files("X"), Collections.emptyList(), b, kind)).isEmpty();
+        assertConflict(
+                check(detection(dv("DA", "X")), files("X"), Collections.emptyList(), b, kind),
+                "expected DV file D0, current DV file DA");
+    }
 
     @ParameterizedTest
     @EnumSource(
@@ -93,6 +124,7 @@ class BucketedDeletionVectorConflictTest {
                 "expected DV file null, current DV file D0");
     }
 
+    /** Case 6, without D0: even first DVs for different files replace the same bucket index. */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testConcurrentFirstIndexesForDifferentFiles(boolean primaryKey) {
@@ -112,6 +144,28 @@ class BucketedDeletionVectorConflictTest {
                 "expected DV file null, current DV file DA");
     }
 
+    /** Case 6, with D0: B's update to Y must not discard A's new deletion marks for X. */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testConcurrentDvReplacementsForDifferentFiles(boolean primaryKey) {
+        IndexFileMeta old = dv("D0", "Y");
+        IndexFileMeta committed = dv("DA", "X", "Y");
+        List<IndexManifestEntry> a = Arrays.asList(index(DELETE, old), index(ADD, committed));
+        List<IndexManifestEntry> b = Arrays.asList(index(DELETE, old), index(ADD, dv("DB", "Y")));
+        assertThat(check(detection(old, primaryKey), files("X", "Y"), Collections.emptyList(), a))
+                .isEmpty();
+        assertThat(check(detection(old, primaryKey), files("X", "Y"), Collections.emptyList(), b))
+                .isEmpty();
+        assertConflict(
+                check(
+                        detection(committed, primaryKey),
+                        files("X", "Y"),
+                        Collections.emptyList(),
+                        b),
+                "expected DV file D0, current DV file DA");
+    }
+
+    /** Case 3, without a DV increment: B must not leave A's retained DA pointing to removed X. */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testRewriteWithoutIndexChanges(boolean primaryKey) {
@@ -131,60 +185,61 @@ class BucketedDeletionVectorConflictTest {
                                 rewrite,
                                 Collections.emptyList()))
                 .isEmpty();
-        assertFileConflict(
+        assertConflict(
                 check(
                         detection(dv("DA", "X"), primaryKey),
                         files("X", "Y"),
                         rewrite,
                         Collections.emptyList()),
-                "Trying to delete file X");
+                "DV file DA references data file X which is not present after applying changes");
     }
 
     @Test
-    void testUpgradeWithoutDvDependencyIsRejected() {
-        // The shared DV checks do not yet special-case metadata-only level upgrades.
-        assertFileConflict(
-                check(
-                        detection(dv("DA", "X")),
-                        files("X"),
-                        Arrays.asList(file("X", DELETE), file("X", ADD, EMPTY_ROW, 0, 1)),
-                        Collections.emptyList()),
-                "Trying to delete file X");
+    void testRetainedDvReferencesSamePhysicalFile() {
+        // A metadata-only change retains the physical file addressed by the DV positions.
+        assertThat(
+                        check(
+                                detection(dv("DA", "X")),
+                                files("X"),
+                                Arrays.asList(file("X", DELETE), file("X", ADD, EMPTY_ROW, 0, 1)),
+                                Collections.emptyList()))
+                .isEmpty();
     }
 
     @Test
     void testDuplicateOldDvDeletionIsRejected() {
         IndexFileMeta old = dv("D0", "X");
         IndexFileMeta next = dv("D1", "Y");
-        assertFileConflict(
+        assertConflict(
                 check(
                         detection(old),
                         files("X", "Y", "Z"),
                         Collections.emptyList(),
                         Arrays.asList(index(DELETE, old), index(ADD, next), index(DELETE, old))),
-                "Trying to delete file X");
+                "Multiple DELETE DV entries for the same bucket");
     }
 
+    /** Case 3, with a DV increment: B's rewrite or clear still depends on the old D0. */
     @ParameterizedTest
     @EnumSource(
             value = Snapshot.CommitKind.class,
             names = {"COMPACT", "OVERWRITE"})
-    void testNonemptyDeleteUsesSharedDvChecks(Snapshot.CommitKind kind) {
+    void testConcurrentDvUpdateBeforeRewriteWithIndexChanges(Snapshot.CommitKind kind) {
         IndexFileMeta old = dv("D0", "X");
         List<IndexManifestEntry> clear = Collections.singletonList(index(DELETE, old));
         List<SimpleFileEntry> rewrite = Arrays.asList(file("X", DELETE), file("Y", ADD));
         assertThat(check(detection(old), files("X"), rewrite, clear, kind)).isEmpty();
-        assertFileConflict(
+        assertConflict(
                 check(detection(dv("DA", "X")), files("X"), rewrite, clear, kind),
-                "Trying to delete file X");
-        assertFileConflict(
+                "expected DV file D0, current DV file DA");
+        assertConflict(
                 check(
                         detection(dv("DA", "X")),
                         files("X"),
-                        Collections.emptyList(),
-                        Arrays.asList(index(DELETE, old), index(ADD, dv("DB", "X"))),
+                        rewrite,
+                        Arrays.asList(index(DELETE, old), index(ADD, dv("DB", "Y"))),
                         kind),
-                "Trying to delete file X");
+                "expected DV file D0, current DV file DA");
     }
 
     @Test
@@ -197,19 +252,42 @@ class BucketedDeletionVectorConflictTest {
                 "expected DV file D0, current DV file DA");
     }
 
+    /** Case 4: A rewrites X to Y without changing the DV version before B publishes a DV for X. */
     @ParameterizedTest
     @EnumSource(
             value = Snapshot.CommitKind.class,
             names = {"COMPACT", "OVERWRITE"})
-    void testMissingReferencedFile(Snapshot.CommitKind kind) {
+    void testConcurrentRewriteBeforeDvUpdate(Snapshot.CommitKind kind) {
+        List<IndexManifestEntry> b = Collections.singletonList(index(ADD, dv("DB", "X")));
+        assertThat(check(detection(null), files("X"), Collections.emptyList(), b, kind)).isEmpty();
+        assertThat(
+                        check(
+                                detection(null),
+                                files("X"),
+                                Arrays.asList(file("X", DELETE), file("Y", ADD)),
+                                Collections.emptyList(),
+                                kind))
+                .isEmpty();
+        assertConflict(
+                check(detection(null), files("Y"), Collections.emptyList(), b, kind),
+                "DV file DB references data file X which is not present after applying changes");
+    }
+
+    /** Case 5: A and B rewrite X; after A commits, the ordinary file check rejects B's DELETE X. */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testConcurrentRewritesOfSameFile(boolean existingDv) {
+        IndexFileMeta old = existingDv ? dv("D0", "X") : null;
+        List<IndexManifestEntry> indexes =
+                old == null
+                        ? Collections.emptyList()
+                        : Collections.singletonList(index(DELETE, old));
+        List<SimpleFileEntry> a = Arrays.asList(file("X", DELETE), file("YA", ADD));
+        List<SimpleFileEntry> b = Arrays.asList(file("X", DELETE), file("YB", ADD));
+        assertThat(check(detection(old, true), files("X"), a, indexes)).isEmpty();
+        assertThat(check(detection(old, true), files("X"), b, indexes)).isEmpty();
         assertFileConflict(
-                check(
-                        detection(null),
-                        files("Y"),
-                        Collections.emptyList(),
-                        Collections.singletonList(index(ADD, dv("DB", "X"))),
-                        kind),
-                "Trying to create deletion vector on file X");
+                check(detection(null, true), files("YA"), b, indexes), "Trying to delete file X");
     }
 
     @Test
@@ -223,13 +301,43 @@ class BucketedDeletionVectorConflictTest {
                                 rewrite,
                                 Arrays.asList(index(DELETE, old), index(ADD, dv("D1", "Y")))))
                 .isEmpty();
-        assertFileConflict(
+        assertConflict(
                 check(
                         detection(old),
                         files("X"),
                         rewrite,
                         Arrays.asList(index(DELETE, old), index(ADD, dv("D1", "X")))),
-                "Delta entry only can have one dv file");
+                "DV file D1 references data file X which is not present after applying changes");
+    }
+
+    @Test
+    void testReferencesMustMatchBucket() {
+        assertConflict(
+                check(
+                        detection(null),
+                        Collections.singletonList(file("X", ADD, EMPTY_ROW, 1, 0)),
+                        Collections.emptyList(),
+                        Collections.singletonList(index(ADD, dv("D1", "X")))),
+                "DV file D1 references data file X which is not present after applying changes");
+    }
+
+    @Test
+    void testMissingReferenceMetadataIsRejected() {
+        IndexFileMeta missing = new IndexFileMeta(DELETION_VECTORS_INDEX, "D1", 1, 1, null, null);
+        assertConflict(
+                check(
+                        detection(null),
+                        files("X"),
+                        Collections.emptyList(),
+                        Collections.singletonList(index(ADD, missing))),
+                "Missing data-file references for DV file D1");
+        assertConflict(
+                check(
+                        detection(missing),
+                        files("X"),
+                        Collections.singletonList(file("Y", ADD)),
+                        Collections.emptyList()),
+                "Missing data-file references for DV file D1");
     }
 
     private ConflictDetection detection(@Nullable IndexFileMeta current) {
@@ -239,12 +347,6 @@ class BucketedDeletionVectorConflictTest {
     private ConflictDetection detection(@Nullable IndexFileMeta current, boolean primaryKey) {
         IndexFileHandler handler = mock(IndexFileHandler.class);
         when(snapshot.commitUser()).thenReturn("base");
-        when(snapshot.indexManifest()).thenReturn("indexes");
-        when(handler.readManifest("indexes"))
-                .thenReturn(
-                        current == null
-                                ? Collections.emptyList()
-                                : Collections.singletonList(index(ADD, current)));
         when(handler.scanBuckets(eq(snapshot), eq(DELETION_VECTORS_INDEX), anySet()))
                 .thenReturn(
                         Collections.singletonMap(

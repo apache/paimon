@@ -105,10 +105,7 @@ class BucketedDeletionVectorDmlTest {
             assertThat(table.snapshotManager().latestSnapshot().commitKind())
                     .isEqualTo(Snapshot.CommitKind.OVERWRITE);
             assertThatThrownBy(() -> commit(table, b))
-                    .hasMessageContaining(
-                            existingDv
-                                    ? "File deletion conflicts detected"
-                                    : "Deletion vector conflict");
+                    .hasMessageContaining("Deletion vector conflict");
             assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(latest);
             assertThat(readRows(table))
                     .containsExactlyInAnyOrderElementsOf(
