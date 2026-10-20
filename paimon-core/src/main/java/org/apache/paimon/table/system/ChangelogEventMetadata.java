@@ -20,9 +20,15 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -276,6 +282,145 @@ public final class ChangelogEventMetadata {
         List<DataField> fields = new ArrayList<>(baseRowType.getFields());
         fields.addAll(extraFields);
         return new RowType(fields);
+    }
+
+    /**
+     * Adds the physical fields that back requested metadata fields when reading data files.
+     *
+     * <p>Data files do not store metadata fields, so readers copy each metadata value from its
+     * source field. A source field that is not requested is appended; one that is requested is
+     * widened when its nested children do not cover those of the metadata field. Both cases use the
+     * union of the requested nested children, so callers must project their output back to the
+     * requested read type. Returns {@code readType} itself when no change is needed.
+     */
+    public static RowType withMetadataDependencies(
+            RowType readType, RowType logicalRowType, CoreOptions options) {
+        List<String> preserveColumns = options.changelogEventMetadataFields();
+        if (preserveColumns.isEmpty()) {
+            return readType;
+        }
+
+        List<DataField> fields = new ArrayList<>(readType.getFields());
+        boolean changed = false;
+        for (String preserveColumn : preserveColumns) {
+            String metadataName = metadataFieldName(preserveColumn, options);
+            if (!readType.containsField(metadataName)
+                    || !logicalRowType.containsField(preserveColumn)) {
+                continue;
+            }
+            DataField sourceField = logicalRowType.getField(preserveColumn);
+            DataType metadataType = readType.getField(metadataName).type();
+            int sourceIndex = readType.getFieldIndex(preserveColumn);
+            if (sourceIndex < 0) {
+                fields.add(sourceField.newType(metadataType.copy(sourceField.type().isNullable())));
+                changed = true;
+                continue;
+            }
+            DataType requestedType = fields.get(sourceIndex).type();
+            DataType dependencyType =
+                    unionPrunedType(sourceField.type(), requestedType, metadataType);
+            if (!dependencyType.equals(requestedType)) {
+                fields.set(sourceIndex, fields.get(sourceIndex).newType(dependencyType));
+                changed = true;
+            }
+        }
+        return changed ? new RowType(readType.isNullable(), fields) : readType;
+    }
+
+    /**
+     * Creates a view of a row read with {@link #withMetadataDependencies} in which each source
+     * field mapped by {@code fallbackMapping} has the nested shape of its metadata field. Returns
+     * null if no nested projection is needed.
+     */
+    @Nullable
+    public static NestedProjectedRow createFallbackProjection(
+            RowType readType, int[] fallbackMapping) {
+        List<DataField> fields = new ArrayList<>(readType.getFields());
+        for (int i = 0; i < fallbackMapping.length; i++) {
+            int sourceIndex = fallbackMapping[i];
+            if (sourceIndex < 0) {
+                continue;
+            }
+            DataField sourceField = fields.get(sourceIndex);
+            DataType metadataType = readType.getFields().get(i).type();
+            if (sourceField.type().getTypeRoot() != metadataType.getTypeRoot()) {
+                continue;
+            }
+            fields.set(
+                    sourceIndex,
+                    sourceField.newType(metadataType.copy(sourceField.type().isNullable())));
+        }
+        return NestedProjectedRow.create(readType, new RowType(readType.isNullable(), fields));
+    }
+
+    /**
+     * Returns the type of {@code fullType} pruned to the nested children requested by either {@code
+     * left} or {@code right}, keeping the declared child order of {@code fullType}.
+     */
+    private static DataType unionPrunedType(DataType fullType, DataType left, DataType right) {
+        // An engine may read a column as a different kind of type, for example a selected-key MAP
+        // pushdown reads a ROW. Such a type cannot be merged with the metadata field's type.
+        if (left.getTypeRoot() != fullType.getTypeRoot()
+                || right.getTypeRoot() != fullType.getTypeRoot()) {
+            return left;
+        }
+        switch (fullType.getTypeRoot()) {
+            case ROW:
+                RowType fullRow = (RowType) fullType;
+                if (VariantMetadataUtils.isVariantRowType(fullRow)) {
+                    return left;
+                }
+                RowType leftRow = (RowType) left;
+                RowType rightRow = (RowType) right;
+                List<DataField> children = new ArrayList<>();
+                for (DataField fullChild : fullRow.getFields()) {
+                    int id = fullChild.id();
+                    DataField leftChild = leftRow.containsField(id) ? leftRow.getField(id) : null;
+                    DataField rightChild =
+                            rightRow.containsField(id) ? rightRow.getField(id) : null;
+                    if (leftChild == null && rightChild == null) {
+                        continue;
+                    }
+                    DataType childType =
+                            leftChild == null
+                                    ? rightChild.type()
+                                    : rightChild == null
+                                            ? leftChild.type()
+                                            : unionPrunedType(
+                                                    fullChild.type(),
+                                                    leftChild.type(),
+                                                    rightChild.type());
+                    children.add(fullChild.newType(childType));
+                }
+                return new RowType(left.isNullable(), children);
+            case ARRAY:
+                return ((ArrayType) left)
+                        .newElementType(
+                                unionPrunedType(
+                                        ((ArrayType) fullType).getElementType(),
+                                        ((ArrayType) left).getElementType(),
+                                        ((ArrayType) right).getElementType()));
+            case MAP:
+                return ((MapType) left)
+                        .newKeyValueType(
+                                unionPrunedType(
+                                        ((MapType) fullType).getKeyType(),
+                                        ((MapType) left).getKeyType(),
+                                        ((MapType) right).getKeyType()),
+                                unionPrunedType(
+                                        ((MapType) fullType).getValueType(),
+                                        ((MapType) left).getValueType(),
+                                        ((MapType) right).getValueType()));
+            case MULTISET:
+                return new MultisetType(
+                        left.isNullable(),
+                        unionPrunedType(
+                                ((MultisetType) fullType).getElementType(),
+                                ((MultisetType) left).getElementType(),
+                                ((MultisetType) right).getElementType()));
+            default:
+                return left;
+        }
     }
 
     /** Returns the public metadata field name for a preserved physical field. */

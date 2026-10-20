@@ -42,6 +42,8 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.RowLevelModificationScanContext;
+import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
+import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
@@ -232,6 +234,20 @@ public class DataTableSource extends BaseDataTableSource
                 .stream()
                 .map(DataField::name)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context) {
+        // Lookups read the latest table state from data files, which neither holds per-event
+        // metadata nor the row ID, so the produced rows would lack the metadata columns.
+        if (!metadataKeys.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Metadata columns "
+                            + metadataKeys
+                            + " are not supported in lookup joins. Changelog event metadata is"
+                            + " only available when scanning the table.");
+        }
+        return super.getLookupRuntimeProvider(context);
     }
 
     @Override

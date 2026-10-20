@@ -60,7 +60,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
-import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.NestedProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
@@ -98,7 +98,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final boolean ignoreLostFiles;
     private final List<DataField> changelogExtraValueFields;
     private final List<String> metadataPreserveColumns;
-    private final String metadataFieldPrefix;
+    private final CoreOptions coreOptions;
 
     private RowType readRowType;
     @Nullable private RowType outerReadRowType;
@@ -131,7 +131,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
         this.metadataPreserveColumns = coreOptions.changelogEventMetadataFields();
-        this.metadataFieldPrefix = coreOptions.changelogMetadataFieldPrefix();
+        this.coreOptions = coreOptions;
         this.changelogExtraValueFields = createChangelogExtraValueFields(schema, coreOptions);
         this.readRowType = readTypeWithMetadataDependencies(rowType);
         this.outerReadRowType = this.readRowType.equals(rowType) ? null : rowType;
@@ -424,24 +424,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         if (changelogExtraValueFields.isEmpty()) {
             return requestedReadType;
         }
-
-        List<String> readFieldNames = requestedReadType.getFieldNames();
-        List<DataField> dependencies = new ArrayList<>();
-        for (String preserveColumn : metadataPreserveColumns) {
-            String metadataName = metadataFieldPrefix + preserveColumn;
-            if (readFieldNames.contains(metadataName)
-                    && !readFieldNames.contains(preserveColumn)
-                    && schema.logicalRowType().containsField(preserveColumn)) {
-                dependencies.add(schema.logicalRowType().getField(preserveColumn));
-            }
-        }
-
-        if (dependencies.isEmpty()) {
-            return requestedReadType;
-        }
-        List<DataField> fields = new ArrayList<>(requestedReadType.getFields());
-        fields.addAll(dependencies);
-        return new RowType(fields);
+        return ChangelogEventMetadata.withMetadataDependencies(
+                requestedReadType, schema.logicalRowType(), coreOptions);
     }
 
     @Nullable
@@ -486,8 +470,16 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 metadataFallbackMapping == null
                         ? null
                         : new FallbackMappingRow(metadataFallbackMapping);
-        final ProjectedRow projectedRow =
-                outerReadRowType == null ? null : ProjectedRow.from(outerReadRowType, readRowType);
+        final NestedProjectedRow fallbackView =
+                metadataFallbackMapping == null
+                        ? null
+                        : ChangelogEventMetadata.createFallbackProjection(
+                                readRowType, metadataFallbackMapping);
+        // Source fields may be widened for metadata, so project nested children back as well.
+        final NestedProjectedRow projectedRow =
+                outerReadRowType == null
+                        ? null
+                        : NestedProjectedRow.create(readRowType, outerReadRowType);
         return new FileRecordReader<InternalRow>() {
             @Nullable
             @Override
@@ -499,7 +491,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 return iterator.transform(
                         row -> {
                             InternalRow result =
-                                    fallbackRow == null ? row : fallbackRow.replace(row, row);
+                                    fallbackRow == null
+                                            ? row
+                                            : fallbackRow.replace(
+                                                    row,
+                                                    fallbackView == null
+                                                            ? row
+                                                            : fallbackView.replaceRow(row));
                             return projectedRow == null ? result : projectedRow.replaceRow(result);
                         });
             }

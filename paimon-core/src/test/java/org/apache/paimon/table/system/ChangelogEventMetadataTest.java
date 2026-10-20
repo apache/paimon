@@ -182,6 +182,46 @@ class ChangelogEventMetadataTest {
         assertThat(historicalFields.get(1)).isEqualTo(storageFields.get(1));
     }
 
+    @Test
+    void testMetadataDependenciesUseUnionOfNestedChildren() {
+        RowType valueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        DataTypes.ROW(
+                                                new DataField(2, "a", DataTypes.INT()),
+                                                new DataField(3, "b", DataTypes.INT()),
+                                                new DataField(4, "c", DataTypes.INT())))));
+        CoreOptions options = lookupOptions("payload");
+        RowType full =
+                ChangelogEventMetadata.appendMetadataFields(valueType, valueType, 4, options);
+
+        RowType metadataOnly = full.projectByPaths(Arrays.asList("id", "__internal__payload.c"));
+        RowType withMetadataOnly =
+                ChangelogEventMetadata.withMetadataDependencies(metadataOnly, valueType, options);
+        assertThat(withMetadataOnly.getFieldNames())
+                .containsExactly("id", "__internal__payload", "payload");
+        assertThat(((RowType) withMetadataOnly.getField("payload").type()).getFieldNames())
+                .containsExactly("c");
+
+        RowType both =
+                full.projectByPaths(
+                        Arrays.asList("payload.c", "payload.a", "__internal__payload.b"));
+        RowType withBoth =
+                ChangelogEventMetadata.withMetadataDependencies(both, valueType, options);
+        assertThat(((RowType) withBoth.getField("payload").type()).getFieldNames())
+                .containsExactly("a", "b", "c");
+        assertThat(ChangelogEventMetadata.withMetadataDependencies(withBoth, valueType, options))
+                .isSameAs(withBoth);
+
+        RowType covered = full.projectByPaths(Arrays.asList("payload", "__internal__payload.b"));
+        assertThat(ChangelogEventMetadata.withMetadataDependencies(covered, valueType, options))
+                .isSameAs(covered);
+    }
+
     private static CoreOptions lookupOptions(String metadataFields) {
         Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);

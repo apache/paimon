@@ -55,6 +55,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -180,25 +181,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // physical fields while reading whenever a metadata field was requested. The outer read
         // projection removes these internal dependencies after the reader has populated the
         // metadata columns.
-        List<String> preserveColumns = options.changelogEventMetadataFields();
-        if (!preserveColumns.isEmpty()) {
-            List<String> readFieldNames = adjustedReadType.getFieldNames();
-            List<DataField> extraFields = new ArrayList<>();
-            RowType logicalRowType = tableSchema.logicalRowType();
-            for (String preserveColumn : preserveColumns) {
-                String metadataName =
-                        ChangelogEventMetadata.metadataFieldName(preserveColumn, options);
-                if (readFieldNames.contains(metadataName)
-                        && !readFieldNames.contains(preserveColumn)) {
-                    extraFields.add(logicalRowType.getField(preserveColumn));
-                }
-            }
-            if (!extraFields.isEmpty()) {
-                List<DataField> allFields = new ArrayList<>(adjustedReadType.getFields());
-                allFields.addAll(extraFields);
-                adjustedReadType = new RowType(allFields);
-            }
-        }
+        adjustedReadType =
+                ChangelogEventMetadata.withMetadataDependencies(
+                        adjustedReadType, tableSchema.logicalRowType(), options);
         adjustedReadType = mfFactory.adjustReadType(adjustedReadType);
         return adjustedReadType;
     }
@@ -560,8 +545,14 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private RecordReader<KeyValue> projectOuter(RecordReader<KeyValue> reader) {
         if (outerReadType != null) {
-            ProjectedRow projectedRow = ProjectedRow.from(outerReadType, actualReadType());
-            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+            // Metadata dependencies may widen nested children, so project them back as well.
+            NestedProjectedRow projectedRow =
+                    NestedProjectedRow.create(actualReadType(), outerReadType);
+            if (projectedRow != null) {
+                reader =
+                        reader.transform(
+                                kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+            }
         }
         return reader;
     }

@@ -124,7 +124,8 @@ them. In Flink, a sink primary key that differs from the source primary key adds
 (`table.exec.sink.upsert-materialize` is `AUTO` by default): keep the keys equal, or set it to
 `NONE` if the sink applies upserts and deletes by its own key. Set
 `table.optimizer.non-deterministic-update.strategy` to `TRY_RESOLVE` to make Flink reject unsafe
-plans.
+plans. Flink lookup joins read the latest table state and reject the metadata columns; physical
+columns of the same table can still be looked up.
 
 Columns listed in the option cannot be renamed or dropped, because downstream jobs reference the
 metadata field names. Remove a column from the option first.

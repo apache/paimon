@@ -230,6 +230,43 @@ public class LookupChangelogEventMetadataITCase extends CatalogITCaseBase {
                 .hasStackTraceContaining("in cdc source");
     }
 
+    @Test
+    public void testLookupJoinRejectsEventMetadata() throws Exception {
+        sql(
+                "CREATE TABLE dim ("
+                        + "id INT PRIMARY KEY NOT ENFORCED, "
+                        + "event_ts BIGINT, "
+                        + "writetime BIGINT METADATA FROM '__internal__event_ts' VIRTUAL"
+                        + ") WITH ("
+                        + "'bucket'='1', "
+                        + "'changelog-producer'='lookup', "
+                        + "'continuous.discovery-interval'='1 ms', "
+                        + "'changelog-producer.event-metadata-fields'='event_ts')");
+        sql("CREATE TABLE probe (i INT, proctime AS PROCTIME())");
+        sql("INSERT INTO dim VALUES (1, 50)");
+
+        // Lookups only see the latest table state, which has no event metadata.
+        assertThatThrownBy(
+                        () ->
+                                sEnv.executeSql(
+                                        "SELECT probe.i, d.writetime FROM probe JOIN dim "
+                                                + "FOR SYSTEM_TIME AS OF probe.proctime AS d "
+                                                + "ON probe.i = d.id"))
+                .hasStackTraceContaining("are not supported in lookup joins");
+
+        // Physical columns of the same table can still be looked up.
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        sEnv.executeSql(
+                                        "SELECT probe.i, d.event_ts FROM probe JOIN dim "
+                                                + "FOR SYSTEM_TIME AS OF probe.proctime AS d "
+                                                + "ON probe.i = d.id")
+                                .collect());
+        sql("INSERT INTO probe VALUES (1)");
+        assertThat(iterator.collect(1)).containsExactly(Row.of(1, 50L));
+        iterator.close();
+    }
+
     private void createSourceAndSinkWithDifferentPrimaryKeys() {
         sql(
                 "CREATE TABLE source_table ("
