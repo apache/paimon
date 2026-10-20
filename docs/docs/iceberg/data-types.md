@@ -68,8 +68,8 @@ support the table's file format, format version, and column types.
 
 :::warning
 
-Paimon readers without support for this encoding read these values 1000 times too large, without
-an error. Before any writer of an Iceberg-enabled table is upgraded, upgrade every Paimon reader and
+Paimon readers released before this encoding was introduced can read these values 1000 times too
+large, without an error: for dictionary-encoded pages, and for all pages in older releases. Before any writer of an Iceberg-enabled table is upgraded, upgrade every Paimon reader and
 compaction job of that table. Disabling Iceberg metadata afterwards does not make the files readable
 by old readers: rolling back the readers requires rewriting the new files or restoring a snapshot
 from before the upgrade.

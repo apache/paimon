@@ -68,6 +68,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -790,6 +791,128 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
             }
             // row groups without the target are pruned
             Assertions.assertThat(values).contains(target).hasSizeLessThan(rowCount);
+        }
+    }
+
+    @Test
+    public void testMillisFieldOnMicrosFileWithSubMillis() throws Exception {
+        Options options = new Options();
+        // a tiny row-group size gives a row group per 100 rows
+        options.set("parquet.block.size", "1");
+        options.set("parquet.enable.dictionary", "false");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType microsType =
+                RowType.builder()
+                        .field("local_timestamp", DataTypes.TIMESTAMP(6))
+                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6))
+                        .build();
+        RowType millisType =
+                RowType.builder()
+                        .field("local_timestamp", DataTypes.TIMESTAMP(3))
+                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                        .build();
+        long baseMillis = 1691827200000L;
+        int rowCount = 1000;
+        GenericRow[] written = new GenericRow[rowCount];
+        for (int i = 0; i < rowCount; i++) {
+            // every value is 456 microseconds past its millisecond
+            Timestamp timestamp = Timestamp.fromEpochMillis(baseMillis + i, 456_000);
+            written[i] = GenericRow.of(timestamp, timestamp);
+        }
+        write(format.createWriterFactory(microsType), file, written);
+
+        // the first row of the third row group: its millisecond is below the group's micros
+        long firstRowOfGroup;
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            List<BlockMetaData> blocks = reader.getFooter().getBlocks();
+            Assertions.assertThat(blocks).hasSizeGreaterThan(2);
+            firstRowOfGroup = blocks.get(0).getRowCount() + blocks.get(1).getRowCount();
+        }
+        Timestamp target = Timestamp.fromEpochMillis(baseMillis + firstRowOfGroup);
+
+        PredicateBuilder builder = new PredicateBuilder(millisType);
+        for (int field = 0; field < 2; field++) {
+            for (Predicate predicate :
+                    Arrays.asList(
+                            builder.equal(field, target), builder.lessOrEqual(field, target))) {
+                List<Timestamp> values = new ArrayList<>();
+                try (RecordReader<InternalRow> reader =
+                        format.createReaderFactory(
+                                        millisType,
+                                        millisType,
+                                        Collections.singletonList(predicate))
+                                .createReader(
+                                        new FormatReaderContext(
+                                                fileIO,
+                                                file,
+                                                fileIO.getFileSize(file),
+                                                null,
+                                                null))) {
+                    int f = field;
+                    reader.forEachRemaining(row -> values.add(row.getTimestamp(f, 3)));
+                }
+                Assertions.assertThat(values).contains(target).hasSizeLessThan(rowCount);
+            }
+        }
+
+        // statistics bound the millisecond values the field reads
+        SimpleColStats[] stats =
+                format.createStatsExtractor(
+                                millisType,
+                                new SimpleColStatsCollector.Factory[] {
+                                    SimpleColStatsCollector.from("full"),
+                                    SimpleColStatsCollector.from("full")
+                                })
+                        .get()
+                        .extract(fileIO, file, fileIO.getFileSize(file));
+        Assertions.assertThat(stats)
+                .allSatisfy(
+                        stat -> {
+                            Assertions.assertThat(stat.min())
+                                    .isEqualTo(Timestamp.fromEpochMillis(baseMillis));
+                            Assertions.assertThat(stat.max())
+                                    .isEqualTo(
+                                            Timestamp.fromEpochMillis(baseMillis + rowCount - 1));
+                        });
+    }
+
+    @Test
+    public void testIcebergStorageOptionEnablesMicros() throws Exception {
+        RowType rowType = RowType.builder().field("ts", DataTypes.TIMESTAMP(3)).build();
+        Timestamp timestamp = Timestamp.fromEpochMillis(1691827200123L);
+        String[][] cases = {
+            {null, "MILLIS"},
+            {"disabled", "MILLIS"},
+            {" DISABLED ", "MILLIS"},
+            {"table-location", "MICROS"},
+            {"hive-catalog", "MICROS"}
+        };
+        for (String[] c : cases) {
+            Options options = new Options();
+            if (c[0] != null) {
+                options.set("metadata.iceberg.storage", c[0]);
+            }
+            ParquetFileFormat format =
+                    new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+            fileIO.deleteQuietly(file);
+            write(format.createWriterFactory(rowType), file, GenericRow.of(timestamp));
+            try (ParquetFileReader reader =
+                    ParquetUtil.getParquetReader(
+                            fileIO, file, fileIO.getFileSize(file), new Options())) {
+                Assertions.assertThat(
+                                reader.getFooter()
+                                        .getFileMetaData()
+                                        .getSchema()
+                                        .getType("ts")
+                                        .getLogicalTypeAnnotation())
+                        .as("metadata.iceberg.storage=%s", c[0])
+                        .isEqualTo(
+                                LogicalTypeAnnotation.timestampType(
+                                        false, LogicalTypeAnnotation.TimeUnit.valueOf(c[1])));
+            }
         }
     }
 }

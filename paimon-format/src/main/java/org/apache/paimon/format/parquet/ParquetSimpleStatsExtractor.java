@@ -245,6 +245,12 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                         Timestamp.fromEpochMillis(longStats.getMin()),
                         Timestamp.fromEpochMillis(longStats.getMax()),
                         stats.getNumNulls());
+            } else if (unit == LogicalTypeAnnotation.TimeUnit.MICROS && precision <= 3) {
+                // the field reads a value v as the millisecond floor(v / 1000)
+                return new SimpleColStats(
+                        Timestamp.fromEpochMillis(Math.floorDiv(longStats.getMin(), 1000L)),
+                        Timestamp.fromEpochMillis(Math.floorDiv(longStats.getMax(), 1000L)),
+                        stats.getNumNulls());
             } else if (unit == LogicalTypeAnnotation.TimeUnit.MICROS) {
                 return new SimpleColStats(
                         Timestamp.fromMicros(longStats.getMin()),

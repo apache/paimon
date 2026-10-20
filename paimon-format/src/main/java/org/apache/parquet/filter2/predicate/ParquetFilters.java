@@ -203,10 +203,6 @@ public class ParquetFilters {
                     == LogicalTypeAnnotation.TimeUnit.MICROS;
         }
 
-        private Long lastMicroOfMilli(Timestamp timestamp) {
-            return Math.addExact(Math.multiplyExact(timestamp.getMillisecond(), 1000L), 999L);
-        }
-
         @Override
         public FilterPredicate visitAnd(List<FilterPredicate> children) {
             if (children.size() != 2) {
@@ -438,8 +434,8 @@ public class ParquetFilters {
                         return timestamp.getMillisecond();
                     case MICROS:
                         return getTimestampPrecision(type) <= 3
-                                ? Math.multiplyExact(timestamp.getMillisecond(), 1000L)
-                                : timestamp.toMicros();
+                                ? firstMicroOfMilli(timestamp)
+                                : toMicros(timestamp);
                     default:
                         throw new UnsupportedOperationException();
                 }
@@ -629,6 +625,31 @@ public class ParquetFilters {
             throw new UnsupportedOperationException();
         }
         return column;
+    }
+
+    private static long firstMicroOfMilli(Timestamp timestamp) {
+        try {
+            return Math.multiplyExact(timestamp.getMillisecond(), 1000L);
+        } catch (ArithmeticException e) {
+            // a literal outside the range of the file's values cannot be pushed down
+            throw new UnsupportedOperationException(e);
+        }
+    }
+
+    private static long lastMicroOfMilli(Timestamp timestamp) {
+        try {
+            return Math.addExact(firstMicroOfMilli(timestamp), 999L);
+        } catch (ArithmeticException e) {
+            throw new UnsupportedOperationException(e);
+        }
+    }
+
+    private static long toMicros(Timestamp timestamp) {
+        try {
+            return timestamp.toMicros();
+        } catch (ArithmeticException e) {
+            throw new UnsupportedOperationException(e);
+        }
     }
 
     /** The unit of the INT64 values in the file, which literals have to be converted to. */

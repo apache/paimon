@@ -62,6 +62,15 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
                             ShreddingWritePlanType.VARIANT,
                             ShreddingWritePlanType.MAP_SHARED_SHREDDING));
 
+    /**
+     * IcebergOptions#METADATA_ICEBERG_STORAGE, which paimon-format cannot depend on. Values other
+     * than the storage types are rejected by schema validation, so anything but "disabled" means
+     * that Iceberg metadata is published.
+     */
+    private static final String ICEBERG_STORAGE = "metadata.iceberg.storage";
+
+    private static final String ICEBERG_STORAGE_DISABLED = "disabled";
+
     private final FormatContext formatContext;
     private final Options options;
     private final int readBatchSize;
@@ -74,11 +83,11 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
         this.timestampMillisAsMicros =
-                !"disabled"
-                        .equalsIgnoreCase(
-                                formatContext
-                                        .options()
-                                        .getString("metadata.iceberg.storage", "disabled"));
+                !ICEBERG_STORAGE_DISABLED.equalsIgnoreCase(
+                        formatContext
+                                .options()
+                                .getString(ICEBERG_STORAGE, ICEBERG_STORAGE_DISABLED)
+                                .trim());
     }
 
     @VisibleForTesting

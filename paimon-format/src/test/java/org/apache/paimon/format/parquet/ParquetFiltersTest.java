@@ -1091,6 +1091,12 @@ class ParquetFiltersTest {
             test(schema, builder.notEqual(0, value), "", false);
             // more than 20 literals are kept as an IN leaf instead of ORed equalities
             test(schema, builder.in(0, Collections.nCopies(21, value)), "", false);
+            // a millisecond beyond the INT64 microsecond range is not pushed down
+            test(
+                    schema,
+                    builder.lessThan(0, Timestamp.fromEpochMillis(Long.MAX_VALUE / 1000 + 1)),
+                    "",
+                    false);
         }
     }
 
