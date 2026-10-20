@@ -43,6 +43,8 @@ import org.apache.paimon.types.RowType;
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,6 +73,31 @@ public class IncrementalClusterManagerTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
                         "Only support incremental clustering when 'clustering.incremental' is true.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testEmptyPlanningSnapshotDoesNotReadConcurrentFirstAppend(boolean dataEvolution)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), String.valueOf(dataEvolution));
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), String.valueOf(dataEvolution));
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        assertThat(table.snapshotManager().latestSnapshot()).isNull();
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, null);
+
+        writeOnce(
+                table,
+                GenericRow.of(1, 2, BinaryString.fromString("a"), BinaryString.fromString("b")));
+
+        assertThat(manager.createCompactUnits(true)).isEmpty();
+        assertThat(manager.createCompactUnits(false)).isEmpty();
+        assertThat(
+                        new IncrementalClusterManager(
+                                        table, null, table.snapshotManager().latestSnapshot())
+                                .createCompactUnits(true))
+                .isNotEmpty();
     }
 
     @Test

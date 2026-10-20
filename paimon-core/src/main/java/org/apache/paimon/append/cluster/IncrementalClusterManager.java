@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -115,6 +116,10 @@ public class IncrementalClusterManager {
     }
 
     public Map<BinaryRow, CompactUnit> createCompactUnits(boolean fullCompaction) {
+        if (snapshot == null) {
+            return Collections.emptyMap();
+        }
+
         // 1. construct LSM structure for each partition
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels = constructLevels();
         logForPartitionLevel(partitionLevels, partitionComputer);
