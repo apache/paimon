@@ -404,9 +404,10 @@ def _is_global_index(index_type: str) -> bool:
 
 
 def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
+    # The caller has already matched the index type and primary field.
     return (
-        _extra_field_ids(retained_meta) == _extra_field_ids(added_meta)
-        and not _row_ranges_intersect(retained_meta, added_meta)
+        _extra_field_ids(retained_meta) != _extra_field_ids(added_meta)
+        or not _row_ranges_intersect(retained_meta, added_meta)
     )
 
 
