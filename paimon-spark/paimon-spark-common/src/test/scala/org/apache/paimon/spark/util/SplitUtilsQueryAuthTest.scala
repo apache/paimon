@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.catalog.TableQueryAuthResult
-import org.apache.paimon.data.{BinaryRow, InternalRow}
+import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow}
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.PaimonRecordReaderIterator
@@ -27,6 +27,7 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.stats.SimpleStats
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplitImpl
 import org.apache.paimon.table.source.{ChainSplit, DataSplit, QueryAuthSplit, Split}
+import org.apache.paimon.utils.IteratorRecordReader
 
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.scalatest.funsuite.AnyFunSuite
@@ -122,9 +123,15 @@ class SplitUtilsQueryAuthTest extends AnyFunSuite {
   test("bucket metadata supports authorized and chain splits") {
     chainAndAuthorizedSplits().foreach {
       split =>
+        val reader = new IteratorRecordReader[InternalRow](
+          Collections.singletonList[InternalRow](GenericRow.of(Int.box(42))).iterator())
         val iterator =
-          PaimonRecordReaderIterator(new EmptyReader, Seq(PaimonMetadataColumn.BUCKET), split)
+          PaimonRecordReaderIterator(reader, Seq(PaimonMetadataColumn.BUCKET), split)
         try {
+          assert(iterator.hasNext)
+          val row = iterator.next()
+          assert(row.getInt(0) == 42)
+          assert(row.getInt(1) == 0)
           assert(!iterator.hasNext)
         } finally {
           iterator.close()

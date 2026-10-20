@@ -48,7 +48,7 @@ case class PaimonRecordReaderIterator(
       "Partition metadata is only supported for DataSplit without query authorization.")
   }
 
-  private val bucketMetadata =
+  private lazy val bucketMetadata =
     if (metadataColumns.exists(_.name == PaimonMetadataColumn.BUCKET_COLUMN)) {
       // Inspect the underlying split only for metadata. The reader still receives the original
       // split so fallback routing and query authorization are preserved.
