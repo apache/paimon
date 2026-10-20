@@ -576,7 +576,7 @@ class FormatPyArrowReader(RecordBatchReader):
                     and self._selected_shared_map_paths)):
             import pyarrow.parquet as pq
             # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
-            self._parquet_source = _open_pyarrow_input_file(file_io, file_path)
+            self._parquet_source = _open_pyarrow_input_file(file_io, file_path, file_size)
             try:
                 self._parquet_file = pq.ParquetFile(self._parquet_source)
                 if (self._selected_parquet_row_groups is not None

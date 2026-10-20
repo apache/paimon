@@ -121,6 +121,33 @@ def test_known_parquet_size_avoids_source_stat(tmp_path):
 
 
 @pytest.mark.parametrize('disk', [False, True])
+def test_known_parquet_size_selected_rows_use_warm_blocks(tmp_path, disk):
+    path = tmp_path / 'data.parquet'
+    pq.write_table(pa.table({'v': pa.array([1, 2, 3], type=pa.int32())}),
+                   path, row_group_size=1)
+    file_size = path.stat().st_size
+    opts = Options({'local-cache.enabled': 'true', 'local-cache.block-size': '64 b',
+                    'local-cache.whitelist': 'structured-data'})
+    if disk:
+        opts.data['local-cache.dir'] = str(tmp_path / 'cache')
+    delegate = LocalFileIO(catalog_options=opts)
+    file_io = CachingFileIO.wrap_with_caching_if_needed(
+        delegate, opts, CachingFileIO.create_cache_manager(opts))
+    _reset_file_format_dataset_cache()
+    try:
+        assert _read(file_io, path.as_uri(), 'parquet', None, file_size) == [1, 2, 3]
+        path.unlink()
+        _reset_file_format_dataset_cache()
+        with patch.object(delegate, 'new_input_stream',
+                          side_effect=AssertionError('source read')):
+            with patch.object(delegate, 'get_file_size',
+                              side_effect=AssertionError('source stat')):
+                assert _read(file_io, path.as_uri(), 'parquet', [1], file_size) == [2]
+    finally:
+        _reset_file_format_dataset_cache()
+
+
+@pytest.mark.parametrize('disk', [False, True])
 def test_avro_reader_uses_block_cache(tmp_path, disk):
     path = tmp_path / 'data.avro'
     schema = {'type': 'record', 'name': 'row',
