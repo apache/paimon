@@ -319,7 +319,7 @@ public class IncrementalClusterCompact {
                         },
                         InternalTypeInfo.fromRowType(rowType))
                 .setParallelism(sinkParallelism)
-                .map(FlinkRowData::new, input.getType())
+                .map(row -> new FlinkRowData(row, rowType), input.getType())
                 .setParallelism(sinkParallelism);
     }
 
