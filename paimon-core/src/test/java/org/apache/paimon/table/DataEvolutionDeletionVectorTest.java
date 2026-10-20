@@ -26,6 +26,9 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
+import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
@@ -39,7 +42,9 @@ import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -50,7 +55,11 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -71,6 +80,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -87,6 +97,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -895,6 +906,125 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .doesNotContainAnyElementsOf(oldAnchorFiles);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    public void testMaterializeRetryRefreshesConcurrentScalarIndexes(String indexType)
+            throws Exception {
+        Map<String, String> retryOptions = new HashMap<>();
+        retryOptions.put(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "0ms");
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "0ms");
+        FileStoreTable original =
+                createPartitionedReassignTable("materialize_retry_index_table", false)
+                        .copy(retryOptions);
+        writePartitionRows(original, "a", 0, 1, 2);
+        writePartitionRows(original, "a", 3, 4, 5);
+        commitDeletionVectors(
+                original,
+                partition(original, "a"),
+                Collections.singletonList(new DvSpec(new Range(0, 2), 1, 2)));
+        Snapshot planningSnapshot = original.latestSnapshot().get();
+        List<CommitMessage> materialized =
+                prepareMaterializeDeletionVectors(original, planningSnapshot, null);
+        AtomicInteger attempts = new AtomicInteger();
+        List<String> untouchedIndexes = new ArrayList<>();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotCommit snapshotCommit(
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
+                            @Override
+                            protected boolean commitImpl(
+                                    String baseUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                int attempt = attempts.incrementAndGet();
+                                if (attempt == 1) {
+                                    List<CommitMessage> indexes = new ArrayList<>();
+                                    for (DataSplit split :
+                                            original.newSnapshotReader()
+                                                    .withSnapshot(planningSnapshot)
+                                                    .read()
+                                                    .dataSplits()) {
+                                        for (DataFileMeta file : split.dataFiles()) {
+                                            indexes.addAll(
+                                                    SortedGlobalIndexTestUtils.buildIndex(
+                                                            original,
+                                                            indexType,
+                                                            "f0",
+                                                            split.filterDataFile(file::equals)
+                                                                    .get(),
+                                                            planningSnapshot.id()));
+                                        }
+                                    }
+                                    DataEvolutionDeletionVectorTest.commit(original, indexes);
+                                    assertThat(liveGlobalIndexFileNames(original)).hasSize(2);
+                                    for (IndexManifestEntry entry :
+                                            original.store().newIndexFileHandler().scanEntries()) {
+                                        GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                                        if (meta != null
+                                                && meta.rowRange().equals(new Range(3, 5))) {
+                                            untouchedIndexes.add(entry.indexFile().fileName());
+                                        }
+                                    }
+                                    assertThat(untouchedIndexes).hasSize(1);
+                                    // Move the next available row ID after the first candidate has
+                                    // already assigned its output. The retry must assign it again.
+                                    writePartitionRows(original, "a", 6);
+                                }
+                                boolean committed =
+                                        delegate.commit(baseUuid, snapshot, branch, statistics);
+                                assertThat(committed).isEqualTo(attempt == 2);
+                                return committed;
+                            }
+
+                            @Override
+                            protected void closeImpl() throws Exception {
+                                delegate.close();
+                            }
+                        };
+                    }
+                };
+        FileStoreTable committingTable =
+                FileStoreTableFactory.create(
+                        original.fileIO(), original.location(), original.schema(), environment);
+        commitMaterializeDeletionVectors(
+                committingTable, planningSnapshot, materialized, "test-materialize-index-retry");
+
+        assertThat(attempts).hasValue(2);
+        assertThat(original.latestSnapshot().get().id()).isEqualTo(planningSnapshot.id() + 3);
+        assertThat(original.latestSnapshot().get().nextRowId()).isEqualTo(8L);
+        assertThat(readPartitionedRowsWithRowIds(original))
+                .containsExactly("a|3|3", "a|4|4", "a|5|5", "a|6|6", "a|0|7");
+        assertThat(readPartitionedRows(original))
+                .containsExactlyInAnyOrder(
+                        "a|0|base-0", "a|3|base-3", "a|4|base-4", "a|5|base-5", "a|6|base-6");
+        assertThat(liveDeletionVectorDataFileNames(original)).isEmpty();
+        assertThat(liveGlobalIndexFileNames(original)).containsExactlyElementsOf(untouchedIndexes);
+        assertThat(
+                        original.store().newIndexFileHandler().scanEntries().stream()
+                                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                                .map(entry -> entry.indexFile().globalIndexMeta().rowRange()))
+                .containsExactly(new Range(3, 5));
+        Predicate predicate = new PredicateBuilder(original.rowType()).equal(1, 4);
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                                original, PartitionPredicate.ALWAYS_TRUE, predicate)
+                        .get()) {
+            assertThat(scanner.scan(predicate).get().results().toRangeList())
+                    .containsExactly(new Range(4, 4));
+            assertThat(
+                            scanner.scan(new PredicateBuilder(original.rowType()).equal(1, 1))
+                                    .get()
+                                    .results()
+                                    .toRangeList())
+                    .isEmpty();
+        }
+    }
+
     @Test
     public void testStaleMaterializeRejectedAfterConcurrentUpdate() throws Exception {
         createTableDefault();
@@ -1492,7 +1622,10 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                             ((CommitMessageImpl) message)
                                                     .withCheckFromSnapshot(snapshot.id()))
                             .collect(Collectors.toList());
-            commit.materializeDvRowIdCheck().commit(checkedMessages);
+            commit.materializeDvRowIdCheck()
+                    .withCommitChangesRewriter(
+                            new MaterializeDeletionVectorsCommitChangesRewriter(table))
+                    .commit(checkedMessages);
         }
     }
 

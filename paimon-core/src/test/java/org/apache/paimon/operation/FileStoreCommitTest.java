@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
@@ -1021,16 +1022,27 @@ public class FileStoreCommitTest {
                                 otherBucketDelete,
                                 nonGlobalDelete));
 
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            CommitChanges refreshed =
-                    commit.compactChangesProvider(
-                                    changes, Collections.singleton(Pair.of(partition, 0)))
-                            .provide(null);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        2,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.singletonList(
+                                        addFile(partition, 0, 2, 0).file().assignFirstRowId(0)),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+        MaterializeDeletionVectorsCommitChangesRewriter rewriter =
+                new MaterializeDeletionVectorsCommitChangesRewriter(
+                        FileStoreTableFactory.create(store.fileIO(), store.options().path()));
+        CommitChanges refreshed =
+                rewriter.compactChangesProvider(changes, Collections.singletonList(message))
+                        .provide(null);
 
-            // Global-index removals from earlier preparation are replaced for the entire bucket,
-            // even if their ranges do not overlap the materialized input.
-            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete, nonGlobalDelete);
-        }
+        // Global-index removals from earlier preparation are replaced for the entire bucket,
+        // even if their ranges do not overlap the materialized input.
+        assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete, nonGlobalDelete);
     }
 
     private static IndexManifestEntry globalIndexDeleteEntry(

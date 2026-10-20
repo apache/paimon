@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.commit.CommitChangesRewriter;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -35,6 +36,9 @@ import java.util.Map;
 public interface FileStoreCommit extends AutoCloseable {
 
     FileStoreCommit withIOManager(IOManager ioManager);
+
+    /** Injects metadata preparation into the existing commit attempt lifecycle. */
+    FileStoreCommit withCommitChangesRewriter(CommitChangesRewriter rewriter);
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 

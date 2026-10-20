@@ -545,6 +545,35 @@ class DataEvolutionClusterTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testIndexRemappingRequiresClusteringRewriter(boolean materializeDeletionVectors)
+            throws Exception {
+        FileStoreTable table = createTable(false);
+        append(table, "a", 30, 10, 20);
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMappedCluster(table, snapshot, true);
+        // An ordinary caller explicitly invalidates its old indexes. Only a clustering committer
+        // should replace those deletions with remapped postings from the permutation sidecar.
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        messages =
+                IncrementalClusterRewriter.create(table, snapshot).prepareCommitMessages(messages);
+        try (TableCommitImpl commit = table.newCommit("test-scoped-index-rewriter")) {
+            commit.materializeDvRowIdCheck();
+            if (materializeDeletionVectors) {
+                commit.withCommitChangesRewriter(
+                        new MaterializeDeletionVectorsCommitChangesRewriter(table));
+            }
+            commit.commit(messages);
+        }
+
+        assertThat(globalIndexNames(table)).isEmpty();
+        assertThat(readRows(table))
+                .containsExactly("a|10|base-10|3", "a|20|base-20|4", "a|30|base-30|5");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"btree", "bitmap"})
     void testClusterPreservesExactPartialIndexCoverage(String indexType) throws Exception {
         FileStoreTable table = createTable(false);
@@ -707,8 +736,10 @@ class DataEvolutionClusterTest extends TableTestBase {
         assertMinorClusterResult(table, deletionVectors, untouchedRows, untouchedFiles, 21L, 4);
     }
 
-    @Test
-    void testMinorClusterRemapsIndexWhenAllSelectedRowsAreDeleted() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFullyDeletedRewritePreservesIndexForUnchangedRows(boolean clustering)
+            throws Exception {
         FileStoreTable table = createMinorClusterTable(true);
         List<String> untouchedRows = rowsInRange(table, new Range(12, 14));
         List<String> untouchedFiles = filesInRange(table, new Range(12, 14));
@@ -726,7 +757,18 @@ class DataEvolutionClusterTest extends TableTestBase {
                                                         .compactIncrement()
                                                         .compactAfter())
                                         .isEmpty());
-        commitCluster(table, snapshot, messages);
+        if (clustering) {
+            commitCluster(table, snapshot, messages);
+        } else {
+            try (TableCommitImpl commit = table.newCommit("test-materialize-deleted-rows")) {
+                commit.materializeDvRowIdCheck()
+                        .withCommitChangesRewriter(
+                                new MaterializeDeletionVectorsCommitChangesRewriter(table))
+                        .commit(
+                                IncrementalClusterRewriter.create(table, snapshot)
+                                        .prepareCommitMessages(messages));
+            }
+        }
 
         PredicateBuilder predicates = new PredicateBuilder(table.rowType());
         int id = table.rowType().getFieldIndex("id");
@@ -2077,7 +2119,9 @@ class DataEvolutionClusterTest extends TableTestBase {
     private void commitChecked(FileStoreTable table, List<CommitMessage> messages)
             throws Exception {
         try (TableCommitImpl commit = table.newCommit("test-cluster")) {
-            commit.materializeDvRowIdCheck().commit(messages);
+            commit.materializeDvRowIdCheck()
+                    .withCommitChangesRewriter(new ClusteringCommitChangesRewriter(table))
+                    .commit(messages);
         }
     }
 

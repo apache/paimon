@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
+import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
@@ -176,6 +177,8 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                     @Override
                     public void configure(TableCommitImpl commit) {
                         commit.materializeDvRowIdCheck();
+                        commit.withCommitChangesRewriter(
+                                new MaterializeDeletionVectorsCommitChangesRewriter(table));
                     }
 
                     @Override

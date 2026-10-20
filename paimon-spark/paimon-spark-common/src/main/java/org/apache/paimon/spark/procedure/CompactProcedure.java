@@ -25,6 +25,7 @@ import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.DataEvolutionClusterCompaction;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.append.dataevolution.ClusteringCommitChangesRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.compact.CompactUnit;
@@ -987,6 +988,7 @@ public class CompactProcedure extends BaseProcedure {
         if (table.coreOptions().dataEvolutionEnabled()) {
             String commitUser = createCommitUser(table.coreOptions().toConfiguration());
             try (TableCommitImpl commit = table.newCommit(commitUser).materializeDvRowIdCheck()) {
+                commit.withCommitChangesRewriter(new ClusteringCommitChangesRewriter(table));
                 clusterMessages.addAll(
                         DataEvolutionRewriteExecutor.executeTasks(
                                 table,

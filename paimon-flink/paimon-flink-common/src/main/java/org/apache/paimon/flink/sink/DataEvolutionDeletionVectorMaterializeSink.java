@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -75,6 +76,8 @@ public class DataEvolutionDeletionVectorMaterializeSink
         return context -> {
             TableCommitImpl commit = table.newCommit(context.commitUser());
             commit.materializeDvRowIdCheck();
+            commit.withCommitChangesRewriter(
+                    new MaterializeDeletionVectorsCommitChangesRewriter(table));
             return new StoreCommitter(table, commit, context);
         };
     }

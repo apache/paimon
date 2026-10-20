@@ -22,8 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
@@ -71,14 +69,14 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.DataEvolutionUtils.materializedRowIdRanges;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Rewrites scalar index postings after clustering output files receive their final row IDs. */
-public final class ClusteringIndexRewriter {
+/** Maintains scalar index coverage when data evolution replaces row IDs. */
+public final class DataEvolutionIndexRewriter {
 
     // The current metadata protocol represents coverage with contiguous ranges. Bound both
     // tiny-file fan-out and repeated source scans until sparse coverage has its own protocol.
     private static final int MAX_COVERAGE_FRAGMENTS = 64;
 
-    private ClusteringIndexRewriter() {}
+    private DataEvolutionIndexRewriter() {}
 
     public static List<IndexManifestEntry> rewrite(
             FileIO fileIO,
@@ -90,8 +88,7 @@ public final class ClusteringIndexRewriter {
             List<IndexManifestEntry> indexFiles,
             Set<String> mappedClusteringOutputs,
             Set<String> rowIdPreservingOutputs,
-            long newSnapshotId,
-            List<Path> createdFiles)
+            long newSnapshotId)
             throws IOException {
         if (indexFiles.stream()
                 .noneMatch(
@@ -284,7 +281,7 @@ public final class ClusteringIndexRewriter {
                             GlobalIndexer.create(type, fields, Options.fromMap(options.toMap()));
                     IndexPathFactory indexPath = pathFactory.globalIndexFileFactory();
                     GlobalIndexFileReadWrite indexIO =
-                            trackingIndexIO(fileIO, indexPath, createdFiles);
+                            new GlobalIndexFileReadWrite(fileIO, indexPath);
                     for (IndexManifestEntry source : sources) {
                         GlobalIndexMeta meta = source.indexFile().globalIndexMeta();
                         List<Range> fragments = new ArrayList<>();
@@ -380,18 +377,6 @@ public final class ClusteringIndexRewriter {
                 MAX_COVERAGE_FRAGMENTS,
                 fileName);
         fragments.add(fragment);
-    }
-
-    private static GlobalIndexFileReadWrite trackingIndexIO(
-            FileIO fileIO, IndexPathFactory indexPath, List<Path> createdFiles) {
-        return new GlobalIndexFileReadWrite(fileIO, indexPath) {
-            @Override
-            public PositionOutputStream newOutputStream(String fileName) throws IOException {
-                // Track before opening: failed writes can leave a partial file without a result.
-                createdFiles.add(indexPath.toPath(fileName));
-                return super.newOutputStream(fileName);
-            }
-        };
     }
 
     private static void readMapping(
