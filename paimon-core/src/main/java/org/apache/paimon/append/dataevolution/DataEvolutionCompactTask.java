@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static java.util.Comparator.comparingLong;
+import static org.apache.paimon.compact.CompactOptions.REWRITE_OPTIONS;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -43,8 +44,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public abstract class DataEvolutionCompactTask {
 
     protected static final Map<String, String> DYNAMIC_WRITE_OPTIONS = dynamicWriteOptions();
-    protected static final Map<String, String> BLOB_COMPACT_READ_OPTIONS =
-            Collections.singletonMap(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true");
 
     protected final BinaryRow partition;
     protected final List<DataFileMeta> compactBefore;
@@ -58,7 +57,7 @@ public abstract class DataEvolutionCompactTask {
     }
 
     private static Map<String, String> dynamicWriteOptions() {
-        Map<String, String> options = new HashMap<>();
+        Map<String, String> options = new HashMap<>(REWRITE_OPTIONS);
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "99999 G");
         // Compaction is size-based; the write-time row limit must not roll its output.

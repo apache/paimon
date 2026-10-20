@@ -107,8 +107,6 @@ public class IncrementalClusterCompact {
         this.env = env;
         if (table.coreOptions().dataEvolutionEnabled()) {
             Map<String, String> rewriteOptions = new HashMap<>();
-            // Rewrite stored references, including views whose upstream value is currently null.
-            rewriteOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
             // Sorted outputs must reach the clustering committer without another rewrite or commit.
             rewriteOptions.put(PRECOMMIT_COMPACT.key(), "false");
             rewriteOptions.put(SINK_COORDINATOR_COMMIT_ENABLED.key(), "false");
