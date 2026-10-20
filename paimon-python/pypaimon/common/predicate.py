@@ -15,9 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import calendar
 import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, ClassVar, Dict, List, Optional, Sequence, cast
 
@@ -45,6 +47,19 @@ def _combine_arrow_expressions(expressions, combine):
                 ))
         expressions = next_level
     return expressions[0]
+
+
+def _timestamp_literal_in_field_units(value, unit):
+    """Express a datetime exactly in column units without a bounded ns cast."""
+    if value is None:
+        return None
+    micros = calendar.timegm(value.timetuple()) * 1000000 + value.microsecond
+    offset = value.utcoffset()
+    if offset is not None:
+        micros -= (offset.days * 86400 + offset.seconds) * 1000000 + offset.microseconds
+    nanos = micros * 1000 + getattr(value, 'nanosecond', 0)
+    scale = {'s': 9, 'ms': 6, 'us': 3, 'ns': 0}[unit]
+    return Decimal((int(nanos < 0), tuple(int(digit) for digit in str(abs(nanos))), -scale))
 
 
 @dataclass
@@ -204,15 +219,19 @@ class Predicate:
         literals = self.literals
         if schema is not None and self.field in schema.names:
             field_type = schema.field(self.field).type
-            if pyarrow.types.is_timestamp(field_type) and literals:
+            if (pyarrow.types.is_timestamp(field_type) and literals
+                    and any(getattr(value, 'nanosecond', 0) for value in literals)
+                    and all(value is None or (isinstance(value, datetime)
+                                              and (value.utcoffset() is None) == (field_type.tz is None))
+                            for value in literals)):
                 # Arrow otherwise infers datetime subclasses at microsecond
-                # resolution. Preserve pandas.Timestamp's sub-microsecond
-                # remainder and normalize LTZ literals to the field's zone.
-                literal_type = pyarrow.timestamp('ns', tz=field_type.tz)
-                literals = [pyarrow.scalar(value, type=literal_type)
-                            if (getattr(value, 'nanosecond', 0)
-                                and (value.tzinfo is None) == (field_type.tz is None))
-                            else value for value in literals]
+                # resolution. Compare exact column units without promoting
+                # wide ms/us columns or companion literals into bounded ns.
+                # Reuse DECIMAL's floor/ceiling and SQL membership semantics.
+                units_type = pyarrow.decimal128(19, 0)
+                return decimal_arrow_expression(
+                    field.cast(pyarrow.int64()).cast(units_type), units_type, self.method,
+                    [_timestamp_literal_in_field_units(value, field_type.unit) for value in literals])
             if (
                 pyarrow.types.is_decimal(field_type)
                 and literals
