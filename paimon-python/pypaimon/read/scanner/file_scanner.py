@@ -833,8 +833,8 @@ class FileScanner:
         # Only the default hash function (Math.abs(hash % numBuckets)) is
         # supported for bucket pruning. Non-default functions (mod, hive)
         # use different algorithms and would produce wrong bucket sets.
-        bucket_func = self.table.table_schema.options.get('bucket-function.type', 'default')
-        if bucket_func.lower() != 'default':
+        bucket_func = self.table.table_schema.options.get('bucket-function.type')
+        if bucket_func is not None and bucket_func.lower() != 'default':
             return None
         try:
             bucket_key_fields = self.table.table_schema.logical_bucket_key_fields

@@ -1670,6 +1670,7 @@ class DataEvolutionSplitRead(SplitRead):
         row_offsets = [-1] * len(all_read_fields)
         field_offsets = [-1] * len(all_read_fields)
         schema_pos = {f.id: p for p, f in enumerate(self.table.fields)}
+        partition_ids = [field.id for field in self.table.fields if field.name in self.table.partition_keys]
 
         for i, bunch in enumerate(fields_files):
             first_file = bunch.files()[0]
@@ -1692,6 +1693,12 @@ class DataEvolutionSplitRead(SplitRead):
                 ]
                 field_ids.append(SpecialFields.ROW_ID.id)
                 field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
+
+            if isinstance(bunch, DataBunch):
+                # Partition values belong to the split, even when write_cols
+                # omits them from every file. Let the normal reader's existing
+                # PartitionInfo provide them before the merged row is filtered.
+                field_ids.extend(field_id for field_id in partition_ids if field_id not in field_ids)
 
             read_fields = []
             for j, read_field_id in enumerate(read_field_index):

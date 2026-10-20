@@ -204,6 +204,15 @@ class Predicate:
         literals = self.literals
         if schema is not None and self.field in schema.names:
             field_type = schema.field(self.field).type
+            if pyarrow.types.is_timestamp(field_type) and literals:
+                # Arrow otherwise infers datetime subclasses at microsecond
+                # resolution. Preserve pandas.Timestamp's sub-microsecond
+                # remainder and normalize LTZ literals to the field's zone.
+                literal_type = pyarrow.timestamp('ns', tz=field_type.tz)
+                literals = [pyarrow.scalar(value, type=literal_type)
+                            if (getattr(value, 'nanosecond', 0)
+                                and (value.tzinfo is None) == (field_type.tz is None))
+                            else value for value in literals]
             if (
                 pyarrow.types.is_decimal(field_type)
                 and literals

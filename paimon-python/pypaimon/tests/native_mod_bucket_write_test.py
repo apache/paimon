@@ -94,6 +94,27 @@ def test_none_bucket_function_retains_the_default_routing():
         assert unset.extract_partition_bucket_row({'id': value}) == default.extract_partition_bucket_row({'id': value})
 
 
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+def test_unset_bucket_function_allows_filtered_reads(rest_catalog, native):
+    catalog, _ = rest_catalog
+    catalog.create_table('default.t', _schema(pa.int32(), {
+        'bucket-function.type': None, 'write.native.enabled': str(native).lower(),
+        'commit.native.enabled': str(native).lower(), 'read.native.enabled': 'false',
+        'scan.native-plan.enabled': 'false'}), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        writer.write_arrow(pa.table({'id': pa.array([-3, 0, 17], pa.int32()), 'value': ['a', 'b', 'c']}))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    read = table.new_read_builder()
+    read.with_filter(read.new_predicate_builder().equal('id', 17))
+    assert read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist() == [{'id': 17, 'value': 'c'}]
+
+
 def test_hive_single_bucket_retains_existing_row_and_arrow_routing():
     extractor = _extractor(_schema(pa.int32(), {'bucket-function.type': 'hive', 'bucket': '1'}))
     batch = pa.record_batch([pa.array([-3, 0, 17], pa.int32())], names=['id'])

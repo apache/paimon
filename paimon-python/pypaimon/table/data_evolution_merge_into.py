@@ -109,6 +109,10 @@ def merge_into(
     # unrestricted whole-table grant before any user callback or staging.
     from pypaimon.write.table_update import _authorize_update
     _authorize_update(target_table)
+    if any(clause.condition is not None
+           for clauses in (when_matched, when_not_matched) for clause in clauses):
+        from pypaimon.ray.merge_condition import _load_datafusion
+        _load_datafusion()
     target_on, source_on = _normalize_on(on)
     self_merge = _is_self_merge(target_table, source, target_on, source_on)
     from pypaimon.snapshot.time_travel_util import TimeTravelUtil
@@ -222,12 +226,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.ray.merge_condition import (
-            _load_datafusion,
-            extract_target_columns,
-        )
-
-        _load_datafusion()
+        from pypaimon.ray.merge_condition import extract_target_columns
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)

@@ -76,15 +76,13 @@ _EPOCH = datetime(1970, 1, 1)
 def _datetime_to_millis_and_nanos(value: datetime):
     """Convert datetime to (epoch_millis, nano_of_millisecond) without float arithmetic.
 
-    Python's datetime is microsecond-resolution, so nano_of_millisecond is
-    always a multiple of 1000 and sub-microsecond precision is lost. For
-    TIMESTAMP(7..9) columns the lower three nano digits will always serialise
-    as zero — round-trip through pypaimon is microsecond-faithful, not
-    nanosecond-faithful.
+    Plain datetime values have microsecond resolution. Arrow returns pandas
+    Timestamp values for nanosecond arrays, carrying the remaining three
+    digits separately in nanosecond.
     """
     epoch_seconds = calendar.timegm(value.timetuple())
     millis = epoch_seconds * 1000 + value.microsecond // 1000
-    nano_of_millisecond = (value.microsecond % 1000) * 1000
+    nano_of_millisecond = (value.microsecond % 1000) * 1000 + getattr(value, 'nanosecond', 0)
     return millis, nano_of_millisecond
 
 
@@ -100,14 +98,21 @@ def _is_ltz_type(type_name: str) -> bool:
 
 
 def _millis_nanos_to_datetime(millis: int, nano_of_millisecond: int = 0) -> datetime:
-    """Convert (epoch_millis, nano_of_millisecond) to datetime. Nanos truncated to micros."""
+    """Retain nanosecond tails while preserving ordinary datetime results."""
     total_micros = millis * 1000 + nano_of_millisecond // 1000
     seconds = total_micros // 1_000_000
     micros = total_micros % 1_000_000
     if micros < 0:
         seconds -= 1
         micros += 1_000_000
-    return _EPOCH + timedelta(seconds=seconds, microseconds=micros)
+    result = _EPOCH + timedelta(seconds=seconds, microseconds=micros)
+    tail = nano_of_millisecond % 1000
+    if tail:
+        import pandas as pd
+        # Construct the final instant directly: the floored microsecond before
+        # Timestamp.min can be out of range even when these nanoseconds fit.
+        return pd.Timestamp(millis * 1000000 + nano_of_millisecond, unit='ns')
+    return result
 
 
 @dataclass
