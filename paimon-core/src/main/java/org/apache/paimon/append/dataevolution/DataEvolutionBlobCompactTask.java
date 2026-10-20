@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.compact.CompactOptions.REWRITE_OPTIONS;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -78,7 +79,7 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
 
         RowType blobWriteType = new RowType(Collections.singletonList(blobField));
 
-        FileStoreTable readTable = table.copy(BLOB_COMPACT_READ_OPTIONS);
+        FileStoreTable readTable = table.copy(REWRITE_OPTIONS);
         AppendOnlyFileStore store = (AppendOnlyFileStore) readTable.store();
         DataFilePathFactory pathFactory =
                 store.pathFactory().createDataFilePathFactory(partition, 0);
