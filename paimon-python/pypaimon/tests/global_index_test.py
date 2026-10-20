@@ -222,9 +222,7 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
     def test_full_fallback_groups_are_pruned_before_split_packing(self):
-        from pypaimon.read.scanner.file_scanner import (
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (_GlobalIndexPlanningResult)
 
         with tempfile.TemporaryDirectory() as warehouse:
             catalog = CatalogFactory.create({'warehouse': warehouse})
@@ -302,10 +300,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             self.assertEqual(baseline_result, pruned_result)
 
     def test_eval_global_index_keeps_unindexed_ranges_out_of_bitmap(self):
-        from pypaimon.read.scanner.file_scanner import (
-            FileScanner,
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner, _GlobalIndexPlanningResult)
 
         class _Options:
             def global_index_enabled(self):
@@ -352,10 +347,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         )
 
     def test_split_planning_merges_indexed_and_unindexed_ranges(self):
-        from pypaimon.read.scanner.file_scanner import (
-            FileScanner,
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner, _GlobalIndexPlanningResult)
 
         scanner = FileScanner.__new__(FileScanner)
         scanner.idx_of_this_subtask = None
@@ -383,7 +375,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
                 }))
                 scanner._eval_global_index.reset_mock()
                 with unittest.mock.patch(
-                        "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
+                        "pypaimon.execution.python.read.scanner.file_scanner.DataEvolutionSplitGenerator"
                 ) as split_generator:
                     scanner._create_data_evolution_split_generator()
 
@@ -398,7 +390,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
                         scanner.manifest_scanner.return_value[1])
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
-        from pypaimon.read.scanner.file_scanner import FileScanner
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 
         class _Options:
             def global_index_enabled(self):

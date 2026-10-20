@@ -74,7 +74,7 @@ def arrow_schemas_compatible(source, target, check_top_level_nullability=True, a
 
 def normalize_arrow_write_nullability(data, target):
     """Validate read-result NULLs in core before restoring writer child fields."""
-    from pypaimon.read.native_plan import native_runtime_available
+    from pypaimon.execution.native.runtime import (native_runtime_available)
     if not native_runtime_available():
         return data
     from pypaimon_rust.data import normalize_array_for_write

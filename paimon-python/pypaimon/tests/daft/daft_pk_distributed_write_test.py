@@ -318,7 +318,7 @@ def test_hash_dynamic_pk_restores_bucket_mapping_across_commits(catalog):
 @pytest.mark.parametrize('overwrite', [False, True])
 def test_grouped_pk_writes_use_native_without_python_fallback(
         catalog, monkeypatch, bucket, partitioned, overwrite):
-    from pypaimon.write.native_write import NativeTableWrite
+    from pypaimon.execution.native.write.native_write import NativeTableWrite
 
     def reject_fallback(self):
         raise AssertionError('Grouped Daft write fell back to Python')
@@ -538,7 +538,7 @@ def test_pk_distributed_write_on_ray():
         from daft import runners
         from pypaimon import CatalogFactory, Schema
         from pypaimon.daft.daft_paimon import _read_table, _write_table
-        from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+        from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
         root = tempfile.mkdtemp(prefix="paimon-daft-pk-ray-")
         try:

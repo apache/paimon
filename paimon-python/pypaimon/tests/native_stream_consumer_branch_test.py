@@ -27,7 +27,7 @@ import pytest
 from pypaimon import Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.consumer.consumer import Consumer
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
 from pypaimon.tests import native_plan_rest_test
 

@@ -204,7 +204,7 @@ def test_prepared_delete_rejects_concurrent_dv_changes_and_keeps_files(native_re
 def test_unavailable_native_operation_keeps_python_path(native_rest_catalog):
     table = _table(native_rest_catalog)
     predicate = table.new_read_builder().new_predicate_builder().equal('id', 0)
-    with patch('pypaimon.write.native_update.create_native_predicate_delete', return_value=None):
+    with patch('pypaimon.execution.native.write.native_update.create_native_predicate_delete', return_value=None):
         builder = table.new_batch_write_builder()
         messages = builder.new_update().delete_by_predicate(predicate)
     commit = builder.new_commit()
@@ -226,7 +226,7 @@ def test_partition_delete_supports_append_and_pk_tables_without_row_tracking(nat
 
 def test_partition_delete_includes_pending_pk_files(native_rest_catalog):
     from pypaimon.manifest.manifest_list_manager import ManifestListManager
-    from pypaimon.read.scanner.file_scanner import FileScanner
+    from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 
     table = _table(native_rest_catalog, {'bucket': '-2'}, mode='pk')
     predicate = table.new_read_builder().new_predicate_builder().equal('p', 'a')

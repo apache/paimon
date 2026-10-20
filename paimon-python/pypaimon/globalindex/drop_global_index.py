@@ -138,8 +138,10 @@ class GlobalIndexDropper:
         ]
 
     def _native_build(self, partition_filter):
-        from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
-        from pypaimon.write.native_commit import _rest_catalog_supported, from_native_commit_messages
+        from pypaimon.execution.native.table import (_native_table)
+        from pypaimon.execution.native.read.builder import (_predicate_to_native)
+        from pypaimon.execution.native.runtime import (native_runtime_available)
+        from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
 
         table = self._table
         if (not table.options.native_write_enabled()

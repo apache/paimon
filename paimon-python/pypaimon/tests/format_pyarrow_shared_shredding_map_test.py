@@ -35,7 +35,7 @@ from pypaimon.data.map_shared_shredding import (
     assemble_shared_shredding_selected_keys,
     map_selected_keys_field,
 )
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
 from pypaimon.schema.data_types import (
     ArrayType,
     AtomicType,
@@ -421,7 +421,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
                 True, AtomicType("STRING", False), self.value_type),
         )
         with mock.patch(
-                "pypaimon.read.reader.format_pyarrow_reader."
+                "pypaimon.execution.python.read.reader.format_pyarrow_reader."
                 "_orc_schema_with_field_metadata",
                 return_value=pa.schema(fields)):
             reader = FormatPyArrowReader(
@@ -586,7 +586,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
         )
 
         with mock.patch(
-                "pypaimon.read.reader.format_pyarrow_reader."
+                "pypaimon.execution.python.read.reader.format_pyarrow_reader."
                 "_orc_schema_with_field_metadata",
                 return_value=metadata_schema):
             reader = FormatPyArrowReader(

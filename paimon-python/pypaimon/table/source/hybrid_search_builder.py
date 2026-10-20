@@ -279,7 +279,7 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         self._partition_filter = None
 
     def execute_local(self) -> ScoredGlobalIndexResult:
-        from pypaimon.table.source.native_hybrid_search import try_native_hybrid_search
+        from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
 
         result = try_native_hybrid_search(self)
         if result is not None:

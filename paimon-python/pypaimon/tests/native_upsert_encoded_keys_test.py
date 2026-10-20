@@ -26,8 +26,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_update import (
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_update import (
     _native_upsert_key_compatible, _native_upsert_key_type_compatible, create_native_upsert,
 )
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -282,7 +282,7 @@ def test_unrelated_non_null_key_types_still_use_the_existing_python_path():
     assert not _native_upsert_key_compatible(source, pa.int32())
     assert not _native_upsert_key_compatible(pa.chunked_array([source.slice(0, 1), source]), pa.int32())
     # Already compatible types do not inspect value or kernel availability.
-    with patch('pypaimon.write.native_update.pc.take', side_effect=AssertionError('unnecessary take')):
+    with patch('pypaimon.execution.native.write.native_update.pc.take', side_effect=AssertionError('unnecessary take')):
         assert _native_upsert_key_compatible(pa.array([1], type=pa.int32()), pa.int32())
 
 
@@ -295,7 +295,7 @@ def test_all_null_key_columns_select_native_even_with_an_unrelated_physical_type
     source = pa.table({'key': keys, 'p': ['a'] * 3, 'value': pa.array([90, 91, 92], type=pa.int32())})
     source = pa.concat_tables([source.slice(0, 1), source.slice(1)])
     native_table = MagicMock()
-    with patch('pypaimon.write.native_update._native_row_id_table', return_value=native_table):
+    with patch('pypaimon.execution.native.write.native_update._native_row_id_table', return_value=native_table):
         selected = create_native_upsert(table, 'null-keys', source, ['key'], ['value'])
     assert selected is not None
     native_table.new_batch_write_builder.assert_called_once()

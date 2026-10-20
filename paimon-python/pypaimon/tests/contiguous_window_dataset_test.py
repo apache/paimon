@@ -33,8 +33,8 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal import window_dataset
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
-from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.execution.python.read.reader.filter_record_batch_reader import (FilterRecordBatchReader)
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
 from pypaimon.read.table_scan import TableScan
 
 

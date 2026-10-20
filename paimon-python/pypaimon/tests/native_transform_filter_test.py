@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.tests import native_calendar_mask_test, native_query_auth_test
@@ -140,6 +140,6 @@ def test_transformed_filter_fallback_retains_captured_policy(guarded_table, mode
         splits = [deserialize_split_v1(serialize_split_v1(split), []) for split in splits]
     with ExitStack() as stack:
         if mode == 'setup-failure':
-            stack.enter_context(patch('pypaimon.read.native_plan.native_read',
+            stack.enter_context(patch('pypaimon.execution.native.read.table_read.native_read',
                                       side_effect=RuntimeError('setup failed')))
         assert builder.new_read().to_arrow(splits).to_pylist() == [{'id': 2}]

@@ -28,7 +28,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]

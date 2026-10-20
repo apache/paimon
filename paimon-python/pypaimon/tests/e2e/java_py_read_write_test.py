@@ -350,7 +350,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Format: {file_format}, Result:\n{result}")
         self.assertEqual(initial_data.to_dict(), result.to_dict())
 
-        from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+        from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2
         first_row = initial_data.head(1)
         batch = pa.RecordBatch.from_pandas(first_row, schema=pa_schema)

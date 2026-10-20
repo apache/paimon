@@ -628,7 +628,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             ))
         commit_messages = shard.prepare_commit()
 
-        from pypaimon.write.file_store_commit import FileStoreCommit
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
         original_try_commit = FileStoreCommit._try_commit
         captured_args = {}
 

@@ -23,8 +23,8 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.write.native_commit import from_native_commit_messages
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_commit import from_native_commit_messages
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 SCHEMA = pa.schema([('id', pa.int64()), ('p', pa.string()), ('v', pa.string())])

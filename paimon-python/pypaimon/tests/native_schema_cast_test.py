@@ -226,7 +226,7 @@ def test_read_results_write_back_with_not_null_constraints(rest_catalog, native_
     table = table.copy({'write.native.enabled': str(native_write).lower()})
     builder = table.new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
-    from pypaimon.write.native_write import NativeTableWrite
+    from pypaimon.execution.native.write.native_write import NativeTableWrite
     assert isinstance(writer, NativeTableWrite) == native_write
     try:
         writer.write_arrow(data)

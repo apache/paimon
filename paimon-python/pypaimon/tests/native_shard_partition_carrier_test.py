@@ -25,10 +25,10 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.write.native_update import NativeShardTableUpdator
+from pypaimon.execution.native.write.native_update import NativeShardTableUpdator
 
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,

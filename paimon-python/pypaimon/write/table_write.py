@@ -19,274 +19,47 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import ChangelogProducer
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability, project_arrow_batch)
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
-from pypaimon.write.row_utils import (
-    require_columns,
-    row_to_named_values,
-)
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_write import FileStoreWrite
 
 if TYPE_CHECKING:
     from ray.data import Dataset
 
 
-def _pandas_write_schema(table, schema):
-    """Keep ignored events available for the normal row-kind NULL checks."""
-    if table is None or not table.is_primary_key_table:
-        return schema
-    from pypaimon.write.row_kind import write_value_schema
-    schema = write_value_schema(table, schema)
-    options = table.options
-    raw = options.options.to_map()
-    if (raw.get('rowkind.field') is None
-            or not (options.ignore_delete() or str(raw.get('ignore-update-before', 'false')).lower() == 'true')):
-        return schema
-    # Pandas checks top-level NOT NULL before Arrow reaches the writer. Only
-    # relax the transport; the declared schema and nested fields stay intact.
-    return pa.schema([field.with_nullable(True) for field in schema], metadata=schema.metadata)
+class TableWrite(PythonTableWriteMixin):
+    """Public writer API backed by the selected execution implementation."""
 
-
-def _pandas_write_batch(table, dataframe, schema, table_schema):
-    """Retain event/routing inputs omitted from the physical write type."""
-    # Convert the selected fields before building a wider transport. PyArrow
-    # validates missing columns and can resolve selected values from a named
-    # DataFrame index; filling a full DataFrame layout first would erase both.
-    batch = pa.RecordBatch.from_pandas(dataframe, schema=_pandas_write_schema(table, schema))
-    if table is not None and schema.names != table_schema.names:
-        from pypaimon.table.bucket_mode import BucketMode
-        required = list(table.partition_keys)
-        if table.bucket_mode() == BucketMode.HASH_FIXED and table.options.bucket() > 1:
-            required.extend(table.table_schema.bucket_keys)
-        row_kind_field = table.options.options.to_map().get('rowkind.field')
-        if row_kind_field is not None:
-            required.append(row_kind_field)
-        if not set(required).issubset(schema.names):
-            extra_schema = pa.schema([field.with_nullable(True) for field in table_schema
-                                      if field.name in required and field.name not in schema.names])
-            extra = pa.RecordBatch.from_pandas(dataframe, schema=extra_schema)
-            columns = dict(zip(batch.schema.names, batch.columns))
-            columns.update(zip(extra.schema.names, extra.columns))
-            # Only written/event/routing fields were converted. Do not touch
-            # unwritten payloads, including live BLOB objects.
-            fields = [field if field.name in schema.names else field.with_nullable(True) for field in table_schema]
-            arrays = [columns[field.name] if field.name in columns else pa.nulls(batch.num_rows, field.type)
-                      for field in fields]
-            batch = pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields, metadata=table_schema.metadata))
-    return batch
-
-
-def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
-               hash_fixed_precluster='auto', static_partition=None):
-    """Share Ray coordination without constructing another local data writer."""
-    from pypaimon.write.ray_datasink import write_paimon_dataset
-
-    overwrite_partition = writer.static_partition if static_partition is None else static_partition
-    return write_paimon_dataset(
-        dataset, writer.table, overwrite=overwrite, static_partition=overwrite_partition,
-        concurrency=concurrency, ray_remote_args=ray_remote_args,
-        hash_fixed_precluster=hash_fixed_precluster,
-        **writer._distributed_write_options(overwrite=overwrite or overwrite_partition is not None))
-
-
-class TableWrite:
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
                  *, restore_snapshot_id=None):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
-        self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
-        self.commit_user = commit_user
-        self.static_partition = static_partition
-        self.restore_snapshot_id = restore_snapshot_id
-        self.file_store_write = self._create_file_store_write(commit_user)
-        # Java overwrite writers ignore previous files even without an explicit
-        # restore snapshot. HASH restoration is separately disabled by the row
-        # key extractor; sequence restoration must also start from empty state.
-        self.file_store_write.restore_snapshot_id = (
-            0 if static_partition is not None else restore_snapshot_id)
-        if static_partition is not None:
-            # An overwrite replaces state, not an input changelog. Java's
-            # overwrite commit does not publish changelog manifests; avoid
-            # writing unreferenced changelog files in the first place.
-            self.file_store_write.changelog_producer = ChangelogProducer.NONE
-        self.row_key_extractor = self._create_row_key_extractor(static_partition)
-
-    def _create_file_store_write(self, commit_user):
-        return FileStoreWrite(self.table, commit_user)
-
-    def _create_row_key_extractor(self, static_partition):
-        if self.restore_snapshot_id is not None:
-            from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
-            return DynamicBucketRowKeyExtractor(
-                self.table.table_schema, table=self.table,
-                ignore_existing=static_partition is not None,
-                base_snapshot_id=self.restore_snapshot_id)
-        return self.table.create_row_key_extractor(
-            ignore_existing=static_partition is not None
-        )
+        return super().__init__(table, commit_user, static_partition, restore_snapshot_id=restore_snapshot_id)
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
-        data = self._prepare_arrow_schema(data)
-        if isinstance(data, pa.RecordBatch):
-            return self.write_arrow_batch(data, bucket)
-        for batch in data.to_batches():
-            self.write_arrow_batch(batch, bucket)
+        return super().write_arrow(data, bucket)
 
     def write_arrow_batch(self, data: pa.RecordBatch, bucket: Optional[int] = None):
-        if bucket is not None:
-            return self._write_precomputed_bucket(data, bucket)
-        data = self._prepare_arrow_data(data)
-        if data.num_rows == 0:
-            return
-
-        for partition, bucket, row_indices in \
-                self.row_key_extractor.extract_partition_bucket_groups(data):
-            if row_indices is None:
-                # Every input row belongs to the same partition/bucket. Passing the
-                # original batch through avoids copying large BLOB values through
-                # Arrow take before the dedicated BLOB writer consumes them.
-                sub_table = data
-            else:
-                # row_indices is an int64 array of this group's rows in
-                # ascending input order (the extractor sorts grouped indices so
-                # sequence-number assignment stays latest-wins correct), so the
-                # span is just first..last.
-                lo = row_indices[0].as_py()
-                hi = row_indices[-1].as_py()
-                count = len(row_indices)
-                if hi - lo + 1 == count:
-                    # Distinct row indices spanning exactly `count` values are
-                    # contiguous, so share the original Arrow buffers instead of
-                    # gathering their rows into newly allocated buffers with take.
-                    sub_table = data.slice(lo, count)
-                else:
-                    sub_table = pa.compute.take(data, row_indices)
-            self._write_partition_bucket_batch(partition, bucket, sub_table)
+        return super().write_arrow_batch(data, bucket)
 
     def roll_before_group_if_needed(self, row_count: int):
         """Roll current files before the next logical write group if needed."""
-        if isinstance(row_count, bool) or not isinstance(row_count, int) \
-                or row_count <= 0:
-            raise ValueError("Group row count must be a positive integer.")
-        self.file_store_write.roll_before_group_if_needed(row_count)
-
-    def _write_partition_bucket_batch(self, partition, bucket, data):
-        write_cols = self.file_store_write.write_cols
-        if write_cols is not None:
-            # Keep routing columns available for full-schema inputs, then
-            # write only the columns and order recorded in the file metadata.
-            data = project_arrow_batch(data, write_cols)
-        self.file_store_write.write(partition, bucket, data)
-
-    def _write_precomputed_bucket(self, data, bucket):
-        """Write one partition/bucket group using normal index maintenance."""
-        from pypaimon.table.bucket_mode import BucketMode
-        from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
-
-        bucket_mode = self.table.bucket_mode()
-        if bucket_mode not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC):
-            raise ValueError(
-                "Precomputed bucket writes are only valid for HASH_FIXED or "
-                "HASH_DYNAMIC tables"
-            )
-        if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
-            if bucket_mode == BucketMode.HASH_DYNAMIC:
-                raise RuntimeError("Dynamic bucket extractor is not configured")
-        from pypaimon.index.dynamic_bucket import MAX_DYNAMIC_BUCKETS
-        upper_bound = MAX_DYNAMIC_BUCKETS if bucket_mode == BucketMode.HASH_DYNAMIC else self.table.options.bucket()
-        if not 0 <= bucket < upper_bound:
-            raise ValueError('Bucket id must be between 0 and {}'.format(upper_bound - 1))
-        data = self._prepare_arrow_data(data)
-        if bucket_mode == BucketMode.HASH_DYNAMIC:
-            partition = self.row_key_extractor.notify_precomputed_bucket_batch(data, bucket)
-        else:
-            partitions = self.row_key_extractor.extract_partitions_batch(data)
-            if not partitions:
-                return
-            partition = tuple(partitions[0])
-            if any(tuple(actual) != partition for actual in partitions):
-                raise ValueError('A precomputed bucket group contained multiple partitions')
-        if partition is None:
-            return
-        self._write_partition_bucket_batch(partition, bucket, data)
+        return super().roll_before_group_if_needed(row_count)
 
     def write_row(self, row):
-        values_by_name = row_to_named_values(row, self.table.table_schema.fields)
-        column_names = (
-            self.file_store_write.write_cols
-            if self.file_store_write.write_cols is not None
-            else list(self.table.field_names)
-        )
-        require_columns(values_by_name, column_names, "write_row")
-        require_columns(values_by_name, self.table.partition_keys, "write_row")
-        from pypaimon.write.row_kind import skip_write_row
-        if skip_write_row(self.table, values_by_name, row.get_row_kind(), self.file_store_write.write_cols):
-            return
-        partition, bucket = (
-            self.row_key_extractor.extract_partition_bucket_row(values_by_name)
-        )
-        self._write_partition_bucket_row(
-            partition, bucket, row, values_by_name
-        )
-
-    def _write_partition_bucket_row(
-        self, partition, bucket, row, values_by_name
-    ):
-        self.file_store_write.write_row(
-            partition, bucket, row, values_by_name
-        )
+        return super().write_row(row)
 
     def write_pandas(self, dataframe):
-        write_cols = self.file_store_write.write_cols
-        if write_cols is not None:
-            # Column-subset write (append-only ``with_write_type``): build the
-            # RecordBatch against the subset schema so the input only needs the
-            # written columns, mirroring the ``write_arrow`` path.
-            pa_schema = self._write_cols_pyarrow_schema(write_cols)
-        else:
-            pa_schema = self.table_pyarrow_schema
-        record_batch = _pandas_write_batch(
-            getattr(self, 'table', None), dataframe, pa_schema, self.table_pyarrow_schema)
-        return self.write_arrow_batch(record_batch)
+        return super().write_pandas(dataframe)
 
     def with_write_type(self, write_cols: List[str]):
-        write_cols = list(write_cols)
-        for col in write_cols:
-            if col not in self.table_pyarrow_schema.names:
-                raise ValueError(f"Column {col} is not in table schema.")
-        full_names = self.table_pyarrow_schema.names
-        # Java preserves the declared append column order in writeCols. PK
-        # writes still require the complete table layout in the Python buffer.
-        full_pk_type = (self.table.is_primary_key_table and len(write_cols) == len(full_names)
-                        and set(write_cols) == set(full_names))
-        if write_cols == full_names or full_pk_type:
-            write_cols = None
-        self.file_store_write.write_cols = write_cols
-        return self
+        return super().with_write_type(write_cols)
 
     def with_blob_consumer(self, blob_consumer: BlobConsumer):
-        if self.file_store_write.data_writers:
-            raise RuntimeError(
-                "with_blob_consumer must be called before any write operation."
-            )
-        self.file_store_write.blob_consumer = blob_consumer
-        return self
+        return super().with_blob_consumer(blob_consumer)
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
-        if self.file_store_write.data_writers:
-            raise RuntimeError(
-                "with_blob_uri_reader_factory must be called before any "
-                "write operation."
-            )
-        self.file_store_write.blob_uri_reader_factory = uri_reader_factory
-        return self
+        return super().with_blob_uri_reader_factory(uri_reader_factory)
 
     def write_ray(
         self,
@@ -316,137 +89,14 @@ class TableWrite:
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
         """
-        _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
-                   hash_fixed_precluster, static_partition)
-
-    def _distributed_write_options(self, *, overwrite=False) -> Dict[str, Any]:
-        """Return options forwarded by ``write_ray`` to the Ray writer."""
-        return {}
+        return super().write_ray(
+            dataset, overwrite, concurrency, ray_remote_args, hash_fixed_precluster, static_partition)
 
     def close(self):
-        try:
-            self.file_store_write.close()
-        finally:
-            self._release_prepared_indexes()
+        return super().close()
 
     def abort(self):
-        try:
-            self.file_store_write.abort()
-        finally:
-            abort = getattr(self.row_key_extractor, "abort", None)
-            if abort is not None:
-                abort()
-
-    def _prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        commit_messages = self.file_store_write._prepare_commit_messages(commit_identifier)
-        prepare_indexes = getattr(self.row_key_extractor, "prepare_commit", None)
-        index_changes = prepare_indexes() if prepare_indexes is not None else {}
-        messages_by_bucket = {
-            (tuple(message.partition), message.bucket): message
-            for message in commit_messages
-        }
-        for (partition, bucket), changes in index_changes.items():
-            message = messages_by_bucket.get((partition, bucket))
-            if message is None:
-                message = CommitMessage(
-                    partition=partition,
-                    bucket=bucket,
-                    new_files=[],
-                )
-                commit_messages.append(message)
-                messages_by_bucket[(partition, bucket)] = message
-            message.index_adds.extend(changes.additions)
-            message.index_deletes.extend(changes.deletions)
-        # Hand off data, changelog and HASH indexes together. Until every
-        # preparation succeeds, retain the metadata for retry and abort.
-        self.file_store_write._release_prepared_files()
-        self._release_prepared_indexes()
-        return commit_messages
-
-    def _release_prepared_indexes(self) -> None:
-        release = getattr(self.row_key_extractor, "release_prepared", None)
-        if release is not None:
-            release()
-
-    def _prepare_arrow_data(self, data):
-        data = self._prepare_arrow_schema(data)
-        # Schema-only writers can normalize input without table options.
-        table = getattr(self, 'table', None)
-        if table is None:
-            return data
-        data = self._normalize_arrow_write_schema(data)
-        from pypaimon.write.row_kind import filter_write_batch
-        data = filter_write_batch(table, data, self.file_store_write.write_cols)
-        if not data.num_rows:
-            return data
-        data = normalize_arrow_strings(data)
-        target = self.table_pyarrow_schema
-        if data.schema.names != target.names and self.file_store_write.write_cols is not None:
-            target = self._write_cols_pyarrow_schema(self.file_store_write.write_cols)
-        # Validate only surviving values. Keep the input transport metadata:
-        # PyArrow otherwise rejects hidden NULL children of NULL ROW parents.
-        validated = normalize_arrow_write_nullability(data, target)
-        self._validate_pyarrow_schema(validated.schema)
-        return data
-
-    def _prepare_arrow_schema(self, data):
-        # Legacy schema-only callers have no row-kind options to evaluate.
-        # A real writer must defer casts until ignored events have been removed.
-        if getattr(self, 'table', None) is None:
-            data = normalize_arrow_strings(data)
-        self._validate_pyarrow_schema(
-            data.schema, check_nested_nullability=getattr(self, 'table', None) is None)
-        return data
-
-    def _normalize_arrow_write_schema(self, data):
-        # Compatible input batches may differ in top-level nullability or
-        # metadata. Buffered writes and row-to-Arrow conversion must use the
-        # same declared fields, while keeping normalized Arrow array types.
-        fields = []
-        for field in data.schema:
-            declared = self.table_pyarrow_schema.field(field.name)
-            fields.append(pa.field(field.name, field.type, nullable=declared.nullable,
-                                   metadata=declared.metadata))
-        schema = pa.schema(fields, metadata=self.table_pyarrow_schema.metadata)
-        from pypaimon.write.row_kind import write_value_schema
-        schema = write_value_schema(self.table, schema)
-        if data.schema.equals(schema, check_metadata=True):
-            return data
-        if isinstance(data, pa.RecordBatch):
-            return pa.RecordBatch.from_arrays(data.columns, schema=schema)
-        return pa.Table.from_arrays(data.columns, schema=schema)
-
-    def _validate_pyarrow_schema(self, data_schema: pa.Schema, *, check_nested_nullability=True):
-        if self._is_compatible_pyarrow_schema(
-                data_schema, self.table_pyarrow_schema, check_nested_nullability=check_nested_nullability):
-            return
-
-        write_cols = self.file_store_write.write_cols
-        if write_cols is not None:
-            write_cols_schema = self._write_cols_pyarrow_schema(write_cols)
-            if self._is_compatible_pyarrow_schema(
-                    data_schema, write_cols_schema, check_nested_nullability=check_nested_nullability):
-                return
-
-        self._raise_inconsistent_schema(data_schema)
-
-    def _is_compatible_pyarrow_schema(
-            self, data_schema: pa.Schema, expected_schema: pa.Schema, *, check_nested_nullability=True) -> bool:
-        return arrow_schemas_compatible(
-            data_schema, expected_schema, check_top_level_nullability=False,
-            allow_binary_compatibility=True, check_nested_nullability=check_nested_nullability)
-
-    def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
-        table_fields = {
-            field.name: field for field in self.table_pyarrow_schema
-        }
-        return pa.schema([table_fields[col] for col in write_cols])
-
-    def _raise_inconsistent_schema(self, data_schema: pa.Schema):
-        raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
-                         f"Input schema is: {data_schema} "
-                         f"Table schema is: {self.table_pyarrow_schema} "
-                         f"Write cols is: {self.file_store_write.write_cols}")
+        return super().abort()
 
 
 class BatchTableWrite(TableWrite):

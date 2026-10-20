@@ -28,7 +28,7 @@ from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.read.reader.concat_batch_reader import (
+from pypaimon.execution.python.read.reader.concat_batch_reader import (
     BlobFallbackBatchReader,
     DataEvolutionMergeReader,
     MergeAllBatchReader,
@@ -36,7 +36,7 @@ from pypaimon.read.reader.concat_batch_reader import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit
-from pypaimon.read.split_read import (
+from pypaimon.execution.python.read.split_read import (
     RawFileSplitRead,
     _row_ranges_by_file,
     _split_local_row_ranges_by_file,

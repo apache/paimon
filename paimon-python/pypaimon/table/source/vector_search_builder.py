@@ -232,7 +232,7 @@ class AbstractVectorSearchBuilderImpl:
             partition_filter=self._partition_filter,
             options=self._options,
         )
-        from pypaimon.table.source.native_search_plan import native_vector_scan
+        from pypaimon.execution.native.read.native_search_plan import native_vector_scan
         return native_vector_scan(self, scan, self._native_batch_search)
 
     def _is_primary_key_vector_search(self):
@@ -255,7 +255,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         return self
 
     def execute_local(self):
-        from pypaimon.table.source.native_vector_search import try_native_vector_search
+        from pypaimon.execution.native.read.native_vector_search import try_native_vector_search
         result = try_native_vector_search(self, self._query_vector)
         if result is not None:
             return result
@@ -283,5 +283,5 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             partition_filter=self._partition_filter,
             options=self._options,
         )
-        from pypaimon.table.source.native_search_plan import native_vector_read
+        from pypaimon.execution.native.read.native_search_plan import native_vector_read
         return native_vector_read(self, reader)

@@ -305,9 +305,7 @@ class DataEvolutionFullTextRead(FullTextRead):
                 "pypaimon[full-text]."
             ) from e
 
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextIndexOptions,
-        )
+        from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 
         writer = FullTextIndexWriter(
             NativeFullTextIndexOptions.from_options(
@@ -342,21 +340,15 @@ def _index_candidate_limit(splits, limit):
 
 def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list, max_candidates=None):
     """Create a global index reader for full-text search."""
-    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-        FULL_TEXT_IDENTIFIER,
-    )
+    from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
     if index_type == FULL_TEXT_IDENTIFIER:
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextGlobalIndexReader,
-        )
+        from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
         return NativeFullTextGlobalIndexReader(file_io, index_path, index_io_meta_list, max_candidates)
     raise ValueError(f"Unsupported full-text index type: '{index_type}'")
 
 
 def _supports_full_text_search(index_type):
-    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-        FULL_TEXT_IDENTIFIER,
-    )
+    from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
     return index_type == FULL_TEXT_IDENTIFIER
 
 
@@ -391,8 +383,9 @@ def _index_type(index_splits):
 
 def _search_raw_full_text(index_bytes, row_range_start, query, limit, include_row_ids=None, max_candidates=None):
     from paimon_ftindex import FullTextIndexReader
-    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-        PaimonFullTextInput, _search_top_k,
+    from pypaimon.execution.python.read.native_full_text_global_index_reader import (
+        PaimonFullTextInput,
+        _search_top_k,
     )
 
     reader = FullTextIndexReader(PaimonFullTextInput(BytesIO(index_bytes)))

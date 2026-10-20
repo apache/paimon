@@ -31,7 +31,7 @@ from pypaimon.table.format.format_table import (
     Format,
     FormatTable,
 )
-from pypaimon.write.writer.parquet_writer_options import create_parquet_writer_options
+from pypaimon.execution.python.write.writer.parquet_writer_options import create_parquet_writer_options
 
 
 def _partition_path(

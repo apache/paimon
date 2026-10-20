@@ -195,7 +195,7 @@ def _planned_read(tmp_path, limit=None):
 def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume):
     read, splits = _planned_read(tmp_path)
     batches = _Batches([_batch([1, 2]), RuntimeError('must not fetch next batch')])
-    with patch('pypaimon.read.native_plan.native_read', return_value=batches) as prepare, \
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as prepare, \
             patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
         iterator = read.to_iterator(splits)
         prepare.assert_not_called()
@@ -216,7 +216,7 @@ def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_pa
            pa.record_batch([pa.array(['+I']), pa.array(['wrong type'])], names=['rowkind', 'id'])
            if failure == 'schema' else _batch([2], ['invalid']))
     batches = _Batches([_batch([1]), bad])
-    with patch('pypaimon.read.native_plan.native_read', return_value=batches), \
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches), \
             patch.object(read, '_create_split_read', side_effect=AssertionError('Python replay')):
         iterator = read.to_iterator(splits)
         assert next(iterator).get_field(0) == 1
@@ -229,8 +229,10 @@ def test_iterator_delegates_ordered_global_limit_in_one_native_read(tmp_path):
     read, splits = _planned_read(tmp_path, limit=3)
     assert len(splits) >= 2
     batches = _Batches([_batch([1, 2]), _batch([3])])
-    with patch('pypaimon.read.native_plan.native_read', return_value=batches) as native, \
-            patch('pypaimon.read.native_plan.native_split_from_python', side_effect=lambda split, **kwargs: split), \
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as native, \
+            patch(
+                'pypaimon.execution.native.read.split_adapter.native_split_from_python',
+                side_effect=lambda split, **kwargs: split), \
             patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
         result = _rows(read, splits + splits)
     assert result == [((value,), RowKind.INSERT) for value in [1, 2, 3]]
@@ -249,14 +251,14 @@ def test_iterator_setup_failure_falls_back_before_native_rows(tmp_path):
     read, splits = _planned_read(tmp_path)
     expected = _rows(read.table.copy({'read.native.enabled': 'false'}).new_read_builder()
                      .with_projection(['id']).new_read(), splits)
-    with patch('pypaimon.read.native_plan.native_read', side_effect=RuntimeError('setup failed')):
+    with patch('pypaimon.execution.native.read.table_read.native_read', side_effect=RuntimeError('setup failed')):
         assert _rows(read, splits) == expected
 
 
 def test_iterator_qualifies_every_split_before_starting_native(tmp_path):
     read, splits = _planned_read(tmp_path)
     with patch.object(read, '_native_split_files_supported', side_effect=[True, False]), \
-            patch('pypaimon.read.native_plan.native_read') as prepare:
+            patch('pypaimon.execution.native.read.table_read.native_read') as prepare:
         assert len(_rows(read, splits)) == 3
     prepare.assert_not_called()
 
@@ -267,7 +269,7 @@ def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, l
     kinds = ['+I', '-U', '+U', '-D']
     count = 4 if limit is None else limit
     batches = _Batches([_batch([1, 2, 3, 4][:count], kinds[:count])])
-    with patch('pypaimon.read.native_plan.native_read', return_value=batches) as prepare:
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as prepare:
         rows = _rows(read, splits[:1])
     assert rows == [((i + 1,), RowKind.from_string(kind)) for i, kind in enumerate(kinds[:count])]
     assert prepare.call_count == int(limit != 0)
@@ -475,7 +477,7 @@ def test_iterator_keeps_plan_authorization_across_splits_and_fallback(rest_catal
         if mode == 'wire-fallback':
             splits = [deserialize_split_v1(serialize_split_v1(split), []) for split in splits]
             failure = AssertionError('Serialized rules must not mint a native grant')
-        context = patch('pypaimon.read.native_plan.native_read', side_effect=failure)
+        context = patch('pypaimon.execution.native.read.table_read.native_read', side_effect=failure)
     with context:
         assert sorted(_rows(read, splits), key=lambda row: row[0]) == [
             ((2,), RowKind.INSERT), ((3,), RowKind.INSERT)]

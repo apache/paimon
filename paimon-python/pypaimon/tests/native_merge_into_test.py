@@ -60,7 +60,7 @@ def test_native_merge_updates_and_inserts_without_python_join(tmp_path):
     source = pa.Table.from_pylist([dict(id=1, value=11, name='new'), dict(id=3, value=30, name='insert')],
                                   schema=_SCHEMA)
     builder = table.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python merge orchestration')):
         messages = builder.new_update().merge_into(source, on=['id'],
                                                    when_matched=[WhenMatched.update({'value': source_col('value')})],
@@ -103,7 +103,7 @@ def test_ordered_conditions_null_keys_and_three_action_types(tmp_path, stream):
                                   dict(id=3, value=30, name='insert'), dict(id=None, value=91, name='null-new')],
                                   schema=_SCHEMA)
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python merge orchestration')):
         update = builder.new_update()
         kwargs = {'commit_identifier': 27} if stream else {}
@@ -122,7 +122,7 @@ def test_ordered_conditions_null_keys_and_three_action_types(tmp_path, stream):
 def test_native_self_merge_and_empty_target_insert(tmp_path):
     table = _table(tmp_path, [dict(id=1, value=10, name='old'), dict(id=2, value=20, name='keep')])
     builder = table.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python self merge orchestration')):
         messages = builder.new_update().merge_into(table, on=['_ROW_ID'], when_matched=[
             WhenMatched.update({'value': lit(99)}, condition="s.id = 1 AND t.name = 'old'")])
@@ -131,7 +131,7 @@ def test_native_self_merge_and_empty_target_insert(tmp_path):
     empty = _table(tmp_path / 'empty')
     source = pa.Table.from_pylist([dict(id=3, value=30, name='new')], schema=_SCHEMA)
     builder = empty.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python merge orchestration')):
         messages = builder.new_update().merge_into(source, on=['id'], when_not_matched=[
             WhenNotMatched({'value': source_col('value'), 'name': lit('literal s.id')}, condition='s.value > 10')])
@@ -149,7 +149,7 @@ def test_native_merge_preserves_sql_subquery_conditions(tmp_path, condition):
     source = pa.Table.from_pylist([dict(id=2, value=None, name='b'), dict(id=1, value=11, name='a'),
                                   dict(id=3, value=30, name='c')], schema=_SCHEMA)
     builder = table.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python merge orchestration')):
         messages = builder.new_update().merge_into(source, on=['id'], when_matched=[
             WhenMatched.update({'value': source_col('value')}, condition=condition)],
@@ -168,7 +168,7 @@ def test_native_merge_renamed_keys_pandas_and_duplicate_targets(tmp_path):
     source['key'] = source['key'].astype('int32')
     source['value'] = source['value'].astype('int32')
     builder = table.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python merge orchestration')):
         messages = builder.new_update().merge_into(source, on={'id': 'key'}, when_matched=[
             WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
@@ -192,7 +192,7 @@ def test_native_merge_defers_literals_until_a_clause_is_selected(tmp_path):
 
 
 def test_native_merge_keeps_video_inserts_on_python_path(tmp_path):
-    from pypaimon.write.native_merge_into import create_native_merge_into
+    from pypaimon.execution.native.write.native_merge_into import create_native_merge_into
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -229,7 +229,7 @@ def test_native_self_merge_does_not_read_unreferenced_blob(tmp_path, condition):
         builder.new_commit().commit(writer.prepare_commit())
     finally:
         writer.close()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                side_effect=AssertionError('Python self merge orchestration')):
         messages = builder.new_update().merge_into(table, on=['_ROW_ID'], when_matched=[
             WhenMatched.update({'name': lit('after')}, condition=condition)])
@@ -244,9 +244,9 @@ def test_native_merge_reads_paimon_source_in_core(tmp_path, stream):
     source = _table(tmp_path / 'source', [dict(id=1, value=11, name='new'), dict(id=2, value=22, name='insert')])
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     kwargs = dict(commit_identifier=57) if stream else {}
-    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+    with patch('pypaimon.execution.python.write.merge_into._normalize_source',
                side_effect=AssertionError('Python source materialization')), \
-            patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            patch('pypaimon.execution.python.write.merge_into._build_tables',
                   side_effect=AssertionError('Python merge orchestration')):
         messages = builder.new_update().merge_into(source, on=['id'], when_matched=[
             WhenMatched.update({'value': source_col('value')}, condition='s.value > t.value')],
@@ -301,7 +301,7 @@ def test_native_table_source_projects_away_unreadable_blob(tmp_path):
     finally:
         writer.close()
     builder = target.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+    with patch('pypaimon.execution.python.write.merge_into._normalize_source',
                side_effect=AssertionError('Python source materialization')):
         messages = builder.new_update().merge_into(source, on=['id'], when_matched=[
             WhenMatched.update({'value': source_col('value')}, condition='s.value > t.value')])
@@ -327,7 +327,7 @@ def test_native_table_source_pk_reads_logical_rows_and_needs_no_de(tmp_path):
         finally:
             writer.close()
     builder = target.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+    with patch('pypaimon.execution.python.write.merge_into._normalize_source',
                side_effect=AssertionError('Python source materialization')):
         messages = builder.new_update().merge_into(source, on=['id'], when_matched=[
             WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
@@ -364,7 +364,7 @@ def test_native_table_source_preserves_nested_values_and_null_keys_across_files(
     for value in values:
         _write_rows(source, schema, [value])
     builder = target.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+    with patch('pypaimon.execution.python.write.merge_into._normalize_source',
                side_effect=AssertionError('Python source materialization')):
         messages = builder.new_update().merge_into(
             source, on=['id'], when_matched=[WhenMatched.update('*')],
@@ -426,7 +426,7 @@ def test_native_table_source_keeps_its_selected_branch(tmp_path):
     _write_rows(branch, _SCHEMA, [dict(id=2, value=22, name='branch')])
     _write_rows(source, _SCHEMA, [dict(id=3, value=33, name='main')])
     builder = target.new_batch_write_builder()
-    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+    with patch('pypaimon.execution.python.write.merge_into._normalize_source',
                side_effect=AssertionError('Python source materialization')):
         messages = builder.new_update().merge_into(
             branch, on=['id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
@@ -442,7 +442,7 @@ def test_native_table_source_keeps_its_selected_branch(tmp_path):
 @pytest.mark.parametrize('location', ['local', 'file-uri', 'directory', 'external'])
 def test_python_written_partition_source_uses_java_paths_for_native_merge(tmp_path, stream, source_mode, location):
     from pathlib import Path
-    from pypaimon.write.native_write import NativeTableWrite
+    from pypaimon.execution.native.write.native_write import NativeTableWrite
 
     target = _table(tmp_path / 'target', [dict(id=1, value=10, name='old')])
     warehouse = tmp_path / 'source'
@@ -503,9 +503,9 @@ def test_python_written_partition_source_uses_java_paths_for_native_merge(tmp_pa
     assert all('pa%23rt=' in path for path in reported)
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     kwargs = dict(commit_identifier=57) if stream else {}
-    with patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+    with patch('pypaimon.execution.python.write.merge_into._normalize_source',
                side_effect=AssertionError('Python source materialization')), \
-            patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            patch('pypaimon.execution.python.write.merge_into._build_tables',
                   side_effect=AssertionError('Python merge orchestration')):
         messages = builder.new_update().merge_into(
             source, on=['id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
@@ -535,7 +535,7 @@ def test_float_partition_source_uses_native_merge(tmp_path, native, stream, part
     from contextlib import ExitStack
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python source materialization')))
         messages = builder.new_update().merge_into(
             source, on=['id'], when_matched=[WhenMatched.update({'value': source_col('value')})],

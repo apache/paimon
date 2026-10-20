@@ -23,7 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.native_update import create_native_delete, create_native_update
+from pypaimon.execution.native.write.native_update import create_native_delete, create_native_update
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.read.table_read import TableRead
 from pypaimon.write.table_update import BatchTableUpdate, StreamTableUpdate
@@ -38,7 +38,7 @@ pytestmark = pytest.mark.native_plan
 def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, stream):
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.native_update import NativeTableUpdateByRowId
+    from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -90,7 +90,7 @@ def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, 
 
 @pytest.mark.parametrize('stream', [False, True])
 def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
-    from pypaimon.write.native_update import NativeTableUpdateByRowId
+    from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
     from pypaimon.table.row.generic_row import GenericRow
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -496,8 +496,8 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     fallback_updates = pa.Table.from_pydict({
         'id': [2, 6], 'age': [26, 60],
     }, schema=schema)
-    with patch('pypaimon.write.native_update.create_native_upsert', return_value=None), \
-            patch('pypaimon.write.native_update.create_native_update', return_value=None):
+    with patch('pypaimon.execution.native.write.native_update.create_native_upsert', return_value=None), \
+            patch('pypaimon.execution.native.write.native_update.create_native_update', return_value=None):
         messages = builder.new_update().upsert_by_arrow_with_key(fallback_updates, ['id'])
     builder.new_commit().commit(messages)
     read_builder = table.new_read_builder()
@@ -509,7 +509,7 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         'age': [201, 201, 26, 30, 40, 50, 60],
     }
 
-    from pypaimon.write.native_update import NativeTableUpsert
+    from pypaimon.execution.native.write.native_update import NativeTableUpsert
     before = set(tmp_path.rglob('*.parquet'))
     snapshot_id = table.snapshot_manager().get_latest_snapshot().id
     with patch.object(NativeTableUpsert, 'upsert', side_effect=RuntimeError('core upsert failed')), \
@@ -745,7 +745,7 @@ def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_pa
 @pytest.mark.parametrize('case', ['partial', 'float-key', 'empty-columns'])
 def test_row_upsert_input_capabilities(tmp_path, case):
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.native_update import NativeTableUpsert
+    from pypaimon.execution.native.write.native_update import NativeTableUpsert
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([
@@ -935,7 +935,7 @@ def test_row_id_update_rejects_only_referenced_duplicate_columns(tmp_path, nativ
                              mask=pa.array([True, False])), pa.map_(pa.string(), pa.int32())),
 ])
 def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path, native, values, target):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int32()), ('value', target)])
@@ -973,8 +973,8 @@ def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path,
 ])
 @pytest.mark.parametrize('operation', ['row', 'predicate'])
 def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, operation):
-    from pypaimon.write.native_commit import create_native_write_table
-    from pypaimon.write.native_update import NativeBatchTableUpdate, NativePredicateTableUpdate
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_update import NativeBatchTableUpdate, NativePredicateTableUpdate
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', True)
     part_type = {'float': pa.float32(), 'double': pa.float64(), 'external-binary': pa.binary()}.get(

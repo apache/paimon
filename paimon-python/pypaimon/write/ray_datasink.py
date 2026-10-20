@@ -328,7 +328,7 @@ def write_paimon_dataset(
         from pypaimon.write.postpone_bucket import (
             PostponeBucketPlanner,
         )
-        from pypaimon.write.row_key_extractor import (
+        from pypaimon.execution.python.write.row_key_extractor import (
             PostponeFixedBucketRowKeyExtractor,
         )
 

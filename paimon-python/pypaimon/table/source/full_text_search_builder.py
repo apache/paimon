@@ -85,7 +85,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return self
 
     def execute_local(self) -> GlobalIndexResult:
-        from pypaimon.table.source.native_full_text_search import try_native_full_text_search
+        from pypaimon.execution.native.read.native_full_text_search import try_native_full_text_search
 
         result = try_native_full_text_search(self)
         if result is not None:
@@ -147,7 +147,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
-        from pypaimon.table.source.native_search_plan import native_full_text_scan
+        from pypaimon.execution.native.read.native_search_plan import native_full_text_scan
         reject_search_under_query_auth(self._table)
         definition = self._primary_key_full_text_definition()
         if definition is not None:
@@ -164,7 +164,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return native_full_text_scan(self, scan)
 
     def new_full_text_read(self) -> FullTextRead:
-        from pypaimon.table.source.native_search_plan import native_full_text_read
+        from pypaimon.execution.native.read.native_search_plan import native_full_text_read
         reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")

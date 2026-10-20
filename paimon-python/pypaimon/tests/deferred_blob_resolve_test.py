@@ -29,7 +29,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.read.reader.format_blob_reader import BlobRecordIterator
+from pypaimon.execution.python.read.reader.format_blob_reader import (BlobRecordIterator)
 from pypaimon.table.row.blob import BlobRef
 
 

@@ -24,7 +24,7 @@ import pytest
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.read.scan_distribution import java_file_name_shard
-from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
+from pypaimon.execution.python.read.scanner.primary_key_table_split_generator import (PrimaryKeyTableSplitGenerator)
 
 
 @pytest.mark.parametrize('name,count,expected', [

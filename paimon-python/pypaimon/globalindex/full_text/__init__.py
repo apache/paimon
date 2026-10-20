@@ -15,14 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-    NativeFullTextGlobalIndexReader,
+from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
+from pypaimon.globalindex.full_text_options import (
     NativeFullTextIndexOptions,
     FULL_TEXT_IDENTIFIER,
 )
-from pypaimon.globalindex.full_text.native_full_text_index_writer import (
-    NativeFullTextIndexWriter,
-)
+from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 
 __all__ = [
     'NativeFullTextGlobalIndexReader',

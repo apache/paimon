@@ -31,8 +31,8 @@ from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.write.table_delete import TableDeleteByRowId
-from pypaimon.write.native_update import NativeTableUpdateByRowId
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 from pypaimon.write.table_update import TableUpdate
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -280,7 +280,7 @@ def test_native_inline_blob_updates_preserve_references(
 def test_raw_blob_incremental_updater_keeps_one_implementation(tmp_path):
     # One snapshot/index covers scalar and raw Blob columns chosen per call.
     table, _ = _table(tmp_path)
-    from pypaimon.write.native_update import create_native_update_by_row_id
+    from pypaimon.execution.native.write.native_update import create_native_update_by_row_id
     row_ids = {row['id']: row['_ROW_ID']
                for row in _read(table, projection=['id', '_ROW_ID'])}
     with _native_only():
@@ -393,7 +393,7 @@ def test_native_raw_blob_matched_updates_and_unmatched_inserts(tmp_path, kind, s
     update = builder.new_update().with_update_type(['payload'])
     with _native_only():
         if operation == 'merge':
-            with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            with patch('pypaimon.execution.python.write.merge_into._build_tables',
                        side_effect=AssertionError('Python merge orchestration')):
                 kwargs = {'commit_identifier': 7} if stream else {}
                 messages = update.merge_into(source, on=['id'], when_matched=[
@@ -571,7 +571,7 @@ def test_native_blob_row_failure_preserves_prepared_columns_and_can_retry(tmp_pa
 @pytest.mark.parametrize('blob_object', [False, True])
 @pytest.mark.parametrize('kind', ['map', 'int_map'])
 def test_native_row_blob_maps_write_java_null_key_records(tmp_path, stream, blob_object, kind):
-    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
     from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
     payload_type, original, _ = _blob_values(kind)
     table, _ = _table(tmp_path, payloads=original, payload_type=payload_type,

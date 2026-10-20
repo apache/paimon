@@ -24,9 +24,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_sorted_index_build_test as index_tests
-from pypaimon.write.native_commit import from_native_commit_messages
+from pypaimon.execution.native.write.native_commit import from_native_commit_messages
 
 rest_catalog = index_tests.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
@@ -184,7 +186,7 @@ def test_python_full_text_build_delegates_to_common_native_entry(rest_catalog):
 @pytest.mark.parametrize('stop_words', [['paimon', 'apache'], 'paimon;apache'])
 def test_native_full_text_options_match_python_list_encoding(rest_catalog, option_source, stop_words):
     import json
-    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import NativeFullTextIndexOptions
+    from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 
     catalog, _ = rest_catalog
     options = {'full-text.stop-words': stop_words, 'full-text.with-position': True}

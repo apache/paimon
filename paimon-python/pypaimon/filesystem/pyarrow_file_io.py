@@ -45,7 +45,7 @@ from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
-from pypaimon.write.blob_format_writer import BlobFormatWriter
+from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
 def _pyarrow_lt_7():
@@ -969,7 +969,7 @@ class PyArrowFileIO(FileIO):
         try:
             import lance
 
-            from pypaimon.read.reader.lance_utils import to_lance_specified
+            from pypaimon.execution.python.read.reader.lance_utils import (to_lance_specified)
             file_path_for_lance, storage_options = to_lance_specified(self, path)
 
             writer = lance.file.LanceFileWriter(
@@ -998,7 +998,7 @@ class PyArrowFileIO(FileIO):
             import vortex
             from vortex import store
 
-            from pypaimon.read.reader.vortex_utils import to_vortex_specified
+            from pypaimon.execution.python.read.reader.vortex_utils import (to_vortex_specified)
             file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
 
             if store_kwargs:
@@ -1013,7 +1013,7 @@ class PyArrowFileIO(FileIO):
 
     def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
         try:
-            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+            from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
 
             if fields is None:
                 fields = PyarrowFieldParser.to_paimon_schema(data.schema)

@@ -585,9 +585,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
     """Native full-text option metadata."""
 
     def test_empty_metadata_uses_empty_options(self):
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextIndexOptions,
-        )
+        from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 
         options = NativeFullTextIndexOptions.deserialize(b"")
 
@@ -595,9 +593,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
         self.assertEqual(b"{}", options.serialize())
 
     def test_options_are_passed_through(self):
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextIndexOptions,
-        )
+        from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 
         options = NativeFullTextIndexOptions.from_options({
             "full-text.tokenizer": "ngram",
@@ -617,9 +613,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
 
     def test_reader_delegates_query_json_to_paimon_ftindex(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextGlobalIndexReader,
-        )
+        from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
 
         calls = []
 
@@ -660,9 +654,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
 
     def test_reader_delegates_boolean_query_json_to_native(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextGlobalIndexReader,
-        )
+        from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
 
         calls = []
 
@@ -704,9 +696,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
 
     def test_reader_uses_positional_input_adapter(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextGlobalIndexReader,
-        )
+        from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
 
         reads = []
 
@@ -743,9 +733,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
 
     def test_reader_passes_include_row_ids_filter_to_native(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
-        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-            NativeFullTextGlobalIndexReader,
-        )
+        from pypaimon.execution.python.read.native_full_text_global_index_reader import NativeFullTextGlobalIndexReader
 
         filters = []
 

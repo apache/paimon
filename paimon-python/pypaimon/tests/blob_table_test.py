@@ -234,7 +234,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
 
     def test_split_data_with_pyarrow_6_record_batch_api(self):
-        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+        from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
         payload_type = pa.list_(
             pa.field('item', pa.large_binary(), nullable=False)
@@ -319,7 +319,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         # Check that the writer is a DedicatedFormatWriter
         for writer in data_writers.values():
-            from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+            from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
             self.assertIsInstance(writer, DedicatedFormatWriter)
 
         blob_writer.close()
@@ -364,7 +364,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         # Check that the writer is NOT a DedicatedFormatWriter
         for writer_instance in data_writers.values():
-            from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+            from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
             self.assertNotIsInstance(writer_instance, DedicatedFormatWriter)
 
         writer.close()
@@ -1355,8 +1355,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_update_blob_column(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -1431,8 +1431,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_array_blob_column_write_read_and_update(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         array_blob_type = pa.list_(pa.large_binary())
         pa_schema = pa.schema([
@@ -1531,9 +1531,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         )
 
     def test_map_blob_column_write_read_and_update(self):
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
         from pypaimon.table.row.blob import BlobDescriptor
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         map_blob_type = pa.map_(pa.string(), pa.large_binary())
         pa_schema = pa.schema([
@@ -1877,9 +1877,9 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_update_new_blob_column_writes_full_normal_range(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
         from pypaimon.schema.data_types import AtomicType
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         table_name = 'test_db.blob_update_new_column'
         normal_schema = pa.schema([
@@ -2341,8 +2341,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
     def test_update_partial_blob_column_with_rolling_files(self):
         from pypaimon import Schema
-        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -2694,7 +2694,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         from pypaimon import Schema
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.read.reader import format_blob_reader
+        from pypaimon.execution.python.read.reader import format_blob_reader
         from pypaimon.table.row.blob import BlobViewStruct
 
         source_schema = pa.schema([
@@ -5473,7 +5473,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         from pypaimon import Schema
         from pypaimon.globalindex.indexed_split import IndexedSplit
-        from pypaimon.read.split_read import RawFileSplitRead
+        from pypaimon.execution.python.read.split_read import (RawFileSplitRead)
         from pypaimon.read.table_read import TableRead
         from pypaimon.table.row.blob import BlobViewStruct
         from pypaimon.utils.range import Range

@@ -31,9 +31,10 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.identifier import Identifier
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.read.native_plan import _native_read_split, native_runtime_available
+from pypaimon.execution.native.read.split_adapter import (_native_read_split)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+from pypaimon.execution.python.read.reader.data_file_batch_reader import (DataFileBatchReader)
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1

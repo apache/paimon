@@ -35,7 +35,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.scanner.chunk_shuffle_split_generator import (
+from pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator import (
     AppendChunkShuffleSplitGenerator,
     DataEvolutionChunkShuffleSplitGenerator,
     _LiveRowRangeSlicer,
@@ -188,7 +188,7 @@ class ChunkShuffleOrderCompatibilityTest(unittest.TestCase):
                         if workers > 1:
                             gen.with_shard(worker, workers)
                         with patch(
-                            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+                            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
                             side_effect=lambda _, dv: vectors[dv],
                         ) as read:
                             # Manifest input order must not affect the shuffle.
@@ -386,7 +386,7 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         )
 
         with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
             return_value=deletion_vector,
         ) as read:
             splits = gen.create_splits([entry])
@@ -420,7 +420,7 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         )
 
         with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
             return_value=_bitmap_deletion_vector(0, 3, 4, 9),
         ) as read:
             splits = gen.create_splits([entry])
@@ -468,7 +468,7 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         )
 
         with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
             side_effect=lambda _, deletion_file: deletion_vectors[deletion_file],
         ) as read:
             splits = gen.create_splits(entries)
@@ -503,7 +503,7 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         )
 
         with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
         ) as read:
             self.assertEqual(gen.create_splits([entry]), [])
 
@@ -950,7 +950,7 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
         )
 
         with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
             return_value=_bitmap_deletion_vector(1, 2, 7, 9),
         ) as read:
             splits = gen.create_splits([blob, anchor])
@@ -1017,7 +1017,7 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
         )
 
         with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            'pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
             side_effect=lambda _, deletion_file: deletion_vectors[deletion_file],
         ) as read:
             splits = gen.create_splits(entries)

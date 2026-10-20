@@ -26,10 +26,10 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.utils.range import Range
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.execution.python.write.file_store_write import FileStoreWrite
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=[

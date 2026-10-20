@@ -26,7 +26,7 @@ from pypaimon.ray.row_id_conflict_rewriter import (
 )
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
+from pypaimon.execution.python.write.commit.conflict_detection import RowIdExistenceConflict
 
 
 class RayRowIdConflictRewriterTest(unittest.TestCase):
@@ -223,7 +223,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit.FileStoreCommit.abort',
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
             commit_self_merge_with_compaction_retry(
                 table,
@@ -260,7 +260,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit.FileStoreCommit.abort',
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(
             RowIdExistenceConflict,
         ) as context:
@@ -295,7 +295,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         ), patch(
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
-            'pypaimon.write.file_store_commit.FileStoreCommit.abort',
+            'pypaimon.execution.python.write.file_store_commit.FileStoreCommit.abort',
         ) as abort_messages, self.assertRaises(RuntimeError) as context:
             commit_self_merge_with_compaction_retry(
                 table,

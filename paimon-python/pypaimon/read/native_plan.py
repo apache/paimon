@@ -15,661 +15,84 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Plan splits with pypaimon_rust, decoded for the normal pypaimon reader.
+"""Compatibility exports for Native planning and reading adapters."""
 
-Optional, lazily-imported dependency; enabled by ``scan.native-plan.enabled``.
-Predicates and limits are pushed into Rust planning. The normal pypaimon reader
-still applies them while reading, so pushdown remains an optimization.
-"""
-
-import json
-import os
-from importlib import import_module
-from threading import Lock
-from types import SimpleNamespace
-from typing import List, Optional, Tuple
-
-from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptions
-from pypaimon.common.options.options_utils import OptionsUtils
-from pypaimon.common.predicate import Predicate
-from pypaimon.read.plan import Plan
+from pypaimon.execution.native.runtime import (
+    _raise_if_native_fork_safety_error,
+    native_runtime_available,
+)
+from pypaimon.execution.native.table import (
+    _native_blob_view_supported,
+    _partition_fields,
+    _catalog_metastore,
+    _option_value_to_string,
+    _catalog_options,
+    _catalog_context_options,
+    _resolved_schema_file_io_options,
+    _resolved_schema_json,
+    _resolved_rest_table_response,
+    _NativeRestTableCache,
+    _rest_data_token,
+    _validate_native_fuse_binding,
+    _native_table,
+    _load_native_table,
+    _with_native_resolved_schema,
+    _with_native_read_snapshot,
+    _native_query_auth_supported,
+)
+from pypaimon.execution.native.read.builder import (
+    _predicate_to_native,
+    _native_read_builder,
+    _configure_native_read_builder,
+)
+from pypaimon.execution.native.read.split_adapter import (
+    _native_read_split,
+    native_split_from_python,
+)
+from pypaimon.execution.native.read.table_read import (
+    _prepare_native_read,
+    native_read,
+)
+from pypaimon.execution.native.read.plan import (
+    native_plan,
+    native_stream_scan,
+    _from_native_plan,
+)
 from pypaimon.read.split_serializer import (
-    deserialize_split_v1, serialize_split_v1)
-from pypaimon.schema.data_types import DataField, RowType
-
-
-def _raise_if_native_fork_safety_error(error):
-    """Propagate native fork errors instead of using inherited SDK state."""
-    if not native_runtime_available():
-        return
-    from pypaimon_rust import ForkSafetyError
-
-    current = error
-    seen = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, ForkSafetyError):
-            raise current
-        current = current.__cause__ or current.__context__
-
-
-def native_runtime_available() -> bool:
-    """Whether the optional companion Rust extension is installed.
-
-    Native paths require this release's APIs; they do not probe older builds.
-    """
-    try:
-        import_module('pypaimon_rust.datafusion')
-    except ImportError:
-        return False
-    return True
-
-
-def _native_blob_view_supported(table, read_names) -> bool:
-    """Resolve Blob views natively only with the REST catalog environment."""
-    if (not (table.options.blob_view_fields() & set(read_names))
-            or not table.options.blob_view_resolve_enabled()):
-        return True
-    loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
-    # Python also leaves view structs unresolved without a loader.
-    return loader is None or _catalog_metastore(loader) == 'rest'
-
-
-def _native_read_split(split, ranges_use_row_ids):
-    """Express Python's file slices with the existing indexed-split selector."""
-    from pypaimon.globalindex.indexed_split import IndexedSplit
-    from pypaimon.read.query_auth_split import QueryAuthSplit
-    from pypaimon.read.sliced_split import SlicedSplit
-    from pypaimon.utils.range import Range
-
-    def select_rows(base, ranges):
-        if isinstance(base, QueryAuthSplit):
-            return QueryAuthSplit(select_rows(base.split, ranges), base.auth_result)
-        if isinstance(base, IndexedSplit):
-            return select_rows(base.data_split(), Range.and_(base.row_ranges(), ranges))
-        return IndexedSplit(base, ranges)
-
-    if isinstance(split, QueryAuthSplit):
-        base = _native_read_split(split.split, ranges_use_row_ids)
-        return split if base is split.split else QueryAuthSplit(base, split.auth_result)
-    if isinstance(split, IndexedSplit):
-        base = _native_read_split(split.data_split(), ranges_use_row_ids)
-        return split if base is split.data_split() else select_rows(base, split.row_ranges())
-    if not isinstance(split, SlicedSplit):
-        return split
-    if ranges_use_row_ids is None:
-        raise ValueError('Native file-slice conversion requires the reader row-tracking mode')
-    ranges = []
-    offset = 0
-    slices = split.shard_file_idx_map()
-    for file in split.files:
-        start, end = slices.get(file.file_name, (0, file.row_count))
-        start, end = max(0, start), min(file.row_count, end)
-        if start < end:
-            base = file.first_row_id if ranges_use_row_ids else offset
-            if base is None:
-                raise ValueError("Row-tracked file '%s' is missing first_row_id" % file.file_name)
-            ranges.append(Range(base + start, base + end - 1))
-        offset += file.row_count
-    return select_rows(_native_read_split(split.data_split(), ranges_use_row_ids), ranges)
-
-
-def native_split_from_python(split, *, ranges_use_row_ids=None):
-    """Convert a Python-planned split for the Rust reader.
-
-    Vector scores intentionally stay on the Python IndexedSplit. Rust needs
-    only its row ranges to perform the physical read. File slices need the
-    reader's tracking mode to map their local offsets to those ranges.
-    """
-    from pypaimon_rust.datafusion import Split as NativeSplit
-    return NativeSplit.deserialize(serialize_split_v1(
-        _native_read_split(split, ranges_use_row_ids), include_scores=False))
-
-
-def _partition_fields(table):
-    """Ordered partition DataFields, used to decode the split partition bytes."""
-    schema = table.table_schema
-    by_name = {f.name: f for f in schema.fields}
-    return [by_name[name] for name in schema.partition_keys]
-
-
-def _catalog_metastore(loader) -> Optional[str]:
-    """Return the Rust catalog kind for an exact built-in loader."""
-    from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
-    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
-
-    # Subclasses may override load() with routing or option semantics which
-    # cannot be reproduced from context().options alone.
-    if type(loader) is FileSystemCatalogLoader:
-        return 'filesystem'
-    if type(loader) is RESTCatalogLoader:
-        return 'rest'
-    return None
-
-
-def _option_value_to_string(value) -> str:
-    """Stringify an option value for the Rust catalog.
-
-    Python bools stringify to ``'True'``/``'False'``; Rust parses booleans
-    case-sensitively, so emit lowercase ``'true'``/``'false'`` instead.
-    """
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    return OptionsUtils.convert_to_string(value)
-
-
-def _catalog_options(table) -> dict:
-    """Catalog options that built this table, to reconstruct the Rust catalog."""
-    loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
-    if loader is None:
-        raise ValueError("native_plan requires a catalog-backed table (no catalog loader)")
-    metastore = _catalog_metastore(loader)
-    if metastore is None:
-        raise ValueError("native_plan requires an exact built-in catalog loader")
-    normalized = _catalog_context_options(table)
-    normalized[CatalogOptions.METASTORE.key()] = metastore
-    return normalized
-
-
-def _catalog_context_options(table) -> dict:
-    """Normalize catalog storage properties without rebuilding the metastore."""
-    loader = table.catalog_environment.catalog_loader
-    context_options = loader.context().options
-    options = context_options.to_map()
-    normalized = {
-        str(key): _option_value_to_string(value)
-        for key, value in options.items()
-        if value is not None
-    }
-    if FuseOptions.FUSE_ENABLED.key() in normalized:
-        normalized[FuseOptions.FUSE_ENABLED.key()] = _option_value_to_string(
-            context_options.get(FuseOptions.FUSE_ENABLED))
-    if str(getattr(table, 'table_path', '')).startswith('oss://'):
-        from pypaimon.filesystem.jindo_file_system_handler import (
-            JINDO_AVAILABLE,
-        )
-        impl = normalized.get(OssOptions.OSS_IMPL.key())
-        if JINDO_AVAILABLE and (impl is None or impl.lower() == 'jindo'):
-            # This catalog is only used for Rust scan planning.
-            normalized[OssOptions.OSS_IMPL.key()] = 'jindo'
-    return normalized
-
-
-def _resolved_schema_file_io_options(table) -> Optional[dict]:
-    """FileIO properties for tables whose metadata needs no catalog resolution."""
-    environment = table.catalog_environment
-    loader = environment.catalog_loader
-    if loader is None:
-        from pypaimon.catalog.catalog_environment import CatalogEnvironment
-        from pypaimon.filesystem.local_file_io import LocalFileIO
-        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-        from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-        # A custom environment or FileIO can supply metadata outside the path.
-        if (type(environment) is not CatalogEnvironment
-                or type(table.file_io) not in (LocalFileIO, PyArrowFileIO, ResolvingFileIO)):
-            return None
-        return {str(key): _option_value_to_string(value)
-                for key, value in table.file_io.properties.to_map().items()
-                if value is not None}
-    from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
-    if _catalog_metastore(loader) != 'filesystem' and type(loader) is not JdbcCatalogLoader:
-        # REST tables must retain catalog snapshot loading and token refresh.
-        return None
-    context = loader.context()
-    if context.options is None:
-        return None
-    # JDBC, like filesystem catalogs, uses on-disk snapshots. Its already
-    # resolved table does not need another database connection during planning.
-    return _catalog_context_options(table)
-
-
-def _resolved_schema_json(table) -> str:
-    """Preserve all effective table options as strings for Rust."""
-    from pypaimon.common.json_util import JSON
-    options = {str(key): _option_value_to_string(value)
-               for key, value in table.table_schema.options.items() if value is not None}
-    if 'query-auth.enabled' in options:
-        # Preserve Python's effective policy. Forwarding an enabled spelling
-        # such as "on" unchanged would disable authorization in Rust.
-        options['query-auth.enabled'] = _option_value_to_string(OptionsUtils.convert_to_boolean(
-            table.table_schema.options['query-auth.enabled']))
-    return JSON.to_json(table.table_schema.copy(new_options=options))
-
-
-def _predicate_to_native(predicate: Predicate) -> dict:
-    """Convert PyPaimon's predicate tree to pypaimon-rust's dict API."""
-    if predicate.method in ('and', 'or'):
-        children = predicate.literals or []
-        if not children:
-            raise ValueError("Native compound predicate requires children")
-        return {
-            'method': predicate.method,
-            'children': [_predicate_to_native(child) for child in children],
-        }
-    result = {
-        'method': predicate.method,
-        'field': predicate.field,
-        'literals': list(predicate.literals or []),
-    }
-    if predicate.field_path:
-        result['field'] = predicate.field_path[0]
-        if len(predicate.field_path) > 1:
-            result['nested_path'] = list(predicate.field_path[1:])
-    return result
-
-
-def _resolved_rest_table_response(table, identifier=None):
-    """Reuse REST metadata only when the standard loader can be reproduced."""
-    from pypaimon.catalog.catalog_environment import CatalogEnvironment
-    from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
-
-    environment = table.catalog_environment
-    identifier = table.identifier if identifier is None else identifier
-    response = getattr(environment, 'rest_table_response', None)
-    if (type(environment) is not CatalogEnvironment
-            or type(environment.catalog_loader) is not RESTCatalogLoader
-            or not isinstance(response, str)):
-        return None
-    metadata = json.loads(response)
-    if (metadata.get('path') != table.table_path
-            or metadata.get('name') != identifier.get_object_name()
-            or ('database' in metadata
-                and metadata['database'] != identifier.get_database_name())):
-        return None
-    return response
-
-
-class _NativeRestTableCache:
-    """One process-local native table, discarded during worker serialization."""
-
-    def __init__(self):
-        self._states = {}
-
-    def __getstate__(self):
-        return {}
-
-    def __setstate__(self, state):
-        self.__init__()
-
-    def get_or_create(self, key, create):
-        pid = os.getpid()
-        # Publish a complete state atomically; never touch an inherited lock.
-        states = self._states
-        state = states.get(pid)
-        if state is None:
-            state = states.setdefault(pid, SimpleNamespace(lock=Lock(), entry=None))
-            self._states = {pid: state}
-        with state.lock:
-            if state.entry is None or state.entry[0] != key:
-                state.entry = (key, create())
-            return state.entry[1]
-
-    def get(self, response, database, table, options, token_loader=None):
-        from pypaimon_rust.datafusion import Table
-
-        def create():
-            token = token_loader() if token_loader else None
-            if token is None:
-                return Table.from_rest_response(
-                    response, database=database, table=table, rest_options=options)
-            return Table.from_rest_response_with_token(
-                response, database=database, table=table, rest_options=options,
-                data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
-
-        key = (response, database, table, tuple(sorted(options.items())))
-        return self.get_or_create(key, create)
-
-
-def _rest_data_token(table):
-    """Reuse only an existing valid token bound to this exact table."""
-    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-    from pypaimon.filesystem.caching_file_io import CachingFileIO
-
-    file_io = table.file_io
-    if type(file_io) is CachingFileIO:
-        file_io = file_io._delegate
-    if (table.current_branch() != 'main'
-            or type(file_io) is not RESTTokenFileIO
-            or file_io.identifier != table.identifier
-            or file_io.path != table.table_path):
-        return None
-    return file_io._existing_valid_token()
-
-
-def _validate_native_fuse_binding(table):
-    """Find the catalog table whose construction reproduces the bound FileIO."""
-    from pypaimon.catalog.rest.fuse_support import FusePathResolver
-    from pypaimon.common.identifier import Identifier
-    from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.filesystem.local_file_io import FuseLocalFileIO, LocalFileIO
-
-    file_io = table.file_io
-    if type(file_io) is CachingFileIO:
-        file_io = file_io._delegate
-    if not isinstance(file_io, FuseLocalFileIO):
-        return
-    loader = table.catalog_environment.catalog_loader
-    if type(file_io) is not FuseLocalFileIO or _catalog_metastore(loader) != 'rest':
-        raise RuntimeError('Native reads cannot reconstruct custom FUSE FileIO')
-    options = loader.context().options
-    if not options.get(FuseOptions.FUSE_ENABLED):
-        raise RuntimeError('Native catalog would disable the bound FUSE mount')
-    if file_io.path.rstrip('/') != table.table_path.rstrip('/'):
-        raise RuntimeError('The bound FUSE FileIO belongs to a different table path')
-    candidates = []
-    response = table.catalog_environment.rest_table_response
-    if isinstance(response, str):
-        metadata = json.loads(response)
-        if (metadata.get('path') == table.table_path
-                and metadata.get('database', table.identifier.get_database_name())
-                == table.identifier.get_database_name() and isinstance(metadata.get('name'), str)):
-            original = Identifier.create(table.identifier.get_database_name(), metadata['name'])
-            if original.get_table_name() == table.identifier.get_table_name():
-                candidates.append(original)
-    candidates.append(table.identifier)
-    # A manually resolved view can omit the original REST response. Its usual
-    # main-table binding can still be reconstructed by the same catalog.
-    candidates.append(Identifier.create(table.identifier.get_database_name(), table.identifier.get_table_name()))
-    resolver = FusePathResolver(options, None)
-    local = LocalFileIO()
-    mounted = local._to_file(file_io.fuse_path).absolute()
-    for identifier in candidates:
-        expected = resolver.resolve_local_path(table.table_path, identifier)
-        if mounted == local._to_file(expected).absolute():
-            return identifier
-    raise RuntimeError('Native catalog cannot reconstruct the bound FUSE FileIO')
-
-
-def _native_table(table):
-    """Transport the resolved schema, shared FileIO and captured read view."""
-    _validate_native_fuse_binding(table)
-    if ('_read_snapshot' in vars(table)
-            and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
-        from pypaimon.common.json_util import JSON
-        environment = table.catalog_environment
-        cache = vars(table).setdefault('_native_pinned_table_cache', _NativeRestTableCache())
-        key = (table.table_path, table.identifier.get_full_name(), table.file_io,
-               environment.uuid, environment.rest_table_response,
-               tuple(sorted(_catalog_options(table).items())),
-               JSON.to_json(table._read_snapshot) if table._read_snapshot is not None else None)
-        # Keep core's verified snapshot alive for this captured view, including
-        # ordinary read-option copies. Pickling/forking starts a fresh cache.
-        native = cache.get_or_create(key, lambda: _load_native_table(table))
-        return _with_native_read_snapshot(table, _with_native_resolved_schema(table, native))
-    return _load_native_table(table)
-
-
-def _load_native_table(table):
-    identifier = _validate_native_fuse_binding(table) or table.identifier
-    rest_response = _resolved_rest_table_response(table, identifier)
-    file_io_options = _resolved_schema_file_io_options(table)
-    if rest_response is not None:
-        cache = table.catalog_environment.__dict__.setdefault(
-            '_native_rest_table_cache', _NativeRestTableCache())
-        rt = cache.get(
-            rest_response,
-            database=identifier.get_database_name(),
-            table=identifier.get_object_name(),
-            options=_catalog_options(table),
-            token_loader=lambda: _rest_data_token(table))
-    elif file_io_options is not None:
-        from pypaimon_rust.datafusion import Table
-        rt = Table.from_resolved_schema(
-            table.table_path, _resolved_schema_json(table),
-            database=table.identifier.get_database_name(),
-            table=table.identifier.get_table_name(),
-            branch=table.current_branch(), options=file_io_options)
-    else:
-        from pypaimon_rust.datafusion import PaimonCatalog
-        # The Python loader has already resolved /config, including typed
-        # FUSE options. Match RESTCatalogLoader.load() and reuse that context.
-        catalog = PaimonCatalog(_catalog_options(table), config_required=False)
-        # REST may keep branch schemas in the catalog only. Load the base
-        # environment, then attach the schema/branch already resolved here.
-        rt = catalog.get_table((
-            identifier.get_database_name(), identifier.get_object_name()))
-        if rt.location() != table.table_path:
-            raise RuntimeError('Native catalog resolved a different table location')
-    if identifier != table.identifier:
-        # Construct the originally bound table, then use the existing copy API.
-        # Core retains its FileIO while resolving the branch's REST identity.
-        rt = rt.copy({'branch': table.current_branch()})
-    if file_io_options is None:
-        rt = _with_native_resolved_schema(table, rt)
-    if table.current_branch() != 'main':
-        if rt.branch() != table.current_branch():
-            raise RuntimeError("Native table did not resolve the requested branch")
-    return _with_native_read_snapshot(table, rt)
-
-
-def _with_native_resolved_schema(table, native_table):
-    # Resolve time travel through core before replacing options. Caller-supplied
-    # fields cannot acquire the catalog's authorization session.
-    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-    resolved = _resolved_schema_json(table)
-    options = json.loads(resolved)['options']
-    historical = (options.get('query-auth.enabled') == 'true'
-                  and any(key in options for key in SCAN_KEYS))
-    snapshot = vars(table).get('_read_snapshot')
-    if historical and snapshot is not None:
-        from pypaimon.common.json_util import JSON
-        # A captured view can intentionally retain the current read schema
-        # while its files were written under an older snapshot schema.
-        native_table = native_table.copy_with_pinned_snapshot(
-            JSON.to_json(snapshot), with_schema=snapshot.schema_id == table.table_schema.id)
-    elif historical:
-        native_table = native_table.copy(options)
-    return native_table.copy_with_resolved_schema(resolved, branch=table.current_branch())
-
-
-def _with_native_read_snapshot(table, native_table):
-    """Attach a captured read view, including a fixed empty snapshot."""
-    # Only explicitly stored state captures a view; None means a fixed empty view.
-    table_state = vars(table)
-    if '_read_snapshot' in table_state:
-        from pypaimon.common.json_util import JSON
-        snapshot = table_state['_read_snapshot']
-        native_table = native_table.copy_with_pinned_snapshot(JSON.to_json(snapshot) if snapshot is not None else None)
-    return native_table
-
-
-def _native_read_builder(table):
-    return _native_table(table).new_read_builder()
-
-
-def _configure_native_read_builder(builder, predicate, limit, projection,
-                                   read_type: Optional[List[DataField]] = None,
-                                   include_row_kind=False):
-    if read_type is not None:
-        builder = builder.with_read_type(
-            json.dumps(RowType(True, read_type).to_dict()))
-    if projection is not None and read_type is None:
-        builder = builder.with_projection(projection)
-    if predicate is not None:
-        builder = builder.with_filter(_predicate_to_native(predicate))
-    if limit is not None:
-        builder = builder.with_limit(limit)
-    if include_row_kind:
-        builder = builder.with_include_row_kind(True)
-    return builder
-
-
-def _prepare_native_read(table, predicate: Optional[Predicate] = None,
-                         limit: Optional[int] = None,
-                         projection: Optional[List[str]] = None,
-                         blob_parallelism: Optional[int] = None,
-                         read_type: Optional[List[DataField]] = None,
-                         include_row_kind: bool = False):
-    """Create the configured Core reader entrypoint."""
-    if not native_runtime_available():
-        raise RuntimeError(
-            "read.native.enabled needs the pypaimon-rust extension")
-    if not _native_query_auth_supported(table):
-        raise RuntimeError('Native reads cannot reconstruct custom query authorization')
-    if read_type is None:
-        from pypaimon.read.read_builder import ReadBuilder
-        resolved = ReadBuilder(table)
-        if projection is not None:
-            resolved.with_projection(projection)
-        read_type = resolved.read_type()
-    builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, limit, projection,
-        read_type=read_type,
-        include_row_kind=include_row_kind)
-    if blob_parallelism is not None:
-        builder = builder.with_blob_parallelism(blob_parallelism)
-    reader = builder.new_read()
-    return reader.read_arrow
-
-
-def native_read(table, splits, predicate: Optional[Predicate] = None,
-                limit: Optional[int] = None,
-                projection: Optional[List[str]] = None,
-                blob_parallelism: Optional[int] = None,
-                read_type: Optional[List[DataField]] = None,
-                include_row_kind: bool = False,
-                parallelism: int = 1,
-                ordered: bool = False):
-    """Run one Core read; ``ordered`` retains the supplied split order."""
-    read_splits = _prepare_native_read(
-        table,
-        predicate=predicate,
-        limit=limit,
-        projection=projection,
-        blob_parallelism=blob_parallelism,
-        read_type=read_type,
-        include_row_kind=include_row_kind)
-    return read_splits(splits, parallelism=parallelism, ordered=ordered)
-
-
-def native_plan(
-        table,
-        predicate: Optional[Predicate] = None,
-        limit: Optional[int] = None,
-        projection: Optional[List[str]] = None,
-        row_ranges: Optional[List[Tuple[int, int]]] = None,
-        incremental_range: Optional[Tuple[int, int]] = None,
-        incremental_mode: str = 'delta',
-        row_position_slice: Optional[Tuple[int, int]] = None,
-        row_position_shard: Optional[Tuple[int, int]] = None,
-        chunk_shuffle: Optional[Tuple[int, int]] = None,
-        shard: Optional[Tuple[int, int]] = None,
-        partition_predicate: Optional[Predicate] = None,
-        global_index_result=None,
-        all_files: bool = False) -> Plan:
-    """Plan with pypaimon_rust, preserving snapshot metadata.
-
-    Native conversion or planning failures are handled by TableScan, which
-    falls back to the Python planner.
-    """
-    if all_files and incremental_range is not None:
-        raise ValueError('planning all files does not accept incremental ranges')
-    if incremental_range is None and incremental_mode != 'delta':
-        raise ValueError('incremental_mode requires incremental_range')
-    if not native_runtime_available():
-        raise RuntimeError(
-            "scan.native-plan.enabled needs the pypaimon-rust extension")
-    builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, limit, projection)
-    if partition_predicate is not None:
-        builder = builder.with_partition_filter(_predicate_to_native(partition_predicate))
-    if row_ranges is not None:
-        builder = builder.with_row_ranges(row_ranges)
-    from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
-    supplied_pk_splits = (isinstance(global_index_result, GlobalIndexSplitResult)
-                          and not table.options.query_auth_enabled)
-    if supplied_pk_splits or incremental_range is None:
-        scan = builder.new_scan()
-    elif incremental_mode == 'delta':
-        scan = builder.new_incremental_scan(*incremental_range)
-    else:
-        scan = builder.new_incremental_scan(*incremental_range, incremental_mode)
-    if global_index_result is not None and not table.options.query_auth_enabled:
-        # A PK result already selected a snapshot and physical files. Java's
-        # PrimaryKeyBatchScan returns those selections before ordinary planning.
-        from pypaimon_rust.datafusion import GlobalIndexResult, Split as NativeSplit
-        from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
-        from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
-        if isinstance(global_index_result, GlobalIndexSplitResult):
-            # Searches and scans share the same core GlobalIndexResult.
-            result = (getattr(global_index_result, '_native_result', None)
-                      if type(global_index_result) is PrimaryKeyScoredResult else None)
-            # Java's PK result uses snapshot 0 for an uncommitted table,
-            # whereas the core search uses None. Keep the Python result's ID.
-            if result is not None and result.snapshot_id() is None:
-                result = None
-            if result is None:
-                result = GlobalIndexResult.from_splits(
-                    global_index_result.snapshot_id,
-                    [NativeSplit.deserialize(serialize_split_v1(split)) for split in global_index_result.splits])
-        elif isinstance(global_index_result, ScoredGlobalIndexResult):
-            score = global_index_result.score_getter()
-            result = GlobalIndexResult.from_scored_row_ids({
-                row_id: score(row_id) for row_id in global_index_result.results()})
-        else:
-            result = GlobalIndexResult.from_row_ranges([
-                (range_.from_, range_.to) for range_ in global_index_result.results().to_range_list()])
-        scan = scan.with_global_index_result(result)
-    if row_position_slice is not None:
-        scan = scan.with_row_position_slice(*row_position_slice)
-    if row_position_shard is not None:
-        scan = scan.with_row_position_shard(*row_position_shard)
-    if chunk_shuffle is not None:
-        seed, chunk_size = chunk_shuffle
-        scan = scan.with_chunk_shuffle(str(seed), chunk_size)
-    if shard is not None:
-        scan = scan.with_shard(*shard)
-    rust_plan = scan.plan_all_files() if all_files else scan.plan()
-    return _from_native_plan(table, rust_plan)
-
-
-def _native_query_auth_supported(table):
-    """Only reproduce authorization owned by the standard REST environment."""
-    from pypaimon.catalog.catalog_environment import CatalogEnvironment, _TableQueryAuthFn
-
-    environment = table.catalog_environment
-    auth = environment.table_query_auth(table.options, table.identifier)
-    if auth is None:
-        return True
-    if (type(environment) is not CatalogEnvironment
-            or type(auth) is not _TableQueryAuthFn
-            or auth._catalog_loader is not environment.catalog_loader
-            or auth._identifier != table.identifier
-            or not table.options.query_auth_enabled
-            or _catalog_metastore(environment.catalog_loader) != 'rest'):
-        return False
-    return True
-
-
-def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):
-    """Create Rust's stateful StreamTableScan with the canonical reader type."""
-    builder = _configure_native_read_builder(
-        _native_read_builder(table), predicate, None, None, read_type=read_type)
-    scan = builder.new_stream_scan()
-    if bucket_filter is not None:
-        scan.with_bucket_filter(bucket_filter)
-    if consumer_id is not None:
-        scan.with_consumer_id(consumer_id)
-    return scan
-
-
-def _from_native_plan(table, rust_plan) -> Plan:
-    """Keep one split/metadata bridge for batch and streaming planning."""
-    rust_splits = rust_plan.splits()
-    pfields = _partition_fields(table)
-    # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
-    kfields = table.trimmed_primary_keys_fields
-    splits = [
-        deserialize_split_v1(split.serialize(), pfields, kfields)
-        for split in rust_splits
-    ]
-    if table.options.native_read_enabled():
-        # Retain the opaque Rust split next to the Python metadata view so an
-        # unchanged native plan can be read without reserializing each split.
-        # A caller that needs different metadata (such as an endpoint DV)
-        # passes a new Python split, which the native reader converts at read
-        # time from its current fields.
-        for split, rust_split in zip(splits, rust_splits):
-            split._native_split = rust_split
-    snapshot_id = rust_plan.snapshot_id()
-    return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())
+    deserialize_split_v1,
+    serialize_split_v1,
+)
+
+__all__ = [
+    '_raise_if_native_fork_safety_error',
+    'native_runtime_available',
+    '_native_blob_view_supported',
+    '_partition_fields',
+    '_catalog_metastore',
+    '_option_value_to_string',
+    '_catalog_options',
+    '_catalog_context_options',
+    '_resolved_schema_file_io_options',
+    '_resolved_schema_json',
+    '_resolved_rest_table_response',
+    '_NativeRestTableCache',
+    '_rest_data_token',
+    '_validate_native_fuse_binding',
+    '_native_table',
+    '_load_native_table',
+    '_with_native_resolved_schema',
+    '_with_native_read_snapshot',
+    '_native_query_auth_supported',
+    '_predicate_to_native',
+    '_native_read_builder',
+    '_configure_native_read_builder',
+    '_native_read_split',
+    'native_split_from_python',
+    '_prepare_native_read',
+    'native_read',
+    'native_plan',
+    'native_stream_scan',
+    '_from_native_plan',
+    'deserialize_split_v1',
+    'serialize_split_v1',
+]

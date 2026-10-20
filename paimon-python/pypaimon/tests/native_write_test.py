@@ -24,7 +24,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 requires_native = pytest.mark.native_plan
@@ -71,7 +71,7 @@ def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequ
                else table.new_batch_write_builder())
     # A usable native backend must not bypass validation. This also runs when
     # the optional Rust extension is absent.
-    with patch('pypaimon.write.native_write.create_native_write', return_value=object()) as native:
+    with patch('pypaimon.execution.native.write.native_write.create_native_write', return_value=object()) as native:
         with pytest.raises(ValueError):
             builder.new_write()
         native.assert_not_called()
@@ -84,13 +84,13 @@ def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequ
     (pa.float64(), 'ascending', True),
 ])
 def test_native_sequence_write_capabilities(tmp_path, type_, order, supported):
-    from pypaimon.write.native_write import create_native_write
+    from pypaimon.execution.native.write.native_write import create_native_write
 
     table = _table(tmp_path, primary_key=True, id_type=type_, table_options={
         'sequence.field': 'id', 'sequence.field.sort-order': order,
     })
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table') as native:
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table') as native:
         writer = create_native_write(table, 'test')
         if supported:
             assert isinstance(writer, NativeTableWrite)
@@ -441,7 +441,7 @@ def test_partial_write_routes_input_partition_and_bucket_columns(tmp_path, arrow
     try:
         data = pa.table({'pt': ['b', 'a', None], 'id': [1, 2, 3]},
                         schema=pa.schema([schema.field('pt'), schema.field('id')]))
-        with patch('pypaimon.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED', arrow_groups):
+        with patch('pypaimon.execution.python.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED', arrow_groups):
             writer.write_arrow(data)
         builder.new_commit().commit(writer.prepare_commit())
     finally:
@@ -536,8 +536,8 @@ def test_uri_reader_factory_none_keeps_native_and_rejects_late_change(tmp_path):
 @requires_native
 def test_unavailable_native_writer_falls_back_before_table_reconstruction(tmp_path):
     table = _table(tmp_path)
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=False), \
-            patch('pypaimon.write.native_write.create_native_write_table',
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=False), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)
@@ -567,8 +567,8 @@ def test_custom_prefix_uses_native_writer(tmp_path, primary_key):
 def test_external_data_paths_fall_back_before_native_write(tmp_path):
     table = _table(tmp_path).copy({
         'data-file.external-paths': 'file://' + str(tmp_path / 'external')})
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table',
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)
@@ -577,8 +577,8 @@ def test_external_data_paths_fall_back_before_native_write(tmp_path):
 
 def test_unsupported_primary_key_write_falls_back_before_native_reconstruction(tmp_path):
     table = _table(tmp_path, primary_key=True).copy({'changelog-file.format': 'orc'})
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table',
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)
@@ -602,8 +602,8 @@ def test_native_write_validates_input_schema_before_writing(tmp_path):
 def test_deletion_vectors_with_merge_engine_fall_back(tmp_path, engine):
     table = _table(tmp_path).copy({
         'deletion-vectors.enabled': 'true', 'merge-engine': engine})
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table',
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)
@@ -614,8 +614,8 @@ def test_data_evolution_row_sidecar_falls_back_before_native_write(tmp_path):
     table = _table(tmp_path).copy({
         'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
         'data-evolution.row-sidecar.enabled': 'true'})
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table',
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table',
                   side_effect=AssertionError('must not reconstruct')):
         writer = table.new_batch_write_builder().new_write()
     assert not isinstance(writer, NativeTableWrite)

@@ -85,7 +85,7 @@ class PrimaryKeyScoredResult(GlobalIndexSplitResult):
     @classmethod
     def _from_native(cls, table, result):
         """Wrap core GlobalIndexResult; retain it for direct native scan handoff."""
-        from pypaimon.read.native_plan import _partition_fields
+        from pypaimon.execution.native.table import (_partition_fields)
         from pypaimon.read.split_serializer import deserialize_split_v1
 
         value = cls.__new__(cls)

@@ -34,9 +34,9 @@ from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
-from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
+from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import (
+from pypaimon.execution.python.write.file_store_commit import (
     CommitFailRetryResult,
     FileStoreCommit,
     RollbackRetryResult,
@@ -144,8 +144,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_snapshot_commit = Mock()
 
     def _create_file_store_commit(self):
-        with patch('pypaimon.write.file_store_commit.ManifestFileManager'), \
-                patch('pypaimon.write.file_store_commit.ManifestListManager'):
+        with patch('pypaimon.execution.python.write.file_store_commit.ManifestFileManager'), \
+                patch('pypaimon.execution.python.write.file_store_commit.ManifestListManager'):
             return FileStoreCommit(
                 snapshot_commit=self.mock_snapshot_commit,
                 table=self.mock_table,
@@ -346,8 +346,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         )
 
 
-@patch('pypaimon.write.file_store_commit.ManifestFileManager')
-@patch('pypaimon.write.file_store_commit.ManifestListManager')
+@patch('pypaimon.execution.python.write.file_store_commit.ManifestFileManager')
+@patch('pypaimon.execution.python.write.file_store_commit.ManifestListManager')
 class TestFileStoreCommit(unittest.TestCase):
     """Test cases for FileStoreCommit class."""
 

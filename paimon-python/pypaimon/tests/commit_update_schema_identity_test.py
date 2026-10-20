@@ -24,12 +24,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests.global_index_update_action_test import _index_entry
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.global_index_update_checker import scan_global_index_entries
+from pypaimon.execution.python.write.global_index_update_checker import scan_global_index_entries
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 _ENGINES = [False, pytest.param(True, marks=[pytest.mark.native_plan, pytest.mark.skipif(

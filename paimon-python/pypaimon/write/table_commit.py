@@ -18,20 +18,20 @@
 import logging
 from typing import Dict, List, Optional
 
-from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
+from pypaimon.execution.dispatch import prepare_native_commit
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.python.write.table_commit import PythonTableCommitMixin
 
 logger = logging.getLogger(__name__)
 
 
-class TableCommit:
+class TableCommit(PythonTableCommitMixin):
     """Common base for batch and stream table commits.
 
-    Owns the underlying :class:`FileStoreCommit` and provides the shared
-    :meth:`_commit` implementation. The concrete subclasses differ only in
+    Coordinates prepared commit messages through an execution backend.
+    The concrete subclasses differ only in
     their public ``commit`` signature and lifecycle constraints:
 
     * :class:`BatchTableCommit` accepts no ``commit_identifier`` and may be
@@ -47,18 +47,11 @@ class TableCommit:
         self.commit_user = commit_user
         self.overwrite_partition = static_partition
 
-        # Get SnapshotCommit from table's catalog environment
-        snapshot_commit = table.new_snapshot_commit()
-        if snapshot_commit is None:
-            raise RuntimeError("Table does not provide a SnapshotCommit instance")
-
         self._commit_callbacks: List[CommitCallback] = []
         self._native_commit = None
         self._native_commit_is_batch = False
         self._native_callbacks_registered = False
-        self.file_store_commit = FileStoreCommit(
-            snapshot_commit, table, commit_user,
-            commit_callbacks=self._commit_callbacks)
+        self._init_python_commit()
 
     def add_commit_callback(self, callback: CommitCallback) -> None:
         """Register a callback to be invoked after each successful commit."""
@@ -97,7 +90,7 @@ class TableCommit:
                 # Keep publication failures outside the preparation fallback.
                 native.commit(messages, **native_kwargs)
                 return
-            self.file_store_commit.overwrite(
+            self._overwrite_with_python(
                 overwrite_partition=self.overwrite_partition,
                 **commit_kwargs)
         else:
@@ -118,43 +111,10 @@ class TableCommit:
                 else:
                     native.commit(commit_identifier, messages, **native_kwargs)
                 return
-            self.file_store_commit.commit(**commit_kwargs)
+            self._commit_with_python(**commit_kwargs)
 
     def _prepare_native_commit(self, messages, *, batch=False):
-        if not self.table.options.native_commit_enabled():
-            return None
-        try:
-            from pypaimon.write.native_commit import (
-                create_native_commit, native_commit_callback, native_messages_supported,
-                to_native_commit_messages)
-            if not native_messages_supported(self.table, messages):
-                return None
-            if self._native_commit is None or (batch and not self._native_commit_is_batch):
-                native = create_native_commit(
-                    self.table, self.commit_user, self.overwrite_partition,
-                    **({'batch': True} if batch else {}))
-                if native is None:
-                    return None
-                if self._native_commit is not None:
-                    self._native_commit.close()
-                self._native_commit = native
-                self._native_commit_is_batch = batch or self.overwrite_partition is not None
-                self._native_callbacks_registered = False
-            if self._native_commit is None:
-                return None
-            native_messages = to_native_commit_messages(self.table, messages)
-            # Callbacks may be registered after the native committer is created.
-            # FileStoreCommit owns their close lifecycle in either execution path.
-            if self._commit_callbacks and not self._native_callbacks_registered:
-                self._native_commit.add_commit_callback(native_commit_callback(self.table, self._commit_callbacks))
-                self._native_callbacks_registered = True
-            return self._native_commit, native_messages
-        except Exception as error:
-            _raise_if_native_fork_safety_error(error)
-            # No native mutation has started. Preserve the normal Python path
-            # when the optional runtime, FileIO or wire bridge is unavailable.
-            logger.debug("Native commit preparation failed; using Python: %s", error)
-            return None
+        return prepare_native_commit(self, messages, batch=batch)
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Delete explicitly abandoned, known-uncommitted files.
@@ -168,14 +128,14 @@ class TableCommit:
             native, messages = prepared
             native.abort(messages)
             return
-        self.file_store_commit.abort(commit_messages)
+        self._abort_with_python(commit_messages)
 
     def close(self):
         try:
             if self._native_commit is not None:
                 self._native_commit.close()
         finally:
-            self.file_store_commit.close()
+            self._close_python_commit()
 
 
 class BatchTableCommit(TableCommit):
@@ -203,14 +163,14 @@ class BatchTableCommit(TableCommit):
         if prepared is not None:
             prepared[0].truncate_table()
             return
-        self.file_store_commit.truncate_table(BATCH_COMMIT_IDENTIFIER)
+        self._truncate_table_with_python(BATCH_COMMIT_IDENTIFIER)
 
     def truncate_partitions(self, partitions: List[Dict[str, str]]) -> None:
         prepared = self._prepare_native_commit([], batch=True)
         if prepared is not None:
             prepared[0].truncate_partitions(partitions)
             return
-        self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)
+        self._truncate_partitions_with_python(partitions, BATCH_COMMIT_IDENTIFIER)
 
     def _check_committed(self):
         if self.batch_committed:

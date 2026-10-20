@@ -35,7 +35,7 @@ from pypaimon.common.predicate_json_parser import (
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result
-from pypaimon.read.reader.format_pyarrow_reader import _DecodedRowGroupCache
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (_DecodedRowGroupCache)
 from pypaimon.read.table_read import _ClosableArrowBatchReader
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil

@@ -21,7 +21,7 @@ import unittest
 
 import pyarrow as pa
 
-from pypaimon.read.reader.auth_masking_reader import (
+from pypaimon.execution.python.read.reader.auth_masking_reader import (
     AuthFilterReader,
     AuthMaskingReader,
     ColumnProjectReader,

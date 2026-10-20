@@ -23,7 +23,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests.native_scan_stats_test import _append, _create
 from pypaimon.tests import native_plan_rest_test
 

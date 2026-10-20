@@ -111,7 +111,7 @@ def test_native_read_falls_back_before_opening_primary_file_with_row_sidecar():
     read = _table_read()
     split = _Split()
     split.files[0].extra_files = ['point-read.row']
-    with patch('pypaimon.read.native_plan.native_read') as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches([split], pa.schema([('id', pa.int32())])) is None
     native.assert_not_called()
 
@@ -153,7 +153,7 @@ def test_native_read_returns_named_variant_expression_columns():
         ], type=payload_type),
     ], names=['id', 'payload'])
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[batch]) as native:
         result = read.to_arrow([split])
 
@@ -195,7 +195,7 @@ def test_floating_sequence_uses_native_read(type_):
     split = _Split()
     split._native_split = object()
     batch = _id_batch([1])
-    with patch('pypaimon.read.native_plan.native_read', return_value=[batch]) as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[batch]) as native:
         assert list(read._try_native_batches([split], pa.schema([('id', pa.int32())]))) == [batch]
         native.assert_called_once()
 
@@ -208,7 +208,7 @@ def test_native_read_consumes_retained_rust_splits_and_transports_limit():
     batches = [_id_batch([1, 2])]
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
+            'pypaimon.execution.native.read.table_read.native_read',
             return_value=batches) as native:
         result = read.to_arrow([first, second])
 
@@ -235,8 +235,8 @@ def test_native_read_propagates_native_fork_safety_error():
     split = _Split()
     split._native_split = object()
     with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
-            'pypaimon.read.native_plan.native_runtime_available', return_value=True), patch(
-            'pypaimon.read.native_plan.native_read',
+            'pypaimon.execution.native.runtime.native_runtime_available', return_value=True), patch(
+            'pypaimon.execution.native.read.table_read.native_read',
             side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
         with pytest.raises(ForkSafetyError):
             read._try_native_batches([split], pa.schema([('id', pa.int32())]))
@@ -278,7 +278,7 @@ def test_native_read_flattens_nested_rows_and_map_keys_with_parent_nulls():
         ], type=pa.map_(pa.string(), pa.int32())),
     ], names=['payload', 'attrs'])
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[batch]) as native:
         result = read.to_arrow([split])
 
@@ -300,7 +300,7 @@ def test_native_read_preserves_physical_row_kinds():
         pa.array([1, 2, 3, 4], type=pa.int32()),
     ], names=['rowkind', 'id'])
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[batch]) as native:
         result = read.to_arrow([split])
 
@@ -314,7 +314,7 @@ def test_native_read_falls_back_for_transformed_python_split():
     schema = pa.schema([('id', pa.int32())])
     split = _Split()
 
-    with patch('pypaimon.read.native_plan.native_read') as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches([split], schema) is None
 
     native.assert_not_called()
@@ -327,9 +327,9 @@ def test_native_read_bridges_python_planned_split():
     converted = object()
 
     with patch(
-            'pypaimon.read.native_plan.native_split_from_python',
+            'pypaimon.execution.native.read.split_adapter.native_split_from_python',
             return_value=converted) as bridge, patch(
-                'pypaimon.read.native_plan.native_read',
+                'pypaimon.execution.native.read.table_read.native_read',
                 return_value=[_id_batch([1])]) as native:
         result = list(read._try_native_batches([split], schema))
 
@@ -350,9 +350,9 @@ def test_native_split_bridge_failure_falls_back_before_starting_reader():
     read = _table_read()
     split = _Split()
     with patch(
-            'pypaimon.read.native_plan.native_split_from_python',
+            'pypaimon.execution.native.read.split_adapter.native_split_from_python',
             side_effect=ValueError('not serializable')), patch(
-                'pypaimon.read.native_plan.native_read') as native:
+                'pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches(
             [split], pa.schema([('id', pa.int32())])) is None
     native.assert_not_called()
@@ -362,8 +362,9 @@ def test_native_query_auth_transports_rules_for_core_authorization():
     read = _table_read()
     wrapped = QueryAuthSplit(_Split(), object())
     converted = object()
-    with patch('pypaimon.read.native_plan.native_split_from_python', return_value=converted) as convert, \
-            patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([2])]) as native:
+    with patch('pypaimon.execution.native.read.split_adapter.native_split_from_python',
+               return_value=converted) as convert, \
+            patch('pypaimon.execution.native.read.table_read.native_read', return_value=[_id_batch([2])]) as native:
         batches = list(read._try_native_batches([wrapped], pa.schema([('id', pa.int32())])))
     assert batches[0].column('id').to_pylist() == [2]
     convert.assert_called_once_with(wrapped, ranges_use_row_ids=False)
@@ -383,8 +384,9 @@ def test_native_read_delegates_all_splits_and_parallelism_once(method_name, orde
     splits = [_Split(file_size=size) for size in [8, 8, 1, 1]]
     for index, split in enumerate(splits):
         split._native_split = index
-    with patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch(range(4))]) as native, \
-            patch('pypaimon.read.table_read.ThreadPoolExecutor', side_effect=AssertionError('Python executor')):
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[_id_batch(range(4))]) as native, \
+            patch('pypaimon.execution.python.read.table_read.ThreadPoolExecutor',
+                  side_effect=AssertionError('Python executor')):
         result = getattr(read, method_name)(splits, parallelism=runtime)
         if method_name != 'to_arrow':
             result = result.read_all()
@@ -401,7 +403,7 @@ def test_native_read_transports_explicit_order_without_opening_groups(ordered):
     splits = [_Split(), _Split()]
     for index, split in enumerate(splits):
         split._native_split = index
-    with patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([0, 1])]) as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[_id_batch([0, 1])]) as native:
         batches = list(read._try_native_batches(
             splits, pa.schema([('id', pa.int32())]), parallelism=2, ordered=ordered))
     assert batches[0].column('id').to_pylist() == [0, 1]
@@ -413,7 +415,7 @@ def test_native_read_transports_explicit_order_without_opening_groups(ordered):
 
 @pytest.mark.parametrize('ordered', [None, False, True])
 def test_native_read_bridge_transports_current_ordered_api(ordered):
-    from pypaimon.read.native_plan import native_read
+    from pypaimon.execution.native.read.table_read import native_read
 
     table = object()
     splits = [object(), object()]
@@ -425,7 +427,7 @@ def test_native_read_bridge_transports_current_ordered_api(ordered):
         return batches
 
     kwargs = {} if ordered is None else {'ordered': ordered}
-    with patch('pypaimon.read.native_plan._prepare_native_read', return_value=read_splits) as prepare:
+    with patch('pypaimon.execution.native.read.table_read._prepare_native_read', return_value=read_splits) as prepare:
         result = native_read(table, splits, parallelism=2, limit=2, **kwargs)
     assert result is batches
     assert calls == [(splits, 2, False if ordered is None else ordered)]
@@ -493,7 +495,7 @@ def test_native_batch_reader_close_reaches_core_input(method_name, blob_limit):
             self.closed = True
 
     core_reader = CloseTrackingReader()
-    with patch('pypaimon.read.native_plan.native_read', return_value=core_reader):
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=core_reader):
         reader = getattr(read, method_name)(splits, parallelism=4)
         assert reader.read_next_batch().column(0).to_pylist() == [expected]
         assert not core_reader.closed
@@ -526,7 +528,7 @@ def test_serial_native_batch_reader_close_releases_suspended_core_stream(method_
             self.closes += 1
 
     core_reader = CoreReader()
-    with patch('pypaimon.read.native_plan.native_read', return_value=core_reader):
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=core_reader):
         reader = getattr(read, method_name)(splits, parallelism=parallelism)
         assert reader.read_next_batch().column('id').to_pylist() == [1]
         assert core_reader.closes == 0
@@ -547,7 +549,7 @@ def test_native_read_forwards_one_global_limit(method_name, limit):
         split._native_split = index
     # Core owns quota consumption and returns the already limited batches.
     values = [0, 1, 2] if limit is None else [0, 1, 2][:limit]
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[_id_batch([]), _id_batch(values)]) as native:
         result = getattr(read, method_name)(splits)
         if method_name != 'to_arrow':
@@ -566,7 +568,7 @@ def test_native_read_transports_blob_parallelism_for_one_core_read(method_name):
     splits = [_Split() for _ in range(16)]
     for index, split in enumerate(splits):
         split._native_split = index
-    with patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch(range(16))]) as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[_id_batch(range(16))]) as native:
         result = getattr(read, method_name)(splits, parallelism=16, blob_parallelism=16)
         if method_name != 'to_arrow':
             result = result.read_all()
@@ -583,7 +585,8 @@ def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap():
     for index, split in enumerate(splits):
         split._native_split = index
     schema = pa.schema([('id', pa.int32())])
-    with patch('pypaimon.read.native_plan.native_read', side_effect=RuntimeError('setup failed')) as native, \
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               side_effect=RuntimeError('setup failed')) as native, \
             patch.object(read, '_arrow_batch_generator', return_value=iter([_id_batch([1])])) as python_read:
         result = read.to_arrow_batch_reader(splits, parallelism=16, blob_parallelism=16).read_all()
     assert result.to_pydict() == {'id': [1]}
@@ -598,7 +601,8 @@ def test_native_reader_setup_failure_falls_back_before_batches(ordered):
     splits = [_Split(), _Split()]
     for split in splits:
         split._native_split = object()
-    with patch('pypaimon.read.native_plan.native_read', side_effect=RuntimeError('setup failed')) as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read',
+               side_effect=RuntimeError('setup failed')) as native:
         assert read._try_native_batches(
             splits, pa.schema([('id', pa.int32())]), parallelism=2, ordered=ordered) is None
     native.assert_called_once()
@@ -609,7 +613,7 @@ def test_native_reader_qualifies_all_splits_before_starting_core():
     splits = [_Split(), _Split('unsupported.vortex')]
     for split in splits:
         split._native_split = object()
-    with patch('pypaimon.read.native_plan.native_read') as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches(
             splits, pa.schema([('id', pa.int32())]), parallelism=2) is None
     native.assert_not_called()
@@ -631,7 +635,7 @@ def test_native_stream_error_closes_input_without_replaying_python(method_name):
         finally:
             closed.append(True)
 
-    with patch('pypaimon.read.native_plan.native_read', return_value=batches()) as native, \
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches()) as native, \
             patch.object(read, '_create_split_read', side_effect=AssertionError('Python replay')):
         with pytest.raises(RuntimeError, match='stream failed'):
             result = getattr(read, method_name)(splits)
@@ -648,7 +652,7 @@ def test_native_read_failure_falls_back():
     split = _Split()
     split._native_split = object()
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                side_effect=RuntimeError('unsupported')):
         assert read._try_native_batches([split], schema) is None
 
@@ -660,7 +664,7 @@ def test_native_read_falls_back_for_unsupported_file_format():
     split = _Split()
     split._native_split = object()
 
-    with patch('pypaimon.read.native_plan.native_read') as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches([split], schema) is None
 
     native.assert_not_called()
@@ -672,7 +676,7 @@ def test_native_avro_read_uses_native_path():
     split = _Split('data.avro')
     split._native_split = object()
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[_id_batch([7])]) as native:
         batches = list(read._try_native_batches(
             [split], pa.schema([('id', pa.int32())])))
@@ -688,7 +692,7 @@ def test_native_read_falls_back_for_unsupported_dedicated_file(file_name):
     split = _Split(file_name)
     split._native_split = object()
 
-    with patch('pypaimon.read.native_plan.native_read') as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches([split], schema) is None
 
     native.assert_not_called()
@@ -702,7 +706,7 @@ def test_native_read_supports_dedicated_files_and_forwards_parallelism(file_name
     split._native_split = object()
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
+            'pypaimon.execution.native.read.table_read.native_read',
             return_value=[_id_batch([1])]) as native:
         batches = list(read._try_native_batches(
             [split], schema, blob_parallelism=3))
@@ -719,7 +723,7 @@ def test_native_read_preserves_large_binary_blob_schema_for_batch_reader():
         [pa.array([b'a'], type=pa.large_binary())], names=['payload'])
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
+            'pypaimon.execution.native.read.table_read.native_read',
             return_value=[native_batch]):
         result = read.to_arrow_batch_reader([split]).read_all()
 
@@ -745,7 +749,7 @@ def test_native_read_preserves_parallel_large_binary_blob_schema():
         split._native_split = index
 
     with patch(
-            'pypaimon.read.native_plan.native_read',
+            'pypaimon.execution.native.read.table_read.native_read',
             return_value=[pa.record_batch(
                 [pa.array([b'payload'], type=pa.large_binary())],
                 names=['payload'])]):
@@ -765,7 +769,7 @@ def test_native_primary_key_blob_limit_passes_quota_to_rust(descriptor):
     split.merged_row_count = Mock(return_value=2)
 
     batch = pa.record_batch([pa.array([b'first'], type=pa.large_binary())], names=['payload'])
-    with patch('pypaimon.read.native_plan.native_read', return_value=[batch]) as native:
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=[batch]) as native:
         assert list(read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())]),
             blob_parallelism=1)) == [batch]
@@ -787,7 +791,7 @@ def test_native_read_pruning_blob_limit_uses_data_evolution_reader(descriptor):
     batch = pa.record_batch(
         [pa.array([b'first'], type=pa.large_binary())], names=['payload'])
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[batch]) as native:
         actual = list(read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())]),
@@ -814,8 +818,8 @@ def test_native_read_pruning_blob_limit_allows_predicate(layout):
     batch = pa.record_batch(
         [pa.array([b'selected'], type=pa.large_binary())], names=['payload'])
 
-    with patch('pypaimon.read.native_plan._catalog_metastore', return_value='rest'), \
-            patch('pypaimon.read.native_plan.native_read', return_value=[batch]) as native:
+    with patch('pypaimon.execution.native.table._catalog_metastore', return_value='rest'), \
+            patch('pypaimon.execution.native.read.table_read.native_read', return_value=[batch]) as native:
         actual = list(read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())])))
 
@@ -835,8 +839,8 @@ def test_native_read_blob_view_keeps_filesystem_fallback(limit):
     split._native_split = object()
     split.merged_row_count = Mock(return_value=2)
 
-    with patch('pypaimon.read.native_plan._catalog_metastore', return_value='filesystem'), \
-            patch('pypaimon.read.native_plan.native_read') as native:
+    with patch('pypaimon.execution.native.table._catalog_metastore', return_value='filesystem'), \
+            patch('pypaimon.execution.native.read.table_read.native_read') as native:
         assert read._try_native_batches(
             [split], pa.schema([('payload', pa.large_binary())])) is None
 
@@ -856,7 +860,7 @@ def test_native_read_pruning_descriptor_limit_allows_non_blob_predicate():
 
     with patch('pypaimon.read.push_down_utils.predicate_field_names',
                return_value={'id'}):
-        with patch('pypaimon.read.native_plan.native_read',
+        with patch('pypaimon.execution.native.read.table_read.native_read',
                    return_value=[batch]) as native:
             actual = list(read._try_native_batches(
                 [split], pa.schema([('payload', pa.large_binary())])))
@@ -879,7 +883,7 @@ def test_native_read_supports_precision_zero_timestamps(data_type, values):
     split._native_split = object()
     batch = pa.record_batch([pa.array(values, type=data_type)], names=['ts'])
 
-    with patch('pypaimon.read.native_plan.native_read',
+    with patch('pypaimon.execution.native.read.table_read.native_read',
                return_value=[batch]) as native:
         actual = list(read._try_native_batches(
             [split], pa.schema([('ts', data_type)])))

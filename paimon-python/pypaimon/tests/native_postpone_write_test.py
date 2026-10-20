@@ -23,7 +23,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('p', pa.string()),
@@ -221,7 +221,7 @@ def test_pending_files_participate_in_partition_metadata_deletes(tmp_path, opera
     expected = 0 if operation == 'truncate_table' else 1
     assert table.snapshot_manager().get_latest_snapshot().total_record_count == expected
     from pypaimon.manifest.manifest_list_manager import ManifestListManager
-    from pypaimon.read.scanner.file_scanner import FileScanner
+    from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
     snapshot = table.snapshot_manager().get_latest_snapshot()
     entries = FileScanner(table, lambda: ([], None)).with_all_buckets().read_manifest_entries(
         ManifestListManager(table).read_all(snapshot))

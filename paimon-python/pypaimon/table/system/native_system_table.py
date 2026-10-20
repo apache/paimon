@@ -20,8 +20,9 @@
 import pyarrow
 
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.read.native_plan import _native_table, native_runtime_available
-from pypaimon.write.native_commit import _rest_catalog_supported
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
 
 _NATIVE_TABLES = frozenset((
     'snapshots', 'schemas', 'options', 'manifests', 'files', 'buckets',

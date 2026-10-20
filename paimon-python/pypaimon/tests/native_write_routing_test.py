@@ -28,10 +28,10 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_commit import create_native_write_table
-from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite, NativeTableWrite
+from pypaimon.execution.native.write.native_commit import create_native_write_table
+from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite, NativeTableWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlan
 
 rest_catalog = native_plan_rest_test.rest_catalog
@@ -248,7 +248,7 @@ def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_cata
     captured.branch.return_value = 'dev' if invalid == 'captured-branch' else 'main'
     captured.copy_with_resolved_schema.return_value = captured
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
-            patch('pypaimon.read.native_plan._native_table', return_value=captured) as restore:
+            patch('pypaimon.execution.native.table._native_table', return_value=captured) as restore:
         result = create_native_write_table(table)
     resolved.copy_with_resolved_schema.assert_not_called()
     if invalid is not None:
@@ -267,12 +267,12 @@ def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_cata
 
 
 def test_read_based_updates_delegate_standard_rest_authorization_to_core(rest_catalog):
-    from pypaimon.write.native_update import _native_row_id_table
+    from pypaimon.execution.native.write.native_update import _native_row_id_table
 
     catalog, _ = rest_catalog
     table = _table(None, 'data-evolution', catalog, use_native=True, guarded=True)
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table') as create:
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table') as create:
         assert _native_row_id_table(table) is create.return_value
     create.assert_called_once_with(table)
 

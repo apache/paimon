@@ -438,7 +438,7 @@ def make_fixed_bucket_udf(table: FileStoreTable):
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
     extractor = FixedBucketRowKeyExtractor(table.table_schema)
@@ -468,7 +468,7 @@ def make_dynamic_routing_udf(
 
     from pypaimon.index.dynamic_bucket import compute_assigner, to_signed_int32
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
     extractor = DynamicBucketRowKeyExtractor(table.table_schema)
@@ -528,7 +528,7 @@ def make_dynamic_bucket_assignment_udf(
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     catalog_options = _extract_catalog_options(table)
     table_identifier = _extract_identifier(table)

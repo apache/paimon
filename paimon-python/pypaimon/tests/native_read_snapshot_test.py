@@ -23,7 +23,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
 from pypaimon.tests import native_hybrid_search_test as hybrid, native_vector_search_test as vectors
@@ -222,7 +222,7 @@ def test_missing_index_preserves_native_error_without_retry(rest_catalog, family
 
 
 def test_snapshot_json_binding_requires_java_snapshot_metadata(rest_catalog):
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import (_native_table)
     catalog, _ = rest_catalog
     table = hybrid._table(catalog)
     with pytest.raises(ValueError, match='Invalid snapshot JSON'):

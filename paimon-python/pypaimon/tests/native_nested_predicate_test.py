@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _predicate_to_native
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 
 
 pytestmark = pytest.mark.native_plan

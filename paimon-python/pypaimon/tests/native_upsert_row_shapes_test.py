@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import native_runtime_available
+from pypaimon.execution.native.write.native_write import native_runtime_available
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=[

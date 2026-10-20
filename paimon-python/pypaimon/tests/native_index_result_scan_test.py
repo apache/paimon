@@ -24,8 +24,8 @@ from unittest.mock import patch
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.scanner.file_scanner import FileScanner
-from pypaimon.read.native_plan import _partition_fields
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
+from pypaimon.execution.native.table import (_partition_fields)
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
 from pypaimon.tests import native_hybrid_search_test as hybrid
@@ -120,7 +120,7 @@ def test_native_search_result_hands_core_selection_directly_to_scan(source, pk_v
     from pypaimon_rust.datafusion import GlobalIndexResult
     assert isinstance(result._native_result, GlobalIndexResult)
     expected = sorted(position.row_position for position in result.positions)
-    with patch('pypaimon.read.native_plan.serialize_split_v1',
+    with patch('pypaimon.read.split_serializer.serialize_split_v1',
                side_effect=AssertionError('Native result round-tripped through Python')), \
             patch.object(FileScanner, 'scan', side_effect=AssertionError('Python scan ran')):
         plan = table.new_read_builder().new_scan().with_global_index_result(result).plan()
@@ -232,7 +232,7 @@ def test_de_scored_results_align_scores_in_core(vector_table, selection):
 
 def test_de_supplied_result_preserves_explicit_incremental_window(vector_table):
     from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-    from pypaimon.read.native_plan import native_plan
+    from pypaimon.execution.native.read.plan import (native_plan)
     table = vector_table.copy({'read.native.enabled': 'true'})
     start = table.snapshot_manager().get_latest_snapshot().id
     vectors._write(table, [{'id': 7, 'embedding': [1, 0], 'pt': 1}])

@@ -25,7 +25,7 @@ import pytest
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 from pypaimon.common.predicate import Predicate
-from pypaimon.table.source import native_vector_search
+from pypaimon.execution.native.read import native_vector_search
 
 
 @pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])

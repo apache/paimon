@@ -348,7 +348,7 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
 def _apply_self_merge_update_group(context, file_group, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.row_id_file_index import RowIdFileIndex
+    from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
 
     table_read = TableRead(
         context.scan_table,
@@ -719,7 +719,7 @@ def distributed_update_apply(
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    from pypaimon.write.row_id_file_index import RowIdFileIndex
+    from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
     planner = RowIdFileIndex.from_table(scan_table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
@@ -921,7 +921,7 @@ def distributed_read_by_row_id(
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
     # The caller pinned the resolved snapshot, including any retained tag metadata.
-    from pypaimon.write.row_id_file_index import RowIdFileIndex
+    from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
     planner = RowIdFileIndex.from_table(table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:

@@ -39,7 +39,7 @@ from unittest.mock import patch
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.reader import format_blob_reader
+from pypaimon.execution.python.read.reader import format_blob_reader
 
 
 class _IndexProbe:

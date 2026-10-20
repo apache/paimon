@@ -28,8 +28,8 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.manifest_sidecar import read_sidecar, SUFFIX
 from pypaimon.utils.range import Range
-from pypaimon.write.native_commit import native_messages_supported
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_commit import native_messages_supported
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -365,7 +365,7 @@ def test_native_blob_update_rejects_stale_range_before_publication(native_rest_c
 def test_native_update_honors_java_global_index_policy(native_rest_catalog, action):
     from pypaimon.tests.global_index_update_action_test import _index_entry
     from pypaimon.write.commit_message import CommitMessage
-    from pypaimon.write.global_index_update_checker import scan_global_index_entries
+    from pypaimon.execution.python.write.global_index_update_checker import scan_global_index_entries
 
     table = _table(native_rest_catalog, {'global-index.column-update-action': action})
     seed = table.new_batch_write_builder()

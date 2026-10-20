@@ -32,11 +32,11 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
-from pypaimon.write.writer.data_vector_writer import DataVectorWriter
-from pypaimon.write.writer.data_writer import DataWriter
-from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
-from pypaimon.write.writer.write_buffer import WriteBuffer
+from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.execution.python.write.writer.data_vector_writer import DataVectorWriter
+from pypaimon.execution.python.write.writer.data_writer import DataWriter
+from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.execution.python.write.writer.write_buffer import WriteBuffer
 
 _SCHEMA = pa.schema([
     pa.field('id', pa.int64(), nullable=False),

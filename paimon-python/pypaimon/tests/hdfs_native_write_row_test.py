@@ -22,7 +22,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.filesystem.hdfs_native_file_io import HdfsNativeFileIO
-from pypaimon.read.reader.format_row_reader import FormatRowReader
+from pypaimon.execution.python.read.reader.format_row_reader import (FormatRowReader)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 

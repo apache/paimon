@@ -25,7 +25,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 from pypaimon.tests import native_plan_rest_test, primary_key_global_index_golden_test
 
@@ -217,7 +219,7 @@ def test_java_pk_index_results_are_physical_selections(pk_vector_table, filtered
 
 @pytest.mark.parametrize('batch', [False, True])
 def test_native_search_failure_is_propagated_without_retry(vector_table, batch):
-    from pypaimon.table.source import native_vector_search
+    from pypaimon.execution.native.read import native_vector_search
     from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
     table = vector_table.copy({'read.native.enabled': 'true'})
     builder = (table.new_batch_vector_search_builder().with_vector_column('embedding')
@@ -233,7 +235,7 @@ def test_native_search_failure_is_propagated_without_retry(vector_table, batch):
 
 def test_explicit_disable_uses_python(vector_table):
     table = vector_table.copy({'read.native.enabled': 'false'})
-    from pypaimon.table.source import native_vector_search
+    from pypaimon.execution.native.read import native_vector_search
     with patch.object(native_vector_search, '_native_table', side_effect=AssertionError('Native search ran')):
         assert len(_single(table).execute_local().results()) == 3
 
@@ -273,7 +275,7 @@ def test_indexed_search_and_raw_tail_match_python(vector_table, mode, filtered):
 
 def test_fork_safety_error_does_not_fall_back(vector_table):
     from pypaimon_rust import ForkSafetyError
-    from pypaimon.table.source import native_vector_search
+    from pypaimon.execution.native.read import native_vector_search
     table = vector_table.copy({'read.native.enabled': 'true'})
     with patch.object(native_vector_search, '_native_table', side_effect=ForkSafetyError('unsafe fork')):
         with pytest.raises(ForkSafetyError, match='unsafe fork'):

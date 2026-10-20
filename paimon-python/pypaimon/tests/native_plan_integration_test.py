@@ -31,8 +31,9 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.read.native_plan import (
-    _prepare_native_read, native_runtime_available, native_read, native_split_from_python)
+from pypaimon.execution.native.read.table_read import (_prepare_native_read, native_read)
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.read.split_adapter import (native_split_from_python)
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 from pypaimon.utils.range import Range
@@ -239,9 +240,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
             for split in plan.splits()))
 
         with patch(
-                'pypaimon.read.native_plan.native_split_from_python',
+                'pypaimon.execution.native.read.split_adapter.native_split_from_python',
                 wraps=native_split_from_python) as bridge, patch(
-                    'pypaimon.read.native_plan.native_read',
+                    'pypaimon.execution.native.read.table_read.native_read',
                     wraps=native_read) as rust_read, patch(
                         'pypaimon.read.table_read.TableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):
@@ -273,7 +274,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         with patch(
                 'pypaimon.read.table_read.TableRead._create_split_read',
                 side_effect=AssertionError('Python reader was used')), patch(
-                    'pypaimon.read.native_plan.native_read',
+                    'pypaimon.execution.native.read.table_read.native_read',
                     wraps=native_read) as rust_read:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
 
@@ -313,7 +314,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         # The Python adapter may reject this route, but it must never
         # construct a core reader without the custom authorization provider.
-        with patch('pypaimon.read.native_plan._native_read_builder') as rust_builder:
+        with patch('pypaimon.execution.native.read.builder._native_read_builder') as rust_builder:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
             streamed = builder.new_read().to_arrow_batch_reader(
                 plan.splits()).read_all().to_pylist()
@@ -354,7 +355,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         plan = builder.new_scan().plan()
         self.assertEqual(len(plan.splits()), 4)
 
-        with patch('pypaimon.read.native_plan._prepare_native_read',
+        with patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                    wraps=_prepare_native_read) as prepare, \
                 patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
@@ -369,7 +370,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
         prepare.assert_called_once()
 
-        with patch('pypaimon.read.native_plan._prepare_native_read',
+        with patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                    wraps=_prepare_native_read) as prepare, \
                 patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
@@ -1027,7 +1028,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                             for split in plan.splits()))
 
         with patch(
-                'pypaimon.read.native_plan.native_read',
+                'pypaimon.execution.native.read.table_read.native_read',
                 wraps=native_read) as native, patch(
                 'pypaimon.read.table_read.TableRead._create_split_read',
                 side_effect=AssertionError('Python reader used')):
@@ -1103,7 +1104,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         builder = view.new_read_builder()
         plan = builder.new_scan().plan()
         self.assertTrue(builder.explain().native_planned)
-        with patch('pypaimon.read.native_plan.native_read',
+        with patch('pypaimon.execution.native.read.table_read.native_read',
                    side_effect=AssertionError('native view read should not run')) as native:
             self.assertEqual(builder.new_read().to_arrow(plan.splits()).to_pylist(),
                              [{'id': 10, 'payload': b'from-source'}])
@@ -1145,7 +1146,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                         'blob-as-descriptor': value,
                     }).new_read_builder()
                     splits = builder.new_scan().plan().splits()
-                    with patch('pypaimon.read.native_plan.native_read',
+                    with patch('pypaimon.execution.native.read.table_read.native_read',
                                wraps=native_read) as native, patch(
                             'pypaimon.read.table_read.TableRead._create_split_read',
                             side_effect=AssertionError('Python reader used')):
@@ -1210,7 +1211,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                                 for split in plan.splits()))
 
             with patch(
-                    'pypaimon.read.native_plan.native_read',
+                    'pypaimon.execution.native.read.table_read.native_read',
                     wraps=native_read) as native, patch(
                     'pypaimon.read.table_read.TableRead._create_split_read',
                     side_effect=AssertionError('Python reader used')):
@@ -1253,7 +1254,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             plan = builder.new_scan().plan()
             self.assertTrue(all(getattr(split, '_native_split', None) is not None
                                 for split in plan.splits()))
-            with patch('pypaimon.read.native_plan.native_read',
+            with patch('pypaimon.execution.native.read.table_read.native_read',
                        wraps=native_read) as native:
                 with patch('pypaimon.read.table_read.TableRead._create_split_read',
                            side_effect=AssertionError('Python reader used')):
@@ -1295,7 +1296,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 builder = native_table.new_read_builder()
                 plan = builder.new_scan().plan()
                 with patch(
-                        'pypaimon.read.native_plan.native_read',
+                        'pypaimon.execution.native.read.table_read.native_read',
                         wraps=native_read) as native, patch(
                         'pypaimon.read.table_read.TableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):
@@ -1504,7 +1505,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         })
         builder = native_table.new_read_builder()
         plan = builder.new_scan().plan()
-        with patch('pypaimon.read.native_plan._prepare_native_read',
+        with patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                    wraps=_prepare_native_read) as prepare:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
         prepare.assert_called_once()

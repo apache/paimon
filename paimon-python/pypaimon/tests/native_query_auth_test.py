@@ -30,7 +30,7 @@ from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_plan_rest_test
 
@@ -167,7 +167,7 @@ def test_native_plan_retains_captured_policy_on_python_read_fallback(guarded_tab
         splits = pickle.loads(pickle.dumps(splits))
     with ExitStack() as stack:
         if mode == 'setup-failure':
-            stack.enter_context(patch('pypaimon.read.native_plan.native_read',
+            stack.enter_context(patch('pypaimon.execution.native.read.table_read.native_read',
                                       side_effect=RuntimeError('setup failed')))
         result = builder.new_read().to_arrow(splits)
     assert result.to_pylist() == [{'id': 2, 'value': 'abc'}]
@@ -238,7 +238,7 @@ def test_setup_fallback_applies_masked_hidden_predicate_before_limit(guarded_tab
     scan = builder.new_scan()
     with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Native plan fell back')):
         splits = scan.plan().splits()
-    with patch('pypaimon.read.native_plan.native_read', side_effect=RuntimeError('setup failed')):
+    with patch('pypaimon.execution.native.read.table_read.native_read', side_effect=RuntimeError('setup failed')):
         assert builder.new_read().to_arrow(splits).to_pylist() == [{'id': 2}]
 
 
@@ -297,7 +297,7 @@ def test_explain_uses_the_authorized_native_plan(guarded_table):
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
         column_masking={'value': json.dumps({'name': 'TRIM', 'trimFlag': 'BOTH', 'inputs': [_field('source')]})})
     table = table.copy({'scan.native-plan.enabled': 'true'})
-    with patch('pypaimon.read.scanner.file_scanner.FileScanner.scan_with_stats',
+    with patch('pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
                side_effect=AssertionError('Native explain fell back')):
         assert table.new_read_builder().with_projection(['value']).explain().native_planned
 

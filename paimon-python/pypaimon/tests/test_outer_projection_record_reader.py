@@ -20,8 +20,12 @@ from typing import List, Optional
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.read.reader.outer_projection_record_reader import (
-    OuterProjectionRecordReader, _extract, _PathSpec, _step_into)
+from pypaimon.execution.python.read.reader.outer_projection_record_reader import (
+    OuterProjectionRecordReader,
+    _extract,
+    _PathSpec,
+    _step_into,
+)
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.offset_row import OffsetRow
 

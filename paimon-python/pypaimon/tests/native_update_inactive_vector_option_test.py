@@ -25,11 +25,11 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_update import _native_update_formats_supported
+from pypaimon.execution.native.write.native_update import _native_update_formats_supported
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update import TableUpdate
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -89,7 +89,7 @@ def _native_only(native):
                               (TableUpdate, '_build_predicate_update_table'),
                               (TableDeleteByRowId, '_scan_anchor_ranges')]:
             stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python mutation fallback')))
-        stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+        stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                   side_effect=AssertionError('Python MERGE fallback')))
     return stack
 

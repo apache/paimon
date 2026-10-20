@@ -24,8 +24,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_write import NativeTableWrite, create_native_write
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_write import NativeTableWrite, create_native_write
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -55,8 +55,10 @@ def test_inactive_changelog_format_qualifies_for_native_write(
         native_rest_catalog, primary_key, stream, partition, producer):
     table = _table(native_rest_catalog, primary_key, producer)
     native_table = Mock()
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table', return_value=native_table) as create:
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch(
+                'pypaimon.execution.native.write.native_write.create_native_write_table',
+                return_value=native_table) as create:
         writer = create_native_write(table, 'job', static_partition=partition, stream=stream)
     assert isinstance(writer, NativeTableWrite)
     create.assert_called_once_with(table)
@@ -73,8 +75,8 @@ def test_inactive_changelog_format_qualifies_for_native_write(
 def test_active_non_parquet_input_changelog_keeps_existing_fallback(
         native_rest_catalog, stream, partition):
     table = _table(native_rest_catalog, True, 'input')
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table') as create:
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table') as create:
         assert create_native_write(table, 'job', static_partition=partition, stream=stream) is None
     create.assert_not_called()
 

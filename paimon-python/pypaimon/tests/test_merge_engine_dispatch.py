@@ -34,8 +34,7 @@ from pypaimon.common.merge_engine_dispatch import (
     partial_update_unsupported_options,
 )
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.read.reader.partial_update_merge_function import \
-    PartialUpdateMergeFunction
+from pypaimon.execution.python.read.reader.partial_update_merge_function import (PartialUpdateMergeFunction)
 
 
 class OptionIsTruthyTest(unittest.TestCase):

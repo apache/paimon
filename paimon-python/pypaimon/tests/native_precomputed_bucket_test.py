@@ -24,7 +24,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 pytestmark = pytest.mark.native_plan
@@ -138,7 +138,7 @@ def test_native_computes_java_hashes_for_multiple_batches(tmp_path, streaming, p
                             {'id': 2, 'value': 'updated', 'pt': 'a'},
                             {'id': 3, 'value': 'three', 'pt': 'a'}]
     # Restored hashes and indexes remain readable by Python's assigner.
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     extractor = DynamicBucketRowKeyExtractor(table.table_schema, table=table)
     assert extractor.extract_partition_bucket_batch(_batch([1, 2, 3], ['a', 'b', 'c']))[1] == [12, 12, 12]

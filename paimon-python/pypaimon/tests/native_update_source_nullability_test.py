@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 
@@ -83,7 +83,7 @@ def _messages(table, source, native, stream, operation):
             for method in ('_upsert_partition', '_upsert_row_partition'):
                 stack.enter_context(patch('pypaimon.write.table_upsert_by_key.TableUpsertByKey.' + method,
                                           side_effect=AssertionError('Python upsert fallback')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python MERGE fallback')))
         if operation == 'merge':
             messages = update.merge_into(source, on=['id'], when_matched=[

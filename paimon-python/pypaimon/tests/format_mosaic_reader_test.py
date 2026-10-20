@@ -20,7 +20,7 @@ from datetime import datetime
 
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.reader.format_mosaic_reader import _convert_stats_value
+from pypaimon.execution.python.read.reader.format_mosaic_reader import (_convert_stats_value)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
 

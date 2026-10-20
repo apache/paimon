@@ -28,7 +28,7 @@ from typing import Callable, Dict, List, Optional, Set, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
+from pypaimon.execution.dispatch import propagate_fork_safety_error as _raise_if_native_fork_safety_error
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
 from pypaimon.read.table_read import TableRead
@@ -129,7 +129,7 @@ class StreamReadBuilder:
         """Create a stateful streaming scan using the configured backend."""
         projection = self._projection_builder()
         projection._validate_map_key_filter()
-        from pypaimon.read.native_plan import _native_query_auth_supported
+        from pypaimon.execution.native.table import _native_query_auth_supported
         if (self.table.options.native_plan_enabled()
                 and _native_query_auth_supported(self.table)):
             try:

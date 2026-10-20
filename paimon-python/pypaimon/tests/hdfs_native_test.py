@@ -891,7 +891,7 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
         fake_lance.file = types.SimpleNamespace(
             LanceFileWriter=MagicMock(return_value=writer))
         with patch.dict(sys.modules, {"lance": fake_lance}), \
-                patch("pypaimon.read.reader.lance_utils.to_lance_specified",
+                patch("pypaimon.execution.python.read.reader.lance_utils.to_lance_specified",
                       return_value=("hdfs://ns/x.lance", {"opt": "v"})) as spec:
             self.fio.write_lance("hdfs://ns/x.lance", table)
         spec.assert_called_once()
@@ -915,7 +915,7 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
             "vortex._lib.io": fake_io,
         }
         with patch.dict(sys.modules, fake_modules), \
-                patch("pypaimon.read.reader.vortex_utils.to_vortex_specified",
+                patch("pypaimon.execution.python.read.reader.vortex_utils.to_vortex_specified",
                       return_value=("hdfs://ns/x.vortex", None)):
             self.fio.write_vortex("hdfs://ns/x.vortex", table)
         fake_io.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")

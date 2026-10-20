@@ -58,12 +58,11 @@ def _create_mock_snapshot(snapshot_id, commit_kind="APPEND",
 
 class IncrementalDiffScannerTest(unittest.TestCase):
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_returns_only_added_files(self, MockManifestFileManager, MockManifestListManager):
         """Files in end but not in start should be returned."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -93,12 +92,11 @@ class IncrementalDiffScannerTest(unittest.TestCase):
         added_filenames = {e.file.file_name for e in added_entries}
         self.assertEqual(added_filenames, {"file3.parquet", "file4.parquet"})
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_handles_empty_start(self, MockManifestFileManager, MockManifestListManager):
         """When start is empty, all end files should be returned."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -122,12 +120,11 @@ class IncrementalDiffScannerTest(unittest.TestCase):
         added_filenames = {e.file.file_name for e in added_entries}
         self.assertEqual(added_filenames, {"file1.parquet", "file2.parquet"})
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_handles_same_snapshots(self, MockManifestFileManager, MockManifestListManager):
         """When start == end (same files), diff should return empty."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -148,12 +145,11 @@ class IncrementalDiffScannerTest(unittest.TestCase):
 
         self.assertEqual(len(added_entries), 0)
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_groups_by_partition_bucket(self, MockManifestFileManager, MockManifestListManager):
         """Diff should be computed per (partition, bucket)."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -181,12 +177,11 @@ class IncrementalDiffScannerTest(unittest.TestCase):
         self.assertEqual(len(added_entries), 1)
         self.assertEqual(added_entries[0].file.file_name, "file2.parquet")
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_handles_file_deletions(self, MockManifestFileManager, MockManifestListManager):
         """Files in start but not in end (deleted) should NOT be returned."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -213,13 +208,12 @@ class IncrementalDiffScannerTest(unittest.TestCase):
 
         self.assertEqual(len(added_entries), 0)
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_creates_correct_splits(self, MockManifestFileManager, MockManifestListManager):
         """scan() should return a Plan with correct DataSplits."""
         from pypaimon.read.plan import Plan
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -243,12 +237,11 @@ class IncrementalDiffScannerTest(unittest.TestCase):
         splits = plan.splits()
         self.assertGreater(len(splits), 0)
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_entry_key_uniqueness(self, MockManifestFileManager, MockManifestListManager):
         """Entry key should uniquely identify a file by (partition, bucket, filename)."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -273,12 +266,11 @@ class IncrementalDiffScannerTest(unittest.TestCase):
 class IncrementalDiffIntegrationTest(unittest.TestCase):
     """Integration tests comparing diff vs delta approaches."""
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_equals_delta_results(self, MockManifestFileManager, MockManifestListManager):
         """Diff and delta approaches should return the same added files."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 
@@ -337,12 +329,11 @@ class IncrementalDiffIntegrationTest(unittest.TestCase):
         self.assertEqual(diff_filenames, delta_filenames)
         self.assertEqual(diff_filenames, {"file3.parquet", "file4.parquet", "file5.parquet"})
 
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestListManager')
-    @patch('pypaimon.read.scanner.incremental_diff_scanner.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestListManager')
+    @patch('pypaimon.execution.python.read.scanner.incremental_diff_scanner.ManifestFileManager')
     def test_diff_handles_compaction_correctly(self, MockManifestFileManager, MockManifestListManager):
         """Compaction merging file1+file2 into file3 should return only file3."""
-        from pypaimon.read.scanner.incremental_diff_scanner import \
-            IncrementalDiffScanner
+        from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
         table = _create_mock_table()
 

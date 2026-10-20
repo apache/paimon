@@ -25,9 +25,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_commit import _rest_catalog_supported
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 native = pytest.mark.skipif(not native_runtime_available(), reason='pypaimon-rust not installed')
@@ -91,9 +91,11 @@ def test_abort_then_truncate_partitions_then_commit_keeps_batch_lifecycle(tmp_pa
     commit = table.new_batch_write_builder().new_commit()
     stream, batch = Mock(), Mock()
     try:
-        with patch('pypaimon.write.native_commit.create_native_commit', side_effect=[stream, batch]) as create, \
-                patch('pypaimon.write.native_commit.to_native_commit_messages', return_value=[]), \
-                patch('pypaimon.write.native_commit.native_messages_supported', return_value=True), \
+        with patch(
+                'pypaimon.execution.native.write.native_commit.create_native_commit',
+                side_effect=[stream, batch]) as create, \
+                patch('pypaimon.execution.native.write.native_commit.to_native_commit_messages', return_value=[]), \
+                patch('pypaimon.execution.native.write.native_commit.native_messages_supported', return_value=True), \
                 patch.object(commit.file_store_commit, 'commit') as fallback:
             commit.abort([])
             commit.truncate_partitions([{'pt': 'a'}])
@@ -148,7 +150,7 @@ def test_builtin_fuse_is_accepted_without_relaxing_custom_file_io(tmp_path, nati
 @pytest.mark.parametrize('invalid', [None, 'source-uuid', 'source-path', 'target-path', 'target-branch'])
 def test_copied_fuse_write_uses_existing_copy_and_checks_identity(
         tmp_path, native_rest_catalog, cached, invalid):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
 
     original = _table(tmp_path, native_rest_catalog)
     _bind_fuse(original, tmp_path / 'fuse', cached)
@@ -255,7 +257,7 @@ def _merge_table(tmp_path, use_native):
 @pytest.mark.parametrize('dictionary_key', [False, True])
 def test_merge_callable_reads_target_source_and_coalesced_keys(tmp_path, use_native, source_key, dictionary_key):
     import pyarrow.compute as pc
-    import pypaimon.table.data_evolution_merge_into as merge_impl
+    import pypaimon.execution.python.write.merge_into as merge_impl
     from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched
     table = _merge_table(tmp_path, use_native)
     keys = pa.array([1, 3], pa.int32())
@@ -269,7 +271,7 @@ def test_merge_callable_reads_target_source_and_coalesced_keys(tmp_path, use_nat
         return pc.add(pc.add(batch['t.value'], batch['s.delta']), batch['s.' + source_key])
 
     update = table.new_batch_write_builder().new_update()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                wraps=merge_impl._build_tables) as python_merge:
         messages = update.merge_into(
             source, on={'id': source_key},
@@ -368,7 +370,7 @@ def test_explicit_callable_read_columns_keep_self_merge_projection_narrow():
 def test_consumed_blob_rows_are_released_without_losing_unplanned_inputs():
     from pypaimon.schema.data_types import AtomicType
     from pypaimon.table.row.blob import Blob, BlobDescriptor
-    from pypaimon.write.native_blob_rows import NativeBlobRows
+    from pypaimon.execution.native.write.native_blob_rows import NativeBlobRows
     rows = NativeBlobRows()
     blob_type = AtomicType('BLOB')
     known = BlobDescriptor.deserialize(rows.encode(Blob.from_data(b'known'), blob_type)).uri
@@ -387,7 +389,7 @@ def test_consumed_blob_rows_are_released_without_losing_unplanned_inputs():
 
 @pytest.mark.parametrize('use_native', [False, pytest.param(True, marks=native)])
 def test_automatic_postpone_plan_counts_all_batches_per_partition(tmp_path, use_native):
-    from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+    from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
     schema = pa.schema([('id', pa.int64()), ('pt', pa.string())])
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'postpone')})
     catalog.create_database('default', True)
@@ -463,7 +465,7 @@ def test_postpone_blob_row_bridge_keeps_sources_until_prepare(fail):
     from pypaimon.schema.data_types import AtomicType, DataField
     from pypaimon.table.row.blob import Blob, BlobDescriptor
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+    from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
 
     # Exercise the bridge's deferred input lifetime without creating a table:
     # Python catalog validation does not allow a primary-key BLOB schema.

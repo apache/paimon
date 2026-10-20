@@ -26,7 +26,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.api.api_response import ErrorResponse
-from pypaimon.read.native_plan import _native_table, _predicate_to_native
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 from pypaimon.tests import native_vector_search_test as vectors

@@ -122,9 +122,9 @@ def test_merge_full_startup_table_source(source, native, mode, stream):
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python merge')))
         messages = builder.new_update().merge_into(
             selected, on=['id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
@@ -177,9 +177,9 @@ def test_merge_keeps_captured_source_view(source, native, view):
     builder = target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python merge')))
         messages = builder.new_update().merge_into(selected, on=['id'], when_matched=[
             WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
@@ -220,7 +220,7 @@ def test_merge_unrestricted_authorized_source(source, rest_catalog, native, empt
     builder = target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
         messages = builder.new_update().merge_into(original, on=['id'], when_matched=[
             WhenMatched.update({'value': source_col('value')})], when_not_matched=[WhenNotMatched('*')])
@@ -270,7 +270,7 @@ def test_merge_authorized_source_failures_never_modify_target(rest_catalog, nati
     builder = target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
         if restriction == 'denied':
             denied = server._mock_response(ErrorResponse('TABLE', 'source', 'permission denied', 403), 403)
@@ -309,7 +309,7 @@ def test_merge_source_preserves_enabled_authorization(rest_catalog, native, enab
     builder = target.copy({'write.native.enabled': str(native).lower()}).new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
         with pytest.raises(Exception) as caught:
             builder.new_update().merge_into(source, on=['id'], when_matched=[WhenMatched.delete()])

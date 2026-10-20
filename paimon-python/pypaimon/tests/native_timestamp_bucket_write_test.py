@@ -29,14 +29,14 @@ from unittest.mock import patch
 
 from pypaimon import Schema
 from pypaimon.common.predicate import Predicate
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
 from pypaimon.read.table_read import TableRead
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_write import NativeTableWrite
-from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]

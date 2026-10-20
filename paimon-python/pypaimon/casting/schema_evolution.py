@@ -125,7 +125,7 @@ def _integer_to_timestamp(array, target_type):
 def _native_schema_cast(array, target_type, source_paimon_type, target_paimon_type):
     if source_paimon_type is None or target_paimon_type is None:
         return None
-    from pypaimon.read.native_plan import native_runtime_available
+    from pypaimon.execution.native.runtime import (native_runtime_available)
     if not native_runtime_available():
         return None
     from pypaimon_rust.data import cast_array_for_schema_evolution as native_cast
@@ -140,7 +140,7 @@ def _native_schema_cast(array, target_type, source_paimon_type, target_paimon_ty
 
 def read_arrow_schema(fields):
     """Use core runtime nullability while retaining logical write constraints."""
-    from pypaimon.read.native_plan import native_runtime_available
+    from pypaimon.execution.native.runtime import (native_runtime_available)
     if not native_runtime_available():
         from pypaimon.schema.data_types import PyarrowFieldParser
         return PyarrowFieldParser.from_paimon_schema(fields)

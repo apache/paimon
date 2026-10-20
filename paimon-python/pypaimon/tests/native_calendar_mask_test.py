@@ -26,7 +26,7 @@ import pytest
 from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_query_auth_test
@@ -115,7 +115,7 @@ def test_calendar_fallback_keeps_hidden_dependency_and_captured_rule(calendar_ta
         builder = (table.copy({'read.native.enabled': 'false'}).new_read_builder().with_projection(['id'])
                    .with_filter(PredicateBuilder(table.fields).equal('n', 2025)).with_limit(1))
     if mode == 'setup-failure':
-        with patch('pypaimon.read.native_plan.native_read', side_effect=RuntimeError('setup failed')):
+        with patch('pypaimon.execution.native.read.table_read.native_read', side_effect=RuntimeError('setup failed')):
             rows = builder.new_read().to_arrow(splits).to_pylist()
     else:
         rows = builder.new_read().to_arrow(splits).to_pylist()

@@ -45,12 +45,8 @@ from pypaimon.globalindex.build_plan import (
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-    FULL_TEXT_IDENTIFIER,
-)
-from pypaimon.globalindex.full_text.native_full_text_index_writer import (
-    NativeFullTextIndexWriter,
-)
+from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
+from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     VINDEX_IDENTIFIERS,
 )
@@ -176,7 +172,7 @@ class GlobalIndexBuilder:
                 self, concurrency, ray_remote_args)
         partition_filter = self._resolve_partition_filter()
         if execution == "local":
-            from pypaimon.globalindex.native_index_build import build_native_global_index
+            from pypaimon.execution.native.write.native_index_build import build_native_global_index
             messages = build_native_global_index(self, partition_filter)
             if messages is not None:
                 return messages

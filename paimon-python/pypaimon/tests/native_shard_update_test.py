@@ -306,7 +306,7 @@ def test_native_shard_read_type_preserves_nested_map_and_alias_outputs(
 
 
 def test_native_shard_rejects_malformed_read_type_before_starting(native_rest_catalog):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
     table, _ = _table(native_rest_catalog, [dict(p='a', id=1, value=10)])
     native = create_native_write_table(table)
     update = native.new_batch_write_builder().new_update().with_update_type(['value'])

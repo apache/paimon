@@ -26,7 +26,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _native_table, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.system.native_system_table import _NATIVE_TABLES
@@ -349,7 +350,7 @@ def test_metadata_paths_keep_escaped_partition_components(source, name):
 
 
 def test_system_read_filters_before_projection_without_python_arrow_filter(source):
-    from pypaimon.read.native_plan import _predicate_to_native
+    from pypaimon.execution.native.read.builder import (_predicate_to_native)
     _, table, _ = source
     _append(table, [{'id': 1, 'value': 'a', 'pt': 'a'}])
     _append(table, [{'id': 2, 'value': 'b', 'pt': 'b'}])

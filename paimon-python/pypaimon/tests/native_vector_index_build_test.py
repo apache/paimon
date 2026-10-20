@@ -28,7 +28,7 @@ from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
 )
 from pypaimon.tests import native_generic_index_build_test as generic
 from pypaimon.tests import native_sorted_index_build_test as indexes
-from pypaimon.read.native_plan import _native_table
+from pypaimon.execution.native.table import (_native_table)
 
 rest_catalog = indexes.rest_catalog
 pytestmark = generic.pytestmark

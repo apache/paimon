@@ -26,7 +26,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.read.native_plan import native_plan, native_runtime_available
+from pypaimon.execution.native.read.plan import (native_plan)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test, primary_key_global_index_golden_test
 
 rest_catalog = native_plan_rest_test.rest_catalog

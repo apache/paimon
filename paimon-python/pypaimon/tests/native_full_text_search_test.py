@@ -23,7 +23,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.api.api_response import GetTableSnapshotResponse, ErrorResponse
-from pypaimon.read.native_plan import _native_table, native_runtime_available, _predicate_to_native
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.tests import native_sorted_index_build_test as indexes

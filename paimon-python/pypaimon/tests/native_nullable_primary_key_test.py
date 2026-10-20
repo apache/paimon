@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = pytest.mark.native_plan
@@ -141,9 +141,9 @@ def test_nullable_primary_key_source_uses_sql_merge_equality(rest_catalog, nativ
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python merge')))
         messages = builder.new_update().merge_into(
             source, on=['pt', 'id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
@@ -224,7 +224,7 @@ def test_null_key_restores_nonzero_dynamic_bucket(rest_catalog, first_native):
 
 
 def test_null_partition_requires_complete_dynamic_bucket_index(rest_catalog):
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     table = _table(rest_catalog[0], 'missing_hash', -1)
     builder = table.new_batch_write_builder()

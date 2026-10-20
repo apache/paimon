@@ -27,12 +27,9 @@ module is the single source of truth so the two sides cannot drift.
 from typing import List, Optional
 
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.read.reader.deduplicate_merge_function import \
-    DeduplicateMergeFunction
-from pypaimon.read.reader.first_row_merge_function import \
-    FirstRowMergeFunction
-from pypaimon.read.reader.partial_update_merge_function import \
-    PartialUpdateMergeFunction
+from pypaimon.execution.python.read.reader.deduplicate_merge_function import (DeduplicateMergeFunction)
+from pypaimon.execution.python.read.reader.first_row_merge_function import (FirstRowMergeFunction)
+from pypaimon.execution.python.read.reader.partial_update_merge_function import (PartialUpdateMergeFunction)
 
 
 # Boolean-valued options that, when truthy, opt the table into

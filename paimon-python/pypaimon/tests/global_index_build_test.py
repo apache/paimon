@@ -41,13 +41,11 @@ from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
 from pypaimon.globalindex.key_serializer import create_serializer
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+from pypaimon.globalindex.full_text_options import (
     FULL_TEXT_IDENTIFIER,
     NativeFullTextIndexOptions,
 )
-from pypaimon.globalindex.full_text.native_full_text_index_writer import (
-    NativeFullTextIndexWriter,
-)
+from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
     _iter_training_batches,

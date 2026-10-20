@@ -291,7 +291,7 @@ def _read_parallelism(options, file_path):
 
 
 def _native_reader_type():
-    from pypaimon.read.native_plan import native_runtime_available
+    from pypaimon.execution.native.runtime import (native_runtime_available)
     if not native_runtime_available():
         return None
     from pypaimon_rust.datafusion import VindexVectorGlobalIndexReader as NativeReader

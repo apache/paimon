@@ -141,7 +141,7 @@ def pytest_configure(config):
         TableRead._try_native_batches = tracked_read
 
     if _native_write_enabled():
-        from pypaimon.write.native_write import NativeTableWrite
+        from pypaimon.execution.native.write.native_write import NativeTableWrite
 
         def track_write(method):
             original_write = getattr(NativeTableWrite, method)
@@ -173,8 +173,8 @@ def pytest_configure(config):
         TableCommit._prepare_native_commit = tracked_prepare
 
     if _native_update_enabled():
-        from pypaimon.write.native_merge_into import NativeTableMergeInto
-        from pypaimon.write.native_update import (
+        from pypaimon.execution.native.write.native_merge_into import NativeTableMergeInto
+        from pypaimon.execution.native.write.native_update import (
             NativeBatchTableUpdate, NativePredicateTableUpdate,
             NativeTableUpdateByRowId, NativeTableUpsert, NativeShardTableUpdator,
         )

@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.tests.native_commit_semantics_test import _publication
 

@@ -22,9 +22,7 @@ from collections import defaultdict
 from typing import List
 
 from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-    FULL_TEXT_IDENTIFIER,
-)
+from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
 from pypaimon.table.source.full_text_search_split import (
     FullTextSearchSplit,
     IndexFullTextSearchSplit,

@@ -25,7 +25,7 @@ from unittest.mock import patch
 import pytest
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
 from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
 from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead

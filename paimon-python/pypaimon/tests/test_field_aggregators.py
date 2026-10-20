@@ -35,8 +35,8 @@ from _datasketches import hll_sketch, update_theta_sketch
 
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.data import Timestamp, Decimal
-from pypaimon.read.reader.aggregate import create_field_aggregator
-from pypaimon.read.reader.aggregate.aggregators import (
+from pypaimon.execution.python.read.reader.aggregate import (create_field_aggregator)
+from pypaimon.execution.python.read.reader.aggregate.aggregators import (
     FieldBoolAndAgg,
     FieldBoolOrAgg,
     FieldFirstNonNullValueAgg,
@@ -2668,7 +2668,7 @@ class RegistrationTest(unittest.TestCase):
     ])
 
     def test_all_expected_aggregators_registered(self):
-        from pypaimon.read.reader.aggregate import _FACTORIES
+        from pypaimon.execution.python.read.reader.aggregate import (_FACTORIES)
         registered = set(_FACTORIES.keys())
         missing = self.EXPECTED - registered
         self.assertEqual(missing, set(),

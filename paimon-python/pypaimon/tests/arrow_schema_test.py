@@ -145,7 +145,7 @@ class ArrowSchemaTest(unittest.TestCase):
         writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
         source = pa.Table.from_pydict({'text': ['中文']}, schema=pa.schema([('text', pa.large_string())]))
         error = ValueError('Cannot convert large_string input to string')
-        with patch('pypaimon.write.table_write.normalize_arrow_strings', side_effect=error):
+        with patch('pypaimon.execution.python.write.table_write.normalize_arrow_strings', side_effect=error):
             with self.assertRaises(ValueError) as raised:
                 if entry == 'batch':
                     writer.write_arrow_batch(source.to_batches()[0])

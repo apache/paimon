@@ -112,7 +112,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         return self
 
     def execute_batch_local(self):
-        from pypaimon.table.source.native_vector_search import try_native_vector_search
+        from pypaimon.execution.native.read.native_vector_search import try_native_vector_search
         results = try_native_vector_search(self, self._query_vectors, batch=True)
         if results is not None:
             return results
@@ -137,5 +137,5 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
             partition_filter=self._partition_filter,
             options=self._options,
         )
-        from pypaimon.table.source.native_search_plan import native_vector_read
+        from pypaimon.execution.native.read.native_search_plan import native_vector_read
         return native_vector_read(self, reader, batch=True)

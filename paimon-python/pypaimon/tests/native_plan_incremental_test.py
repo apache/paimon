@@ -26,7 +26,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow

@@ -2691,7 +2691,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
     def test_self_merge_compaction_retry_checks_core_rollback(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
-        from pypaimon.write.file_store_commit import FileStoreCommit
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
         target = self._create_table()
         self._write(target, self._source(ids=(1, 2)))

@@ -26,11 +26,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_update import NativeTableUpsert, _upsert_row_batches, create_native_upsert
+from pypaimon.execution.native.write.native_update import NativeTableUpsert, _upsert_row_batches, create_native_upsert
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -172,8 +172,8 @@ def test_lossy_temporal_keys_are_rejected_before_constructing_core_updater(nativ
     key_type, initial, _, value = _case(kind)
     _, target = _tables(native_rest_catalog, key_type, initial, True, False)
     native_table = Mock()
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table', return_value=native_table):
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table', return_value=native_table):
         writer = create_native_upsert(target, 'temporal-identity', [{'key': value, 'value': 99}], ['key'], ['value'])
     assert writer is None
     native_table.new_batch_write_builder.assert_not_called()
@@ -210,8 +210,10 @@ def test_temporal_precision_check_preserves_fold_and_equivalent_instants(native_
     ]
     for value in inputs:
         native_table = Mock()
-        with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-                patch('pypaimon.write.native_update.create_native_write_table', return_value=native_table):
+        with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+                patch(
+                    'pypaimon.execution.native.write.native_update.create_native_write_table',
+                    return_value=native_table):
             writer = create_native_upsert(target, 'temporal-identity',
                                           [{'key': value, 'value': 99}], ['key'], ['value'])
         assert isinstance(writer, NativeTableUpsert)
@@ -225,8 +227,8 @@ def test_pytz_temporal_keys_keep_the_existing_instant_conversion(native_rest_cat
     value = pytz.timezone('America/New_York').localize(datetime(2021, 11, 7, 1, 30, 0, 123000), is_dst=False)
     _, target = _tables(native_rest_catalog, pa.timestamp('ms', tz='UTC'), initial, True, False)
     native_table = Mock()
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table', return_value=native_table):
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table', return_value=native_table):
         writer = create_native_upsert(target, 'temporal-identity', [{'key': value, 'value': 99}], ['key'], ['value'])
     assert isinstance(writer, NativeTableUpsert)
     assert writer.data[0].column('key').to_pylist() == [initial]
@@ -240,8 +242,8 @@ def test_partition_temporal_keys_also_preserve_their_original_identity(native_re
         }), False)
     table = native_rest_catalog.get_table('default.temporal_partition')
     native_table = Mock()
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table', return_value=native_table):
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table', return_value=native_table):
         writer = create_native_upsert(table, 'temporal-identity',
                                       [{'key': 1, 'p': datetime(2020, 1, 1, microsecond=123456), 'value': 99}],
                                       ['key'], ['value'])

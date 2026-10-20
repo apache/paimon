@@ -28,7 +28,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.scan_distribution import java_file_name_shard
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range

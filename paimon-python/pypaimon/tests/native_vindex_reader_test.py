@@ -29,7 +29,7 @@ from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     PaimonVindexInput, VINDEX_IDENTIFIERS, VindexVectorGlobalIndexReader,
 )
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 pytestmark = pytest.mark.skipif(

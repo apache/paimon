@@ -540,8 +540,7 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
     def test_align_handles_sliced_arrays(self):
         # The list/map rebuilds read offsets/raw buffers; a sliced input
         # must be re-materialized, not read through stale parent offsets.
-        from pypaimon.read.reader.data_file_batch_reader import \
-            DataFileBatchReader
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (DataFileBatchReader)
         reader = DataFileBatchReader.__new__(DataFileBatchReader)
         sliced_list = pa.array(
             [[1, 2], [3], [4, 5, 6], None], type=pa.list_(pa.int32())).slice(1, 3)
@@ -562,8 +561,7 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
         self.assertEqual(out.to_pylist(), [[('b', 2)], None])
 
     def test_nested_decimal_scale_down_rounds_and_nulls_overflow(self):
-        from pypaimon.read.reader.data_file_batch_reader import \
-            DataFileBatchReader
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (DataFileBatchReader)
         reader = DataFileBatchReader.__new__(DataFileBatchReader)
         source_type = RowType(True, [
             DataField(1, 'price', AtomicType('DECIMAL(6, 3)'))])
@@ -586,8 +584,7 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
         ])
 
     def test_decimal_scale_down_preserves_max_precision_values(self):
-        from pypaimon.read.reader.data_file_batch_reader import \
-            cast_array_for_schema_evolution
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (cast_array_for_schema_evolution)
         value = decimal.Decimal('12345678901234567890123456789012345.678')
         source = pa.array([value], type=pa.decimal128(38, 3))
 

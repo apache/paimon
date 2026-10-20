@@ -28,11 +28,13 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
-                                              FixedBucketRowKeyExtractor,
-                                              PostponeBucketRowKeyExtractor,
-                                              RowKeyExtractor,
-                                              UnawareBucketRowKeyExtractor)
+from pypaimon.execution.python.write.row_key_extractor import (
+    DynamicBucketRowKeyExtractor,
+    FixedBucketRowKeyExtractor,
+    PostponeBucketRowKeyExtractor,
+    RowKeyExtractor,
+    UnawareBucketRowKeyExtractor,
+)
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
@@ -586,7 +588,7 @@ class FileStoreTable(Table):
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
-            from pypaimon.read.native_plan import _NativeRestTableCache
+            from pypaimon.execution.native.table import (_NativeRestTableCache)
             new_table._native_pinned_table_cache = vars(self).setdefault(
                 '_native_pinned_table_cache', _NativeRestTableCache())
         return new_table

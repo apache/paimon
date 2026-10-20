@@ -20,8 +20,10 @@ from unittest.mock import patch
 
 import pytest
 
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-    NativeFullTextIndexOptions, PaimonFullTextInput, _search_top_k,
+from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
+from pypaimon.execution.python.read.native_full_text_global_index_reader import (
+    PaimonFullTextInput,
+    _search_top_k,
 )
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult

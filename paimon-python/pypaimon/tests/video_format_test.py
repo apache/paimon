@@ -30,8 +30,8 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
 from pypaimon.filesystem.jindo_file_system_handler import JindoInputFile
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-from pypaimon.read.reader.video_format_reader import VideoFileMeta
+from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+from pypaimon.execution.python.read.reader.video_format_reader import (VideoFileMeta)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import (
     Blob,
@@ -42,7 +42,7 @@ from pypaimon.table.row.blob import (
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
-from pypaimon.write.video_format_writer import VideoFormatWriter
+from pypaimon.execution.python.write.video_format_writer import VideoFormatWriter
 
 try:
     import av

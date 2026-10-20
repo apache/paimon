@@ -33,7 +33,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.split_read import SplitRead
+from pypaimon.execution.python.read.split_read import (SplitRead)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow

@@ -182,7 +182,7 @@ class TestNativeStreamFactory:
         failure = LookupError('native planning failed')
         native = MagicMock()
         native.plan.side_effect = failure
-        with patch('pypaimon.read.native_plan.native_stream_scan', return_value=native):
+        with patch('pypaimon.execution.native.read.plan.native_stream_scan', return_value=native):
             scan = StreamTableScan(mock_scan_table)
         with patch('pypaimon.read.streaming_table_scan.FileScanner') as python_planner:
             with pytest.raises(LookupError) as caught:

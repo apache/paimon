@@ -30,7 +30,7 @@ from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader import format_blob_reader
+from pypaimon.execution.python.read.reader import format_blob_reader
 from pypaimon.schema.data_types import AtomicType, DataField
 
 

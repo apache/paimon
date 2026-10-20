@@ -214,7 +214,7 @@ class LimitPushdownTest(unittest.TestCase):
         LimitedRecordBatchReader (inherits RecordBatchReader) when limit
         is set, so the arrow-batch read path is taken."""
         from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
+        from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordBatchReader)
 
         table = self._create_ao_table('limit_ao_split_read')
         self._write_ao_partitions(table, [('p1', list(range(10)))])
