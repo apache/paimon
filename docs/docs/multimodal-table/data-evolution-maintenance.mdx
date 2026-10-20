@@ -183,7 +183,13 @@ row-ID group. Readers merge the latest column values and apply logical deletes
 before the existing Spark or Flink clustering pipeline sorts the surviving rows
 and writes new normal files with new row IDs. Unselected groups keep their row IDs.
 The output records the clustering columns and level for subsequent incremental
-selection. `clustering.incremental.mode` selects the same distributed global sort
+selection. Updating only non-clustering columns does not make an already clustered
+group eligible again: its row order remains valid, so even a full clustering call
+can skip it and preserve its row IDs and indexes on unchanged columns.
+Updating a clustering column
+makes the group eligible again. When a group is selected, all its column versions
+are rewritten together, including newer values of non-clustering columns.
+`clustering.incremental.mode` selects the same distributed global sort
 or task-local sort used by ordinary append-table clustering.
 
 For example, enable clustering with Spark SQL and run an explicit batch compact:

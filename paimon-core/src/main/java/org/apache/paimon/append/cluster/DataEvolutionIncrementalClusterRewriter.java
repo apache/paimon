@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append.cluster;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
 import org.apache.paimon.data.BinaryRow;
@@ -27,24 +28,30 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RangeHelper;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Preserves complete row-id groups and materializes deletion vectors for clustering. */
@@ -52,10 +59,21 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
 
     private final FileStoreTable table;
     private final Snapshot snapshot;
+    private final List<String> clusterKeys;
+    private final Set<Integer> clusterFieldIds;
+    private final Map<Long, TableSchema> schemas = new HashMap<>();
+    private final Map<Pair<Long, List<String>>, Set<Integer>> writtenFieldIds = new HashMap<>();
 
     DataEvolutionIncrementalClusterRewriter(FileStoreTable table, Snapshot snapshot) {
         this.table = table;
         this.snapshot = snapshot;
+        this.clusterKeys = table.coreOptions().clusteringColumns();
+        this.clusterFieldIds =
+                clusterKeys.stream()
+                        // A partition key is constant within a group, including partial writes.
+                        .filter(key -> !table.partitionKeys().contains(key))
+                        .map(key -> table.rowType().getField(key).id())
+                        .collect(Collectors.toSet());
     }
 
     @Override
@@ -73,8 +91,10 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
         for (List<DataFileMeta> group : helper.mergeOverlappingRanges(files)) {
             checkArgument(
                     helper.areAllRangesSame(group), "Normal files must have equal row-id ranges.");
-            // A partial update makes the complete group eligible again, including its base.
-            int level = group.stream().mapToInt(DataFileMeta::level).min().getAsInt();
+            DataFileMeta anchor = retrieveAnchorFile(group, file -> file);
+            // The shared full planner reads the first file's clustering schema.
+            Collections.swap(group, 0, group.indexOf(anchor));
+            int level = groupLevel(group, anchor);
             if (level == 0) {
                 runs.add(new LevelSortedRun(0, SortedRun.fromSorted(group)));
             } else {
@@ -85,6 +105,36 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
                 (level, group) -> runs.add(new LevelSortedRun(level, SortedRun.fromSorted(group))));
         runs.sort(Comparator.comparingInt(LevelSortedRun::level));
         return runs;
+    }
+
+    private int groupLevel(List<DataFileMeta> group, DataFileMeta anchor) {
+        int level = anchor.level();
+        CoreOptions anchorOptions = CoreOptions.fromMap(schema(anchor.schemaId()).options());
+        if (!fieldIds(anchor).containsAll(clusterFieldIds)
+                || !anchorOptions.clusteringColumns().equals(clusterKeys)
+                || anchorOptions.clusteringStrategy(clusterKeys.size())
+                        != table.coreOptions().clusteringStrategy(clusterKeys.size())) {
+            // The shared full planner checks only the first file's schema. Do not let a newer
+            // non-key update or another group hide an incompatible clustering definition.
+            return 0;
+        }
+        for (DataFileMeta file : group) {
+            if (file.level() < level && !Collections.disjoint(fieldIds(file), clusterFieldIds)) {
+                // Keep every column version in the run, but only key writes lower its level.
+                level = file.level();
+            }
+        }
+        return level;
+    }
+
+    private Set<Integer> fieldIds(DataFileMeta file) {
+        return writtenFieldIds.computeIfAbsent(
+                Pair.of(file.schemaId(), file.writeCols()),
+                ignored -> fileFieldIds(schema(file.schemaId()), file));
+    }
+
+    private TableSchema schema(long schemaId) {
+        return schemas.computeIfAbsent(schemaId, id -> table.schemaManager().schema(id));
     }
 
     @Override
