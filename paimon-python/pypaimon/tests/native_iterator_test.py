@@ -107,6 +107,46 @@ def test_iterator_uses_native_read(tmp_path, mode, projection, limit):
     assert all(kind == RowKind.INSERT for _, kind in actual)
 
 
+@pytest.mark.parametrize('method_name', [
+    'to_arrow', 'to_arrow_batch_reader', '_to_managed_arrow_batch_reader',
+])
+def test_native_arrow_modes_share_limit_and_materialized_keeps_split_prefix(tmp_path, method_name):
+    table, _ = _table(tmp_path)
+    predicate = table.new_read_builder().new_predicate_builder().greater_than('v', 10)
+    builder = table.new_read_builder().with_projection(['id']).with_filter(predicate)
+    splits = list(reversed(builder.new_scan().plan().splits()))
+    assert len(splits) >= 2
+    python = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+    python_read = python.new_read_builder().with_projection(['id']).with_filter(predicate).new_read()
+    expected = []
+    for split in splits:
+        expected.extend(python_read.to_arrow([split], parallelism=1).column('id').to_pylist())
+    assert len(expected) == 2
+    for limit in [None, 1]:
+        for parallelism in [1, 4]:
+            limited = table.new_read_builder().with_projection(['id']).with_filter(predicate)
+            if limit is not None:
+                limited.with_limit(limit)
+            read = limited.new_read()
+            with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+                result = getattr(read, method_name)(splits, parallelism=parallelism)
+                if method_name != 'to_arrow':
+                    try:
+                        result_table = result.read_all()
+                    finally:
+                        result.close()
+                else:
+                    result_table = result
+            values = result_table.column('id').to_pylist()
+            count = len(expected) if limit is None else limit
+            assert len(values) == count
+            if method_name == 'to_arrow' or parallelism == 1:
+                assert values == expected[:count]
+            else:
+                assert len(set(values)) == len(values)
+                assert set(values).issubset(expected)
+
+
 def test_append_iterator_row_kind_is_insert(tmp_path):
     table, _ = _table(tmp_path)
     table = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
@@ -199,7 +239,7 @@ def test_iterator_delegates_ordered_global_limit_in_one_native_read(tmp_path):
     assert native.call_args.args == (read.table, transported)
     assert native.call_args.kwargs['limit'] == 3
     assert native.call_args.kwargs['parallelism'] == 1
-    assert native.call_args.kwargs['preserve_split_order'] is True
+    assert native.call_args.kwargs['ordered'] is True
     assert native.call_args.kwargs['include_row_kind'] is True
     assert batches.closed
     assert read.limit == 3

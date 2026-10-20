@@ -239,8 +239,7 @@ class TableRead:
             read._row_kind_column = 'rowkind'
             schema = read._add_row_kind_to_schema(read._output_arrow_schema(splits), read._row_kind_column)
             fields = output_fields(self.read_type, self.output_projection)
-            batches = read._try_native_batches(splits, schema, parallelism=1, streaming=True,
-                                               preserve_split_order=True)
+            batches = read._try_native_batches(splits, schema, parallelism=1, ordered=True)
             if batches is not None:
                 try:
                     yield from native_rows(batches, self.table, fields)
@@ -341,7 +340,7 @@ class TableRead:
             schema,
             parallelism=effective,
             blob_parallelism=effective_bp,
-            streaming=True,
+            ordered=False,
         )
         if native_batches is not None:
             batch_iterator = iter(native_batches)
@@ -442,6 +441,7 @@ class TableRead:
             schema,
             parallelism=effective,
             blob_parallelism=effective_bp,
+            ordered=True,
         )
         if native_batches is not None:
             return self._batches_to_arrow(native_batches, schema)
@@ -589,8 +589,7 @@ class TableRead:
             schema: pyarrow.Schema,
             parallelism: Optional[int] = None,
             blob_parallelism: Optional[int] = None,
-            streaming: bool = False,
-            preserve_split_order: bool = False):
+            ordered: bool = False):
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
             return self._native_fallback("read.native.enabled is false")
@@ -630,7 +629,7 @@ class TableRead:
             batches = native_read(
                 self.table, rust_splits,
                 parallelism=effective,
-                preserve_split_order=preserve_split_order or not streaming,
+                ordered=ordered,
                 **self._native_read_kwargs(blob_parallelism))
         except Exception as error:
             _raise_if_native_fork_safety_error(error)

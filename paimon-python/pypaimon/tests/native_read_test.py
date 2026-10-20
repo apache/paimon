@@ -221,7 +221,7 @@ def test_native_read_consumes_retained_rust_splits_and_transports_limit():
         read_type=read.read_type,
         blob_parallelism=1,
         parallelism=1,
-        preserve_split_order=True,
+        ordered=True,
     )
 
 
@@ -342,7 +342,7 @@ def test_native_read_bridges_python_planned_split():
         limit=None,
         read_type=read.read_type,
         parallelism=1,
-        preserve_split_order=True,
+        ordered=False,
     )
 
 
@@ -392,24 +392,46 @@ def test_native_read_delegates_all_splits_and_parallelism_once(method_name, orde
     native.assert_called_once()
     assert native.call_args.args == (read.table, list(range(4)))
     assert native.call_args.kwargs['parallelism'] == expected
-    assert native.call_args.kwargs['preserve_split_order'] == ordered
+    assert native.call_args.kwargs['ordered'] == ordered
 
 
-@pytest.mark.parametrize('streaming, ordered', [(False, False), (True, False), (True, True)])
-def test_native_read_transports_explicit_order_without_opening_groups(streaming, ordered):
+@pytest.mark.parametrize('ordered', [False, True])
+def test_native_read_transports_explicit_order_without_opening_groups(ordered):
     read = _table_read()
     splits = [_Split(), _Split()]
     for index, split in enumerate(splits):
         split._native_split = index
     with patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([0, 1])]) as native:
         batches = list(read._try_native_batches(
-            splits, pa.schema([('id', pa.int32())]), parallelism=2,
-            streaming=streaming, preserve_split_order=ordered))
+            splits, pa.schema([('id', pa.int32())]), parallelism=2, ordered=ordered))
     assert batches[0].column('id').to_pylist() == [0, 1]
     native.assert_called_once()
     assert native.call_args.args[1] == [0, 1]
-    assert native.call_args.kwargs['preserve_split_order'] == (ordered or not streaming)
+    assert native.call_args.kwargs['ordered'] == ordered
     assert native.call_args.kwargs['parallelism'] == 2
+
+
+@pytest.mark.parametrize('ordered', [None, False, True])
+def test_native_read_bridge_transports_current_ordered_api(ordered):
+    from pypaimon.read.native_plan import native_read
+
+    table = object()
+    splits = [object(), object()]
+    batches = [_id_batch([2]), _id_batch([1])]
+    calls = []
+
+    def read_splits(values, *, parallelism, ordered=False):
+        calls.append((values, parallelism, ordered))
+        return batches
+
+    kwargs = {} if ordered is None else {'ordered': ordered}
+    with patch('pypaimon.read.native_plan._prepare_native_read', return_value=read_splits) as prepare:
+        result = native_read(table, splits, parallelism=2, limit=2, **kwargs)
+    assert result is batches
+    assert calls == [(splits, 2, False if ordered is None else ordered)]
+    prepare.assert_called_once_with(
+        table, predicate=None, limit=2, projection=None, blob_parallelism=None,
+        read_type=None, include_row_kind=False)
 
 
 def test_native_batch_reader_close_closes_batch_iterator():
@@ -570,15 +592,15 @@ def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap():
     python_read.assert_called_once_with(splits, schema, 4)
 
 
-@pytest.mark.parametrize('streaming', [False, True])
-def test_native_reader_setup_failure_falls_back_before_batches(streaming):
+@pytest.mark.parametrize('ordered', [False, True])
+def test_native_reader_setup_failure_falls_back_before_batches(ordered):
     read = _table_read()
     splits = [_Split(), _Split()]
     for split in splits:
         split._native_split = object()
     with patch('pypaimon.read.native_plan.native_read', side_effect=RuntimeError('setup failed')) as native:
         assert read._try_native_batches(
-            splits, pa.schema([('id', pa.int32())]), parallelism=2, streaming=streaming) is None
+            splits, pa.schema([('id', pa.int32())]), parallelism=2, ordered=ordered) is None
     native.assert_called_once()
 
 
@@ -589,7 +611,7 @@ def test_native_reader_qualifies_all_splits_before_starting_core():
         split._native_split = object()
     with patch('pypaimon.read.native_plan.native_read') as native:
         assert read._try_native_batches(
-            splits, pa.schema([('id', pa.int32())]), parallelism=2, streaming=True) is None
+            splits, pa.schema([('id', pa.int32())]), parallelism=2) is None
     native.assert_not_called()
 
 

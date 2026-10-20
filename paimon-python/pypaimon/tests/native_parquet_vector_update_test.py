@@ -192,7 +192,7 @@ def test_shard_normal_updates_preserve_parquet_vector_and_blob_sidecars(tmp_path
             # Native read delegates every split to one serial Core stream.
             native_calls.assert_called_once()
             assert native_calls.call_args.kwargs['parallelism'] == 1
-            assert native_calls.call_args.kwargs['preserve_split_order'] is False
+            assert native_calls.call_args.kwargs['ordered'] is False
     _commit(builder, messages, stream)
     for rows in _rows(table):
         assert rows == [dict(row, score=row['score'] + 10) for row in before]

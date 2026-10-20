@@ -529,8 +529,8 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
                 read_type: Optional[List[DataField]] = None,
                 include_row_kind: bool = False,
                 parallelism: int = 1,
-                preserve_split_order: bool = False):
-    """Run one Core read, including split scheduling and its total row quota."""
+                ordered: bool = False):
+    """Run one Core read; ``ordered`` retains the supplied split order."""
     read_splits = _prepare_native_read(
         table,
         predicate=predicate,
@@ -539,7 +539,7 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
         blob_parallelism=blob_parallelism,
         read_type=read_type,
         include_row_kind=include_row_kind)
-    return read_splits(splits, parallelism=parallelism, preserve_split_order=preserve_split_order)
+    return read_splits(splits, parallelism=parallelism, ordered=ordered)
 
 
 def native_plan(

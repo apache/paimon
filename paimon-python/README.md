@@ -420,8 +420,11 @@ For both materialized
 `to_arrow()` and streaming `to_arrow_batch_reader()` reads, the effective split
 parallelism (the method argument, `read.parallelism`, or the automatic default)
 is executed by Rust Core. Core owns byte-balanced split groups, bounded
-prefetch, the shared row limit and cancellation. Materialized reads emit the
-groups in input order; streaming reads emit batches as groups become ready.
+prefetch, the shared row limit and cancellation. The Rust reader's `ordered`
+argument defaults to `False`. PyPaimon requests `ordered=True` for materialized
+reads, emitting groups in supplied split order; streaming reads use
+`ordered=False` and emit batches as groups become ready. Both modes retain each
+split reader's row order.
 An unfiltered row limit also caps reader fan-out to avoid speculative work.
 The split scheduler buffers at most one batch per worker, and closing the batch
 reader interrupts native reads that are still in flight. Limited BLOB reads visit
