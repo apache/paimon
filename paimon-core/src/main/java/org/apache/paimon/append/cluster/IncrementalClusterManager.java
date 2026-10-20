@@ -185,10 +185,6 @@ public class IncrementalClusterManager {
                                                 table.coreOptions().dataEvolutionEnabled())));
     }
 
-    public static List<LevelSortedRun> constructPartitionLevels(List<DataFileMeta> partitionFiles) {
-        return constructPartitionLevels(partitionFiles, false);
-    }
-
     public static List<LevelSortedRun> constructPartitionLevels(
             List<DataFileMeta> partitionFiles, boolean dataEvolution) {
         if (dataEvolution) {

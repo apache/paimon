@@ -74,14 +74,7 @@ public class IncrementalClusterManagerTest {
     }
 
     @Test
-    public void testConstructPartitionLevels() throws Exception {
-        // Create a valid table for IncrementalClusterManager
-        Map<String, String> options = new HashMap<>();
-        FileStoreTable table = createTable(options, Collections.emptyList());
-        IncrementalClusterManager incrementalClusterManager =
-                new IncrementalClusterManager(
-                        table, null, table.snapshotManager().latestSnapshot());
-
+    public void testConstructPartitionLevels() {
         // Create test files with different levels
         List<DataFileMeta> partitionFiles = new ArrayList<>();
 
@@ -103,7 +96,7 @@ public class IncrementalClusterManagerTest {
 
         // Call the method under test
         List<LevelSortedRun> result =
-                incrementalClusterManager.constructPartitionLevels(partitionFiles);
+                IncrementalClusterManager.constructPartitionLevels(partitionFiles, false);
 
         // Verify the results
         assertThat(result).hasSize(4); // 2 level-0 runs + 1 level-1 run + 1 level-2 run
