@@ -105,9 +105,11 @@ class TableWrite:
         self.static_partition = static_partition
         self.restore_snapshot_id = restore_snapshot_id
         self.file_store_write = self._create_file_store_write(commit_user)
+        # Java overwrite writers ignore previous files even without an explicit
+        # restore snapshot. HASH restoration is separately disabled by the row
+        # key extractor; sequence restoration must also start from empty state.
         self.file_store_write.restore_snapshot_id = (
-            0 if static_partition is not None and restore_snapshot_id is not None
-            else restore_snapshot_id)
+            0 if static_partition is not None else restore_snapshot_id)
         if static_partition is not None:
             # An overwrite replaces state, not an input changelog. Java's
             # overwrite commit does not publish changelog manifests; avoid

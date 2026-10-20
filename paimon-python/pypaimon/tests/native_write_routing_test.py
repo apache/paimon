@@ -174,23 +174,95 @@ def test_append_write_type_preserves_input_routing_columns_for_core(tmp_path, fu
     assert writer._python_writer is None
 
 
+@pytest.mark.parametrize('use_native', [False, pytest.param(True, marks=native)])
+def test_stream_new_bucket_restores_sequences_after_a_checkpoint(rest_catalog, use_native):
+    catalog, _ = rest_catalog
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(
+        SCHEMA, primary_keys=['id'], options={
+            'bucket': '2', 'write.native.enabled': str(use_native).lower(),
+            'commit.native.enabled': 'false', 'read.native.enabled': 'false',
+            'scan.native-plan.enabled': 'false'}), False)
+    table = catalog.get_table('default.t')
+    builder = table.new_stream_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    try:
+        assert isinstance(writer, NativeTableWrite) == use_native
+        writer.write_arrow(pa.Table.from_pylist([dict(id=1, pt='a', value='first')], schema=SCHEMA), bucket=0)
+        commit.commit(writer.prepare_commit(1), 1)
+
+        # A new bucket is first seen after the long-lived writer's checkpoint.
+        other_builder = table.new_batch_write_builder()
+        other_writer, other_commit = other_builder.new_write(), other_builder.new_commit()
+        try:
+            other_writer.write_arrow(pa.Table.from_pylist([
+                dict(id=2, pt='a', value=str(value)) for value in (20, 21, 22)
+            ], schema=SCHEMA), bucket=1)
+            other_commit.commit(other_writer.prepare_commit())
+        finally:
+            other_writer.close()
+            other_commit.close()
+
+        writer.write_arrow(pa.Table.from_pylist([dict(id=2, pt='a', value='latest')], schema=SCHEMA), bucket=1)
+        messages = writer.prepare_commit(2)
+        new_bucket = [file for message in messages if message.bucket == 1 for file in message.new_files]
+        assert len(new_bucket) == 1
+        assert new_bucket[0].min_sequence_number == 3
+        commit.commit(messages, 2)
+        assert _rows(table) == [dict(id=1, pt='a', value='first'), dict(id=2, pt='a', value='latest')]
+
+        # Refreshing restore state must not reset an already-open bucket's counter.
+        writer.write_arrow(pa.Table.from_pylist([dict(id=1, pt='a', value='retained')], schema=SCHEMA), bucket=0)
+        messages = writer.prepare_commit(3)
+        assert messages[0].new_files[0].min_sequence_number == 1
+        commit.commit(messages, 3)
+        assert _rows(table) == [dict(id=1, pt='a', value='retained'), dict(id=2, pt='a', value='latest')]
+    finally:
+        writer.close()
+        commit.close()
+
+
 @pytest.mark.parametrize('query_auth', ['true', 'on'])
-def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog, query_auth):
+@pytest.mark.parametrize('invalid', [None, 'fresh-uuid', 'captured-uuid', 'captured-path', 'captured-branch'])
+def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog, query_auth, invalid):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
     catalog, _ = rest_catalog
     table = _table(None, catalog=catalog, guarded=True).copy({'query-auth.enabled': query_auth})
+    catalog.alter_table('default.t', [SchemaChange.add_column('extra', AtomicType('INT'))])
+    assert table.table_schema.id != catalog.get_table('default.t').table_schema.id
     module = ModuleType('pypaimon_rust.datafusion')
     module.Table = Mock()
     module.PaimonCatalog = Mock()
     resolved = Mock(spec=['location', 'rest_table_uuid', 'branch', 'copy_with_resolved_schema'])
     module.PaimonCatalog.return_value.get_table.return_value = resolved
     resolved.location.return_value = table.table_path
-    resolved.rest_table_uuid.return_value = table.catalog_environment.uuid
+    resolved.rest_table_uuid.return_value = (
+        'replacement-uuid' if invalid == 'fresh-uuid' else table.catalog_environment.uuid)
     resolved.branch.return_value = 'main'
     resolved.copy_with_resolved_schema.return_value = resolved
-    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}):
-        assert create_native_write_table(table) is resolved
-    resolved.copy_with_resolved_schema.assert_called_once()
-    schema = json.loads(resolved.copy_with_resolved_schema.call_args[0][0])
+    captured = Mock(spec=['location', 'rest_table_uuid', 'branch', 'copy_with_resolved_schema'])
+    captured.location.return_value = '/different' if invalid == 'captured-path' else table.table_path
+    captured.rest_table_uuid.return_value = (
+        'replacement-uuid' if invalid == 'captured-uuid' else table.catalog_environment.uuid)
+    captured.branch.return_value = 'dev' if invalid == 'captured-branch' else 'main'
+    captured.copy_with_resolved_schema.return_value = captured
+    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
+            patch('pypaimon.read.native_plan._native_table', return_value=captured) as restore:
+        result = create_native_write_table(table)
+    resolved.copy_with_resolved_schema.assert_not_called()
+    if invalid is not None:
+        assert result is None
+        captured.copy_with_resolved_schema.assert_not_called()
+        if invalid == 'fresh-uuid':
+            restore.assert_not_called()
+        else:
+            restore.assert_called_once_with(table)
+        return
+    assert result is captured
+    restore.assert_called_once_with(table)
+    captured.copy_with_resolved_schema.assert_called_once()
+    schema = json.loads(captured.copy_with_resolved_schema.call_args[0][0])
     assert schema['options']['query-auth.enabled'] == 'true'
 
 

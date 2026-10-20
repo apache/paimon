@@ -18,6 +18,7 @@
 import logging
 from typing import Dict, List, Optional
 
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
@@ -149,6 +150,7 @@ class TableCommit:
                 self._native_callbacks_registered = True
             return self._native_commit, native_messages
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             # No native mutation has started. Preserve the normal Python path
             # when the optional runtime, FileIO or wire bridge is unavailable.
             logger.debug("Native commit preparation failed; using Python: %s", error)

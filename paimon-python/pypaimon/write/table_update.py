@@ -36,6 +36,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scanner.data_evolution_split_generator import (
     DataEvolutionSplitGenerator,
@@ -150,6 +151,7 @@ class TableUpdate:
                 native = create_native_update_by_row_id(
                     self.table, self.commit_user, commit_identifier)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native row-id updater preparation failed: %s', error)
             else:
                 if native is not None:
@@ -213,6 +215,7 @@ class TableUpdate:
                 from pypaimon.write.native_update import create_native_update
                 native = create_native_update(self.table, self.commit_user, cols)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native update preparation failed; using Python: %s', error)
             else:
                 if native is not None:
@@ -327,6 +330,7 @@ class TableUpdate:
                 native = create_native_predicate_update(
                     self.table, self.commit_user, predicate, list(assignments))
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native predicate update preparation failed: %s', error)
             else:
                 if native is not None:
@@ -544,6 +548,7 @@ class TableUpdate:
             native = create_native_predicate_delete(
                 self.table, self.commit_user, predicate)
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logger.debug('Native predicate delete preparation failed: %s', error)
         else:
             if native is not None:
@@ -629,6 +634,7 @@ class TableUpdate:
                 from pypaimon.write.native_update import create_native_delete
                 native = create_native_delete(self.table, self.commit_user)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native delete preparation failed; using Python: %s', error)
             else:
                 if native is not None:
@@ -702,6 +708,7 @@ class TableUpdate:
                 from pypaimon.write.native_update import native_predicate_row_ids
                 row_ids = native_predicate_row_ids(scan_table, predicate, splits)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native predicate delete match failed: %s', error)
             else:
                 if row_ids is not None:
@@ -740,6 +747,7 @@ class BatchTableUpdate(TableUpdate):
             native = create_native_update(
                 self.table, self.commit_user, self.update_cols)
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logger.debug('Native batch update preparation failed: %s', error)
         else:
             if native is not None:

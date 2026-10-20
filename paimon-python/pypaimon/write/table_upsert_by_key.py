@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.internal_row import InternalRow
@@ -154,6 +155,7 @@ class TableUpsertByKey:
             return create_native_upsert(
                 self.table, self.commit_user, data, upsert_keys, columns)
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logger.debug(
                 'Native upsert preparation failed; using Python: %s', error)
             return None

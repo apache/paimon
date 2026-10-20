@@ -353,6 +353,10 @@ class FileStoreWrite:
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
             writer._release_prepared_files()
+        # Existing bucket writers keep their advancing sequence counters. A
+        # bucket opened after this checkpoint must restore from the latest
+        # snapshot rather than reuse another bucket's earlier partition scan.
+        self.max_seq_numbers.clear()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -388,7 +392,11 @@ class FileStoreWrite:
             # Replace inherited selectors and mode, including an explicit empty
             # view for the writer's internal manifest lookup.
             return self.table._copy_with_snapshot(snapshot)
-        return self.table
+        # Read selectors select a caller's read view, not writer restore state.
+        # Java FileSystemWriteRestore scans the latest committed snapshot unless
+        # the writer explicitly requested a restore snapshot. Retain this
+        # handle's schema and branch while replacing only the internal view.
+        return self.table._copy_with_snapshot(self.table.snapshot_manager().get_latest_snapshot())
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
         read_builder = self._sequence_read_table().new_read_builder()

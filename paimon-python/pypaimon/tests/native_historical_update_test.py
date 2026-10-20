@@ -27,8 +27,9 @@ from pypaimon import Schema
 from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
-from pypaimon.write.native_update import NativeShardTableUpdator, _native_row_id_table
+from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.native_update import NativeShardTableUpdator
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
@@ -171,19 +172,80 @@ def test_historical_delete_does_not_delete_newer_rows(native_rest_catalog, nativ
     assert _rows(latest) == {'id': [2, 3], 'value': [20, 30], 'keep': [200, 300], 'extra': [None, 999]}
 
 
-@pytest.mark.parametrize('view', ['snapshot', 'captured-empty'])
-def test_append_capable_operations_keep_historical_native_gate(native_rest_catalog, view):
-    latest, historical, _ = _tables(native_rest_catalog, False, 'scan.snapshot-id')
-    if view == 'captured-empty':
-        historical = latest._copy_with_snapshot(None)
-    historical = historical.copy({'write.native.enabled': 'true'})
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True):
-        assert _native_row_id_table(historical, allow_time_travel=False) is None
+def _append_mutation(table, native, operation, only_matched=False, stream=False):
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    update = builder.new_update().with_update_type(['value'])
+    kwargs = dict(commit_identifier=37) if stream else {}
+    data = pa.table({'id': [1] if only_matched else [1, 4],
+                     'value': [11] if only_matched else [11, 40],
+                     'keep': [101] if only_matched else [101, 400]},
+                    schema=pa.schema([('id', pa.int32()), ('value', pa.int32()), ('keep', pa.int32())]))
+    with ExitStack() as stack:
+        if native:
+            for method in ('pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_partition',
+                           'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_row_partition',
+                           'pypaimon.table.data_evolution_merge_into._build_tables'):
+                stack.enter_context(patch(method, side_effect=AssertionError('Python historical mutation fallback')))
+        if operation == 'upsert':
+            return update.upsert_by_arrow_with_key(data, ['id'], **kwargs)
+        if operation == 'row-upsert':
+            return update.upsert_by_key([
+                GenericRow([row[name] for name in table.field_names], table.fields) for row in data.to_pylist()
+            ], ['id'], **kwargs)
+        return update.merge_into(data, on=['id'], when_matched=[
+            WhenMatched.update({'value': source_col('value')})],
+            when_not_matched=[WhenNotMatched('*')], **kwargs)
+
+
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+@pytest.mark.parametrize('operation', ['upsert', 'row-upsert', 'merge'])
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('only_matched', [False, True], ids=['mixed', 'matched'])
+def test_historical_append_mutations_preserve_schema_and_conflict_baseline(
+        native_rest_catalog, native, operation, stream, only_matched):
+    latest, historical, snapshot_id = _tables(native_rest_catalog, native, 'scan.snapshot-id')
+    messages = _append_mutation(historical, native, operation, only_matched, stream)
+    assert any(message.check_from_snapshot == snapshot_id for message in messages)
+    assert all(message.check_from_snapshot in (None, snapshot_id) for message in messages)
+    assert all(file.schema_id == historical.table_schema.id for message in messages for file in message.new_files)
+    if not only_matched:
+        assert any(message.check_from_snapshot is None for message in messages)
+        assert all(file.first_row_id is None for message in messages if message.check_from_snapshot is None
+                   for file in message.new_files)
+    _commit(latest, messages)
+    expected = {'id': [1, 2, 3], 'value': [11, 20, 30], 'keep': [100, 200, 300], 'extra': [None, None, 999]}
+    if not only_matched:
+        for name, value in zip(('id', 'value', 'keep', 'extra'), (4, 40, 400, None)):
+            expected[name].append(value)
+    assert _rows(latest) == expected
+    stale = _append_mutation(historical, native, operation, only_matched, stream)
+    with pytest.raises(RuntimeError, match='(?i)conflict'):
+        _commit(latest, stale)
+    assert _rows(latest) == expected
+
+
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+@pytest.mark.parametrize('operation', ['upsert', 'merge'])
+def test_captured_empty_append_mutations_use_new_row_ids(native_rest_catalog, native, operation):
+    latest, historical, _ = _tables(native_rest_catalog, native, 'scan.snapshot-id')
+    empty = historical._copy_with_snapshot(None)
+    messages = _append_mutation(empty, native, operation)
+    assert messages
+    assert all(message.check_from_snapshot is None for message in messages)
+    assert all(file.first_row_id is None and file.schema_id == historical.table_schema.id
+               for message in messages for file in message.new_files)
+    _commit(latest, messages)
+    # The existing key 1 was not visible in the captured empty target. It must
+    # append a fresh row, rather than update the concurrently visible row 1.
+    assert _rows(latest) == {
+        'id': [1, 1, 2, 3, 4], 'value': [10, 11, 20, 30, 40],
+        'keep': [100, 101, 200, 300, 400], 'extra': [None, None, None, 999, None]}
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
 @pytest.mark.parametrize('change', ['rename', 'drop_readd', 'widen'])
-def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, native, change):
+@pytest.mark.parametrize('operation', ['row-id', 'upsert', 'merge'])
+def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, native, change, operation):
     latest, historical, snapshot_id = _tables(native_rest_catalog, native, 'scan.snapshot-id')
     catalog, name = native_rest_catalog, 'default.historical_updates'
     if change == 'rename':
@@ -198,17 +260,32 @@ def test_historical_partial_files_keep_original_field_ids(native_rest_catalog, n
     values = {'id': [4], value_name: [2 ** 40 if change == 'widen' else 40], 'keep': [400], 'extra': [1000]}
     from pypaimon.schema.data_types import PyarrowFieldParser
     _append(latest, pa.table(values, schema=PyarrowFieldParser.from_paimon_schema(latest.fields)))
-    messages = _update(historical, 'row_id', False, native)
-    assert all(message.check_from_snapshot == snapshot_id for message in messages)
+    messages = (_update(historical, 'row_id', False, native) if operation == 'row-id' else
+                _append_mutation(historical, native, operation))
+    assert all(message.check_from_snapshot in (None, snapshot_id) for message in messages)
     for message in messages:
         for file in message.new_files:
             assert file.schema_id == historical.table_schema.id
-            assert file.write_cols == ['value']
-    _commit(latest, messages)
+            if message.check_from_snapshot is not None:
+                assert file.write_cols == ['value']
+    _commit(historical, messages)
     values = [None, None, None, 40] if change == 'drop_readd' else [11, 20, 30, 2 ** 40 if change == 'widen' else 40]
-    assert _rows(latest) == {
+    expected = {
         'id': [1, 2, 3, 4], value_name: values, 'keep': [100, 200, 300, 400],
         'extra': [None, None, 999, 1000]}
+    if operation != 'row-id':
+        # A second row with logical key 4 is new to snapshot 1 and receives a
+        # fresh physical row ID, even though latest already contains key 4.
+        expected['id'].append(4)
+        expected[value_name].append(None if change == 'drop_readd' else 40)
+        expected['keep'].append(400)
+        expected['extra'].append(None)
+    assert _rows(latest) == expected
+    stale = (_update(historical, 'row_id', False, native) if operation == 'row-id' else
+             _append_mutation(historical, native, operation))
+    with pytest.raises(RuntimeError, match='(?i)conflict'):
+        _commit(historical, stale)
+    assert _rows(latest) == expected
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])

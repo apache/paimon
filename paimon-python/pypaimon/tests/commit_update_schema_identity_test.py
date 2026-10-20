@@ -17,6 +17,7 @@
 
 """Index update policy uses the identities in a prepared file's own schema."""
 
+from dataclasses import replace
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -108,3 +109,50 @@ def test_commit_resolves_updated_index_columns_by_file_schema(native_rest_catalo
         read = latest.new_read_builder()
         rows = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pydict()
         assert rows == {'id': [1], index_field.name: [None if evolution == 'drop_readd' else 11]}
+
+
+@pytest.mark.parametrize('native', _ENGINES)
+@pytest.mark.parametrize('action', ['THROW_ERROR', 'DROP_PARTITION_INDEX', 'IGNORE'])
+@pytest.mark.parametrize('deleted', ['affected', 'other', 'both'])
+def test_explicit_index_deletion_does_not_exempt_other_indexes(native_rest_catalog, native, action, deleted):
+    catalog = native_rest_catalog
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
+    catalog.create_table('default.index_deletes', Schema.from_pyarrow_schema(schema, options={
+        'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
+        'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
+        'global-index.column-update-action': action,
+    }), False)
+    table = catalog.get_table('default.index_deletes')
+    writer = table.new_batch_write_builder().new_write()
+    try:
+        writer.write_arrow(pa.table({'id': [1], 'value': [10]}, schema=schema))
+        _commit(table, writer.prepare_commit())
+    finally:
+        writer.close()
+    affected = _index_entry('affected.index', (), table.fields[1].id)
+    other = _index_entry('other.index', (), table.fields[0].id)
+    _commit(table, [CommitMessage((), 0, [], index_adds=[affected, other])])
+    before = table.snapshot_manager().get_latest_snapshot()
+    source = table.copy({'global-index.column-update-action': 'IGNORE'})
+    messages = source.new_batch_write_builder().new_update().new_update_by_row_id().update_columns(
+        pa.table({'_ROW_ID': [0], 'value': [11]}), ['value'])
+    deletions = [affected] if deleted == 'affected' else [other] if deleted == 'other' else [affected, other]
+    messages.append(CommitMessage((), 0, [], index_deletes=[replace(entry, kind=1) for entry in deletions]))
+    target = table.copy({'commit.native.enabled': str(native).lower()})
+    if action == 'THROW_ERROR' and deleted == 'other':
+        with pytest.raises(Exception, match='globally indexed columns'):
+            _commit(target, messages, native)
+        assert table.snapshot_manager().get_latest_snapshot().id == before.id
+        expected_indexes, expected_value = ['affected.index', 'other.index'], 10
+    else:
+        _commit(target, messages, native)
+        expected_indexes = ['other.index'] if deleted == 'affected' else (
+            ['affected.index'] if deleted == 'other' and action == 'IGNORE' else [])
+        expected_value = 11
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    actual_indexes = sorted(entry.index_file.file_name for entry in scan_global_index_entries(table, snapshot))
+    assert actual_indexes == expected_indexes
+    read = table.new_read_builder()
+    assert read.new_read().to_arrow(read.new_scan().plan().splits()).to_pydict() == {
+        'id': [1], 'value': [expected_value]}

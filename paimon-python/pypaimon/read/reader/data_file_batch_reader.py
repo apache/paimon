@@ -454,18 +454,7 @@ class DataFileBatchReader(RecordBatchReader):
             # NULL entries from the manifest's max sequence number.
             arrays[idx] = pc.fill_null(arrays[idx], self.max_sequence_number)
 
-        names = record_batch.schema.names
-        table = None
-        for i, name in enumerate(names):
-            field = pa.field(
-                name, arrays[i].type,
-                nullable=record_batch.schema.field(name).nullable
-            )
-            if table is None:
-                table = pa.table({name: arrays[i]}, schema=pa.schema([field]))
-            else:
-                table = table.append_column(field, arrays[i])
-        return table.to_batches()[0]
+        return pa.RecordBatch.from_arrays(arrays, schema=record_batch.schema)
 
     def close(self) -> None:
         self.format_reader.close()

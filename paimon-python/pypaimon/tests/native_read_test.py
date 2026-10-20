@@ -332,7 +332,7 @@ def test_native_read_bridges_python_planned_split():
         result = list(read._try_native_batches([split], schema))
 
     assert result[0].column('id').to_pylist() == [1]
-    bridge.assert_called_once_with(split)
+    bridge.assert_called_once_with(split, ranges_use_row_ids=False)
     native.assert_called_once_with(
         read.table,
         [converted],
@@ -362,7 +362,7 @@ def test_native_query_auth_transports_rules_for_core_authorization():
             patch('pypaimon.read.native_plan.native_read', return_value=[_id_batch([2])]) as native:
         batches = list(read._try_native_batches([wrapped], pa.schema([('id', pa.int32())])))
     assert batches[0].column('id').to_pylist() == [2]
-    convert.assert_called_once_with(wrapped)
+    convert.assert_called_once_with(wrapped, ranges_use_row_ids=False)
     assert native.call_args.args[1] == [converted]
 
 
