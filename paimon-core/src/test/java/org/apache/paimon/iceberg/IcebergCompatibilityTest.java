@@ -34,6 +34,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
@@ -93,6 +94,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -110,7 +112,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -1576,6 +1580,110 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testDropNanPartitionInManifestWithOtherPartitions() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DOUBLE(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // one manifest holds all partitions, and its bounds [1.0, 2.0] leave out NaN
+        write.write(GenericRow.of(1.0, 1));
+        write.write(GenericRow.of(Double.NaN, 2));
+        write.write(GenericRow.of(2.0, 3));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1.0, 1)", "Record(NaN, 2)", "Record(2.0, 3)");
+
+        // the bounds still cover a finite partition
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "2.0")));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1.0, 1)", "Record(NaN, 2)");
+
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "NaN")));
+        assertThat(getIcebergResult()).containsExactly("Record(1.0, 1)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPartitionDropSkipsManifestsWhoseBoundsExcludeIt() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DOUBLE(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        ReadCountingFileIO fileIO = new ReadCountingFileIO();
+        FileStoreTable table =
+                createPaimonTable(
+                        fileIO,
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        -1,
+                        new HashMap<>());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // this manifest saw NaN, and its bounds [5.0, 5.0] rule out pt=1.0
+        write.write(GenericRow.of(5.0, 1));
+        write.write(GenericRow.of(Double.NaN, 2));
+        commit.commit(1, write.prepareCommit(false, 1));
+        Set<String> nanManifests = currentManifestNames(table);
+        assertThat(nanManifests).hasSize(1);
+
+        write.write(GenericRow.of(1.0, 3));
+        commit.commit(2, write.prepareCommit(false, 2));
+        Set<String> finiteManifests = currentManifestNames(table);
+
+        // this manifest has no NaN, and its bounds [2.0, 2.0] rule out pt=NaN
+        write.write(GenericRow.of(2.0, 4));
+        commit.commit(3, write.prepareCommit(false, 3));
+        Set<String> finiteOnlyManifests = currentManifestNames(table);
+        finiteOnlyManifests.removeAll(finiteManifests);
+        assertThat(finiteOnlyManifests).hasSize(1);
+
+        fileIO.readCounts.clear();
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "1.0")));
+        assertThat(fileIO.readCounts.keySet()).doesNotContainAnyElementsOf(nanManifests);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(5.0, 1)", "Record(NaN, 2)", "Record(2.0, 4)");
+
+        fileIO.readCounts.clear();
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "NaN")));
+        assertThat(fileIO.readCounts.keySet()).doesNotContainAnyElementsOf(finiteOnlyManifests);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(5.0, 1)", "Record(2.0, 4)");
+
+        write.close();
+        commit.close();
+    }
+
+    private Set<String> currentManifestNames(FileStoreTable table) {
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(
+                                table.location(),
+                                "metadata/v" + latestSnapshotId + ".metadata.json"));
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        return IcebergManifestList.create(table, pathFactory)
+                .read(new Path(metadata.currentSnapshot().manifestList()).getName()).stream()
+                .map(meta -> new Path(meta.manifestPath()).getName())
+                .collect(Collectors.toCollection(HashSet::new));
+    }
+
+    @Test
     public void testNullPartitionValue() throws Exception {
         RowType rowType =
                 RowType.of(
@@ -1637,6 +1745,39 @@ public class IcebergCompatibilityTest {
         commit.truncatePartitions(Collections.singletonList(partition));
 
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(null, 2)", "Record(b, 3)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testDropPartitionInManifestWithOneLiveRowAndNullPartition() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(null, 1));
+        write.write(GenericRow.of(1, 2));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // the rewritten manifest still reports contains_null for the deleted entry, and has a
+        // single live row left
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", table.coreOptions().partitionDefaultName());
+        commit.truncatePartitions(Collections.singletonList(partition));
+        assertThat(getIcebergResult()).containsExactly("Record(1, 2)");
+
+        partition.put("pt", "1");
+        commit.truncatePartitions(Collections.singletonList(partition));
+        assertThat(getIcebergResult()).isEmpty();
 
         write.close();
         commit.close();
@@ -3183,7 +3324,23 @@ public class IcebergCompatibilityTest {
             int numBuckets,
             Map<String, String> customOptions)
             throws Exception {
-        LocalFileIO fileIO = LocalFileIO.create();
+        return createPaimonTable(
+                LocalFileIO.create(),
+                rowType,
+                partitionKeys,
+                primaryKeys,
+                numBuckets,
+                customOptions);
+    }
+
+    private FileStoreTable createPaimonTable(
+            FileIO fileIO,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            int numBuckets,
+            Map<String, String> customOptions)
+            throws Exception {
         Path path = new Path(tempDir.toString());
 
         Options options = new Options(customOptions);
@@ -3372,5 +3529,19 @@ public class IcebergCompatibilityTest {
 
         IcebergCommitCallback.checkVariantNotPublishable(
                 RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}));
+    }
+
+    /** A {@link LocalFileIO} that counts the reads of each file name. */
+    private static class ReadCountingFileIO extends LocalFileIO {
+
+        private final Map<String, AtomicInteger> readCounts = new ConcurrentHashMap<>();
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            readCounts
+                    .computeIfAbsent(path.getName(), ignored -> new AtomicInteger())
+                    .incrementAndGet();
+            return super.newInputStream(path);
+        }
     }
 }
