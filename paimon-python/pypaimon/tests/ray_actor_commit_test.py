@@ -24,6 +24,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 import ray
 
 from pypaimon import CatalogFactory, Schema
@@ -118,6 +119,7 @@ class RayActorCommitTest(unittest.TestCase):
     # Happy paths
     # ------------------------------------------------------------------
 
+    @pytest.mark.python_commit
     def test_actor_mode_basic_write(self):
         table = self._create_append_table('test_actor_basic')
 
@@ -138,6 +140,7 @@ class RayActorCommitTest(unittest.TestCase):
                           arrow.column('value').to_pylist()))
         self.assertEqual(rows, [(1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')])
 
+    @pytest.mark.python_commit
     def test_actor_mode_empty_write_to_populated_table_returns_none(self):
         """No task committed, so the write reports None.
 
@@ -166,6 +169,7 @@ class RayActorCommitTest(unittest.TestCase):
             table.snapshot_manager().get_latest_snapshot().id,
             seeded.snapshot_id)
 
+    @pytest.mark.python_commit
     def test_actor_mode_multiple_batches(self):
         """Several write tasks commit through the actor without losing or
         duplicating rows."""
@@ -191,6 +195,7 @@ class RayActorCommitTest(unittest.TestCase):
         # Exactly once: no row lost, none committed twice.
         self.assertEqual(ids, list(range(50)))
 
+    @pytest.mark.python_commit
     def test_actor_mode_commits_incrementally(self):
         """Each write task commits its own snapshot rather than waiting for a
         single coordinator commit -- this is what actor mode buys over
@@ -227,6 +232,7 @@ class RayActorCommitTest(unittest.TestCase):
         # coordinator committed on everyone's behalf.
         self.assertEqual(len(set(commit_users)), len(commit_users))
 
+    @pytest.mark.python_commit
     def test_actor_mode_data_is_visible_before_the_write_finishes(self):
         """Actor mode's point is that a task's rows are queryable as soon as
         that task returns, without waiting for the rest of the write.
@@ -267,6 +273,7 @@ class RayActorCommitTest(unittest.TestCase):
         finally:
             datasink._shutdown_actor()
 
+    @pytest.mark.python_commit
     def test_actor_mode_applies_options(self):
         """`options` must reach the write tasks, not just be accepted and
         dropped. file.format is observable in the committed file names."""
@@ -328,6 +335,7 @@ class RayActorCommitTest(unittest.TestCase):
         )
         self.assertEqual(len(self._read_all(table)), 3)
 
+    @pytest.mark.python_commit
     def test_public_write_paimon_reaches_actor_mode(self):
         """``commit_mode`` and ``options`` must be reachable through the
         documented public entry point, not only through the internal
@@ -398,6 +406,7 @@ class RayActorCommitTest(unittest.TestCase):
         finally:
             table_write.close()
 
+    @pytest.mark.python_commit
     def test_committer_actor_skips_replayed_commit(self):
         """A replayed commit -- same commit_user and base_snapshot_id, as Ray
         resends after the actor dies mid-commit or a write task is retried --
@@ -424,6 +433,7 @@ class RayActorCommitTest(unittest.TestCase):
         )
         self.assertEqual(len(self._read_all(table)), 3)
 
+    @pytest.mark.python_commit
     def test_committer_actor_does_not_skip_distinct_commits(self):
         """Negative control: the dedup scan must only match a replay of the
         *same* task, not suppress a different task's commit."""
@@ -446,6 +456,7 @@ class RayActorCommitTest(unittest.TestCase):
         arrow = self._read_all(table)
         self.assertEqual(sorted(arrow.column('id').to_pylist()), [1, 2])
 
+    @pytest.mark.python_commit
     def test_committer_actor_dedup_survives_intervening_commits(self):
         """The pinned base is below the task's own first commit, so the replay
         is still found after other tasks have committed on top of it. This is
@@ -484,6 +495,7 @@ class RayActorCommitTest(unittest.TestCase):
             sorted(self._read_all(table).column('id').to_pylist()), [1, 2, 3]
         )
 
+    @pytest.mark.python_commit
     def test_actor_datasink_pins_dedup_base_on_driver(self):
         """on_write_start pins the dedup base once, before any task runs.
 
@@ -536,6 +548,7 @@ class RayActorCommitTest(unittest.TestCase):
         finally:
             datasink._shutdown_actor()
 
+    @pytest.mark.python_commit
     def test_dedup_base_and_scan_follow_the_configured_branch(self):
         """With ``branch`` in options, commits go to that branch, so the dedup
         bound and the scan have to be taken there too.
@@ -596,6 +609,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(
             sorted(self._read_all(branch_table).column('id').to_pylist()), [9])
 
+    @pytest.mark.python_commit
     def test_actor_datasink_reports_the_branch_it_wrote(self):
         """on_write_complete reports the snapshot of the branch written, not
         whatever main happens to be at."""
@@ -813,6 +827,7 @@ class RayActorCommitTest(unittest.TestCase):
         table.file_io.overwrite_file_utf8(
             snapshot_manager.latest_file, str(snapshot_id))
 
+    @pytest.mark.python_commit
     def test_commit_refuses_a_bound_whose_snapshot_was_rolled_back(self):
         """A rollback under an in-flight write must fail the commit outright.
 
@@ -858,6 +873,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(
             sorted(self._read_all(table).column('id').to_pylist()), [1])
 
+    @pytest.mark.python_commit
     def test_commit_refuses_a_pinned_bound_after_table_reset(self):
         """A reset to empty under a pinned bound must fail, not re-publish.
 
@@ -899,6 +915,7 @@ class RayActorCommitTest(unittest.TestCase):
         # Nothing was published over the reset history.
         self.assertIsNone(snapshot_manager.get_latest_snapshot())
 
+    @pytest.mark.python_commit
     def test_vouched_commit_still_validates_the_pinned_bound(self):
         """Vouching skips the duplicate scan, never the history check.
 
@@ -939,6 +956,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(
             sorted(self._read_all(table).column('id').to_pylist()), [1])
 
+    @pytest.mark.python_commit
     def test_cas_retry_refuses_an_observed_latest_regression(self):
         """A retry must notice the latest id falling below what it saw.
 
@@ -1013,6 +1031,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(
             sorted(self._read_all(table).column('id').to_pylist()), [1])
 
+    @pytest.mark.python_commit
     def test_cas_retry_refuses_a_regrown_history(self):
         """A regrown id line is a different history, not a recovered one.
 
@@ -1110,6 +1129,7 @@ class RayActorCommitTest(unittest.TestCase):
                 ids = sorted(self._read_all(table).column('id').to_pylist())
                 self.assertNotIn(42, ids)
 
+    @pytest.mark.python_commit
     def test_dedup_rescan_refuses_a_history_replaced_mid_scan(self):
         """A rescan that reads a replaced history must not keep the old one.
 
@@ -1191,6 +1211,7 @@ class RayActorCommitTest(unittest.TestCase):
         ids = sorted(self._read_all(table).column('id').to_pylist())
         self.assertNotIn(42, ids)
 
+    @pytest.mark.python_commit
     def test_authorization_rechecks_a_missing_latest(self):
         for permanent in (True, False):
             with self.subTest(permanent=permanent):
@@ -1245,6 +1266,7 @@ class RayActorCommitTest(unittest.TestCase):
                         sorted(self._read_all(table).column('id').to_pylist()),
                         [1, 42])
 
+    @pytest.mark.python_commit
     def test_missing_authorization_observation_never_reaches_publication(self):
         table = self._create_append_table('authorization_expired_observation')
         actor = PaimonCommitterActor(
@@ -1292,6 +1314,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(
             sorted(self._read_all(table).column('id').to_pylist()), [1, 99])
 
+    @pytest.mark.python_commit
     def test_recovery_checks_files_after_duplicate_filtering(self):
         for already_committed in (True, False):
             with self.subTest(already_committed=already_committed):
@@ -1348,6 +1371,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(attempts, [1])
         self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
 
+    @pytest.mark.python_commit
     def test_expired_retry_observation_requires_positive_commit_evidence(self):
         for landed in (True, False):
             with self.subTest(landed=landed):
@@ -1401,6 +1425,7 @@ class RayActorCommitTest(unittest.TestCase):
                     sorted(self._read_all(table).column('id').to_pylist()),
                     [1, 2, 42] if landed else [1, 2, 99])
 
+    @pytest.mark.python_commit
     def test_dedup_treats_a_missing_anchor_as_unknown_history(self):
         """A missing anchor with the id line above it proves nothing.
 
@@ -1487,6 +1512,7 @@ class RayActorCommitTest(unittest.TestCase):
             sorted(self._read_all(table).column('id').to_pylist()),
             [1, 3, 4, 42])
 
+    @pytest.mark.python_commit
     def test_dedup_tolerates_an_unreadable_unrelated_snapshot(self):
         """An id the scan cannot read is only fatal when the answer depends on
         it.
@@ -1522,6 +1548,7 @@ class RayActorCommitTest(unittest.TestCase):
             'being there to find',
         )
 
+    @pytest.mark.python_commit
     def test_vouching_actor_skips_the_scan_only_for_unseen_commit_users(self):
         """An actor alive since before the write's first commit knows a
         commit_user it has never attempted has nothing to be a replay of, so
@@ -1577,6 +1604,7 @@ class RayActorCommitTest(unittest.TestCase):
             'the replay was committed again',
         )
 
+    @pytest.mark.python_commit
     def test_commit_metadata_options_land_in_snapshot_properties(self):
         """``commit.metadata.*`` tags one commit with the caller's own metadata,
         re-prefixed so it cannot collide with Paimon's own snapshot keys."""
@@ -1599,6 +1627,7 @@ class RayActorCommitTest(unittest.TestCase):
             'nightly-42',
         )
 
+    @pytest.mark.python_commit
     def test_commit_without_metadata_options_has_no_extra_properties(self):
         """Negative control: the metadata plumbing must not invent properties
         for a commit that asked for none."""
@@ -1619,6 +1648,7 @@ class RayActorCommitTest(unittest.TestCase):
         self.assertEqual(
             [key for key in properties if 'commit.metadata' in key], [])
 
+    @pytest.mark.python_commit
     def test_commit_survives_the_latest_snapshot_expiring_mid_read(self):
         """The interleaving that matters: the snapshot a read resolved is
         expired before its file is read, while the snapshot that replaced it is
