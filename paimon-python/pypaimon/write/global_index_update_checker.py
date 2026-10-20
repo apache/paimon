@@ -93,6 +93,7 @@ def apply_global_index_update_action(
     snapshot,
     updated_cols: Sequence[str],
     written_partitions: Set[Tuple],
+    index_deletes=(),
 ) -> list:
     if snapshot is None or not updated_cols or not written_partitions:
         return []
@@ -104,9 +105,12 @@ def apply_global_index_update_action(
         return []
     field_by_id = {f.id: f.name for f in table.fields}
     update_set = set(updated_cols)
+    deleted = {_index_identity(e) for e in index_deletes if e.kind == 1}
     affected = []
     conflicted = set()
     for e in entries:
+        if _index_identity(e) in deleted:
+            continue
         if tuple(e.partition.values) not in written_partitions:
             continue
         matched = indexed_field_names(
@@ -126,3 +130,8 @@ def apply_global_index_update_action(
         f"Updated columns: {sorted(update_set)}\n"
         f"Conflicted columns: {sorted(conflicted)}"
     )
+
+
+def _index_identity(entry):
+    return (tuple(entry.partition.values), entry.bucket,
+            entry.index_file.index_type, entry.index_file.file_name)

@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from dataclasses import replace
 from unittest import mock
 
 from pypaimon.common.options.core_options import (
@@ -125,6 +126,27 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
 
         self.assertIn("'age'", str(ctx.exception))
         self.assertIn("Conflicted columns: ['age']", str(ctx.exception))
+
+    def test_only_an_exact_index_deletion_exempts_the_update_check(self):
+        table = _Table(CoreOptions.from_dict({}))
+        entry = _index_entry("idx-name", ("p0",), 1)
+        deleted = replace(entry, kind=1)
+        variants = {
+            "add": entry,
+            "partition": replace(deleted, partition=_partition_row(("p1",))),
+            "bucket": replace(deleted, bucket=1),
+            "type": replace(deleted, index_file=replace(entry.index_file, index_type="BITMAP")),
+            "file": replace(deleted, index_file=replace(entry.index_file, file_name="another-index")),
+        }
+        with mock.patch(
+                "pypaimon.write.global_index_update_checker.scan_global_index_entries",
+                return_value=[entry]):
+            self.assertEqual([], apply_global_index_update_action(
+                table, object(), ["name"], {("p0",)}, [deleted]))
+            for name, other in variants.items():
+                with self.subTest(identity=name):
+                    with self.assertRaisesRegex(RuntimeError, "Conflicted columns"):
+                        apply_global_index_update_action(table, object(), ["name"], {("p0",)}, [other])
 
     def test_ignore_action_skips_global_index_handling(self):
         options = CoreOptions.from_dict({

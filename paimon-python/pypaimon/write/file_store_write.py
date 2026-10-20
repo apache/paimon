@@ -353,6 +353,10 @@ class FileStoreWrite:
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
             writer._release_prepared_files()
+        # Existing bucket writers keep their advancing sequence counters. A
+        # bucket opened after this checkpoint must restore from the latest
+        # snapshot rather than reuse another bucket's earlier partition scan.
+        self.max_seq_numbers.clear()
 
     def close(self):
         """Close all data writers and clean up resources."""
