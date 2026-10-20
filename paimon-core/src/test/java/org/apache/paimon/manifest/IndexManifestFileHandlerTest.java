@@ -41,6 +41,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,6 +55,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class IndexManifestFileHandlerTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    void testBucketedDvReplacementChainEndingWithRemoval() {
+        IndexManifestEntry old =
+                new IndexManifestEntry(
+                        FileKind.ADD, BinaryRow.EMPTY_ROW, 0, randomDeletionVectorIndexFile());
+        IndexManifestEntry next =
+                new IndexManifestEntry(
+                        FileKind.ADD, BinaryRow.EMPTY_ROW, 0, randomDeletionVectorIndexFile());
+        assertThat(
+                        new IndexManifestFileHandler.BucketedCombiner()
+                                .combine(
+                                        Collections.singletonList(old),
+                                        Arrays.asList(
+                                                old.toDeleteEntry(), next, next.toDeleteEntry())))
+                .isEmpty();
+    }
 
     @Test
     public void testUnawareMode() throws Exception {

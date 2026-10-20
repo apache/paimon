@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileIOUtils;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -55,11 +56,95 @@ import java.util.stream.Collectors;
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /** Test for {@link BucketedDvMaintainer}. */
 public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
     private IndexFileHandler fileHandler;
     private final BinaryRow partition = BinaryRow.singleColumn(1);
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPreparedDeletesIgnoreIntermediateDvFiles(boolean lazy) {
+        initIndexHandler(false);
+        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
+        BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
+        initial.notifyNewDeletion("f1", 0);
+        IndexFileMeta base = initial.writeDeletionVectorsIndex().get();
+        BucketedDvMaintainer maintainer =
+                factory.create(partition, 0, Collections.singletonList(base));
+        maintainer.notifyNewDeletion("f1", 1);
+        CompactDeletionFile first =
+                lazy
+                        ? CompactDeletionFile.lazyGeneration(maintainer)
+                        : CompactDeletionFile.generateFiles(maintainer);
+        maintainer.notifyNewDeletion("f2", 2);
+        CompactDeletionFile second =
+                lazy
+                        ? CompactDeletionFile.lazyGeneration(maintainer)
+                        : CompactDeletionFile.generateFiles(maintainer);
+        IndexFileMeta output = second.mergeOldFile(first).getOrCompute().get();
+        CompactIncrement prepared =
+                new CompactIncrement(
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        Collections.singletonList(output),
+                        new ArrayList<>());
+        maintainer.prepareCommit(prepared);
+        assertThat(prepared.deletedIndexFiles()).containsExactly(base);
+
+        maintainer.notifyNewDeletion("f2", 3);
+        IndexFileMeta nextOutput = maintainer.writeDeletionVectorsIndex().get();
+        CompactIncrement next =
+                new CompactIncrement(
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        Collections.singletonList(nextOutput),
+                        new ArrayList<>());
+        maintainer.prepareCommit(next);
+        assertThat(next.deletedIndexFiles()).containsExactly(output);
+        assertThat(prepared.deletedIndexFiles()).containsExactly(base);
+    }
+
+    @Test
+    public void testUnchangedDvIsNotDeletedAndRemovalResetsState() {
+        initIndexHandler(false);
+        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
+        BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
+        initial.notifyNewDeletion("f1", 0);
+        IndexFileMeta base = initial.writeDeletionVectorsIndex().get();
+        BucketedDvMaintainer maintainer =
+                factory.create(partition, 0, Collections.singletonList(base));
+        CompactIncrement unchanged =
+                new CompactIncrement(
+                        Collections.singletonList(mock(DataFileMeta.class)),
+                        emptyList(),
+                        emptyList());
+        maintainer.prepareCommit(unchanged);
+        assertThat(unchanged.newIndexFiles()).isEmpty();
+        assertThat(unchanged.deletedIndexFiles()).isEmpty();
+
+        CompactIncrement removal =
+                new CompactIncrement(
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        Collections.singletonList(base));
+        maintainer.prepareCommit(removal);
+        maintainer.notifyNewDeletion("f2", 1);
+        CompactIncrement next =
+                new CompactIncrement(
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        Collections.singletonList(maintainer.writeDeletionVectorsIndex().get()),
+                        new ArrayList<>());
+        maintainer.prepareCommit(next);
+        assertThat(next.deletedIndexFiles()).isEmpty();
+    }
 
     @BeforeEach
     public void setUp() throws Exception {

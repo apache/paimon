@@ -1178,15 +1178,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<SimpleFileEntry> baseDataFiles = new ArrayList<>();
         boolean discardDuplicate =
                 options.commitDiscardDuplicateFiles() && commitKind == CommitKind.APPEND;
-        boolean checkConflicts = latestSnapshot != null && (discardDuplicate || detectConflicts);
+        // Validate initial DV publications too: an empty table cannot satisfy DELETE old-DV.
+        boolean initialDvCommit =
+                latestSnapshot == null
+                        && options.deletionVectorsEnabled()
+                        && bucketMode == BucketMode.HASH_FIXED
+                        && indexFiles.stream()
+                                .anyMatch(
+                                        entry ->
+                                                DELETION_VECTORS_INDEX.equals(
+                                                        entry.indexFile().indexType()));
+        boolean checkConflicts =
+                initialDvCommit || latestSnapshot != null && (discardDuplicate || detectConflicts);
         // By default, if checkConflicts is required, we do not have to do the extra check bucket
         // here.
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
         if (checkConflicts
-                && !conflictDetection.canSkipDataFileConflictDetection(
-                        latestSnapshot, deltaFiles, indexFiles, commitKind)) {
+                && (latestSnapshot == null
+                        || !conflictDetection.canSkipDataFileConflictDetection(
+                                latestSnapshot, deltaFiles, indexFiles, commitKind))) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             if (changedPartitions == null) {
@@ -1197,14 +1209,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             ? (CommitFailRetryResult) retryResult
                             : null;
             baseDataFiles =
-                    conflictDetection.scanBaseDataFiles(
-                            latestSnapshot,
-                            changedPartitions,
-                            deltaFiles,
-                            indexFiles,
-                            commitKind,
-                            commitFailRetry,
-                            hasOverwriteSinceLastAttempt);
+                    latestSnapshot == null
+                            ? emptyList()
+                            : conflictDetection.scanBaseDataFiles(
+                                    latestSnapshot,
+                                    changedPartitions,
+                                    deltaFiles,
+                                    indexFiles,
+                                    commitKind,
+                                    commitFailRetry,
+                                    hasOverwriteSinceLastAttempt);
             if (discardDuplicate) {
                 Set<FileEntry.Identifier> baseIdentifiers =
                         baseDataFiles.stream()

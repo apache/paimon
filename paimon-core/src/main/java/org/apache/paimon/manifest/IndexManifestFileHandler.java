@@ -182,13 +182,33 @@ public class IndexManifestFileHandler {
                 indexEntries.put(identifier(entry), entry);
             }
 
+            // DV replacements form an ordered chain (D0 -> D1 -> no DV is also valid).
+            // Hash indexes retain their existing delete-before-add semantics below.
+            for (IndexManifestEntry entry : newIndexFiles) {
+                if (DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                    if (entry.kind() == FileKind.DELETE) {
+                        IndexManifestEntry current = indexEntries.get(identifier(entry));
+                        if (current != null
+                                && current.indexFile()
+                                        .fileName()
+                                        .equals(entry.indexFile().fileName())) {
+                            indexEntries.remove(identifier(entry));
+                        }
+                    } else {
+                        indexEntries.put(identifier(entry), entry);
+                    }
+                }
+            }
+
             // The deleted entry is processed first to avoid overwriting a new entry.
             List<IndexManifestEntry> removed =
                     newIndexFiles.stream()
+                            .filter(f -> !DELETION_VECTORS_INDEX.equals(f.indexFile().indexType()))
                             .filter(f -> f.kind() == FileKind.DELETE)
                             .collect(Collectors.toList());
             List<IndexManifestEntry> added =
                     newIndexFiles.stream()
+                            .filter(f -> !DELETION_VECTORS_INDEX.equals(f.indexFile().indexType()))
                             .filter(f -> f.kind() == FileKind.ADD)
                             .collect(Collectors.toList());
             for (IndexManifestEntry entry : removed) {

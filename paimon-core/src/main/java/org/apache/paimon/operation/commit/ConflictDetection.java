@@ -203,15 +203,201 @@ public abstract class ConflictDetection {
         return false;
     }
 
+    /**
+     * Fixed-bucket DV indexes replace the entire bucket state. DELETE declares the old index; ADD
+     * requires its absence after the preceding DELETE. Legacy ADD-only replacements are rejected
+     * when a bucket already has an index.
+     *
+     * <p>A physical rewrite without index changes must not consume an input with a current DV:
+     * otherwise it would discard a deletion which it never applied. Level-only upgrades retain
+     * physical row positions and are excluded.
+     */
+    private Optional<RuntimeException> checkBucketedDeletionVectorConflicts(
+            @Nullable Snapshot latestSnapshot,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries) {
+        if (!deletionVectorsEnabled || bucketMode != BucketMode.HASH_FIXED) {
+            return Optional.empty();
+        }
+
+        Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
+        Map<Pair<BinaryRow, Integer>, Set<String>> retainedFiles = new HashMap<>();
+        for (SimpleFileEntry entry : deltaEntries) {
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            if (entry.kind() == FileKind.DELETE) {
+                buckets.add(bucket);
+            } else {
+                retainedFiles
+                        .computeIfAbsent(bucket, ignored -> new HashSet<>())
+                        .add(entry.fileName());
+            }
+        }
+        Set<Pair<BinaryRow, Integer>> changedDvBuckets = new HashSet<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+                buckets.add(bucket);
+                changedDvBuckets.add(bucket);
+            }
+        }
+        if (buckets.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> snapshotFiles =
+                latestSnapshot == null
+                        ? Collections.emptyMap()
+                        : indexFileHandler.scanBuckets(
+                                latestSnapshot, DELETION_VECTORS_INDEX, buckets);
+        Map<Pair<BinaryRow, Integer>, IndexFileMeta> states = new HashMap<>();
+        for (Pair<BinaryRow, Integer> bucket : buckets) {
+            List<IndexFileMeta> files = snapshotFiles.getOrDefault(bucket, Collections.emptyList());
+            checkState(files.size() <= 1, "Expected at most one DV index per bucket.");
+            if (!files.isEmpty()) {
+                states.put(bucket, files.get(0));
+            }
+        }
+
+        // Use the same order as BucketedCombiner, including consecutive replacements.
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            IndexFileMeta index = entry.indexFile();
+            if (!DELETION_VECTORS_INDEX.equals(index.indexType())) {
+                continue;
+            }
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            IndexFileMeta current = states.get(bucket);
+            String expected = entry.kind() == FileKind.DELETE ? index.fileName() : null;
+            String actual = current == null ? null : current.fileName();
+            if (!Objects.equals(expected, actual)) {
+                return bucketedDvConflict(
+                        latestSnapshot,
+                        bucket,
+                        String.format("expected DV file %s, current DV file %s", expected, actual));
+            }
+            if (entry.kind() == FileKind.DELETE) {
+                states.remove(bucket);
+            } else {
+                states.put(bucket, index);
+            }
+        }
+
+        for (SimpleFileEntry entry : deltaEntries) {
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            if (entry.kind() != FileKind.DELETE
+                    || changedDvBuckets.contains(bucket)
+                    || retainedFiles
+                            .getOrDefault(bucket, Collections.emptySet())
+                            .contains(entry.fileName())) {
+                continue;
+            }
+            IndexFileMeta current = states.get(bucket);
+            if (current != null) {
+                if (current.dvRanges() == null) {
+                    return bucketedDvConflict(
+                            latestSnapshot,
+                            bucket,
+                            "Missing data-file references for DV file " + current.fileName());
+                }
+                if (current.dvRanges().containsKey(entry.fileName())) {
+                    return bucketedDvConflict(
+                            latestSnapshot,
+                            bucket,
+                            String.format(
+                                    "rewritten input %s acquired a DV in %s",
+                                    entry.fileName(), current.fileName()));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> bucketedDvConflict(
+            @Nullable Snapshot latestSnapshot, Pair<BinaryRow, Integer> bucket, String detail) {
+        return Optional.of(
+                new IllegalStateException(
+                        String.format(
+                                "Deletion vector conflict for table %s, partition %s, bucket %s "
+                                        + "at snapshot %s: %s. Reload the latest state and recompute "
+                                        + "compaction or the DML operation; do not retry the stale result.",
+                                tableName,
+                                pathFactory.getPartitionString(bucket.getLeft()),
+                                bucket.getRight(),
+                                latestSnapshot == null ? null : latestSnapshot.id(),
+                                detail)));
+    }
+
+    /** Validate only newly published DV references against the resulting physical files. */
+    private Optional<RuntimeException> checkBucketedDvReferencedFiles(
+            @Nullable Snapshot latestSnapshot,
+            Collection<SimpleFileEntry> mergedEntries,
+            List<IndexManifestEntry> deltaIndexEntries) {
+        if (!deletionVectorsEnabled || bucketMode != BucketMode.HASH_FIXED) {
+            return Optional.empty();
+        }
+        Map<Pair<BinaryRow, Integer>, IndexFileMeta> addedDvs = new HashMap<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (!DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                continue;
+            }
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            if (entry.kind() == FileKind.ADD) {
+                addedDvs.put(bucket, entry.indexFile());
+            } else {
+                addedDvs.remove(bucket);
+            }
+        }
+        if (addedDvs.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<Pair<BinaryRow, Integer>, Set<String>> liveFiles = new HashMap<>();
+        for (SimpleFileEntry entry : mergedEntries) {
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            if (entry.kind() == FileKind.ADD && addedDvs.containsKey(bucket)) {
+                liveFiles.computeIfAbsent(bucket, ignored -> new HashSet<>()).add(entry.fileName());
+            }
+        }
+        for (Map.Entry<Pair<BinaryRow, Integer>, IndexFileMeta> entry : addedDvs.entrySet()) {
+            Pair<BinaryRow, Integer> bucket = entry.getKey();
+            IndexFileMeta dv = entry.getValue();
+            if (dv.dvRanges() == null) {
+                return bucketedDvConflict(
+                        latestSnapshot,
+                        bucket,
+                        "Missing data-file references for DV file " + dv.fileName());
+            }
+            Set<String> files = liveFiles.getOrDefault(bucket, Collections.emptySet());
+            for (DeletionVectorMeta reference : dv.dvRanges().values()) {
+                if (!files.contains(reference.dataFileName())) {
+                    return bucketedDvConflict(
+                            latestSnapshot,
+                            bucket,
+                            String.format(
+                                    "DV file %s references data file %s which is not present "
+                                            + "after applying changes",
+                                    dv.fileName(), reference.dataFileName()));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     public final Optional<RuntimeException> checkConflicts(
-            Snapshot latestSnapshot,
+            @Nullable Snapshot latestSnapshot,
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
             @Nullable RowIdConflictChecker rowIdConflictChecker,
             CommitKind commitKind) {
-        String baseCommitUser = latestSnapshot.commitUser();
-        if (deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE)) {
+        Optional<RuntimeException> dvConflict =
+                checkBucketedDeletionVectorConflicts(
+                        latestSnapshot, deltaEntries, deltaIndexEntries);
+        if (dvConflict.isPresent()) {
+            return dvConflict;
+        }
+        String baseCommitUser = latestSnapshot == null ? commitUser : latestSnapshot.commitUser();
+        if (latestSnapshot != null
+                && deletionVectorsEnabled
+                && bucketMode.equals(BucketMode.BUCKET_UNAWARE)) {
             // Enrich dvName in fileEntry to checker for base ADD dv and delta DELETE dv.
             // For example:
             // If the base file is <ADD baseFile1, ADD dv1>,
@@ -265,6 +451,11 @@ public abstract class ConflictDetection {
 
         exception = checkDeleteInEntries(mergedEntries, conflictException);
         if (exception.isPresent()) {
+            return exception;
+        }
+        exception =
+                checkBucketedDvReferencedFiles(latestSnapshot, mergedEntries, deltaIndexEntries);
+        if (exception.isPresent() || latestSnapshot == null) {
             return exception;
         }
         return checkTableSpecificConflicts(
