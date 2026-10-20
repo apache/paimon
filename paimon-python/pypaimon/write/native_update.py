@@ -310,6 +310,14 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         # surviving payloads before applying row-ID update or append rules;
         # validating all payload types here would reject valid matched updates.
         key_names = list(dict.fromkeys(keys + table.partition_keys))
+        for name in key_names:
+            field = data.schema.field(name)
+            if pa.types.is_null(field.type):
+                # An untyped NULL has the same match identity as a typed NULL.
+                # Give core the declared key layout without casting payloads.
+                data = data.set_column(
+                    data.schema.get_field_index(name), field.with_type(schema.field(name).type),
+                    pa.nulls(data.num_rows, type=schema.field(name).type))
         if not all(_native_upsert_key_compatible(data.column(name), schema.field(name).type)
                    for name in key_names):
             return None

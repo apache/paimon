@@ -142,6 +142,9 @@ class TableUpdate:
     def _new_row_id_updater(
             self, commit_identifier: int, _precomputed_files_info=None
     ) -> TableUpdateByRowId:
+        # Authorize outside the native preparation fallback so a denied or
+        # restricted grant cannot be swallowed and retried by another reader.
+        _authorize_update(self.table)
         if _precomputed_files_info is None:
             from pypaimon.write.native_update import create_native_update_by_row_id
             try:

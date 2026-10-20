@@ -50,6 +50,7 @@ def test_write_builder_creates_row_id_updater_with_commit_identity(
         stream, commit_identifier):
     table = mock.Mock()
     table.options.commit_user_prefix.return_value = None
+    table.catalog_environment.table_query_auth.return_value = None
     files_info = mock.Mock(
         snapshot_id=42,
         first_row_ids=[0],

@@ -830,7 +830,7 @@ class TableWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits)
+        actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(expect.cast(read_arrow_schema(table.fields)), actual)
 
     def test_postpone_file_store_write_validates_runtime_bucket_count(self):

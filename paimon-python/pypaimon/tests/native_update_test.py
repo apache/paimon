@@ -1015,8 +1015,8 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
         native_calls.append(operation)
         return original(*args, **kwargs)
 
-    # Check a second update too: fallback outputs must remain readable on the
-    # next operation, and canonical files must continue using native updates.
+    # Check a second update too: outputs must remain readable and all supported
+    # partition layouts must continue using native updates.
     with patch.object(wrapper, method, track):
         for value in [11, 12]:
             builder = table.new_batch_write_builder()
@@ -1029,5 +1029,4 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
             read = table.new_read_builder()
             actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
             assert actual.to_pydict() == {'id': [1, 2], 'part': parts, 'value': [value, value]}
-    expected_calls = 0 if layout == 'external-binary' else 2
-    assert len(native_calls) == expected_calls
+    assert len(native_calls) == 2

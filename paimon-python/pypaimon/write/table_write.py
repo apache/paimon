@@ -151,7 +151,11 @@ class TableWrite:
         if write_cols is not None:
             # Keep routing columns available for full-schema inputs, then
             # write only the columns and order recorded in the file metadata.
-            data = data.select(write_cols)
+            # RecordBatch.select is unavailable in Arrow 6 (Python 3.6).
+            data = pa.RecordBatch.from_arrays(
+                [data.column(name) for name in write_cols],
+                schema=pa.schema([data.schema.field(name) for name in write_cols],
+                                 metadata=data.schema.metadata))
         self.file_store_write.write(partition, bucket, data)
 
     def _write_precomputed_bucket(self, data, bucket):
