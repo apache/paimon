@@ -1628,9 +1628,6 @@ public class SchemaValidation {
             checkArgument(
                     rowTrackingEnabled,
                     "Data evolution config must enabled with row-tracking.enabled");
-            checkArgument(
-                    !options.clusteringIncrementalEnabled(),
-                    "Data evolution config must disabled with clustering.incremental");
         }
 
         if (options.dataEvolutionNestedFieldEnabled()) {
@@ -1925,6 +1922,16 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+            if (options.dataEvolutionEnabled()) {
+                checkArgument(
+                        fieldNamesInBlobFile(schema.logicalRowType(), options.blobInlineField())
+                                .isEmpty(),
+                        "Data evolution incremental clustering does not support dedicated BLOB files.");
+                checkArgument(
+                        vectorFileFormat(options) == null
+                                || fieldsInVectorFile(schema.logicalRowType(), true).isEmpty(),
+                        "Data evolution incremental clustering does not support dedicated VECTOR files.");
+            }
             if (options.bucket() != -1) {
                 checkArgument(
                         !options.bucketAppendOrdered(),
