@@ -500,7 +500,7 @@ def _prepare_native_read(table, predicate: Optional[Predicate] = None,
                          blob_parallelism: Optional[int] = None,
                          read_type: Optional[List[DataField]] = None,
                          include_row_kind: bool = False):
-    """Create one Rust reader reusable across split groups."""
+    """Create the configured Core reader entrypoint."""
     if not native_runtime_available():
         raise RuntimeError(
             "read.native.enabled needs the pypaimon-rust extension")
@@ -527,8 +527,10 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
                 projection: Optional[List[str]] = None,
                 blob_parallelism: Optional[int] = None,
                 read_type: Optional[List[DataField]] = None,
-                include_row_kind: bool = False):
-    """Read Rust ``Split`` objects into PyArrow ``RecordBatch`` objects."""
+                include_row_kind: bool = False,
+                parallelism: int = 1,
+                preserve_split_order: bool = False):
+    """Run one Core read, including split scheduling and its total row quota."""
     read_splits = _prepare_native_read(
         table,
         predicate=predicate,
@@ -537,7 +539,7 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
         blob_parallelism=blob_parallelism,
         read_type=read_type,
         include_row_kind=include_row_kind)
-    return read_splits(splits)
+    return read_splits(splits, parallelism=parallelism, preserve_split_order=preserve_split_order)
 
 
 def native_plan(
