@@ -45,11 +45,9 @@ public class DeletionVectorIndexFileWriter {
     }
 
     /**
-     * The deletion file of the bucketed table is updated according to the bucket. If a compaction
-     * occurs and there is no longer a deletion file, an empty deletion file needs to be generated
-     * to overwrite the old file.
-     *
-     * <p>TODO: We can consider sending a message to delete the deletion file in the future.
+     * Write all bucket deletion vectors into one index file. When compaction removes all deletion
+     * vectors, {@link BucketedDvMaintainer} emits a DELETE for the old index instead of calling
+     * this method with an empty map.
      */
     public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) throws IOException {
         DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);

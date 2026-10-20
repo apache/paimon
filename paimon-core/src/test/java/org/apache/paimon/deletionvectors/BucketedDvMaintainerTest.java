@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer.DeletionVectorUpdate;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -63,6 +64,115 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
     private IndexFileHandler fileHandler;
     private final BinaryRow partition = BinaryRow.singleColumn(1);
 
+    /**
+     * Clearing must supersede an unpublished replacement, even if followed by an unchanged result.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testClearDvDoesNotWriteEmptyIndex(boolean lazy) {
+        initIndexHandler(false);
+        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
+        BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
+        initial.notifyNewDeletion("f1", 0);
+        IndexFileMeta base = initial.writeDeletionVectorsIndex().newFile().get();
+        BucketedDvMaintainer maintainer =
+                factory.create(partition, 0, Collections.singletonList(base));
+
+        maintainer.notifyNewDeletion("f1", 1);
+        CompactDeletionFile replacement = compactDeletionFile(maintainer, lazy);
+        maintainer.removeDeletionVectorOf("f1");
+        CompactDeletionFile clear = compactDeletionFile(maintainer, lazy).mergeOldFile(replacement);
+        CompactDeletionFile unchanged = compactDeletionFile(maintainer, lazy).mergeOldFile(clear);
+        DeletionVectorUpdate update = unchanged.getOrCompute();
+        assertThat(update.hasChanges()).isTrue();
+        assertThat(update.newFile()).isEmpty();
+        File indexDir = new File(tempPath.toFile(), "/default.db/T/index");
+        // The published baseline stays readable; only unpublished intermediate files are cleaned.
+        assertThat(indexDir.list()).containsExactly(base.fileName());
+        assertThat(
+                        fileHandler
+                                .readAllDeletionVectors(
+                                        partition, 0, Collections.singletonList(base))
+                                .get("f1")
+                                .isDeleted(0))
+                .isTrue();
+
+        CompactIncrement removal = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(removal.newIndexFiles(), removal.deletedIndexFiles(), update);
+        assertThat(removal.newIndexFiles()).isEmpty();
+        assertThat(removal.deletedIndexFiles()).containsExactly(base);
+
+        CompactIncrement noChange = CompactIncrement.emptyIncrement();
+        DeletionVectorUpdate noUpdate = maintainer.writeDeletionVectorsIndex();
+        assertThat(noUpdate.hasChanges()).isFalse();
+        maintainer.prepareCommit(noChange.newIndexFiles(), noChange.deletedIndexFiles(), noUpdate);
+        assertThat(noChange.isEmpty()).isTrue();
+
+        maintainer.notifyNewDeletion("f2", 2);
+        CompactIncrement next = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(
+                next.newIndexFiles(),
+                next.deletedIndexFiles(),
+                maintainer.writeDeletionVectorsIndex());
+        assertThat(next.newIndexFiles()).hasSize(1);
+        assertThat(next.deletedIndexFiles()).isEmpty();
+    }
+
+    /**
+     * A later replacement supersedes a clear, and still deletes the published baseline only once.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testClearThenReplaceBeforePrepare(boolean lazy) {
+        initIndexHandler(false);
+        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
+        BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
+        initial.notifyNewDeletion("f1", 0);
+        IndexFileMeta base = initial.writeDeletionVectorsIndex().newFile().get();
+        BucketedDvMaintainer maintainer =
+                factory.create(partition, 0, Collections.singletonList(base));
+        maintainer.removeDeletionVectorOf("f1");
+        CompactDeletionFile clear = compactDeletionFile(maintainer, lazy);
+        maintainer.notifyNewDeletion("f2", 1);
+        CompactDeletionFile replacement = compactDeletionFile(maintainer, lazy).mergeOldFile(clear);
+
+        CompactIncrement increment = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(
+                increment.newIndexFiles(),
+                increment.deletedIndexFiles(),
+                replacement.getOrCompute());
+        assertThat(increment.deletedIndexFiles()).containsExactly(base);
+        assertThat(increment.newIndexFiles()).hasSize(1);
+        Map<String, DeletionVector> vectors =
+                fileHandler.readAllDeletionVectors(partition, 0, increment.newIndexFiles());
+        assertThat(vectors).containsOnlyKeys("f2");
+        assertThat(vectors.get("f2").isDeleted(1)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testUnpublishedDvClearedBeforeFirstPrepare(boolean lazy) {
+        initIndexHandler(false);
+        BucketedDvMaintainer maintainer =
+                BucketedDvMaintainer.factory(fileHandler).create(partition, 0, emptyList());
+        maintainer.notifyNewDeletion("f1", 0);
+        CompactDeletionFile replacement = compactDeletionFile(maintainer, lazy);
+        maintainer.removeDeletionVectorOf("f1");
+        CompactDeletionFile clear = compactDeletionFile(maintainer, lazy).mergeOldFile(replacement);
+        CompactIncrement increment = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(
+                increment.newIndexFiles(), increment.deletedIndexFiles(), clear.getOrCompute());
+        assertThat(increment.isEmpty()).isTrue();
+        File indexDir = new File(tempPath.toFile(), "/default.db/T/index");
+        assertThat(indexDir.list() == null || indexDir.list().length == 0).isTrue();
+    }
+
+    private CompactDeletionFile compactDeletionFile(BucketedDvMaintainer maintainer, boolean lazy) {
+        return lazy
+                ? CompactDeletionFile.lazyGeneration(maintainer)
+                : CompactDeletionFile.generateFiles(maintainer);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testPreparedDeletesIgnoreIntermediateDvFiles(boolean lazy) {
@@ -70,7 +180,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
         BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
         initial.notifyNewDeletion("f1", 0);
-        IndexFileMeta base = initial.writeDeletionVectorsIndex().get();
+        IndexFileMeta base = initial.writeDeletionVectorsIndex().newFile().get();
         BucketedDvMaintainer maintainer =
                 factory.create(partition, 0, Collections.singletonList(base));
         maintainer.notifyNewDeletion("f1", 1);
@@ -83,27 +193,18 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                 lazy
                         ? CompactDeletionFile.lazyGeneration(maintainer)
                         : CompactDeletionFile.generateFiles(maintainer);
-        IndexFileMeta output = second.mergeOldFile(first).getOrCompute().get();
-        CompactIncrement prepared =
-                new CompactIncrement(
-                        emptyList(),
-                        emptyList(),
-                        emptyList(),
-                        Collections.singletonList(output),
-                        new ArrayList<>());
-        maintainer.prepareCommit(prepared);
+        DeletionVectorUpdate update = second.mergeOldFile(first).getOrCompute();
+        IndexFileMeta output = update.newFile().get();
+        CompactIncrement prepared = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(prepared.newIndexFiles(), prepared.deletedIndexFiles(), update);
+        assertThat(prepared.newIndexFiles()).containsExactly(output);
         assertThat(prepared.deletedIndexFiles()).containsExactly(base);
 
         maintainer.notifyNewDeletion("f2", 3);
-        IndexFileMeta nextOutput = maintainer.writeDeletionVectorsIndex().get();
-        CompactIncrement next =
-                new CompactIncrement(
-                        emptyList(),
-                        emptyList(),
-                        emptyList(),
-                        Collections.singletonList(nextOutput),
-                        new ArrayList<>());
-        maintainer.prepareCommit(next);
+        DeletionVectorUpdate nextUpdate = maintainer.writeDeletionVectorsIndex();
+        CompactIncrement next = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(next.newIndexFiles(), next.deletedIndexFiles(), nextUpdate);
+        assertThat(next.newIndexFiles()).containsExactly(nextUpdate.newFile().get());
         assertThat(next.deletedIndexFiles()).containsExactly(output);
         assertThat(prepared.deletedIndexFiles()).containsExactly(base);
     }
@@ -114,7 +215,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
         BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
         initial.notifyNewDeletion("f1", 0);
-        IndexFileMeta base = initial.writeDeletionVectorsIndex().get();
+        IndexFileMeta base = initial.writeDeletionVectorsIndex().newFile().get();
         BucketedDvMaintainer maintainer =
                 factory.create(partition, 0, Collections.singletonList(base));
         CompactIncrement unchanged =
@@ -122,27 +223,28 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                         Collections.singletonList(mock(DataFileMeta.class)),
                         emptyList(),
                         emptyList());
-        maintainer.prepareCommit(unchanged);
+        maintainer.prepareCommit(
+                unchanged.newIndexFiles(),
+                unchanged.deletedIndexFiles(),
+                maintainer.writeDeletionVectorsIndex());
         assertThat(unchanged.newIndexFiles()).isEmpty();
         assertThat(unchanged.deletedIndexFiles()).isEmpty();
 
-        CompactIncrement removal =
-                new CompactIncrement(
-                        emptyList(),
-                        emptyList(),
-                        emptyList(),
-                        emptyList(),
-                        Collections.singletonList(base));
-        maintainer.prepareCommit(removal);
+        maintainer.removeDeletionVectorOf("f1");
+        CompactIncrement removal = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(
+                removal.newIndexFiles(),
+                removal.deletedIndexFiles(),
+                maintainer.writeDeletionVectorsIndex());
+        assertThat(removal.newIndexFiles()).isEmpty();
+        assertThat(removal.deletedIndexFiles()).containsExactly(base);
         maintainer.notifyNewDeletion("f2", 1);
-        CompactIncrement next =
-                new CompactIncrement(
-                        emptyList(),
-                        emptyList(),
-                        emptyList(),
-                        Collections.singletonList(maintainer.writeDeletionVectorsIndex().get()),
-                        new ArrayList<>());
-        maintainer.prepareCommit(next);
+        CompactIncrement next = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(
+                next.newIndexFiles(),
+                next.deletedIndexFiles(),
+                maintainer.writeDeletionVectorsIndex());
+        assertThat(next.newIndexFiles()).hasSize(1);
         assertThat(next.deletedIndexFiles()).isEmpty();
     }
 
@@ -171,7 +273,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
 
         assertThat(dvMaintainer.deletionVectorOf("f1")).isPresent();
         assertThat(dvMaintainer.deletionVectorOf("f3")).isEmpty();
-        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
 
         Map<String, DeletionVector> deletionVectors =
                 fileHandler.readAllDeletionVectors(partition, 0, Collections.singletonList(file));
@@ -197,7 +299,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         dvMaintainer.notifyNewDeletion("f1", deletionVector1);
         assertThat(dvMaintainer.bitmap64()).isEqualTo(bitmap64);
 
-        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
         CommitMessage commitMessage =
                 new CommitMessageImpl(
                         partition,
@@ -224,7 +326,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         deletionVector2.delete(2);
         dvMaintainer.notifyNewDeletion("f1", deletionVector2);
 
-        file = dvMaintainer.writeDeletionVectorsIndex().get();
+        file = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
         commitMessage =
                 new CommitMessageImpl(
                         partition,
@@ -302,7 +404,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         dvMaintainer1.notifyNewDeletion("f2", 3);
         assertThat(dvMaintainer1.bitmap64()).isEqualTo(bitmap64);
 
-        IndexFileMeta file = dvMaintainer1.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer1.writeDeletionVectorsIndex().newFile().get();
         CommitMessage commitMessage1 =
                 new CommitMessageImpl(
                         partition,
@@ -339,7 +441,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvs.get("f3"))
                 .isInstanceOf(bitmap64 ? BitmapDeletionVector.class : Bitmap64DeletionVector.class);
 
-        file = dvMaintainer2.writeDeletionVectorsIndex().get();
+        file = dvMaintainer2.writeDeletionVectorsIndex().newFile().get();
         CommitMessage commitMessage2 =
                 new CommitMessageImpl(
                         partition,

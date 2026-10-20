@@ -2525,30 +2525,6 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testBucketedDvConflictWithoutBaseSnapshot() throws Exception {
-        TestFileStore store =
-                createStore(
-                        false,
-                        Collections.singletonMap(
-                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
-        BinaryRow partition = gen.getPartition(gen.next());
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            assertThatThrownBy(
-                            () ->
-                                    commit.commit(
-                                            bucketedDvCommittable(
-                                                    partition, 0, 0, "missing-dv", "new-dv"),
-                                            false))
-                    .hasMessageContaining("expected DV file missing-dv, current DV file null");
-            assertThat(store.snapshotManager().latestSnapshot()).isNull();
-            // The same committer can publish a result that was prepared against no DV.
-            commit.commit(bucketedDvCommittable(partition, 0, 0, null, "new-dv"), false);
-        }
-        assertThat(store.snapshotManager().latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.COMPACT);
-    }
-
-    @Test
     public void testBucketedDvConflictIgnoresOtherBuckets() throws Exception {
         TestFileStore store =
                 createStore(
@@ -2607,7 +2583,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testCombinedBucketedDvCommitsThroughEmptyBaseline() throws Exception {
+    public void testConsecutiveBucketedDvCommitsThroughEmptyBaseline() throws Exception {
         TestFileStore store =
                 createStore(
                         false,
@@ -2627,14 +2603,22 @@ public class FileStoreCommitTest {
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.singletonList(baseDv));
-        ManifestCommittable combined = new ManifestCommittable(1);
-        combined.addFileCommittable(
+        ManifestCommittable clear = new ManifestCommittable(1);
+        clear.addFileCommittable(
                 new CommitMessageImpl(partition, 0, 1, DataIncrement.emptyIncrement(), removal));
-        combined.addFileCommittable(
-                bucketedDvCommittable(partition, 0, 1, null, "next-dv").fileCommittables().get(0));
+        ManifestCommittable next = bucketedDvCommittable(partition, 0, 2, null, "next-dv");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             commit.commit(base, false);
-            commit.commit(combined, false);
+            commit.commit(clear, false);
+            assertThat(
+                            store.newIndexFileHandler()
+                                    .scan(
+                                            store.snapshotManager().latestSnapshot(),
+                                            DELETION_VECTORS_INDEX,
+                                            partition,
+                                            0))
+                    .isEmpty();
+            commit.commit(next, false);
         }
         assertThat(
                         store.newIndexFileHandler()

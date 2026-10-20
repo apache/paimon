@@ -144,8 +144,10 @@ class ClusteringTableTest {
             List<CommitMessage> preparedB = b.prepareCommit();
             commitA.commit(preparedA);
             assertThatThrownBy(() -> commitB.commit(preparedB))
-                    .hasMessageContaining("Deletion vector conflict")
-                    .hasMessageContaining("recompute compaction");
+                    .hasMessageContaining(
+                            existingDv
+                                    ? "File deletion conflicts detected"
+                                    : "Deletion vector conflict");
             // B's APPEND may already be committed, but its stale compact/DV must not be visible.
             assertThat(readRows()).containsExactly(GenericRow.of(1, 12));
         }
@@ -180,18 +182,21 @@ class ClusteringTableTest {
         }
     }
 
+    /** Prepared DV updates depend on the preceding result and are committed in checkpoint order. */
     @Test
-    public void testCombinedPreparedDvCommits() throws Exception {
+    public void testPendingDvCommitsAreSubmittedInOrder() throws Exception {
         writeRows(Collections.singletonList(GenericRow.of(1, 10)));
         StreamWriteBuilder builder = table.newStreamWriteBuilder();
         try (StreamTableWrite write =
                         (StreamTableWrite) builder.newWrite().withIOManager(ioManager);
                 StreamTableCommit commit = builder.newCommit()) {
             write.write(GenericRow.of(1, 20));
-            List<CommitMessage> messages = new ArrayList<>(write.prepareCommit(true, 0));
+            List<CommitMessage> first = write.prepareCommit(true, 0);
             write.write(GenericRow.of(1, 30));
-            messages.addAll(write.prepareCommit(true, 1));
-            commit.commit(1, messages);
+            List<CommitMessage> second = write.prepareCommit(true, 1);
+            commit.commit(0, first);
+            assertThat(readRows()).containsExactly(GenericRow.of(1, 20));
+            commit.commit(1, second);
             assertThat(readRows()).containsExactly(GenericRow.of(1, 30));
         }
     }

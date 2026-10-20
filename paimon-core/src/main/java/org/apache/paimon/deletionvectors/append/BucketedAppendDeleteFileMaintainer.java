@@ -62,8 +62,7 @@ public class BucketedAppendDeleteFileMaintainer implements BaseAppendDeleteFileM
         List<IndexManifestEntry> result = new ArrayList<>();
         List<IndexFileMeta> added = new ArrayList<>();
         List<IndexFileMeta> deleted = new ArrayList<>();
-        maintainer.writeDeletionVectorsIndex().ifPresent(added::add);
-        maintainer.prepareCommit(added, deleted);
+        maintainer.prepareCommit(added, deleted, maintainer.writeDeletionVectorsIndex());
         for (IndexFileMeta file : deleted) {
             result.add(new IndexManifestEntry(FileKind.DELETE, partition, bucket, file));
         }

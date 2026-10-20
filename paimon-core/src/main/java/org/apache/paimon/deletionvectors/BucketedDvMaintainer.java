@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.CompactIncrement;
 
 import javax.annotation.Nullable;
 
@@ -31,9 +30,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Maintainer of deletionVectors index. */
 public class BucketedDvMaintainer {
@@ -111,49 +107,37 @@ public class BucketedDvMaintainer {
         }
     }
 
-    /**
-     * Write new deletion vectors index file if any modifications have been made.
-     *
-     * @return None if no modifications have been made, otherwise the new deletion vectors index
-     *     file.
-     */
-    public Optional<IndexFileMeta> writeDeletionVectorsIndex() {
-        if (modified) {
-            modified = false;
-            return Optional.of(dvIndexFile.writeSingleFile(deletionVectors));
+    /** Capture an index update, without writing an empty file when all DVs have been removed. */
+    public DeletionVectorUpdate writeDeletionVectorsIndex() {
+        if (!modified) {
+            return DeletionVectorUpdate.unchanged();
         }
-        return Optional.empty();
+        IndexFileMeta file =
+                deletionVectors.isEmpty() ? null : dvIndexFile.writeSingleFile(deletionVectors);
+        modified = false;
+        return new DeletionVectorUpdate(true, file);
     }
 
     /**
      * Replace the previously prepared bucket index explicitly. Intermediate DV files generated
      * between prepareCommit calls are not published and must not become deletion dependencies.
      */
-    public void prepareCommit(CompactIncrement increment) {
-        prepareCommit(increment.newIndexFiles(), increment.deletedIndexFiles());
-    }
+    public void prepareCommit(
+            List<IndexFileMeta> addedFiles,
+            List<IndexFileMeta> deletedFiles,
+            DeletionVectorUpdate update) {
+        if (!update.hasChanges()) {
+            return;
+        }
 
-    /** Bind index mutations to the restored or previously prepared bucket index. */
-    public void prepareCommit(List<IndexFileMeta> addedFiles, List<IndexFileMeta> deletedFiles) {
-        for (IndexFileMeta deleted : deletedFiles) {
-            if (DELETION_VECTORS_INDEX.equals(deleted.indexType())) {
-                checkArgument(
-                        lastPreparedDeletionVectorFile != null
-                                && lastPreparedDeletionVectorFile
-                                        .fileName()
-                                        .equals(deleted.fileName()),
-                        "Deleted DV must match the previously prepared bucket index.");
-                lastPreparedDeletionVectorFile = null;
-            }
+        IndexFileMeta newFile = update.newFile().orElse(null);
+        if (lastPreparedDeletionVectorFile != null) {
+            deletedFiles.add(lastPreparedDeletionVectorFile);
         }
-        for (IndexFileMeta added : addedFiles) {
-            if (DELETION_VECTORS_INDEX.equals(added.indexType())) {
-                if (lastPreparedDeletionVectorFile != null) {
-                    deletedFiles.add(lastPreparedDeletionVectorFile);
-                }
-                lastPreparedDeletionVectorFile = added;
-            }
+        if (newFile != null) {
+            addedFiles.add(newFile);
         }
+        lastPreparedDeletionVectorFile = newFile;
     }
 
     /**
@@ -180,6 +164,33 @@ public class BucketedDvMaintainer {
         return bitmap64;
     }
 
+    /**
+     * An immutable result distinguishing unchanged, replacement and removal. A removal has changes
+     * but no new file; it must supersede earlier uncommitted results during compaction merging.
+     */
+    public static final class DeletionVectorUpdate {
+
+        private final boolean changed;
+        @Nullable private final IndexFileMeta newFile;
+
+        private DeletionVectorUpdate(boolean changed, @Nullable IndexFileMeta newFile) {
+            this.changed = changed;
+            this.newFile = newFile;
+        }
+
+        public static DeletionVectorUpdate unchanged() {
+            return new DeletionVectorUpdate(false, null);
+        }
+
+        public boolean hasChanges() {
+            return changed;
+        }
+
+        public Optional<IndexFileMeta> newFile() {
+            return Optional.ofNullable(newFile);
+        }
+    }
+
     public static Factory factory(IndexFileHandler handler) {
         return new Factory(handler);
     }
@@ -202,10 +213,6 @@ public class BucketedDvMaintainer {
             if (restoredFiles == null) {
                 restoredFiles = Collections.emptyList();
             }
-            checkArgument(
-                    restoredFiles.size() <= 1,
-                    "Expected at most one deletion vector index file for a bucket, but found %s.",
-                    restoredFiles.size());
             Map<String, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(partition, bucket, restoredFiles));
             BucketedDvMaintainer maintainer = create(partition, bucket, deletionVectors);

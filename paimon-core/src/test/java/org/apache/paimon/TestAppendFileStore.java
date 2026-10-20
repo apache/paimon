@@ -191,7 +191,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
             }
         }
         List<IndexFileMeta> indexFiles = new ArrayList<>();
-        dvMaintainer.writeDeletionVectorsIndex().ifPresent(indexFiles::add);
+        dvMaintainer.writeDeletionVectorsIndex().newFile().ifPresent(indexFiles::add);
         return new CommitMessageImpl(
                 partition,
                 bucket,

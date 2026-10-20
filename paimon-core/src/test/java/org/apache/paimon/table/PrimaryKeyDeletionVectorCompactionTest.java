@@ -89,9 +89,9 @@ class PrimaryKeyDeletionVectorCompactionTest {
      * its COMPACT commit because its DELETE D0 dependency differs from the current DA. The default
      * DV read, which excludes unmerged L0 files, must return exactly (1,11) and (2,20).
      *
-     * <p>Without the bucket DV replacement check, B would replace DA with its stale DB, which only
-     * marks id=2 and id=3 deleted. The old (1,10) would become visible again alongside (1,11) and
-     * (2,21), producing three rows for two primary keys.
+     * <p>Without the DV dependency check, B would replace DA with its stale DB, which only marks
+     * id=2 and id=3 deleted. The old (1,10) would become visible again alongside (1,11) and (2,21),
+     * producing three rows for two primary keys.
      */
     @Test
     void testMinimalStaleDvCommit() throws Exception {
@@ -128,10 +128,79 @@ class PrimaryKeyDeletionVectorCompactionTest {
                 // A replaces D0 with DA; B must not overwrite DA with its stale DB.
                 commitA.commit(preparedA);
                 assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict");
+                        .hasMessageContaining("File deletion conflicts detected");
                 assertThat(readRows(table))
                         .containsExactlyInAnyOrder(GenericRow.of(1, 11), GenericRow.of(2, 20));
             }
+        }
+    }
+
+    /**
+     * Full compaction materializes all deletions and removes the old index without an empty
+     * replacement.
+     */
+    @Test
+    void testFullCompactionClearsDvIndex() throws Exception {
+        try (Catalog catalog =
+                        CatalogFactory.createCatalog(
+                                CatalogContext.create(new Path(tempDir.toString())));
+                IOManager ioManager = IOManager.create(tempDir.toString())) {
+            FileStoreTable table = createTable(catalog, 3);
+            writeRows(
+                    table,
+                    ioManager,
+                    Arrays.asList(
+                            GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30)));
+            writeRows(
+                    table,
+                    ioManager,
+                    Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 3, 30)));
+            IndexFileHandler handler = table.store().newIndexFileHandler();
+            List<IndexFileMeta> oldIndexes =
+                    handler.scan(
+                            table.snapshotManager().latestSnapshot(),
+                            DELETION_VECTORS_INDEX,
+                            BinaryRow.EMPTY_ROW,
+                            0);
+            assertThat(oldIndexes).hasSize(1);
+
+            FileStoreTable compactTable =
+                    table.copy(
+                            Collections.singletonMap(
+                                    COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true"));
+            BatchWriteBuilder builder = compactTable.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite().withIOManager(ioManager);
+                    BatchTableCommit commit = builder.newCommit()) {
+                write.compact(BinaryRow.EMPTY_ROW, 0, true);
+                List<CommitMessage> messages = write.prepareCommit();
+                assertThat(messages).hasSize(1);
+                CompactIncrement increment =
+                        ((CommitMessageImpl) messages.get(0)).compactIncrement();
+                assertThat(increment.newIndexFiles()).isEmpty();
+                assertThat(increment.deletedIndexFiles()).containsExactlyElementsOf(oldIndexes);
+                commit.commit(messages);
+            }
+            assertThat(
+                            handler.scan(
+                                    table.snapshotManager().latestSnapshot(),
+                                    DELETION_VECTORS_INDEX))
+                    .isEmpty();
+            assertThat(readRows(table))
+                    .containsExactlyInAnyOrder(GenericRow.of(1, 10), GenericRow.of(2, 20));
+
+            // Restoring the cleared bucket must allow a fresh ADD without deleting the old index
+            // again.
+            BatchWriteBuilder updateBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = updateBuilder.newWrite().withIOManager(ioManager);
+                    BatchTableCommit commit = updateBuilder.newCommit()) {
+                write.write(GenericRow.of(1, 11));
+                List<CommitMessage> messages = write.prepareCommit();
+                CompactIncrement increment = assertLookupCompaction(messages, 1, 1);
+                assertThat(increment.deletedIndexFiles()).isEmpty();
+                commit.commit(messages);
+            }
+            assertThat(readRows(table))
+                    .containsExactlyInAnyOrder(GenericRow.of(1, 11), GenericRow.of(2, 20));
         }
     }
 
@@ -163,7 +232,7 @@ class PrimaryKeyDeletionVectorCompactionTest {
                     BucketedDvMaintainer.factory(handler)
                             .create(BinaryRow.EMPTY_ROW, 0, Collections.emptyList());
             delete.notifyNewDeletion(fileX, 0);
-            IndexFileMeta staleDv = delete.writeDeletionVectorsIndex().get();
+            IndexFileMeta staleDv = delete.writeDeletionVectorsIndex().newFile().get();
 
             // Adding a distinct key and compacting forces a physical rewrite with no row deletes.
             writeRows(table, ioManager, Collections.singletonList(GenericRow.of(3, 30)), true);
@@ -192,8 +261,9 @@ class PrimaryKeyDeletionVectorCompactionTest {
                                                                                 staleDv)),
                                                                 CompactIncrement
                                                                         .emptyIncrement()))))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining("references data file " + fileX);
+                        .hasMessageContaining("File deletion conflicts detected")
+                        .hasStackTraceContaining(
+                                "Trying to create deletion vector on file " + fileX);
             }
             assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(compactSnapshot);
             assertThat(readRows(table))
@@ -216,6 +286,7 @@ class PrimaryKeyDeletionVectorCompactionTest {
                                                 Collections.singletonList(
                                                         freshDelete
                                                                 .writeDeletionVectorsIndex()
+                                                                .newFile()
                                                                 .get())),
                                         CompactIncrement.emptyIncrement())));
             }
@@ -302,13 +373,8 @@ class PrimaryKeyDeletionVectorCompactionTest {
                                     assertThat(file.rowCount()).isEqualTo(expected.size());
                                 });
                 // Full compaction consumes the old deletion marks, but still depends on the DV
-                // baseline. It may publish an empty DV index file.
-                assertThat(
-                                table.store()
-                                        .newIndexFileHandler()
-                                        .readAllDeletionVectors(
-                                                BinaryRow.EMPTY_ROW, 0, incrementB.newIndexFiles()))
-                        .isEmpty();
+                // baseline. Clearing publishes only DELETE old DV, without an empty index.
+                assertThat(incrementB.newIndexFiles()).isEmpty();
                 assertThat(oldDvFile(incrementB)).isEqualTo(oldDvFile(incrementA));
                 if (existingDv) {
                     assertThat(oldDvFile(incrementA)).isNotNull();
@@ -326,9 +392,12 @@ class PrimaryKeyDeletionVectorCompactionTest {
                 // The overlapping key ranges are in different levels, so the LSM check alone
                 // would accept B and expose id=1 in both A's L4 file and B's L5 file.
                 commitA.commit(preparedA);
+                if (!existingDv) {
+                    assertThat(incrementB.deletedIndexFiles()).isEmpty();
+                }
                 assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining("recompute compaction");
+                        .hasMessageContaining("File deletion conflicts detected")
+                        .hasStackTraceContaining("Trying to delete file " + fileX.fileName());
                 expected.set(0, GenericRow.of(1, 100));
                 assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
             }
@@ -433,8 +502,10 @@ class PrimaryKeyDeletionVectorCompactionTest {
                 // prevents B from replacing A's deletion mark for id=1 in the L2 file.
                 commitA.commit(preparedA);
                 assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining("recompute compaction");
+                        .hasMessageContaining(
+                                existingDv
+                                        ? "File deletion conflicts detected"
+                                        : "Deletion vector conflict");
 
                 // B's APPEND may be committed, but the default DV read excludes unmerged L0.
                 // A's update remains visible exactly once and B's stale compact is not visible.
@@ -492,8 +563,8 @@ class PrimaryKeyDeletionVectorCompactionTest {
                 assertLookupCompaction(preparedA, 1, 1);
                 commitA.commit(preparedA);
                 assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining("rewritten input " + input.fileName());
+                        .hasMessageContaining("File deletion conflicts detected")
+                        .hasStackTraceContaining("Trying to delete file " + input.fileName());
                 expected.set(0, GenericRow.of(1, 100));
                 assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
             }
@@ -606,7 +677,9 @@ class PrimaryKeyDeletionVectorCompactionTest {
                 commitA.commit(update);
                 if (changeInput) {
                     assertThatThrownBy(() -> commitB.commit(pending))
-                            .hasMessageContaining("rewritten input " + inputs.get(0).fileName());
+                            .hasMessageContaining("File deletion conflicts detected")
+                            .hasStackTraceContaining(
+                                    "Trying to delete file " + inputs.get(0).fileName());
                 } else {
                     commitB.commit(pending);
                 }

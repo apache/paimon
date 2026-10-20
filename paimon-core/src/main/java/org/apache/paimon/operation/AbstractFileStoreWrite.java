@@ -277,12 +277,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
-                    compactDeletionFile
-                            .getOrCompute()
-                            .ifPresent(compactIncrement.newIndexFiles()::add);
-                }
-                if (writerContainer.deletionVectorsMaintainer != null) {
-                    writerContainer.deletionVectorsMaintainer.prepareCommit(compactIncrement);
+                    writerContainer.deletionVectorsMaintainer.prepareCommit(
+                            compactIncrement.newIndexFiles(),
+                            compactIncrement.deletedIndexFiles(),
+                            compactDeletionFile.getOrCompute());
                 }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
