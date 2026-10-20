@@ -50,7 +50,9 @@ read work until compaction consolidates them.
 Set both `row-tracking.enabled` and `data-evolution.enabled` when creating the
 table. These options are immutable. Data Evolution requires an append table
 with no primary key and `bucket = -1` (the default for an append table).
-`clustering.incremental` cannot be enabled with Data Evolution.
+[Incremental clustering](./data-evolution-maintenance#incremental-clustering) is
+supported for tables without dedicated BLOB or VECTOR files. Clustering rewrites
+the selected groups and assigns new row IDs.
 
 The following examples assume a configured Paimon catalog and the `default`
 database. Deletion vectors are enabled so the same table can also run the

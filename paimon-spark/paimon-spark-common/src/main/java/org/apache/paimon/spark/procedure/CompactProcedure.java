@@ -37,6 +37,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
+import org.apache.paimon.spark.SparkTable;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.DataEvolutionCompactMergeConflictRewriter;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
@@ -75,6 +76,7 @@ import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
@@ -104,7 +106,6 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import scala.collection.JavaConverters;
-import scala.collection.Seq;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -328,16 +329,20 @@ public class CompactProcedure extends BaseProcedure {
                             javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
-                    if (table.coreOptions().dataEvolutionEnabled()) {
+                    if (clusterIncrementalEnabled) {
+                        clusterIncrementalUnAwareBucketTable(
+                                table,
+                                partitionPredicate,
+                                partitionIdleTime,
+                                fullCompact,
+                                relation);
+                    } else if (table.coreOptions().dataEvolutionEnabled()) {
                         compactDataEvolutionTable(
                                 table,
                                 relation,
                                 partitionPredicate,
                                 partitionIdleTime,
                                 javaSparkContext);
-                    } else if (clusterIncrementalEnabled) {
-                        clusterIncrementalUnAwareBucketTable(
-                                table, partitionPredicate, fullCompact, relation);
                     } else {
                         compactUnAwareBucketTable(
                                 table, partitionPredicate, partitionIdleTime, javaSparkContext);
@@ -841,21 +846,56 @@ public class CompactProcedure extends BaseProcedure {
     private void clusterIncrementalUnAwareBucketTable(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
             boolean fullCompaction,
             DataSourceV2Relation relation) {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
         IncrementalClusterManager incrementalClusterManager =
-                new IncrementalClusterManager(
-                        table, partitionPredicate, table.snapshotManager().latestSnapshot());
+                new IncrementalClusterManager(table, partitionPredicate, snapshot);
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.createCompactUnits(fullCompaction);
+        if (partitionIdleTime != null) {
+            Set<BinaryRow> idlePartitions =
+                    getPartitionsToCompact(
+                            table.newSnapshotReader().withSnapshot(snapshot), partitionIdleTime);
+            compactUnits.keySet().retainAll(idlePartitions);
+        }
         LOG.info(
                 "Planned {} compact units to incrementally cluster for table {}, full compaction {}.",
                 compactUnits.size(),
                 table.fullName(),
                 fullCompaction);
 
+        if (compactUnits.isEmpty()) {
+            return;
+        }
+
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
                 incrementalClusterManager.toSplitsAndRewriteDvFiles(compactUnits);
+
+        final FileStoreTable clusterTable;
+        final DataSourceV2Relation clusterRelation;
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Map<String, String> clusterOptions = new HashMap<>();
+            // Preserve inline references and the layout already produced by the sorter.
+            clusterOptions.put(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true");
+            clusterOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
+            clusterOptions.put(CoreOptions.PARTITION_SINK_STRATEGY.key(), "none");
+            clusterOptions.put(CoreOptions.CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE.key(), "false");
+            clusterTable = table.copy(clusterOptions);
+            clusterRelation =
+                    SparkShimLoader.shim()
+                            .copyDataSourceV2Relation(
+                                    relation,
+                                    ((SparkTable) relation.table()).copy(clusterTable),
+                                    relation.output());
+        } else {
+            clusterTable = table;
+            clusterRelation = relation;
+        }
 
         // sort in partition
         TableSorter sorter =
@@ -876,6 +916,7 @@ public class CompactProcedure extends BaseProcedure {
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
                         .map(Pair::getKey)
+                        .filter(splits -> !splits.isEmpty())
                         .map(
                                 splits -> {
                                     Dataset<Row> dataset =
@@ -883,7 +924,7 @@ public class CompactProcedure extends BaseProcedure {
                                                     spark(),
                                                     ScanPlanHelper$.MODULE$.createNewScanPlan(
                                                             splits.toArray(new DataSplit[0]),
-                                                            relation));
+                                                            clusterRelation));
                                     // Use sortLocal() for LOCAL_SORT, sort() for GLOBAL_SORT
                                     if (mode == CoreOptions.ClusteringIncrementalMode.LOCAL_SORT) {
                                         return sorter.sortLocal(dataset);
@@ -893,73 +934,82 @@ public class CompactProcedure extends BaseProcedure {
                                 })
                         .reduce(Dataset::union)
                         .orElse(null);
-        if (datasetForWrite != null) {
-            // set to write only to prevent invoking compaction
-            // do not use overwrite, we don't need to overwrite the whole partition
-            PaimonSparkWriter writer = PaimonSparkWriter.apply(table).writeOnly();
-            Seq<CommitMessage> commitMessages = writer.write(datasetForWrite);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Commit messages after writing:{}", commitMessages);
-            }
+        // set to write only to prevent invoking compaction
+        // do not use overwrite, we don't need to overwrite the whole partition
+        PaimonSparkWriter writer = PaimonSparkWriter.apply(clusterTable).writeOnly();
+        List<CommitMessage> commitMessages =
+                datasetForWrite == null
+                        ? Collections.emptyList()
+                        : JavaConverters.seqAsJavaList(writer.write(datasetForWrite));
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Commit messages after writing:{}", commitMessages);
+        }
 
-            // re-organize the commit messages to generate the compact messages
-            Map<BinaryRow, List<DataFileMeta>> partitionClustered = new HashMap<>();
-            for (CommitMessage commitMessage : JavaConverters.seqAsJavaList(commitMessages)) {
-                checkArgument(commitMessage.bucket() == 0);
-                partitionClustered
-                        .computeIfAbsent(commitMessage.partition(), k -> new ArrayList<>())
-                        .addAll(((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
-            }
+        // re-organize the commit messages to generate the compact messages
+        Map<BinaryRow, List<DataFileMeta>> partitionClustered = new HashMap<>();
+        for (CommitMessage commitMessage : commitMessages) {
+            checkArgument(commitMessage.bucket() == 0);
+            partitionClustered
+                    .computeIfAbsent(commitMessage.partition(), k -> new ArrayList<>())
+                    .addAll(((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
+        }
 
-            List<CommitMessage> clusterMessages = new ArrayList<>();
-            for (Map.Entry<BinaryRow, List<DataFileMeta>> entry : partitionClustered.entrySet()) {
-                BinaryRow partition = entry.getKey();
-                CommitMessageImpl dvCommitMessage =
-                        (CommitMessageImpl) partitionSplits.get(partition).getValue();
-                List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
-                // upgrade the clustered file to outputLevel
-                List<DataFileMeta> clusterAfter =
-                        IncrementalClusterManager.upgrade(
-                                entry.getValue(), compactUnits.get(partition).outputLevel());
-                LOG.info(
-                        "Partition {}: upgrade file level to {}",
-                        partition,
-                        compactUnits.get(partition).outputLevel());
-
-                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
-                List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
-                if (dvCommitMessage != null) {
-                    newIndexFiles = dvCommitMessage.compactIncrement().newIndexFiles();
-                    deletedIndexFiles = dvCommitMessage.compactIncrement().deletedIndexFiles();
-                }
-
-                // get the dv index messages
-                CompactIncrement compactIncrement =
-                        new CompactIncrement(
-                                clusterBefore,
-                                clusterAfter,
-                                Collections.emptyList(),
-                                newIndexFiles,
-                                deletedIndexFiles);
-                clusterMessages.add(
-                        new CommitMessageImpl(
-                                partition,
-                                // bucket 0 is bucket for unaware-bucket table
-                                // for compatibility with the old design
-                                0,
-                                table.coreOptions().bucket(),
-                                DataIncrement.emptyIncrement(),
-                                compactIncrement));
-            }
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Commit messages after reorganizing:{}", clusterMessages);
-            }
-
-            writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
-        } else {
+        List<CommitMessage> clusterMessages = new ArrayList<>();
+        for (Map.Entry<BinaryRow, CompactUnit> entry : compactUnits.entrySet()) {
+            BinaryRow partition = entry.getKey();
+            CommitMessageImpl dvCommitMessage =
+                    (CommitMessageImpl) partitionSplits.get(partition).getValue();
+            List<DataFileMeta> clusterBefore = entry.getValue().files();
+            // upgrade the clustered file to outputLevel
+            List<DataFileMeta> clusterAfter =
+                    IncrementalClusterManager.upgrade(
+                            partitionClustered.getOrDefault(partition, Collections.emptyList()),
+                            entry.getValue().outputLevel());
             LOG.info(
-                    "No data split to incrementally cluster for table {}, skip this compact job.",
-                    table.fullName());
+                    "Partition {}: upgrade file level to {}",
+                    partition,
+                    compactUnits.get(partition).outputLevel());
+
+            List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+            List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+            if (dvCommitMessage != null) {
+                newIndexFiles = dvCommitMessage.compactIncrement().newIndexFiles();
+                deletedIndexFiles = dvCommitMessage.compactIncrement().deletedIndexFiles();
+            }
+
+            // get the dv index messages
+            CompactIncrement compactIncrement =
+                    new CompactIncrement(
+                            clusterBefore,
+                            clusterAfter,
+                            Collections.emptyList(),
+                            newIndexFiles,
+                            deletedIndexFiles);
+            clusterMessages.add(
+                    new CommitMessageImpl(
+                            partition,
+                            // bucket 0 is bucket for unaware-bucket table
+                            // for compatibility with the old design
+                            0,
+                            table.coreOptions().bucket(),
+                            DataIncrement.emptyIncrement(),
+                            compactIncrement));
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Commit messages after reorganizing:{}", clusterMessages);
+        }
+
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            List<CommitMessage> preparedMessages =
+                    incrementalClusterManager.prepareCommitMessages(clusterMessages);
+            String commitUser = createCommitUser(table.coreOptions().toConfiguration());
+            try (TableCommitImpl commit = table.newCommit(commitUser).materializeDvRowIdCheck()) {
+                commit.commit(preparedMessages);
+            } catch (Exception e) {
+                throw new RuntimeException("Commit data evolution clustering failed.", e);
+            }
+        } else {
+            writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
         }
     }
 

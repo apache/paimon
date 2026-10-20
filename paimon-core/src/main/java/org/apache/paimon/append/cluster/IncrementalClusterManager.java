@@ -186,6 +186,7 @@ public class IncrementalClusterManager {
 
             DataSplit.Builder builder =
                     DataSplit.builder()
+                            .withSnapshot(snapshot.id())
                             .withPartition(partition)
                             .withBucket(0)
                             .withTotalBuckets(1)

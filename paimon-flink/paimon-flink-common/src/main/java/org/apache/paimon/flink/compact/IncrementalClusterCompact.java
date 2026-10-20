@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.compact.CompactUnit;
@@ -31,6 +32,8 @@ import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.DataEvolutionCommitPreparationOperator;
+import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.RowAppendTableSink;
 import org.apache.paimon.flink.sorter.SortOperator;
@@ -59,12 +62,15 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
 /** Compact for incremental clustering. */
@@ -87,6 +93,15 @@ public class IncrementalClusterCompact {
             PartitionPredicate partitionPredicate,
             @Nullable Boolean fullCompaction) {
         this.env = env;
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Map<String, String> rewriteOptions = new HashMap<>();
+            // Rewrite stored references, including views whose upstream value is currently null.
+            rewriteOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
+            // Sorted outputs must reach the clustering committer without another rewrite or commit.
+            rewriteOptions.put(PRECOMMIT_COMPACT.key(), "false");
+            rewriteOptions.put(SINK_COORDINATOR_COMMIT_ENABLED.key(), "false");
+            table = table.copy(rewriteOptions);
+        }
         this.table = table;
         this.clusterManager =
                 new IncrementalClusterManager(
@@ -331,6 +346,20 @@ public class IncrementalClusterCompact {
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));
         }
-        sink.doCommit(dataStream, commitUser);
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            Snapshot snapshot = clusterManager.snapshot();
+            dataStream =
+                    dataStream
+                            .transform(
+                                    "Data Evolution Cluster Commit Preparation : " + table.name(),
+                                    new CommittableTypeInfo(),
+                                    DataEvolutionCommitPreparationOperator.Factory.forClustering(
+                                            table, snapshot))
+                            .forceNonParallel();
+            new DataEvolutionDeletionVectorMaterializeSink(table, snapshot)
+                    .doCommit(dataStream, commitUser);
+        } else {
+            sink.doCommit(dataStream, commitUser);
+        }
     }
 }

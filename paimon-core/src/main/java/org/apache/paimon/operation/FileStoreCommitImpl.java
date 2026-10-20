@@ -836,7 +836,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
-        if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
+        if (!options.dataEvolutionEnabled()) {
             return Collections.emptySet();
         }
 
