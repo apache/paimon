@@ -297,6 +297,8 @@ public abstract class ConflictDetection {
                                 ? Collections.emptyList()
                                 : indexFileHandler.readManifest(latestSnapshot.indexManifest());
                 baseEntries = buildBaseEntriesWithDV(baseEntries, baseIndexes);
+                // Metadata-only level upgrades with DVs may also be rejected conservatively.
+                // This can block compaction, but does not publish incorrect data.
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
