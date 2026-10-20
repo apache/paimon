@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -255,12 +256,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (collectedTags != null) {
             collectedTags.run();
         }
-        // Another JVM can create a tag without this process's lock. Mark untagged snapshots, scan
-        // tags again, and keep any snapshot that published a tag before the marker. Snapshot files
-        // are still deleted at the end, same as before.
+        // Each run owns its expire markers. Another run must not clear a fence it did not create,
+        // or a creator can outlive an expirer that already missed the tag. Snapshot files are
+        // still deleted at the end, same as before.
         List<Long> marked = new ArrayList<>();
+        String owner = UUID.randomUUID().toString();
         try {
-            retainTagsCreatedDuringExpiration(snapshotsExcludingEnd, taggedSnapshots, marked);
+            retainTagsCreatedDuringExpiration(
+                    snapshotsExcludingEnd, taggedSnapshots, marked, owner);
 
             // delete merge tree files
             // deleted merge tree files in a snapshot are not used by the next snapshot, so the
@@ -319,30 +322,32 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             return snapshotsExcludingEnd.size();
         } finally {
             for (Long snapshotId : marked) {
-                tagManager.deleteExpirationMarker(snapshotId);
+                tagManager.deleteExpirationMarker(snapshotId, owner);
             }
         }
     }
 
     private void retainTagsCreatedDuringExpiration(
-            List<Snapshot> expiring, List<Snapshot> taggedSnapshots, List<Long> marked)
+            List<Snapshot> expiring,
+            List<Snapshot> taggedSnapshots,
+            List<Long> marked,
+            String owner)
             throws ExecutionException, InterruptedException {
         Set<Long> taggedIds = new HashSet<>();
         for (Snapshot tagged : taggedSnapshots) {
             taggedIds.add(tagged.id());
         }
         for (Snapshot snapshot : expiring) {
-            if (taggedIds.contains(snapshot.id())) {
-                tagManager.deleteExpirationMarker(snapshot.id());
-            } else {
-                tagManager.createExpirationMarker(snapshot.id());
+            if (!taggedIds.contains(snapshot.id())) {
+                tagManager.createExpirationMarker(snapshot.id(), owner);
                 marked.add(snapshot.id());
             }
         }
         for (Snapshot tagged : collectTaggedSnapshots()) {
             if (taggedIds.add(tagged.id())) {
                 taggedSnapshots.add(tagged);
-                tagManager.deleteExpirationMarker(tagged.id());
+                // Release only this run. A marker owned by an expirer that missed the tag stays.
+                tagManager.deleteExpirationMarker(tagged.id(), owner);
             }
         }
         taggedSnapshots.sort(Comparator.comparingLong(Snapshot::id));

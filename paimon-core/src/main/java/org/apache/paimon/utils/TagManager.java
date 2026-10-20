@@ -190,7 +190,7 @@ public class TagManager {
      * an existing tag still retains that snapshot's files. The post-write check ({@code
      * excludeSelf}) does not treat another tag as protection: that tag may be an in-flight creator
      * that will roll back. It requires the snapshot file or its manifest list to still exist, and
-     * honors {@link #createExpirationMarker(long)}.
+     * honors {@link #createExpirationMarker(long, String)}.
      */
     private void ensureSnapshotRetained(Snapshot snapshot, String tagName, boolean excludeSelf) {
         if (excludeSelf) {
@@ -219,13 +219,13 @@ public class TagManager {
     }
 
     /**
-     * Cross-process fence written before the final tag scan. A creator that still sees it missed
-     * that scan and must roll the tag back. Snapshot files stay in place until the usual deletion
-     * step; the marker is what later creators observe.
+     * Cross-process fence for one expiration run, written before its final tag scan. A creator that
+     * still sees any run's marker missed that scan and must roll the tag back. Only the owning run
+     * deletes its marker.
      */
-    public void createExpirationMarker(long snapshotId) {
+    public void createExpirationMarker(long snapshotId, String owner) {
         try {
-            Path path = expirationMarkerPath(snapshotId);
+            Path path = expirationMarkerPath(snapshotId, owner);
             if (!fileIO.tryToWriteAtomic(path, "1") && !fileIO.exists(path)) {
                 throw new IOException("Failed to write expiration marker " + path);
             }
@@ -234,20 +234,31 @@ public class TagManager {
         }
     }
 
-    public void deleteExpirationMarker(long snapshotId) {
-        fileIO.deleteQuietly(expirationMarkerPath(snapshotId));
+    public void deleteExpirationMarker(long snapshotId, String owner) {
+        fileIO.deleteQuietly(expirationMarkerPath(snapshotId, owner));
     }
 
     private boolean expirationMarkerExists(long snapshotId) {
+        Path dir = expirationMarkerDir(snapshotId);
         try {
-            return fileIO.exists(expirationMarkerPath(snapshotId));
+            if (!fileIO.exists(dir)) {
+                return false;
+            }
+            FileStatus[] statuses = fileIO.listStatus(dir);
+            return statuses != null && statuses.length > 0;
+        } catch (FileNotFoundException e) {
+            return false;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    private Path expirationMarkerPath(long snapshotId) {
+    private Path expirationMarkerDir(long snapshotId) {
         return new Path(branchPath(tablePath, branch) + "/expire-marker/" + snapshotId);
+    }
+
+    private Path expirationMarkerPath(long snapshotId, String owner) {
+        return new Path(expirationMarkerDir(snapshotId), owner);
     }
 
     /** Snapshot metadata, or the manifest list a previous tag retained after metadata expired. */
@@ -320,7 +331,7 @@ public class TagManager {
         if (rollbackIfSnapshotExpired) {
             try {
                 ensureSnapshotRetained(snapshot, tagName, true);
-            } catch (SnapshotNotExistException e) {
+            } catch (RuntimeException e) {
                 fileIO.deleteQuietly(tagPath);
                 throw e;
             }

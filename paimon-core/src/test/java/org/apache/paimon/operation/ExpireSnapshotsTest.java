@@ -71,6 +71,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -1875,7 +1876,7 @@ public class ExpireSnapshotsTest {
             expireThread.start();
             assertThat(scanned.await(10, TimeUnit.SECONDS)).isTrue();
             assertThat(snapshotManager.snapshotExists(2)).isTrue();
-            assertThat(fileIO.exists(marker)).isTrue();
+            assertThat(fileIO.listStatus(marker)).isNotEmpty();
             assertThat(fileIO.exists(manifestList)).isTrue();
             creatorA = startTagProcess("creator-a", logA);
             creatorB = startTagProcess("creator-b", logB);
@@ -1906,8 +1907,68 @@ public class ExpireSnapshotsTest {
         assertThat(newTagManager().tagExists("creator-b")).isFalse();
         assertThat(snapshotManager.snapshotExists(2)).isFalse();
         assertThat(fileIO.exists(manifestList)).isFalse();
-        assertThat(fileIO.exists(marker)).isFalse();
+        assertThat(fileIO.listStatus(marker)).isEmpty();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    @Test
+    public void testExpireKeepsAnotherExpirerFence() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(4, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        TagManager tags = newTagManager();
+        Snapshot kept = snapshotManager.snapshot(2);
+        Path borrowed = new Path(store.options().path() + "/expire-marker/2/other-expirer");
+        ExpireSnapshotsImpl expire = newExpire(tags);
+        expire.setAfterTagCollection(
+                () -> {
+                    tags.createTag(
+                            kept, "kept", Duration.ofDays(1), Collections.emptyList(), false);
+                    tags.createExpirationMarker(kept.id(), "other-expirer");
+                });
+
+        assertThat(expire.expireUntil(1, latestSnapshotId)).isPositive();
+
+        assertThat(fileIO.exists(borrowed)).isTrue();
+        assertThat(tags.tagExists("kept")).isTrue();
+        assertThat(fileIO.exists(store.pathFactory().toManifestListPath(kept.deltaManifestList())))
+                .isTrue();
+        assertThatThrownBy(
+                        () ->
+                                newTagManager()
+                                        .createTag(
+                                                kept,
+                                                "late",
+                                                Duration.ofDays(1),
+                                                Collections.emptyList(),
+                                                true))
+                .isInstanceOf(SnapshotNotExistException.class);
+        assertThat(newTagManager().tagExists("late")).isFalse();
+    }
+
+    @Test
+    public void testCreateTagRollsBackWhenMarkerCheckFails() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(2, allData, snapshotPositions);
+        Snapshot snapshot = snapshotManager.snapshot(1);
+        TagManager tags =
+                new TagManager(
+                        new MarkerExistsFailingFileIO(),
+                        store.options().path(),
+                        store.options().branch());
+
+        assertThatThrownBy(
+                        () ->
+                                tags.createTag(
+                                        snapshot, "dangling", null, Collections.emptyList(), true))
+                .isInstanceOf(UncheckedIOException.class)
+                .hasMessageContaining("transient");
+        assertThat(tags.tagExists("dangling")).isFalse();
+
+        newTagManager().createTag(snapshot, "dangling", null, Collections.emptyList(), true);
+        assertThat(newTagManager().tagExists("dangling")).isTrue();
     }
 
     public static void main(String[] args) throws Exception {
@@ -2031,6 +2092,20 @@ public class ExpireSnapshotsTest {
             thread.join(TimeUnit.SECONDS.toMillis(10));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private static final class MarkerExistsFailingFileIO extends LocalFileIO {
+
+        private boolean failed;
+
+        @Override
+        public boolean exists(Path path) throws IOException {
+            if (!failed && String.valueOf(path).contains("/expire-marker/")) {
+                failed = true;
+                throw new IOException("transient");
+            }
+            return super.exists(path);
         }
     }
 
