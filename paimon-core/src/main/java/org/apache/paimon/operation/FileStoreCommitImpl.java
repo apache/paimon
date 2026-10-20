@@ -1207,7 +1207,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
         boolean skipManifestMerge = false;
         long nextRowIdStart = firstRowIdStart;
-        List<Path> commitAttemptFiles = new ArrayList<>();
         try {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
@@ -1279,8 +1278,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     newSnapshotId,
                                     Collections.unmodifiableList(deltaFiles),
                                     Collections.unmodifiableList(indexFiles),
-                                    ioManager,
-                                    commitAttemptFiles::add));
+                                    ioManager));
 
             if (options.snapshotSequenceOrdering()) {
                 deltaFiles = stampSequenceWithSnapshotId(newSnapshotId, commitKind, deltaFiles);
@@ -1362,7 +1360,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             operation);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
-            commitAttemptFiles.forEach(fileIO::deleteQuietly);
             commitCleaner.cleanUpReuseTmpManifests(
                     deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
             commitCleaner.cleanUpNoReuseTmpManifests(
@@ -1379,16 +1376,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
         final List<IndexManifestEntry> finalIndexFiles = indexFiles;
-        try {
-            commitPreCallbacks.forEach(
-                    callback ->
-                            callback.call(
-                                    finalBaseFiles, finalDeltaFiles, finalIndexFiles, newSnapshot));
-        } catch (RuntimeException | Error failure) {
-            // No snapshot publication has been attempted, so these new payloads are unreferenced.
-            commitAttemptFiles.forEach(fileIO::deleteQuietly);
-            throw failure;
-        }
+        commitPreCallbacks.forEach(
+                callback ->
+                        callback.call(
+                                finalBaseFiles, finalDeltaFiles, finalIndexFiles, newSnapshot));
         try {
             success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
         } catch (Exception e) {

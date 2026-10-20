@@ -149,7 +149,7 @@ public final class DataEvolutionCommitChangesRewriter implements CommitChangesRe
                         .filter(entry -> entry.file().firstRowId() != null)
                         .map(entry -> entry.file().fileName())
                         .collect(Collectors.toSet());
-        return (newSnapshotId, assignedFiles, indexFiles, ioManager, registerNewFile) -> {
+        return (newSnapshotId, assignedFiles, indexFiles, ioManager) -> {
             if (assignedFiles.stream().noneMatch(entry -> entry.kind() == FileKind.DELETE)) {
                 return indexFiles;
             }
@@ -163,8 +163,7 @@ public final class DataEvolutionCommitChangesRewriter implements CommitChangesRe
                     indexFiles,
                     mappedClusteringOutputs,
                     rowIdPreservingOutputs,
-                    newSnapshotId,
-                    registerNewFile);
+                    newSnapshotId);
         };
     }
 }

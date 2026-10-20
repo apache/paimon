@@ -20,7 +20,6 @@ package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -29,7 +28,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.function.Consumer;
 
 /** Prepares commit metadata while reusing the committer's conflict and publication lifecycle. */
 public interface CommitChangesRewriter {
@@ -55,20 +53,17 @@ public interface CommitChangesRewriter {
     @FunctionalInterface
     interface Attempt {
 
-        Attempt IDENTITY = (snapshotId, files, indexes, ioManager, registerNewFile) -> indexes;
+        Attempt IDENTITY = (snapshotId, files, indexes, ioManager) -> indexes;
 
         /**
-         * Returns index changes for this candidate snapshot. Inputs are read-only. Register each
-         * new file before opening it, so preparation and pre-publication callback failures can
-         * clean it up. Files are retained once publication is attempted, even if its outcome is
-         * uncertain.
+         * Returns index changes for this candidate snapshot. Inputs are read-only. Generated index
+         * files are retained on failure; unreferenced files can be removed by orphan-file cleanup.
          */
         List<IndexManifestEntry> rewriteIndexFiles(
                 long newSnapshotId,
                 List<ManifestEntry> assignedFiles,
                 List<IndexManifestEntry> indexFiles,
-                @Nullable IOManager ioManager,
-                Consumer<Path> registerNewFile)
+                @Nullable IOManager ioManager)
                 throws IOException;
     }
 }

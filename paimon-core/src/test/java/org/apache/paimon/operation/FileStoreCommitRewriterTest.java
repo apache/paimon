@@ -54,12 +54,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Commit-attempt isolation and resource ownership for injected index rewriters. */
+/** Commit-attempt isolation and index payload retention for injected index rewriters. */
 class FileStoreCommitRewriterTest extends TableTestBase {
 
     @Test
@@ -102,13 +101,13 @@ class FileStoreCommitRewriterTest extends TableTestBase {
                         assertReadOnly(changes.indexFiles);
                         AtomicInteger calls = new AtomicInteger();
                         Attempt attempt =
-                                (snapshotId, assigned, indexes, ioManager, register) -> {
+                                (snapshotId, assigned, indexes, ioManager) -> {
                                     assertThat(calls.incrementAndGet()).isEqualTo(1);
                                     snapshots.add(snapshotId);
                                     assertReadOnly(assigned);
                                     assertReadOnly(indexes);
                                     firstRowIds.add(assigned.get(0).file().firstRowId());
-                                    return writeIndex(table, assigned.get(0), outputs, register);
+                                    return writeIndex(table, assigned.get(0), outputs);
                                 };
                         attempts.add(attempt);
                         return attempt;
@@ -142,7 +141,7 @@ class FileStoreCommitRewriterTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testPreparationFailureCleansRegisteredFiles(boolean fatalError) throws Exception {
+    void testPreparationFailureRetainsOrphanIndex(boolean fatalError) throws Exception {
         FileStoreTable table = createTable();
         ManifestCommittable pending = prepareAppend(table, 10);
         List<Path> outputs = new ArrayList<>();
@@ -155,8 +154,8 @@ class FileStoreCommitRewriterTest extends TableTestBase {
                 new CommitChangesRewriter() {
                     @Override
                     public Attempt createAttempt(Snapshot.CommitKind kind, CommitChanges changes) {
-                        return (snapshotId, assigned, indexes, ioManager, register) -> {
-                            writeIndex(table, assigned.get(0), outputs, register);
+                        return (snapshotId, assigned, indexes, ioManager) -> {
+                            writeIndex(table, assigned.get(0), outputs);
                             if (fatalError) {
                                 throw (AssertionError) failure;
                             }
@@ -172,13 +171,13 @@ class FileStoreCommitRewriterTest extends TableTestBase {
                     .hasCauseReference(failure);
         }
         assertThat(outputs).hasSize(1);
-        assertThat(table.fileIO().exists(outputs.get(0))).isFalse();
+        assertThat(table.fileIO().readFileUtf8(outputs.get(0))).isEqualTo("index payload");
         assertThat(publications).hasValue(0);
         assertThat(table.latestSnapshot()).isEmpty();
     }
 
     @Test
-    void testManifestPreparationFailureCleansRegisteredFiles() throws Exception {
+    void testManifestPreparationFailureRetainsOrphanIndex() throws Exception {
         FileStoreTable table = createTable();
         ManifestCommittable pending = prepareAppend(table, 10);
         List<Path> outputs = new ArrayList<>();
@@ -187,9 +186,9 @@ class FileStoreCommitRewriterTest extends TableTestBase {
                 new CommitChangesRewriter() {
                     @Override
                     public Attempt createAttempt(Snapshot.CommitKind kind, CommitChanges changes) {
-                        return (snapshotId, assigned, indexes, ioManager, register) -> {
+                        return (snapshotId, assigned, indexes, ioManager) -> {
                             IndexManifestEntry index =
-                                    writeIndex(table, assigned.get(0), outputs, register).get(0);
+                                    writeIndex(table, assigned.get(0), outputs).get(0);
                             // Fail after the extension returns, while merging the index manifest.
                             return Collections.singletonList(index.toDeleteEntry());
                         };
@@ -204,14 +203,14 @@ class FileStoreCommitRewriterTest extends TableTestBase {
                     .hasStackTraceContaining("which does not exist.");
         }
         assertThat(outputs).hasSize(1);
-        assertThat(table.fileIO().exists(outputs.get(0))).isFalse();
+        assertThat(table.fileIO().readFileUtf8(outputs.get(0))).isEqualTo("index payload");
         assertThat(publications).hasValue(0);
         assertThat(table.latestSnapshot()).isEmpty();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testPreCallbackFailureCleansRegisteredFiles(boolean fatalError) throws Exception {
+    void testPreCallbackFailureRetainsOrphanIndex(boolean fatalError) throws Exception {
         FileStoreTable table = createTable();
         ManifestCommittable pending = prepareAppend(table, 10);
         List<Path> outputs = new ArrayList<>();
@@ -247,15 +246,14 @@ class FileStoreCommitRewriterTest extends TableTestBase {
             assertThatThrownBy(() -> commit.commit(pending, false)).isSameAs(failure);
         }
         assertThat(outputs).hasSize(1);
-        assertThat(table.fileIO().exists(outputs.get(0))).isFalse();
+        assertThat(table.fileIO().readFileUtf8(outputs.get(0))).isEqualTo("index payload");
         assertThat(publications).hasValue(0);
         assertThat(table.latestSnapshot()).isEmpty();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testUncertainPublicationRetainsRegisteredIndex(boolean publicationThrows)
-            throws Exception {
+    void testUncertainPublicationRetainsVisibleIndex(boolean publicationThrows) throws Exception {
         FileStoreTable table = createTable();
         ManifestCommittable pending = prepareAppend(table, 10, 20);
         List<Path> outputs = new ArrayList<>();
@@ -284,8 +282,8 @@ class FileStoreCommitRewriterTest extends TableTestBase {
                     @Override
                     public Attempt createAttempt(Snapshot.CommitKind kind, CommitChanges changes) {
                         attempts.incrementAndGet();
-                        return (snapshotId, assigned, indexes, ioManager, register) ->
-                                writeIndex(table, assigned.get(0), outputs, register);
+                        return (snapshotId, assigned, indexes, ioManager) ->
+                                writeIndex(table, assigned.get(0), outputs);
                     }
                 };
         try (FileStoreCommit commit =
@@ -340,20 +338,15 @@ class FileStoreCommitRewriterTest extends TableTestBase {
         return new CommitChangesRewriter() {
             @Override
             public Attempt createAttempt(Snapshot.CommitKind kind, CommitChanges changes) {
-                return (snapshotId, assigned, indexes, ioManager, register) ->
-                        writeIndex(table, assigned.get(0), outputs, register);
+                return (snapshotId, assigned, indexes, ioManager) ->
+                        writeIndex(table, assigned.get(0), outputs);
             }
         };
     }
 
     private List<IndexManifestEntry> writeIndex(
-            FileStoreTable table,
-            ManifestEntry assigned,
-            List<Path> outputs,
-            Consumer<Path> register)
-            throws IOException {
+            FileStoreTable table, ManifestEntry assigned, List<Path> outputs) throws IOException {
         Path path = table.store().pathFactory().globalIndexFileFactory().newPath();
-        register.accept(path);
         outputs.add(path);
         table.fileIO().writeFile(path, "index payload", false);
         IndexFileMeta index =
