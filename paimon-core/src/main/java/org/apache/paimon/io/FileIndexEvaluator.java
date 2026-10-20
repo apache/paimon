@@ -75,6 +75,31 @@ public class FileIndexEvaluator {
             @Nullable DeletionVector dv,
             long fileOffset)
             throws IOException {
+        return evaluate(
+                fileIO,
+                dataSchema,
+                dataFilter,
+                topN,
+                limit,
+                dataFilePathFactory,
+                file,
+                dv,
+                fileOffset,
+                false);
+    }
+
+    public static FileIndexResult evaluate(
+            FileIO fileIO,
+            TableSchema dataSchema,
+            List<Predicate> dataFilter,
+            @Nullable TopN topN,
+            @Nullable Integer limit,
+            DataFilePathFactory dataFilePathFactory,
+            DataFileMeta file,
+            @Nullable DeletionVector dv,
+            long fileOffset,
+            boolean ignoreUnknownType)
+            throws IOException {
         // File index selections use 32-bit positions. Fall back when they cannot safely represent
         // the file or its deletion vector.
         if (file.rowCount() > RoaringBitmap32.MAX_VALUE || dv instanceof Bitmap64DeletionVector) {
@@ -100,14 +125,14 @@ public class FileIndexEvaluator {
             FileIndexResult result;
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
-                result = predicate.evaluate(filter);
+                result = predicate.evaluate(filter, ignoreUnknownType);
                 result = result.and(selection);
             } else if (topN != null) {
                 // 1. TopN cannot work with filter, because a filter may not completely filter out
                 // all records, any unfiltered records can affect the calculation results of TopN
                 // 2. evaluateTopN with selection, because we must filter out the data based on
                 // deletion vector before selecting TopN records.
-                result = predicate.evaluateTopN(topN, selection);
+                result = predicate.evaluateTopN(topN, selection, ignoreUnknownType);
             } else {
                 return FileIndexResult.REMAIN;
             }
