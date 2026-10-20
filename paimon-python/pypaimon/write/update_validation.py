@@ -21,7 +21,7 @@ from pypaimon.common.predicate import Predicate
 def _authorize_update(table):
     """Require the same whole-table grant as plan_all_files for fast paths."""
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
-    from pypaimon.read.table_scan import authorize
+    from pypaimon.read.auth_support import authorize
 
     query_auth = table.catalog_environment.table_query_auth(table.options, table.identifier)
     if authorize(table, query_auth, None) is not None:

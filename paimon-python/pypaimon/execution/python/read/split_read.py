@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
-from pypaimon.common.merge_engine_dispatch import build_merge_function
+from pypaimon.execution.python.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.predicate import Predicate
@@ -1193,7 +1193,7 @@ class MergeFileSplitRead(SplitRead):
         """Pick the MergeFunction for the table's ``merge-engine`` option.
 
         Delegates to the shared dispatch in
-        ``pypaimon.common.merge_engine_dispatch`` so the read path and
+        ``pypaimon.execution.python.merge_engine_dispatch`` so the read path and
         the in-memory merge buffer on the write path cannot drift.
         ``AGGREGATE`` is special-cased here because building the per-
         field aggregators needs the full ``DataField`` objects, the

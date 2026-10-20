@@ -15,14 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Compatibility exports for Native execution adapters."""
+"""Materialize a Python system-table provider into its shared split contract."""
 
-from pypaimon.execution.native.read.native_vector_search import (
-    _native_vector_builder,
-    try_native_vector_search,
-)
+from pypaimon.read.plan import Plan
+from pypaimon.table.system.system_table_scan import SystemSplit
 
-__all__ = [
-    '_native_vector_builder',
-    'try_native_vector_search',
-]
+
+def plan(scan) -> Plan:
+    return Plan(_splits=[SystemSplit(scan.system_table._build_arrow_table())])

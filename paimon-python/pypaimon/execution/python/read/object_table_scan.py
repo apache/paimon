@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Public imports for the Python search implementation."""
+from pypaimon.read.plan import Plan
+from pypaimon.table.object.object_split import ObjectSplit
 
-from pypaimon.execution.python.read.search.primary_key_full_text_read import (
-    PrimaryKeyFullTextRead,
-)
 
-__all__ = [
-    'PrimaryKeyFullTextRead',
-]
+def plan(self) -> Plan:
+    split = ObjectSplit(
+        file_io=self.table.file_io,
+        location=self.table.location(),
+    )
+    return Plan(_splits=[split])

@@ -29,8 +29,8 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.ray import batch_vector_search as search_module
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.tests.ray_vector_search_test import VECTORS, add_rows, build_index, ids

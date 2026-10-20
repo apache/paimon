@@ -176,3 +176,36 @@ from pypaimon.execution.native.read import native_search_plan
     result = subprocess.run([sys.executable, '-c', source], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             universal_newlines=True, timeout=30)
     assert result.returncode == 0, result.stderr
+
+
+def test_shared_scan_requests_and_update_authorization_do_not_load_backends():
+    source = '''
+import importlib.abc
+import sys
+from types import SimpleNamespace
+
+class BlockExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(('pypaimon.execution.', 'pypaimon_rust')):
+            raise AssertionError('Shared request loaded an executor: ' + fullname)
+
+sys.meta_path.insert(0, BlockExecution())
+from pypaimon.read.scan_request import ScanRequest
+from pypaimon.write.update_validation import _authorize_update
+
+request = ScanRequest().with_shard(1, 3)
+assert (request.idx_of_this_subtask, request.number_of_para_subtasks) == (1, 3)
+try:
+    ScanRequest().with_shard(3, 3)
+except ValueError:
+    pass
+else:
+    raise AssertionError('Invalid shard request was accepted')
+table = SimpleNamespace(
+    options=object(), identifier='db.table',
+    catalog_environment=SimpleNamespace(table_query_auth=lambda options, identifier: None))
+_authorize_update(table)
+'''
+    result = subprocess.run([sys.executable, '-c', source], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=30)
+    assert result.returncode == 0, result.stderr

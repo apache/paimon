@@ -346,7 +346,7 @@ class AsyncStreamingTableScan:
         )
         starting_scanner.only_read_real_buckets = self._only_read_real_buckets()
         if auth_result is not None:
-            from pypaimon.read.auth_support import prune_scanner_by_auth
+            from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
             prune_scanner_by_auth(self.table, starting_scanner, auth_result)
         plan = starting_scanner.scan()
         if self._bucket_filter is not None:

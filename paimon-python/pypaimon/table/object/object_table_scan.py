@@ -16,7 +16,6 @@
 # under the License.
 
 from pypaimon.read.plan import Plan
-from pypaimon.table.object.object_split import ObjectSplit
 
 
 class ObjectTableScan:
@@ -31,8 +30,5 @@ class ObjectTableScan:
         self.table: ObjectTable = table
 
     def plan(self) -> Plan:
-        split = ObjectSplit(
-            file_io=self.table.file_io,
-            location=self.table.location(),
-        )
-        return Plan(_splits=[split])
+        from pypaimon.execution.python.read.object_table_scan import plan
+        return plan(self)

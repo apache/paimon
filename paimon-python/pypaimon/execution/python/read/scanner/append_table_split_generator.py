@@ -22,7 +22,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.execution.python.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import Split
-from pypaimon.read.scan_distribution import slice_append_splits
+from pypaimon.execution.python.read.scan_distribution import slice_append_splits
 
 
 class AppendTableSplitGenerator(AbstractSplitGenerator):

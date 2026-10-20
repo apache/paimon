@@ -21,7 +21,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
+from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
 from pypaimon.tests.vector_search_filter_test import _StubTable, _entry, _field
 
 

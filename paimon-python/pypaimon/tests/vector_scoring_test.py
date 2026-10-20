@@ -21,9 +21,14 @@ from unittest import mock
 import numpy as np
 import pyarrow as pa
 
-from pypaimon.table.source.vector_search_read import (
-    DataEvolutionVectorRead, _compute_score, _compute_scores,
-    _iter_arrow_batch_scores, _iter_arrow_scores, _score_block_size, _score_rows,
+from pypaimon.execution.python.read.search.vector_search_read import (
+    DataEvolutionVectorRead,
+    _compute_score,
+    _compute_scores,
+    _iter_arrow_batch_scores,
+    _iter_arrow_scores,
+    _score_block_size,
+    _score_rows,
 )
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field

@@ -31,9 +31,12 @@ pypaimon/
     dispatch.py               Preparation and safe backend selection
     python/
       read/                   Python scanning, file readers and merge execution
+                              Format/object file I/O and system-table filtering
         search/               Vector, text, hybrid search and candidate filtering
       write/                  Python writers, committers and update execution
+                              Format-table writing and explicit cleanup
       globalindex/            Python index readers, writers, build and evaluation
+      merge_engine_dispatch.py Python merge-function selection for read and write
     native/
       runtime.py              Lazy runtime discovery and process safety
       table.py                Rust table/configuration bridge
@@ -56,6 +59,11 @@ shared metadata remain in `globalindex`; shared search plans and splits remain i
 `table/source`. Python index file codecs, compression and reader/writer helpers
 live in `execution/python/globalindex`. Vector-index stream ownership and I/O
 callbacks are shared by both backends through `execution/vindex_input.py`.
+Public Format, Object and System table classes keep their existing paths and
+delegate file enumeration, decoding and filtering to Python read execution.
+Native system-table planning uses `execution/native/read/system_table.py`.
+Scan authorization and request validation remain shared; Python file-scanner
+pruning, sharding and slicing execute under `execution/python/read`.
 
 Native adapters convert requests and results and invoke `pypaimon_rust`. General
 execution algorithms belong in Rust Core. The optional extension is loaded only

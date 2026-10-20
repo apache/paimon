@@ -26,9 +26,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl, DataEvolutionVectorRead,
-)
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl, DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field, _entry, _bitmap
 

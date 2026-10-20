@@ -203,29 +203,17 @@ def test_batch_reader_freezes_query_sequence_before_lazy_fallback(search_table):
     assert fallback._query_vectors == [[1.0, 0.0]]
 
 
-@pytest.mark.parametrize('module,name', [
-    ('vector_search_scan', 'VectorSearchScanPlan'),
-    ('vector_search_scan', 'VectorSearchScan'),
-    ('vector_search_read', 'VectorSearchRead'),
-    ('vector_search_read', 'BatchVectorSearchRead'),
-    ('full_text_scan', 'FullTextScanPlan'),
-    ('full_text_scan', 'FullTextScan'),
-    ('full_text_read', 'FullTextRead'),
-    ('primary_key_vector_scan', 'PrimaryKeyVectorSearchSplit'),
-    ('primary_key_vector_scan', 'PrimaryKeyVectorScanPlan'),
-    ('primary_key_full_text_scan', 'PrimaryKeyFullTextSearchSplit'),
-    ('primary_key_full_text_scan', 'PrimaryKeyFullTextScanPlan'),
+@pytest.mark.parametrize('name', [
+    'VectorSearchScanPlan', 'VectorSearchScan', 'VectorSearchRead', 'BatchVectorSearchRead',
+    'FullTextScanPlan', 'FullTextScan', 'FullTextRead', 'PrimaryKeyVectorSearchSplit',
+    'PrimaryKeyVectorScanPlan', 'PrimaryKeyFullTextSearchSplit', 'PrimaryKeyFullTextScanPlan',
 ])
-def test_shared_search_contracts_keep_original_import_and_pickle_paths(module, name):
-    old_module = 'pypaimon.table.source.' + module
+def test_shared_search_contracts_serialize_from_shared_module(name):
     canonical = getattr(importlib.import_module('pypaimon.table.source.search_types'), name)
-    assert getattr(importlib.import_module(old_module), name) is canonical
-    assert pickle.loads(('c%s\n%s\n.' % (old_module, name)).encode('ascii')) is canonical
+    assert pickle.loads(pickle.dumps(canonical)) is canonical
 
 
-def test_vector_scan_keeps_its_shared_split_export():
-    from pypaimon.table.source.vector_search_scan import VectorSearchSplit
-    from pypaimon.table.source.vector_search_split import VectorSearchSplit as shared_split
+def test_vector_split_uses_its_shared_contract_module():
+    from pypaimon.table.source.vector_search_split import VectorSearchSplit
 
-    assert VectorSearchSplit is shared_split
-    assert pickle.loads(b'cpypaimon.table.source.vector_search_scan\nVectorSearchSplit\n.') is shared_split
+    assert pickle.loads(pickle.dumps(VectorSearchSplit)) is VectorSearchSplit

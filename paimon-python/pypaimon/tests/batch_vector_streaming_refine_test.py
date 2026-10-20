@@ -24,9 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl, _compute_score,
-)
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl, _compute_score
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
 from pypaimon.utils.range import Range
 
@@ -99,7 +97,7 @@ def test_batches_are_scored_and_released_before_reading_next_batch():
     read._options["ivf.refine_factor"] = "4"
     references = []
     offered = []
-    from pypaimon.table.source.vector_search_read import _offer_score
+    from pypaimon.execution.python.read.search.vector_search_read import _offer_score
 
     def batches():
         for row_id in range(4):
@@ -197,7 +195,7 @@ def test_large_arrow_batch_bounds_scoring_blocks():
         pa.FixedSizeListArray.from_arrays(pa.array(values.ravel()), 128),
     ], names=["_ROW_ID", "embedding"])
     resource = stream(read, [batch])
-    from pypaimon.table.source.vector_search_read import _iter_arrow_scores
+    from pypaimon.execution.python.read.search.vector_search_read import _iter_arrow_scores
 
     def score_block(vectors, query, metric):
         assert len(vectors) <= 1024

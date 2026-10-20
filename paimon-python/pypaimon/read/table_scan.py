@@ -24,7 +24,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.execution.native.read.plan import NativeTableScanMixin
 from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
 from pypaimon.read.auth_support import (
-    authorize, latest_auth_fields, prune_scanner_by_auth, validate_auth_rules)
+    authorize, latest_auth_fields, validate_auth_rules)
 from pypaimon.read.plan import Plan
 from pypaimon.read.scan_config import (
     _validate_scan_mode, _parse_incremental_timestamp_window, resolve_scan_snapshot_range)
@@ -136,6 +136,7 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
                 return native
         auth_result = self.__auth_query()
         if self._query_auth_fn is not None and self._file_scanner is not None:
+            from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
             prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
         # The native planner bypasses the auth-aware file scanner. Resolve auth
         # before selecting a planning backend.
@@ -180,6 +181,7 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
                 return native, native.stats()
         auth_result = self.__auth_query()
         if self._query_auth_fn is not None and self._file_scanner is not None:
+            from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
             prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
         if (not native_auth and auth_result is None and self._native_requested()
                 and self._native_plan_supported()):
@@ -229,5 +231,5 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
 
 __all__ = [
     "TableScan", "authorize", "latest_auth_fields", "validate_auth_rules",
-    "prune_scanner_by_auth", "_validate_scan_mode", "_parse_incremental_timestamp_window",
+    "_validate_scan_mode", "_parse_incremental_timestamp_window",
 ]

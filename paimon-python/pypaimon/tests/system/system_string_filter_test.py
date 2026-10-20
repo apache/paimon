@@ -273,6 +273,6 @@ def test_native_result_handoff_uses_string_filter(table):
     builder = table.new_read_builder()
     predicate = builder.new_predicate_builder().contains("name", "parquet")
     rows = table._build_arrow_table()
-    with patch("pypaimon.table.system.native_system_table.try_read_native_system_table", return_value=rows):
+    with patch("pypaimon.execution.native.read.system_table.try_read_native_system_table", return_value=rows):
         with patch.object(table, "_build_arrow_table", side_effect=AssertionError("Metadata rebuilt")):
             assert _read(builder.with_filter(predicate)).column("id").to_pylist() == [2, 4, 7, 9]

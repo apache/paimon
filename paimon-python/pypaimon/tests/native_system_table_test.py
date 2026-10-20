@@ -30,7 +30,7 @@ from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
-from pypaimon.table.system.native_system_table import _NATIVE_TABLES
+from pypaimon.execution.native.read.system_table import _NATIVE_TABLES
 from pypaimon.table.system.system_table_loader import load
 from pypaimon.tests import native_plan_rest_test
 
@@ -177,7 +177,7 @@ def test_stats_follow_readded_column_ids(source):
 def test_native_error_is_not_retried_in_python(source):
     _, table, _ = source
     system = _system(table, 'files', True)
-    with patch('pypaimon.table.system.native_system_table._native_table', side_effect=RuntimeError('denied')):
+    with patch('pypaimon.execution.native.read.system_table._native_table', side_effect=RuntimeError('denied')):
         with patch.object(type(system), '_build_arrow_table') as fallback:
             with pytest.raises(RuntimeError, match='denied'):
                 _read(system)
@@ -386,7 +386,7 @@ def test_captured_native_split_reads_without_recreating_rest_environment(source)
     system = _system(table, 'snapshots', True)
     splits = pickle.loads(pickle.dumps(system.new_read_builder().new_scan().plan().splits()))
     reader = system.new_read_builder().with_projection(['snapshot_id']).new_read()
-    with patch('pypaimon.table.system.native_system_table._native_table',
+    with patch('pypaimon.execution.native.read.system_table._native_table',
                side_effect=AssertionError('REST environment recreated')):
         assert reader.to_arrow(splits).to_pylist() == [{'snapshot_id': 1}]
 

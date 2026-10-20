@@ -27,7 +27,7 @@ from pypaimon.execution.python.read.native_full_text_global_index_reader import 
 )
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead, _search_raw_full_text
+from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead, _search_raw_full_text
 from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit
 from pypaimon.tests.vector_search_filter_test import _StubTable, _entry, _field, _bitmap, match_query
 

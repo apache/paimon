@@ -21,8 +21,8 @@ import pyarrow as pa
 import pytest
 
 import pypaimon.multimodal as pm
-from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
-from pypaimon.table.source.global_index_row_filter import matching_rows
+from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+from pypaimon.execution.python.read.search.global_index_row_filter import matching_rows
 
 
 @pytest.fixture

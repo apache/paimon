@@ -21,7 +21,8 @@ from typing import Callable, List, Optional, Dict, Tuple
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.read.scan_distribution import shard_range, validate_shard, validate_slice
+from pypaimon.execution.python.read.scan_distribution import shard_range
+from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.split import Split
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow

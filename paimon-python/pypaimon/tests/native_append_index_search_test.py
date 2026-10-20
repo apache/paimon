@@ -26,7 +26,7 @@ import pytest
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
-from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead
 from pypaimon.tests import native_sorted_index_build_test as indexes
 from pypaimon.tests.vector_search_filter_test import match_query
 

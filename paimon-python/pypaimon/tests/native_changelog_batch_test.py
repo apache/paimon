@@ -25,7 +25,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.scan_distribution import java_file_name_shard
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow

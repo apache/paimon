@@ -26,14 +26,14 @@ import pytest
 import pyarrow as pa
 
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
-from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
-from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
-from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
-from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl, DataEvolutionVectorRead
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+from pypaimon.execution.python.read.search.full_text_scan import DataEvolutionFullTextScan
+from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
+from pypaimon.execution.python.read.search.primary_key_full_text_scan import PrimaryKeyFullTextScan
+from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
+from pypaimon.execution.python.read.search.primary_key_vector_scan import PrimaryKeyVectorScan
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl, DataEvolutionVectorRead
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.tests import native_hybrid_search_test as hybrid
 from pypaimon.tests import native_pk_full_text_search_test as text
 from pypaimon.tests import native_sorted_index_build_test as indexes

@@ -27,7 +27,10 @@ from pypaimon.globalindex.global_index_reader import FieldRef, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.execution.python.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
 from pypaimon.execution.python.globalindex.union_global_index_reader import UnionGlobalIndexReader
-from pypaimon.table.source.vector_search_read import AbstractVectorSearchReadImpl, DataEvolutionVectorRead
+from pypaimon.execution.python.read.search.vector_search_read import (
+    AbstractVectorSearchReadImpl,
+    DataEvolutionVectorRead,
+)
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
 from pypaimon.tests.global_index_evaluator_test import StubGlobalIndexReader, _make_fields
 from pypaimon.utils.range import Range

@@ -22,7 +22,7 @@ import pytest
 pytest.importorskip("ray")
 
 from pypaimon.read.table_read import TableRead
-from pypaimon.table.source.vector_search_read import AbstractVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_read import AbstractVectorSearchReadImpl
 from pypaimon.tests import ray_vector_search_test as ray_fixtures
 from pypaimon.tests import vector_filter_exactness_test as fixtures
 from pypaimon.tests.vector_filter_exactness_test import query, scalar_index

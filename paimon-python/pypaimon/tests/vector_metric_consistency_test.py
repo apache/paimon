@@ -21,8 +21,11 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl, DataEvolutionVectorRead, _raw_search_metric)
+from pypaimon.execution.python.read.search.vector_search_read import (
+    BatchVectorSearchReadImpl,
+    DataEvolutionVectorRead,
+    _raw_search_metric,
+)
 from pypaimon.tests.vector_search_filter_test import (
     _StubTable, _entry, _field, _install_raw_vector_read_builder)
 from pypaimon.table.source.vector_search_split import RawVectorSearchSplit

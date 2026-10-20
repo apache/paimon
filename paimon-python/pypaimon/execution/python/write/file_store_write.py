@@ -266,7 +266,7 @@ class FileStoreWrite:
         value side). So ``value_arity`` here is ``len(table.fields)``,
         not ``len(table.fields) - len(primary_keys)``.
         """
-        from pypaimon.common.merge_engine_dispatch import (
+        from pypaimon.execution.python.merge_engine_dispatch import (
             build_merge_function, partial_update_unsupported_options)
         from pypaimon.common.options.core_options import MergeEngine
 

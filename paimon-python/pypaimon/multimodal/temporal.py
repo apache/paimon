@@ -40,9 +40,7 @@ from pypaimon.read.table_read import _ClosableArrowBatchReader
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.table.source.global_index_live_row_filter import (
-    table_at_snapshot,
-)
+from pypaimon.execution.python.read.search.global_index_live_row_filter import table_at_snapshot
 from pypaimon.utils.range import Range
 
 

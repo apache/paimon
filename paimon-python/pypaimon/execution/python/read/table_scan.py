@@ -19,7 +19,7 @@
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.auth_support import prune_scanner_by_auth
+from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
 

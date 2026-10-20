@@ -22,7 +22,7 @@ from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.interval_partition import IntervalPartition
-from pypaimon.read.scan_distribution import java_file_name_shard
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.execution.python.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import Split
 
