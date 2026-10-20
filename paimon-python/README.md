@@ -419,11 +419,19 @@ Python-planned or serialized authorization rules retain the Python reader.
 For both materialized
 `to_arrow()` and streaming `to_arrow_batch_reader()` reads, the effective split
 parallelism (the method argument, `read.parallelism`, or the automatic default)
-runs independent Rust readers. Splits stay in input order but contiguous groups
-are balanced by physical file bytes to reduce worker skew. An unfiltered row
-limit also caps reader fan-out to avoid speculative work.
-Streaming buffers at most one batch per reader and closing the batch reader
-interrupts native reads that are still in flight. An uninstalled extension,
+is executed by Rust Core. Core owns byte-balanced split groups, bounded
+prefetch, the shared row limit and cancellation. The Rust reader's `ordered`
+argument defaults to `False`. PyPaimon requests `ordered=True` for materialized
+reads, emitting groups in supplied split order; streaming reads use
+`ordered=False` and emit batches as groups become ready. Both modes retain each
+split reader's row order.
+Ordered parallel reads disable background Parquet row-group prefetch to prevent
+later groups from holding scheduling permits needed by earlier groups; split
+workers still read concurrently.
+An unfiltered row limit also caps reader fan-out to avoid speculative work.
+The split scheduler buffers at most one batch per worker, and closing the batch
+reader interrupts native reads that are still in flight. Limited BLOB reads visit
+splits lazily with the remaining quota, before resolving output payloads. An uninstalled extension,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
 

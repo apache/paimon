@@ -25,7 +25,7 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.table_read import TableRead
+from pypaimon.read.native_plan import native_read as read_native_splits
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.write.table_update import TableUpdate
@@ -172,17 +172,9 @@ def test_shard_normal_updates_preserve_parquet_vector_and_blob_sidecars(tmp_path
     update = builder.new_update().with_update_type(['score'])
     update.with_read_projection(['id', 'score'])
 
-    def reversed_groups(self, readers):
-        # A valid completion order for parallel readers must not change which
-        # row receives an update. Read actual files, but finish the last group first.
-        for reader in reversed(readers):
-            try:
-                yield from reader
-            finally:
-                reader.close()
-
     with ExitStack() as stack:
-        stack.enter_context(patch.object(TableRead, '_native_batches_parallel_streaming', reversed_groups))
+        native_calls = stack.enter_context(patch(
+            'pypaimon.read.native_plan.native_read', wraps=read_native_splits))
         if native:
             stack.enter_context(patch('pypaimon.write.table_update.ShardTableUpdator.__init__',
                                       side_effect=AssertionError('Python shard fallback')))
@@ -195,6 +187,12 @@ def test_shard_normal_updates_preserve_parquet_vector_and_blob_sidecars(tmp_path
         finally:
             reader.close()
         messages = shard.prepare_commit()
+        if native_read and not native:
+            # Pure shard writers consume their ranges in split order. Their
+            # Native read delegates every split to one serial Core stream.
+            native_calls.assert_called_once()
+            assert native_calls.call_args.kwargs['parallelism'] == 1
+            assert native_calls.call_args.kwargs['ordered'] is False
     _commit(builder, messages, stream)
     for rows in _rows(table):
         assert rows == [dict(row, score=row['score'] + 10) for row in before]
