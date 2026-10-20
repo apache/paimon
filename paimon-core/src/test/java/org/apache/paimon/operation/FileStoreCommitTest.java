@@ -51,7 +51,6 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
-import org.apache.paimon.operation.commit.ReassignCompactChangesRewriter;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -3070,51 +3069,40 @@ public class FileStoreCommitTest {
             List<CommitCallback> callbacks,
             List<CommitPreCallback> preCallbacks) {
         String tableName = store.options().path().getName();
-        FileStoreCommitImpl commit =
-                new FileStoreCommitImpl(
-                        snapshotCommit,
-                        store.fileIO(),
-                        new FileSystemSchemaManager(store.fileIO(), store.options().path()),
-                        tableName,
-                        commitUser,
-                        store.partitionType(),
-                        options,
-                        store.pathFactory(),
-                        store.snapshotManager(),
-                        store.manifestFileFactory(),
-                        store.manifestListFactory(),
-                        store.indexManifestFileFactory(),
-                        store::newScan,
-                        store.newStatsFileHandler(),
-                        store.bucketMode(),
-                        preCallbacks,
-                        callbacks,
-                        scanner ->
-                                ConflictDetection.create(
-                                        tableName,
-                                        commitUser,
-                                        store.partitionType(),
-                                        store.pathFactory(),
-                                        store.newKeyComparator(),
-                                        store.bucketMode(),
-                                        options.deletionVectorsEnabled(),
-                                        dataEvolutionEnabled,
-                                        options.dataEvolutionNestedFieldEnabled(),
-                                        options.pkClusteringOverride(),
-                                        store.newIndexFileHandler(),
-                                        store.snapshotManager(),
-                                        scanner),
-                        null);
-        Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
-        if (dataEvolutionEnabled && lastSafeSnapshot != null && lastSafeSnapshot >= 0) {
-            commit.withCommitChangesRewriter(
-                    new ReassignCompactChangesRewriter(
-                            store.fileIO(),
-                            store.pathFactory(),
-                            store.snapshotManager(),
-                            lastSafeSnapshot));
-        }
-        return commit;
+        return new FileStoreCommitImpl(
+                snapshotCommit,
+                store.fileIO(),
+                new FileSystemSchemaManager(store.fileIO(), store.options().path()),
+                tableName,
+                commitUser,
+                store.partitionType(),
+                options,
+                store.pathFactory(),
+                store.snapshotManager(),
+                store.manifestFileFactory(),
+                store.manifestListFactory(),
+                store.indexManifestFileFactory(),
+                store::newScan,
+                store.newStatsFileHandler(),
+                store.bucketMode(),
+                preCallbacks,
+                callbacks,
+                scanner ->
+                        ConflictDetection.create(
+                                tableName,
+                                commitUser,
+                                store.partitionType(),
+                                store.pathFactory(),
+                                store.newKeyComparator(),
+                                store.bucketMode(),
+                                options.deletionVectorsEnabled(),
+                                dataEvolutionEnabled,
+                                options.dataEvolutionNestedFieldEnabled(),
+                                options.pkClusteringOverride(),
+                                store.newIndexFileHandler(),
+                                store.snapshotManager(),
+                                scanner),
+                null);
     }
 
     private ManifestCommittable indexCommittable(

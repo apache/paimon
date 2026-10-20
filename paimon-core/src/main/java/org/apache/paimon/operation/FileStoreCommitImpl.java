@@ -52,6 +52,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.ReassignCompactChangesRewriter;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -240,6 +241,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
+        if (options.dataEvolutionEnabled()) {
+            options.commitLastSafeSnapshot()
+                    .filter(id -> id >= 0)
+                    .ifPresent(
+                            id ->
+                                    this.commitChangesRewriter =
+                                            new ReassignCompactChangesRewriter(
+                                                    fileIO, pathFactory, snapshotManager, id));
+        }
     }
 
     private <T> T runWithLock(Callable<T> callable) {

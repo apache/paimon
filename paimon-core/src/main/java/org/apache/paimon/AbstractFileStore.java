@@ -49,7 +49,6 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
-import org.apache.paimon.operation.commit.ReassignCompactChangesRewriter;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
@@ -312,37 +311,26 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (tableRollback != null) {
             rollback = new CommitRollback(tableRollback);
         }
-        FileStoreCommitImpl commit =
-                new FileStoreCommitImpl(
-                        snapshotCommit,
-                        fileIO,
-                        schemaManager,
-                        tableName,
-                        commitUser,
-                        partitionType,
-                        options,
-                        pathFactory(),
-                        snapshotManager,
-                        manifestFileFactory(),
-                        manifestListFactory(),
-                        indexManifestFileFactory(),
-                        this::newScan,
-                        newStatsFileHandler(),
-                        bucketMode(),
-                        createCommitPreCallbacks(table),
-                        createCommitCallbacks(commitUser, table),
-                        conflictDetectFactory,
-                        rollback);
-        if (options.dataEvolutionEnabled()) {
-            options.commitLastSafeSnapshot()
-                    .filter(id -> id >= 0)
-                    .ifPresent(
-                            id ->
-                                    commit.withCommitChangesRewriter(
-                                            new ReassignCompactChangesRewriter(
-                                                    fileIO, pathFactory(), snapshotManager, id)));
-        }
-        return commit;
+        return new FileStoreCommitImpl(
+                snapshotCommit,
+                fileIO,
+                schemaManager,
+                tableName,
+                commitUser,
+                partitionType,
+                options,
+                pathFactory(),
+                snapshotManager,
+                manifestFileFactory(),
+                manifestListFactory(),
+                indexManifestFileFactory(),
+                this::newScan,
+                newStatsFileHandler(),
+                bucketMode(),
+                createCommitPreCallbacks(table),
+                createCommitCallbacks(commitUser, table),
+                conflictDetectFactory,
+                rollback);
     }
 
     @Override
