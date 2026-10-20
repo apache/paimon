@@ -41,7 +41,7 @@ public class ParquetRowDataBuilder
         extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
-    private final boolean localZonedTimestampMillisAsMicros;
+    private final boolean timestampMillisAsMicros;
     private Supplier<Map<String, byte[]>> metadataSupplier;
 
     public ParquetRowDataBuilder(OutputFile path, RowType rowType) {
@@ -49,10 +49,10 @@ public class ParquetRowDataBuilder
     }
 
     public ParquetRowDataBuilder(
-            OutputFile path, RowType rowType, boolean localZonedTimestampMillisAsMicros) {
+            OutputFile path, RowType rowType, boolean timestampMillisAsMicros) {
         super(path);
         this.rowType = rowType;
-        this.localZonedTimestampMillisAsMicros = localZonedTimestampMillisAsMicros;
+        this.timestampMillisAsMicros = timestampMillisAsMicros;
         this.metadataSupplier = HashMap::new;
     }
 
@@ -75,7 +75,7 @@ public class ParquetRowDataBuilder
     private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
         private final MessageType schema =
-                convertToParquetMessageType(rowType, localZonedTimestampMillisAsMicros);
+                convertToParquetMessageType(rowType, timestampMillisAsMicros);
 
         private ParquetRowDataWriter writer;
 

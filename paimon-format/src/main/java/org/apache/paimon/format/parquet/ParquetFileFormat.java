@@ -65,7 +65,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     private final FormatContext formatContext;
     private final Options options;
     private final int readBatchSize;
-    private final boolean localZonedTimestampMillisAsMicros;
+    private final boolean timestampMillisAsMicros;
 
     public ParquetFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -73,7 +73,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
         this.formatContext = formatContext;
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
-        this.localZonedTimestampMillisAsMicros =
+        this.timestampMillisAsMicros =
                 !"disabled"
                         .equalsIgnoreCase(
                                 formatContext
@@ -118,8 +118,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     public FormatWriterFactory createWriterFactory(RowType type) {
         FormatWriterFactory rawFactory =
                 new ParquetWriterFactory(
-                        new RowDataParquetBuilder(
-                                type, options, localZonedTimestampMillisAsMicros));
+                        new RowDataParquetBuilder(type, options, timestampMillisAsMicros));
         ShreddingWritePlanFactory writePlanFactory =
                 ShreddingWritePlanWriterFactories.createWritePlanFactory(
                         type, formatContext.options(), SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
@@ -130,8 +129,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
 
     @Override
     public void validateDataFields(RowType rowType) {
-        ParquetSchemaConverter.convertToParquetMessageType(
-                rowType, localZonedTimestampMillisAsMicros);
+        ParquetSchemaConverter.convertToParquetMessageType(rowType, timestampMillisAsMicros);
     }
 
     @Override

@@ -105,19 +105,18 @@ public class ParquetSchemaConverter {
     }
 
     public static MessageType convertToParquetMessageType(
-            RowType rowType, boolean localZonedTimestampMillisAsMicros) {
+            RowType rowType, boolean timestampMillisAsMicros) {
         return new MessageType(
-                PAIMON_SCHEMA, convertToParquetTypes(rowType, localZonedTimestampMillisAsMicros));
+                PAIMON_SCHEMA, convertToParquetTypes(rowType, timestampMillisAsMicros));
     }
 
     public static Type[] convertToParquetTypes(RowType rowType) {
         return convertToParquetTypes(rowType, false);
     }
 
-    private static Type[] convertToParquetTypes(
-            RowType rowType, boolean localZonedTimestampMillisAsMicros) {
+    private static Type[] convertToParquetTypes(RowType rowType, boolean timestampMillisAsMicros) {
         return rowType.getFields().stream()
-                .map(field -> convertToParquetType(field, localZonedTimestampMillisAsMicros))
+                .map(field -> convertToParquetType(field, timestampMillisAsMicros))
                 .toArray(Type[]::new);
     }
 
@@ -126,10 +125,9 @@ public class ParquetSchemaConverter {
         return convertToParquetType(field, false);
     }
 
-    public static Type convertToParquetType(
-            DataField field, boolean localZonedTimestampMillisAsMicros) {
+    public static Type convertToParquetType(DataField field, boolean timestampMillisAsMicros) {
         return convertToParquetType(
-                field.name(), field.type(), field.id(), 0, localZonedTimestampMillisAsMicros);
+                field.name(), field.type(), field.id(), 0, timestampMillisAsMicros);
     }
 
     public static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
@@ -137,11 +135,7 @@ public class ParquetSchemaConverter {
     }
 
     private static Type convertToParquetType(
-            String name,
-            DataType type,
-            int fieldId,
-            int depth,
-            boolean localZonedTimestampMillisAsMicros) {
+            String name, DataType type, int fieldId, int depth, boolean timestampMillisAsMicros) {
         Type.Repetition repetition =
                 type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
         switch (type.getTypeRoot()) {
@@ -235,7 +229,11 @@ public class ParquetSchemaConverter {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return createTimestampWithLogicalType(
-                                name, timestampType.getPrecision(), repetition, false)
+                                name,
+                                timestampType.getPrecision(),
+                                repetition,
+                                false,
+                                timestampMillisAsMicros)
                         .withId(fieldId);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
@@ -244,7 +242,7 @@ public class ParquetSchemaConverter {
                                 localZonedTimestampType.getPrecision(),
                                 repetition,
                                 true,
-                                localZonedTimestampMillisAsMicros)
+                                timestampMillisAsMicros)
                         .withId(fieldId);
             case ARRAY:
             case VECTOR:
@@ -258,7 +256,7 @@ public class ParquetSchemaConverter {
                                         listElementType,
                                         fieldId,
                                         depth + 1,
-                                        localZonedTimestampMillisAsMicros)
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
                         .withId(fieldId);
@@ -276,7 +274,7 @@ public class ParquetSchemaConverter {
                                         keyType,
                                         fieldId,
                                         depth + 1,
-                                        localZonedTimestampMillisAsMicros)
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
                 Type mapValueParquetType =
                         convertToParquetType(
@@ -284,7 +282,7 @@ public class ParquetSchemaConverter {
                                         mapType.getValueType(),
                                         fieldId,
                                         depth + 1,
-                                        localZonedTimestampMillisAsMicros)
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
                                 repetition,
@@ -307,7 +305,7 @@ public class ParquetSchemaConverter {
                                         elementType,
                                         fieldId,
                                         depth + 1,
-                                        localZonedTimestampMillisAsMicros)
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
                 Type multisetValueParquetType =
                         convertToParquetType(
@@ -315,7 +313,7 @@ public class ParquetSchemaConverter {
                                         new IntType(false),
                                         fieldId,
                                         depth + 1,
-                                        localZonedTimestampMillisAsMicros)
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
                                 repetition,
@@ -333,8 +331,7 @@ public class ParquetSchemaConverter {
                 //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
                 // }
                 return groupTypeBuilder
-                        .addFields(
-                                convertToParquetTypes(rowType, localZonedTimestampMillisAsMicros))
+                        .addFields(convertToParquetTypes(rowType, timestampMillisAsMicros))
                         .named(name)
                         .withId(fieldId);
             case VARIANT:
