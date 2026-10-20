@@ -32,13 +32,22 @@ class _PaimonTableFrameReader:
             frames_table, columns)
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
+        self._table = self._table._copy_with_snapshot(snapshot)
         self.num_rows = snapshot.next_row_id
         self.file_io = self._table.file_io
         self._locator = _FrameLocator(self._table, snapshot, splits)
 
     def read_indices(self, indices, columns):
-        splits, needs_filter = self._locator.locate(indices)
         builder = self._table.new_read_builder().with_projection(columns)
+        if (self._table.options.native_plan_enabled()
+                or self._table.options.native_read_enabled()):
+            from pypaimon.read.native_plan import native_runtime_available
+            if native_runtime_available():
+                # Keep lookup predicates in the native plan and residual read.
+                builder.with_filter(_index_predicate(self._table, indices))
+                plan = builder.new_scan().plan()
+                return builder.new_read().to_arrow(plan.splits())
+        splits, needs_filter = self._locator.locate(indices)
         if needs_filter:
             builder = builder.with_filter(
                 _index_predicate(self._table, indices))

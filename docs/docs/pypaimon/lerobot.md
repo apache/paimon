@@ -248,6 +248,11 @@ on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GO
 uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
 `video_backend` to force either decoder.
 
+With `pypaimon-rust` installed, set
+`table = table.copy({"read.native.enabled": "true"})` before constructing the dataset
+to use Rust for frame lookup planning and table reads. Lookups stay on the
+snapshot selected at initialization; unsupported native plans fall back to Python.
+
 Set `table = table.copy({"read.video.max-open-decoders": "8"})` before
 constructing the dataset to limit cached decoders per camera per worker (default: 16).
 Each open decoder uses memory and a file handle, so usage grows with cameras and workers.
