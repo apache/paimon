@@ -26,7 +26,7 @@ from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import deserialize_split_v1, native_method_available, _partition_fields
+from pypaimon.read.native_plan import deserialize_split_v1, _partition_fields
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
 from pypaimon.table.source.primary_key_full_text_scan import (
@@ -209,8 +209,6 @@ def python_search_reader(reader):
 
 
 def native_vector_scan(builder, python, batch=False):
-    if not native_method_available('VectorScanPlan', '_metadata'):
-        return python
     from pypaimon.table.source.native_vector_search import _native_vector_builder
     native = _native_vector_builder(builder, batch)
     return python if native is None else _NativeScan(
@@ -219,8 +217,6 @@ def native_vector_scan(builder, python, batch=False):
 
 
 def native_vector_read(builder, python, batch=False):
-    if not native_method_available('VectorScanPlan', '_metadata'):
-        return python
     from pypaimon.table.source.native_vector_search import _native_vector_builder
     native = _native_vector_builder(builder, batch)
     if native is None:
@@ -235,8 +231,6 @@ def native_vector_read(builder, python, batch=False):
 
 
 def native_full_text_scan(builder, python):
-    if not native_method_available('FullTextScanPlan', '_metadata'):
-        return python
     from pypaimon.table.source.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder, require_limit=False)
     return python if native is None else _NativeScan(
@@ -245,8 +239,6 @@ def native_full_text_scan(builder, python):
 
 
 def native_full_text_read(builder, python):
-    if not native_method_available('FullTextScanPlan', '_metadata'):
-        return python
     from pypaimon.table.source.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder)
     return python if native is None else _NativeRead(

@@ -182,7 +182,8 @@ class PaimonScanBuilder(val table: InnerTable)
           hybridSearch,
           fullTextSearch,
           acceptedVariantExtractions,
-          preserveDataGrouping = preserveDataGrouping
+          preserveDataGrouping = preserveDataGrouping,
+          pushedBucketFilters = pushedBucketFilters.toList
         )
     }
   }

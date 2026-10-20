@@ -18,6 +18,7 @@
 import logging
 from typing import Dict, List, Optional
 
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
@@ -53,6 +54,7 @@ class TableCommit:
 
         self._commit_callbacks: List[CommitCallback] = []
         self._native_commit = None
+        self._native_commit_is_batch = False
         self._native_callbacks_registered = False
         self.file_store_commit = FileStoreCommit(
             snapshot_commit, table, commit_user,
@@ -111,11 +113,14 @@ class TableCommit:
                 native, messages = prepared
                 # Mutation is deliberately outside the fallback boundary:
                 # an exception can mean the snapshot was already published.
-                native.commit(commit_identifier, messages, **native_kwargs)
+                if self._native_commit_is_batch:
+                    native.commit(messages, **native_kwargs)
+                else:
+                    native.commit(commit_identifier, messages, **native_kwargs)
                 return
             self.file_store_commit.commit(**commit_kwargs)
 
-    def _prepare_native_commit(self, messages):
+    def _prepare_native_commit(self, messages, *, batch=False):
         if not self.table.options.native_commit_enabled():
             return None
         try:
@@ -124,9 +129,17 @@ class TableCommit:
                 to_native_commit_messages)
             if not native_messages_supported(self.table, messages):
                 return None
-            if self._native_commit is None:
-                self._native_commit = create_native_commit(
-                    self.table, self.commit_user, self.overwrite_partition)
+            if self._native_commit is None or (batch and not self._native_commit_is_batch):
+                native = create_native_commit(
+                    self.table, self.commit_user, self.overwrite_partition,
+                    **({'batch': True} if batch else {}))
+                if native is None:
+                    return None
+                if self._native_commit is not None:
+                    self._native_commit.close()
+                self._native_commit = native
+                self._native_commit_is_batch = batch or self.overwrite_partition is not None
+                self._native_callbacks_registered = False
             if self._native_commit is None:
                 return None
             native_messages = to_native_commit_messages(self.table, messages)
@@ -137,6 +150,7 @@ class TableCommit:
                 self._native_callbacks_registered = True
             return self._native_commit, native_messages
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             # No native mutation has started. Preserve the normal Python path
             # when the optional runtime, FileIO or wire bridge is unavailable.
             logger.debug("Native commit preparation failed; using Python: %s", error)
@@ -185,10 +199,17 @@ class BatchTableCommit(TableCommit):
     def truncate_table(self) -> None:
         """Truncate the entire table, deleting all data."""
         self._check_committed()
+        prepared = self._prepare_native_commit([], batch=True)
+        if prepared is not None:
+            prepared[0].truncate_table()
+            return
         self.file_store_commit.truncate_table(BATCH_COMMIT_IDENTIFIER)
 
     def truncate_partitions(self, partitions: List[Dict[str, str]]) -> None:
-        self._check_committed()
+        prepared = self._prepare_native_commit([], batch=True)
+        if prepared is not None:
+            prepared[0].truncate_partitions(partitions)
+            return
         self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)
 
     def _check_committed(self):

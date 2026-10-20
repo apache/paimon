@@ -94,8 +94,8 @@ class TableScan:
             return True
         if not self.table.options.native_read_enabled():
             return False
-        from pypaimon.read.native_plan import native_reader_available
-        return native_reader_available()
+        from pypaimon.read.native_plan import native_runtime_available
+        return native_runtime_available()
 
     def _native_plan_supported(self) -> bool:
         # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
@@ -109,7 +109,7 @@ class TableScan:
         """Fall back to the Python scanner for scans native can't carry:
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; Rust rejects this schema), unsupported time travel selectors,
-        query auth, a missing pypaimon-rust, or a catalog / identifier Rust
+        custom authorization, a missing pypaimon-rust, or a catalog / identifier Rust
         cannot reconstruct. Keep this capability gate in sync when adding scan
         features."""
         from pypaimon.read.native_plan import (
@@ -138,21 +138,17 @@ class TableScan:
             catalog_options = getattr(context, 'options', None)
             if catalog_options is None:
                 return False
-            if any(getattr(context, attr, None) is not None for attr in (
-                    'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
-                return False
             database_name = self.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
-                return False
-        if self.partition_predicate is not None:
-            from pypaimon.read.native_plan import native_method_available
-            if not native_method_available('ReadBuilder', 'with_partition_filter'):
                 return False
         if self.table.options.query_auth_enabled:
             # The filesystem path has no catalog-issued authorization session.
             loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
             from pypaimon.read.native_plan import _catalog_metastore
             if loader is None or _catalog_metastore(loader) != 'rest':
+                return False
+            from pypaimon.read.native_plan import _native_query_auth_supported
+            if not _native_query_auth_supported(self.table):
                 return False
         # Rust rejects schemas whose primary keys are all partition keys.
         if getattr(self.table, 'is_primary_key_table', False) \
@@ -167,9 +163,6 @@ class TableScan:
         result = self.file_scanner._global_index_result
         if result is None:
             return True
-        from pypaimon.read.native_plan import native_method_available
-        if not native_method_available('TableScan', 'with_global_index_result'):
-            return False
         if self.table.is_primary_key_table:
             from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
             return isinstance(result, GlobalIndexSplitResult)
@@ -184,7 +177,7 @@ class TableScan:
             return [(range_.from_, range_.to) for range_ in row_ranges]
         return None
 
-    def _try_native_plan(self) -> Optional[Plan]:
+    def _try_native_plan(self, all_files=False) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
         Predicate and limit are pushed into Rust planning and are still enforced
@@ -231,6 +224,8 @@ class TableScan:
             # Append positions still precede LIMIT. Rust owns PK shards and
             # source-backed sorted-index refinement before applying LIMIT.
             defer_limit = has_distribution and not self.table.is_primary_key_table
+            if all_files:
+                extra_options['all_files'] = True
             plan = native_plan(
                 self.table,
                 predicate=self.predicate,
@@ -242,16 +237,6 @@ class TableScan:
                 **extra_options,
             )
             splits = plan.splits()
-            if (self.table.options.merge_engine() == 'first-row'
-                    and (fs._global_index_result is None or self.table.options.query_auth_enabled)
-                    and not fs.skip_level0 and not fs.is_streaming
-                    and any(file.level == 0 for split in splits for file in split.files)
-                    and any(not split.raw_convertible and any(file.level > 0 for file in split.files)
-                            for split in splits)):
-                # L0 runs are sorted by PK and can merge using first-row.
-                # Materialized clustered files must stay in raw splits: their
-                # physical order need not match the PK merge comparator.
-                return None
             partition_predicate = self.file_scanner.partition_key_predicate
             if (partition_predicate is not None and not (
                     self.table.is_primary_key_table and fs._global_index_result is not None)
@@ -276,8 +261,18 @@ class TableScan:
                 "Native plan failed, falling back to the Python scanner: %s", e)
             return None
 
-    def plan_for_write(self) -> Plan:
-        if self.__auth_query() is not None:
+    def plan_all_files(self) -> Plan:
+        """Plan matching files including L0 and all data-evolution column files.
+
+        Existing filters and limits still apply. Query authorization must be
+        unrestricted, as required by writer restore, overwrite and indexing.
+        """
+        from pypaimon.read.native_plan import _native_query_auth_supported
+        if self._native_requested() and _native_query_auth_supported(self.table) and self._native_plan_supported():
+            plan = self._try_native_plan(all_files=True)
+            if plan is not None:
+                return plan
+        if self.__auth_query(all_columns=True) is not None:
             raise TableNoPermissionException(self.table.identifier)
         if self._query_auth_fn is not None:
             prune_scanner_by_auth(self.table, self.file_scanner, None)
@@ -289,8 +284,8 @@ class TableScan:
         finally:
             self.file_scanner.skip_level0 = skip_level0
 
-    def __auth_query(self):
-        return authorize(self.table, self._query_auth_fn, self._read_type,
+    def __auth_query(self, all_columns=False):
+        return authorize(self.table, self._query_auth_fn, None if all_columns else self._read_type,
                          self.predicate, self.partition_predicate)
 
     def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:

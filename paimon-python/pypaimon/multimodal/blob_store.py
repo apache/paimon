@@ -20,9 +20,11 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
+from urllib.parse import urlparse
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.filesystem.uri_utils import table_relative_path
 from pypaimon.schema.data_types import is_blob_type
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
@@ -70,6 +72,20 @@ class BlobObject:
 
     def open(self) -> BinaryIO:
         descriptor = _descriptor_for_range(self.descriptor, self.range_header)
+        if self.table_root is not None:
+            parsed = urlparse(descriptor.uri)
+            if not (parsed.params or parsed.query or parsed.fragment):
+                try:
+                    relative_path = table_relative_path(
+                        self.table_root, descriptor.uri)
+                except ValueError:
+                    pass
+                else:
+                    # Use the table root's exact spelling for FUSE prefix mapping.
+                    managed_uri = self.table_root.rstrip("/") + "/" + relative_path
+                    return Blob.from_file(
+                        self.file_io, managed_uri, descriptor.offset,
+                        descriptor.length).new_input_stream()
         uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
         return Blob.from_descriptor(uri_reader, descriptor).new_input_stream()
 
@@ -343,7 +359,7 @@ class BlobStore:
         read_builder = read_builder.with_projection(projection)
         read_builder = read_builder.with_filter(self._keys_predicate(keys))
         scan = read_builder.new_scan()
-        plan = scan.plan_for_write()
+        plan = scan.plan_all_files()
         table = read_builder.new_read().to_arrow(plan.splits())
 
         targets = {}

@@ -316,6 +316,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
         class _Table:
             options = _Options()
+            fields = [DataField(0, 'id', AtomicType('INT'))]
 
         predicate = Predicate(method="equal", index=0, field="id", literals=[1])
         scanner = FileScanner.__new__(FileScanner)
@@ -405,6 +406,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
         class _Table:
             options = _Options()
+            fields = [DataField(0, 'id', AtomicType('INT'))]
 
         scanner = FileScanner.__new__(FileScanner)
         scanner.is_streaming = False

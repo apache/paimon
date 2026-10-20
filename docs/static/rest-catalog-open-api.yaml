@@ -815,6 +815,130 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/replace:
+    post:
+      tags:
+        - table
+      summary: Replace table
+      operationId: replaceTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceTableRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas:
+    get:
+      tags:
+        - table
+      summary: List schemas
+      operationId: listSchemas
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSchemasResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas/{version}:
+    get:
+      tags:
+        - table
+      summary: Get schema
+      operationId: getSchema
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSchemaResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Not Found - the table or the schema version does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
     get:
       tags:
@@ -1431,49 +1555,6 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/BranchNotExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/rename:
-    post:
-      tags:
-        - branch
-      summary: rename branch
-      operationId: renameBranch
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: branch
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RenameBranchRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          $ref: '#/components/responses/BranchNotExistErrorResponse'
-        "409":
-          description: Branch already exists
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
@@ -3686,6 +3767,58 @@ components:
         schemaId:
           type: integer
           format: int64
+    ReplaceTableRequest:
+      type: object
+      properties:
+        schema:
+          $ref: '#/components/schemas/Schema'
+    TableSchema:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int32
+        id:
+          type: integer
+          format: int64
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        highestFieldId:
+          type: integer
+          format: int32
+        partitionKeys:
+          type: array
+          items:
+            type: string
+        primaryKeys:
+          type: array
+          items:
+            type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        timeMillis:
+          type: integer
+          format: int64
+    ListSchemasResponse:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableSchema'
+        nextPageToken:
+          type: [ string, "null" ]
+    GetSchemaResponse:
+      type: object
+      properties:
+        schema:
+          $ref: '#/components/schemas/TableSchema'
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
@@ -3822,7 +3955,7 @@ components:
           items:
             $ref: '#/components/schemas/Snapshot'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     AuthTableQueryRequest:
       type: object
       properties:
@@ -3876,7 +4009,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetDatabaseResponse:
       type: object
       properties:
@@ -3911,7 +4044,7 @@ components:
             type: string
             description: table name of the table.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTableDetailsResponse:
       type: object
       properties:
@@ -3920,7 +4053,7 @@ components:
           items:
             $ref: '#/components/schemas/GetTableResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTablesGloballyResponse:
       type: object
       properties:
@@ -3929,7 +4062,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ConfigResponse:
       type: object
       properties:
@@ -3949,7 +4082,7 @@ components:
           items:
             $ref: '#/components/schemas/Partition'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     CreateBranchRequest:
       type: object
       properties:
@@ -3957,11 +4090,6 @@ components:
           type: string
         fromTag:
           type: [ string, "null" ]
-    RenameBranchRequest:
-      type: object
-      properties:
-        toBranch:
-          type: string
     ForwardBranchRequest:
       type: object
       properties:
@@ -4012,7 +4140,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     TagInfo:
       type: object
       properties:
@@ -4056,7 +4184,7 @@ components:
             type: string
             description: view name of the view.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewDetailsResponse:
       type: object
       properties:
@@ -4065,7 +4193,7 @@ components:
           items:
             $ref: '#/components/schemas/GetViewResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsGloballyResponse:
       type: object
       properties:
@@ -4074,7 +4202,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewsGloballyResponse:
       type: object
       properties:
@@ -4083,7 +4211,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsResponse:
       type: object
       properties:
@@ -4092,7 +4220,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionDetailsResponse:
       type: object
       properties:
@@ -4101,7 +4229,7 @@ components:
           items:
             $ref: '#/components/schemas/GetFunctionResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetFunctionResponse:
       type: object
       properties:
@@ -4159,7 +4287,7 @@ components:
           items:
             $ref: '#/components/schemas/ConsumerInfo'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
           description: Token for the next page of results
     ResetConsumerRequest:
       type: object

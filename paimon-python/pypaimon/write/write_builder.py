@@ -20,6 +20,7 @@ import uuid
 from abc import ABC
 from typing import Optional
 
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
 from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
@@ -83,6 +84,7 @@ class WriteBuilder(ABC):
                                        static_partition, stream,
                                        restore_snapshot_id=self.restore_snapshot_id, **kwargs)
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             # Construction has not written any data; the normal writer is safe.
             logger.debug('Native writer preparation failed; using Python: %s', error)
             return None

@@ -139,6 +139,48 @@ def predicate_field_names(predicate: Predicate) -> Set[str]:
     return involved_fields
 
 
+def predicate_for_physical_fields(predicate: Optional[Predicate], fields: List[DataField]) -> Optional[Predicate]:
+    """Bind projected top-level leaves; omit nested leaves from file pruning.
+
+    Like Java's NestedFieldTransform, a nested ROW leaf cannot use the parent
+    column's stats, bucket key or scalar index. Its flat output name can also
+    coincide with an unrelated physical column. Keep exact filtering on the
+    original predicate after projection.
+    """
+    if predicate is None:
+        return None
+    if predicate.method in ('and', 'or'):
+        children = [predicate_for_physical_fields(child, fields) for child in predicate.literals or []]
+        if predicate.method == 'or' and any(child is None for child in children):
+            return None
+        kept = [child for child in children if child is not None]
+        combine = (PredicateBuilder.and_predicates if predicate.method == 'and'
+                   else PredicateBuilder.or_predicates)
+        return combine(kept)
+    if not predicate.field_path:
+        return predicate
+    if len(predicate.field_path) != 1:
+        return None
+    name = predicate.field_path[0]
+    index = next((index for index, field in enumerate(fields) if field.name == name), None)
+    if index is None:
+        # Synthesized row-tracking columns are absent from table.fields but
+        # already carry the physical name used by the row-range selector.
+        if name == predicate.field:
+            return predicate
+        return None
+    return Predicate(predicate.method, index, name, predicate.literals, predicate.field_path)
+
+
+def predicate_matches_physical_names(predicate: Optional[Predicate]) -> bool:
+    """Whether a predicate's output names denote the same physical columns."""
+    if predicate is None:
+        return True
+    if predicate.method in ('and', 'or'):
+        return all(predicate_matches_physical_names(child) for child in predicate.literals or [])
+    return not predicate.field_path or predicate.field_path == [predicate.field]
+
+
 def _get_all_fields(predicate: Predicate) -> Set[str]:
     return predicate_field_names(predicate)
 

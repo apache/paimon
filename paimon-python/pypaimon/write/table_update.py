@@ -26,7 +26,6 @@ from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options.core_options import (
     CoreOptions,
     GlobalIndexSearchMode,
-    StartupMode,
 )
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -37,6 +36,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scanner.data_evolution_split_generator import (
     DataEvolutionSplitGenerator,
@@ -44,7 +44,7 @@ from pypaimon.read.scanner.data_evolution_split_generator import (
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
+from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_id_file_index import RowIdFileIndex
@@ -55,6 +55,16 @@ from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _authorize_update(table):
+    """Require the same whole-table grant as plan_all_files for fast paths."""
+    from pypaimon.catalog.catalog_exception import TableNoPermissionException
+    from pypaimon.read.table_scan import authorize
+
+    query_auth = table.catalog_environment.table_query_auth(table.options, table.identifier)
+    if authorize(table, query_auth, None) is not None:
+        raise TableNoPermissionException(table.identifier)
 
 
 def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total_tasks: int) -> List[DataSplit]:
@@ -132,12 +142,16 @@ class TableUpdate:
     def _new_row_id_updater(
             self, commit_identifier: int, _precomputed_files_info=None
     ) -> TableUpdateByRowId:
+        # Authorize outside the native preparation fallback so a denied or
+        # restricted grant cannot be swallowed and retried by another reader.
+        _authorize_update(self.table)
         if _precomputed_files_info is None:
             from pypaimon.write.native_update import create_native_update_by_row_id
             try:
                 native = create_native_update_by_row_id(
                     self.table, self.commit_user, commit_identifier)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native row-id updater preparation failed: %s', error)
             else:
                 if native is not None:
@@ -201,6 +215,7 @@ class TableUpdate:
                 from pypaimon.write.native_update import create_native_update
                 native = create_native_update(self.table, self.commit_user, cols)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native update preparation failed; using Python: %s', error)
             else:
                 if native is not None:
@@ -315,6 +330,7 @@ class TableUpdate:
                 native = create_native_predicate_update(
                     self.table, self.commit_user, predicate, list(assignments))
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native predicate update preparation failed: %s', error)
             else:
                 if native is not None:
@@ -331,7 +347,7 @@ class TableUpdate:
         else:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        plan = read_builder.new_scan().plan_for_write()
+        plan = read_builder.new_scan().plan_all_files()
         splits = plan.splits()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         files_info = RowIdFileIndex.from_splits(
@@ -413,31 +429,11 @@ class TableUpdate:
                 yield group
 
     def _matched_update_scan_table(self):
-        snapshot_manager = self.table.snapshot_manager()
-        snapshot = TimeTravelUtil.try_travel_to_snapshot(
-            self.table.options.options,
-            self.table.tag_manager(),
-            snapshot_manager,
-        )
-        if snapshot is None:
-            snapshot = snapshot_manager.get_latest_snapshot()
-        if snapshot is None:
-            return self.table
-
-        dynamic_options = {
+        snapshot = TimeTravelUtil.resolve_snapshot(self.table)
+        return self.table.copy_without_time_travel({
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
                 GlobalIndexSearchMode.FULL.value,
-            CoreOptions.SCAN_MODE.key(): StartupMode.DEFAULT.value,
-            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
-        }
-        for scan_key in SCAN_KEYS:
-            if (
-                    scan_key != CoreOptions.SCAN_SNAPSHOT_ID.key()
-                    and self.table.options.options.contains_key(scan_key)
-            ):
-                dynamic_options[scan_key] = None
-
-        return self.table.copy(dynamic_options)
+        })._copy_with_snapshot(snapshot)
 
     def _validate_predicate_update(
             self,
@@ -552,6 +548,7 @@ class TableUpdate:
             native = create_native_predicate_delete(
                 self.table, self.commit_user, predicate)
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logger.debug('Native predicate delete preparation failed: %s', error)
         else:
             if native is not None:
@@ -568,7 +565,8 @@ class TableUpdate:
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
-        snapshot = self.table.snapshot_manager().get_latest_snapshot()
+        _authorize_update(self.table)
+        snapshot = TimeTravelUtil.resolve_snapshot(self.table)
         if snapshot is None:
             return []
 
@@ -636,6 +634,7 @@ class TableUpdate:
                 from pypaimon.write.native_update import create_native_delete
                 native = create_native_delete(self.table, self.commit_user)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native delete preparation failed; using Python: %s', error)
             else:
                 if native is not None:
@@ -700,7 +699,7 @@ class TableUpdate:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
         scan = read_builder.new_scan()
-        splits = scan.plan_for_write().splits()
+        splits = scan.plan_all_files().splits()
         if (splits
                 and self.table.options.native_write_enabled()
                 and not any(isinstance(split, QueryAuthSplit)
@@ -709,6 +708,7 @@ class TableUpdate:
                 from pypaimon.write.native_update import native_predicate_row_ids
                 row_ids = native_predicate_row_ids(scan_table, predicate, splits)
             except Exception as error:
+                _raise_if_native_fork_safety_error(error)
                 logger.debug('Native predicate delete match failed: %s', error)
             else:
                 if row_ids is not None:
@@ -747,6 +747,7 @@ class BatchTableUpdate(TableUpdate):
             native = create_native_update(
                 self.table, self.commit_user, self.update_cols)
         except Exception as error:
+            _raise_if_native_fork_safety_error(error)
             logger.debug('Native batch update preparation failed: %s', error)
         else:
             if native is not None:
@@ -934,7 +935,7 @@ class ShardTableUpdator:
         self.dict = defaultdict(list)
 
         scanner = self.table.new_read_builder().new_scan()
-        plan = scanner.plan_for_write()
+        plan = scanner.plan_all_files()
         self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
@@ -957,7 +958,9 @@ class ShardTableUpdator:
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
         read_builder = self.table.new_read_builder()
         read_builder.with_projection(self.projection)
-        return read_builder.new_read().to_arrow_batch_reader(self.splits)
+        # Updates consume row ranges in split order. Parallel native readers
+        # return batches in completion order, which would assign values to other rows.
+        return read_builder.new_read().to_arrow_batch_reader(self.splits, parallelism=1)
 
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []

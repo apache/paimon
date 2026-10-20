@@ -52,7 +52,7 @@ def _rows(table, native):
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
                           'read.native.enabled': str(native).lower()}).new_read_builder()
     # Java first-row scans hide un-compacted L0 files; a write scan includes them.
-    splits = builder.new_scan().plan_for_write().splits()
+    splits = builder.new_scan().plan_all_files().splits()
     reader = builder.new_read()
     if native:
         with patch.object(reader, '_create_split_read', side_effect=AssertionError('fallback')):
@@ -106,6 +106,46 @@ def test_cross_partition_engines_rebuild_full_primary_keys(
             commit.close()
     for native in (False, True):
         assert _rows(table, native) == expected
+
+
+@pytest.mark.parametrize('native_commit', [False, True])
+@pytest.mark.parametrize('captured_empty', [False, True])
+@pytest.mark.parametrize('engine,partition,value', [
+    ('deduplicate', 'c', 30),
+    ('first-row', 'b', 20),
+    ('partial-update', 'b', 30),
+    ('aggregation', 'b', 50),
+])
+def test_cross_partition_historical_writer_restores_latest_locations(
+        tmp_path, native_rest_catalog, native_commit, captured_empty, engine, partition, value):
+    options = {'merge-engine': engine, 'commit.native.enabled': str(native_commit).lower()}
+    if engine == 'aggregation':
+        options['fields.v.aggregate-function'] = 'sum'
+    table = _table(tmp_path, options, native_rest_catalog)
+    empty = table._copy_with_snapshot(None)
+
+    def append(view, data):
+        builder = view.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        assert isinstance(writer, NativeTableWrite)
+        try:
+            writer.write_arrow_batch(_batch(data))
+            assert writer._python_writer is None
+            _commit(commit, writer.prepare_commit(), native_commit)
+        finally:
+            writer.close()
+            commit.close()
+
+    append(table, [('x', 'a', 1, 10)])
+    historical = table._copy_with_snapshot(table.snapshot_manager().get_latest_snapshot())
+    append(table, [('x', 'b', 2, 20)])
+    view = empty if captured_empty else historical
+    # The second key is absent from the selected read view but already has a
+    # global location. Java IndexBootstrap restores it from the latest state.
+    append(view, [('x', 'c', 2, 30)])
+    for native in (False, True):
+        assert _rows(table, native) == [('x', 'a', 1, 10), ('x', partition, 2, value)]
+        assert _rows(view, native) == ([] if captured_empty else [('x', 'a', 1, 10)])
 
 
 @pytest.mark.parametrize('chunk_size', [1, 2, 3, 4])

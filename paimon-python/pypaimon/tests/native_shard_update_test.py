@@ -211,10 +211,20 @@ def test_native_empty_shard_and_configuration_validation(native_rest_catalog):
         _updater(table, columns=())
 
 
-def test_native_shard_rejects_partition_column_updates(native_rest_catalog):
-    table, _ = _table(native_rest_catalog, partitions=True)
-    with pytest.raises(NotImplementedError, match='partition column'):
-        _updater(table, columns=('p',))
+def test_native_shard_rejects_changing_partition_values(native_rest_catalog):
+    table, _ = _table(native_rest_catalog, [dict(p='a', id=1, value=10)], partitions=True)
+    updater = _updater(table, columns=('p',))
+    try:
+        with updater.arrow_reader() as reader:
+            assert sum(batch.num_rows for batch in reader) == 1
+        # Validation may run when a file group flushes or when preparing.
+        with pytest.raises(ValueError, match='Cannot change partition column'):
+            updater.update_by_arrow_batch(pa.record_batch([pa.array(['changed'])], names=['p']))
+            updater.prepare_commit()
+    finally:
+        updater.close()
+    assert table.snapshot_manager().get_latest_snapshot().id == 1
+    assert _rows(table) == dict(p=['a'], id=[1], value=[10])
 
 
 @pytest.mark.parametrize('data_type, original, replacement', [

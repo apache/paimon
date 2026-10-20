@@ -193,9 +193,11 @@ def test_rest_snapshot_response_is_authoritative_without_search_retry(rest_catal
     from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
     catalog, server = rest_catalog
     table = hybrid._table(catalog)
+    # A 503 is retried by the HTTP client. Use 500 so the request count
+    # detects repeated search-level resolution rather than transport retries.
     reply = GetTableSnapshotResponse() if response == 'empty' else ErrorResponse(
-        'TABLE', 'indexes', 'snapshot unavailable', 503)
-    code = 200 if response == 'empty' else 503
+        'TABLE', 'indexes', 'snapshot unavailable', 500)
+    code = 200 if response == 'empty' else 500
     with patch.object(server, '_table_snapshot_handle', return_value=server._mock_response(reply, code)) as latest:
         with _native_only():
             if response == 'error':

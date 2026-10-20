@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_reader_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages)
 
@@ -49,7 +49,7 @@ def _table(tmp_path, options=None):
 
 
 @pytest.mark.native_plan
-@pytest.mark.skipif(not native_reader_available(), reason='native reader required')
+@pytest.mark.skipif(not native_runtime_available(), reason='native reader required')
 @pytest.mark.parametrize('options', [_ADVANCED, {
     'merge-engine': 'partial-update', 'ignore-delete': 'true',
 }])

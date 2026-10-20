@@ -25,12 +25,12 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import native_write_available
+from pypaimon.write.native_write import native_runtime_available
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=[
     pytest.mark.native_plan,
-    pytest.mark.skipif(not native_write_available(), reason='native writer required'),
+    pytest.mark.skipif(not native_runtime_available(), reason='native writer required'),
 ])], ids=['python', 'native'])
 def native(request):
     return request.param

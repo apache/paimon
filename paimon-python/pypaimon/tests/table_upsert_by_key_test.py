@@ -293,7 +293,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         read_builder = table.new_read_builder().with_projection(
             list(table.field_names) + [SpecialFields.ROW_ID.name]
         )
-        plan = read_builder.new_scan().plan_for_write()
+        plan = read_builder.new_scan().plan_all_files()
         old_files = [
             file
             for split in plan.splits()

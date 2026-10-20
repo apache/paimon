@@ -41,6 +41,9 @@ SUITES = [
     ("full-text", "Full text / JDK 8", 8, "2.12", 30),
 ]
 ALL_JAVA = {suite[0] for suite in SUITES}
+# Java's core tests and pypaimon's tests both check the REST client against these.
+REST_SPECS = {"docs/static/rest-catalog-open-api.yaml", "docs/static/rest-management-open-api.yaml"}
+OPENAPI_V4_ACTIONS = "paimon-api/src/main/java/org/apache/paimon/rest/auth/DLFOpenApiActions.java"
 FLINK = {"flink1-common", "flink1-connectors", "flink2"}
 SPARK = {"spark3", "spark4"}
 E2E = {"e2e-flink1", "e2e-flink2"}
@@ -54,6 +57,10 @@ def select(paths, full=False):
         docs = python = licensing = True
 
     for path in paths:
+        if path in REST_SPECS:
+            docs = python = True
+            selected.add("core")
+            continue
         if path.startswith("docs/"):
             docs = True
             continue
@@ -80,6 +87,8 @@ def select(paths, full=False):
             continue
 
         licensing = True
+        if path == OPENAPI_V4_ACTIONS:
+            python = True
         if path.startswith("paimon-spark/"):
             # Core includes spark-common tests and paimon-docs completeness tests.
             # SparkE2eTest is disabled on JDK 11, so only the Flink 1 E2E lane applies.

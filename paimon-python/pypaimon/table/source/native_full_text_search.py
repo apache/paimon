@@ -21,7 +21,7 @@ from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import NativeFullTextIndexOptions
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 from pypaimon.write.native_commit import _rest_catalog_supported
@@ -34,7 +34,7 @@ def _native_full_text_builder(builder, require_limit=True):
     if (type(table) is not FileStoreTable
             or not table.options.native_read_enabled()
             or table.options.file_format() != 'parquet'
-            or not native_method_available('Table', 'new_full_text_search_builder')
+            or not native_runtime_available()
             or not _rest_catalog_supported(table)):
         return None
     primary_key = builder._primary_key_full_text_definition() is not None

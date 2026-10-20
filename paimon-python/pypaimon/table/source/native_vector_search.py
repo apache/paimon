@@ -19,9 +19,7 @@
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import (
-    _catalog_metastore, _native_table, _predicate_to_native,
-    native_method_available)
+from pypaimon.read.native_plan import _catalog_metastore, _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 
 
@@ -39,20 +37,14 @@ def _native_vector_builder(builder, batch=False):
     loader = getattr(getattr(table, 'catalog_environment', None), 'catalog_loader', None)
     if loader is None or _catalog_metastore(loader) != 'rest':
         return None
-    context_fn = getattr(loader, 'context', None)
-    if not callable(context_fn):
-        return None
-    context = context_fn()
-    if any(getattr(context, attr, None) is not None for attr in (
-            'hadoop_conf', 'prefer_io_loader', 'fallback_io_loader')):
-        return None
     # Python's batch reader currently supports only global row-ID results.
     if batch and builder._is_primary_key_vector_search():
         return None
-    method = 'new_batch_vector_search_builder' if batch else 'new_vector_search_builder'
-    if not native_method_available('Table', method):
+    if not native_runtime_available():
         return None
-    native = getattr(_native_table(table), method)()
+    native_table = _native_table(table)
+    native = (native_table.new_batch_vector_search_builder() if batch else
+              native_table.new_vector_search_builder())
     if builder._vector_column is not None:
         native.with_vector_column(builder._vector_column.name)
     native.with_limit(builder._limit).with_options(builder._options)

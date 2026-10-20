@@ -125,10 +125,10 @@ def _integer_to_timestamp(array, target_type):
 def _native_schema_cast(array, target_type, source_paimon_type, target_paimon_type):
     if source_paimon_type is None or target_paimon_type is None:
         return None
-    try:
-        from pypaimon_rust.data import cast_array_for_schema_evolution as native_cast
-    except ImportError:
+    from pypaimon.read.native_plan import native_runtime_available
+    if not native_runtime_available():
         return None
+    from pypaimon_rust.data import cast_array_for_schema_evolution as native_cast
     source = json.dumps(source_paimon_type.to_dict())
     target = json.dumps(target_paimon_type.to_dict())
     if isinstance(array, pa.ChunkedArray):
@@ -140,11 +140,11 @@ def _native_schema_cast(array, target_type, source_paimon_type, target_paimon_ty
 
 def read_arrow_schema(fields):
     """Use core runtime nullability while retaining logical write constraints."""
-    try:
-        from pypaimon_rust.data import read_arrow_schema as native_schema
-    except ImportError:
+    from pypaimon.read.native_plan import native_runtime_available
+    if not native_runtime_available():
         from pypaimon.schema.data_types import PyarrowFieldParser
         return PyarrowFieldParser.from_paimon_schema(fields)
+    from pypaimon_rust.data import read_arrow_schema as native_schema
     schema = native_schema(json.dumps([field.to_dict() for field in fields]))
     return pa.schema([field.remove_metadata() for field in schema])
 

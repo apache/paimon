@@ -323,7 +323,6 @@ class DataWriter(ABC):
                 min_sequence_number=statistics['min_seq'],
                 max_sequence_number=statistics['max_seq'],
                 extra_files=extra_files,
-                creation_time=statistics['creation_time'],
                 delete_row_count=self._count_delete_rows(data),
             )
 
@@ -382,10 +381,9 @@ class DataWriter(ABC):
         else:
             min_seq = self.sequence_generator.start
             max_seq = self.sequence_generator.current
-        creation_time = Timestamp.now()
         return dict(min_key=min_key, max_key=max_key, key_stats=key_stats,
                     value_stats=value_stats, min_seq=min_seq, max_seq=max_seq,
-                    creation_time=creation_time, value_stats_enabled=value_stats_enabled)
+                    value_stats_enabled=value_stats_enabled)
 
     def _writes_changelog_before_merge(self):
         return False
@@ -424,7 +422,7 @@ class DataWriter(ABC):
             max_sequence_number=max_sequence_number,
             schema_id=self.table.table_schema.id, level=0,
             extra_files=extra_files if extra_files is not None else [],
-            creation_time=creation_time if creation_time is not None else Timestamp.now(),
+            creation_time=creation_time if creation_time is not None else Timestamp.now().to_millis_timestamp(),
             delete_row_count=delete_row_count, file_source=0,
             value_stats_cols=None if self.options.metadata_stats_enabled() else [],
             external_path=file_path if self.external_path_provider is not None else None,
@@ -468,7 +466,7 @@ class DataWriter(ABC):
         return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
     def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
-                              min_seq, max_seq, creation_time,
+                              min_seq, max_seq,
                               value_stats_enabled, is_external) -> DataFileMeta:
         """Write a complete changelog file and return its metadata.
 
@@ -502,7 +500,7 @@ class DataWriter(ABC):
                 schema_id=self.table.table_schema.id,
                 level=0,
                 extra_files=[],
-                creation_time=creation_time,
+                creation_time=Timestamp.now().to_millis_timestamp(),
                 delete_row_count=self._count_delete_rows(data),
                 file_source=0,
                 value_stats_cols=None if value_stats_enabled else [],

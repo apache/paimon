@@ -792,6 +792,7 @@ def _exploding_schema_manager():
     return SimpleNamespace(latest=boom)
 
 
+@pytest.mark.python_read
 class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
 
     def _table(self, cached, latest):
@@ -865,6 +866,7 @@ class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
         pickle.dumps(read._auth_schema)
 
 
+@pytest.mark.python_read
 class TestReaderAppliesTheRules(unittest.TestCase):
 
     def _read(self, fields, data, latest=None, projected=None):

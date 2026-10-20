@@ -29,12 +29,12 @@ from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     PaimonVindexInput, VINDEX_IDENTIFIERS, VindexVectorGlobalIndexReader,
 )
-from pypaimon.read.native_plan import native_method_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 pytestmark = pytest.mark.skipif(
-    not native_method_available('VindexVectorGlobalIndexReader', 'search'),
-    reason='Rust low-level vector-index reader required')
+    not native_runtime_available(),
+    reason='pypaimon-rust not installed')
 
 
 def _native_type():

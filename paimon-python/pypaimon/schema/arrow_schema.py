@@ -74,10 +74,10 @@ def arrow_schemas_compatible(source, target, check_top_level_nullability=True, a
 
 def normalize_arrow_write_nullability(data, target):
     """Validate read-result NULLs in core before restoring writer child fields."""
-    try:
-        from pypaimon_rust.data import normalize_array_for_write
-    except ImportError:
+    from pypaimon.read.native_plan import native_runtime_available
+    if not native_runtime_available():
         return data
+    from pypaimon_rust.data import normalize_array_for_write
     options = dict(check_top_level_nullability=False, allow_binary_compatibility=True)
     if (arrow_schemas_compatible(data.schema, target, **options)
             or not arrow_schemas_compatible(data.schema, target, check_nested_nullability=False, **options)):
@@ -123,3 +123,17 @@ def normalize_arrow_strings(data):
         raise ValueError(
             "Cannot convert large_string input to string with PyArrow %s: %s"
             % (pa.__version__, error)) from error
+
+
+def project_arrow_batch(data, column_names):
+    """Project batch fields in order while retaining field/schema metadata."""
+    indices = [data.schema.get_field_index(name) for name in column_names]
+    missing = [name for name, index in zip(column_names, indices) if index < 0]
+    if missing:
+        raise KeyError('Columns not found in record batch: %s' % missing)
+    if not indices:
+        # With no child arrays, from_arrays cannot infer the batch row count.
+        rows = pa.StructArray.from_buffers(pa.struct([]), data.num_rows, [None])
+        return pa.RecordBatch.from_struct_array(rows).replace_schema_metadata(data.schema.metadata)
+    schema = pa.schema([data.schema.field(index) for index in indices], metadata=data.schema.metadata)
+    return pa.RecordBatch.from_arrays([data.column(index) for index in indices], schema=schema)

@@ -353,6 +353,10 @@ class FileStoreWrite:
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
             writer._release_prepared_files()
+        # Existing bucket writers keep their advancing sequence counters. A
+        # bucket opened after this checkpoint must restore from the latest
+        # snapshot rather than reuse another bucket's earlier partition scan.
+        self.max_seq_numbers.clear()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -386,27 +390,37 @@ class FileStoreWrite:
                 if snapshot is None:
                     raise ValueError("Snapshot id '{}' doesn't exist".format(self.restore_snapshot_id))
             # Replace inherited selectors and mode, including an explicit empty
-            # view. plan_for_write still validates row filters and column masks.
+            # view for the writer's internal manifest lookup.
             return self.table._copy_with_snapshot(snapshot)
-        return self.table
+        # Read selectors select a caller's read view, not writer restore state.
+        # Java FileSystemWriteRestore scans the latest committed snapshot unless
+        # the writer explicitly requested a restore snapshot. Retain this
+        # handle's schema and branch while replacing only the internal view.
+        return self.table._copy_with_snapshot(self.table.snapshot_manager().get_latest_snapshot())
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
         read_builder = self._sequence_read_table().new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):
-            sub_predicates.append(predicate_builder.equal(key, value))
+            # Java PartitionPredicate uses IS NULL for null partition values.
+            # Equality to NULL cannot locate the files whose sequence we restore.
+            sub_predicates.append(predicate_builder.is_null(key) if value is None
+                                  else predicate_builder.equal(key, value))
         partition_filter = predicate_builder.and_predicates(sub_predicates)
 
-        scan = read_builder.with_filter(partition_filter).new_scan()
-        splits = scan.plan_for_write().splits()
+        scanner = read_builder.with_filter(partition_filter).new_scan().file_scanner
+        # Sequence restoration reads file metadata, not query results. As in
+        # Java's writer scan, include L0 and do not require SELECT or apply row
+        # filters/masks to internal state. Public plan_all_files stays guarded.
+        scanner.skip_level0 = False
 
         max_seq_numbers = {}
-        for split in splits:
-            current_seq_num = max([file.max_sequence_number for file in split.files])
-            existing_max = max_seq_numbers.get(split.bucket, -1)
+        for entry in scanner.plan_files():
+            current_seq_num = entry.file.max_sequence_number
+            existing_max = max_seq_numbers.get(entry.bucket, -1)
             if current_seq_num > existing_max:
-                max_seq_numbers[split.bucket] = current_seq_num
+                max_seq_numbers[entry.bucket] = current_seq_num
         return max_seq_numbers
 
 

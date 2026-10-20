@@ -18,7 +18,7 @@
 """Local global-index builds delegated to Rust, retaining Python's commit API."""
 
 from pypaimon.read.native_plan import (
-    _native_table, _option_value_to_string, _predicate_to_native, native_method_available)
+    _native_table, _option_value_to_string, _predicate_to_native, native_runtime_available)
 from pypaimon.write.native_commit import _rest_catalog_supported, from_native_commit_messages
 
 
@@ -36,7 +36,7 @@ def build_native_global_index(builder, partition_filter):
             or table.options.query_auth_enabled
             or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
-            or not native_method_available('Table', 'new_global_index_build_builder')
+            or not native_runtime_available()
             or not _rest_catalog_supported(table)):
         return None
     from pypaimon_rust.datafusion import GlobalIndexBuildBuilder

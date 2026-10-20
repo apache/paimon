@@ -27,8 +27,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.native_commit import (
-    create_native_commit, native_commit_available, native_messages_supported)
+from pypaimon.write.native_commit import create_native_commit, native_runtime_available, native_messages_supported
 from pypaimon.write.table_write import StreamTableWrite
 
 
@@ -36,12 +35,10 @@ pytestmark = pytest.mark.python_write
 
 
 def requires_native(test):
-    # Native commit needs the from-source paimon-rust runtime built in the Rust
-    # Plan CI job; the PyPI pypaimon-rust wheel used by the standard test job
-    # predates the commit bridge. Route these like the other native_plan tests.
+    # Exercise the companion Rust release in the Native CI job.
     test = pytest.mark.native_plan(test)
     return pytest.mark.skipif(
-        not native_commit_available(), reason='pypaimon-rust runtime required')(test)
+        not native_runtime_available(), reason='pypaimon-rust not installed')(test)
 
 
 def _table(tmp_path, mode='append', backend='filesystem', catalog=None):
@@ -256,8 +253,8 @@ def test_native_overwrite_normalizes_python_boolean_option(tmp_path, native_rest
 @pytest.mark.parametrize('native', [False, pytest.param(True, marks=pytest.mark.native_plan)])
 @pytest.mark.parametrize('case', ['unpartitioned', 'static-empty', 'static-missing', 'dynamic-empty'])
 def test_empty_overwrite_records_java_snapshot(tmp_path, native_rest_catalog, native, case):
-    if native and not native_commit_available():
-        pytest.skip('pypaimon-rust runtime required')
+    if native and not native_runtime_available():
+        pytest.skip('pypaimon-rust not installed')
     table = _table(tmp_path, 'unpartitioned' if case == 'unpartitioned' else 'append',
                    catalog=native_rest_catalog).copy({
                        'commit.native.enabled': str(native).lower(),
@@ -460,7 +457,7 @@ def test_non_rest_snapshot_properties_keep_python_commit(tmp_path, properties, o
 @pytest.mark.parametrize('warmup', [False, True])
 def test_callbacks_added_after_construction_use_native(
         tmp_path, native_rest_catalog, warmup):
-    if warmup and not native_commit_available():
+    if warmup and not native_runtime_available():
         pytest.skip('native warmup requires the commit bindings')
     table = _table(tmp_path, catalog=native_rest_catalog)
     builder = table.new_stream_write_builder()
@@ -481,17 +478,17 @@ def test_callbacks_added_after_construction_use_native(
     callback.close.assert_called_once()
 
 
-def test_truncate_uses_python(tmp_path):
+def test_truncate_keeps_python_when_native_publication_is_unavailable(tmp_path):
     table = _table(tmp_path)
     _seed(table)
-    with patch('pypaimon.write.native_commit.create_native_commit') as create:
+    with patch('pypaimon.write.native_commit.create_native_commit', return_value=None) as create:
         for method, args in [('truncate_partitions', ([{'pt': 'a'}],)), ('truncate_table', ())]:
             commit = table.new_batch_write_builder().new_commit()
             try:
                 getattr(commit, method)(*args)
             finally:
                 commit.close()
-        create.assert_not_called()
+        assert create.call_count == 2
     assert _rows(table) == []
 
 
@@ -552,16 +549,26 @@ def test_incompatible_publication_environment_is_not_reconstructed(
         table.catalog_environment = CustomEnvironment()
     else:
         table.file_io = Mock()
-    with patch('pypaimon.write.native_commit.native_commit_available', return_value=True), \
+    with patch('pypaimon.write.native_commit.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()
 
 
+@pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])
+def test_inactive_context_loader_fields_do_not_disable_native_commit(tmp_path, native_rest_catalog, option):
+    from pypaimon.write.native_commit import _rest_catalog_supported
+    table = _table(tmp_path, catalog=native_rest_catalog)
+    unused = Mock(side_effect=AssertionError('Inactive IO loader was invoked'))
+    setattr(table.catalog_environment.catalog_loader.context(), option, unused)
+    assert _rest_catalog_supported(table)
+    unused.assert_not_called()
+
+
 def test_missing_runtime_falls_back_without_reconstructing_table(
         tmp_path, native_rest_catalog):
     table = _table(tmp_path, catalog=native_rest_catalog)
-    with patch('pypaimon.write.native_commit.native_commit_available', return_value=False), \
+    with patch('pypaimon.write.native_commit.native_runtime_available', return_value=False), \
             patch('pypaimon.write.native_commit._native_rest_table') as resolve:
         assert create_native_commit(table, 'job') is None
         resolve.assert_not_called()

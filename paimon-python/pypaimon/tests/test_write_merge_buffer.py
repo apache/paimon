@@ -27,6 +27,7 @@ spinning up the real catalog/write stack.
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pyarrow as pa
@@ -86,6 +87,9 @@ class _Harness(KeyValueDataWriter):
 
     def __init__(self, merge_function, target_file_size: int = 10 ** 12):
         self.options = CoreOptions(Options({}))
+        self.table = SimpleNamespace(
+            is_primary_key_table=True, cross_partition_update=False,
+            options=self.options, table_schema=SimpleNamespace(primary_keys=['id']))
         self.trimmed_primary_keys = ['id']
         self._merge_function = merge_function
         # Large enough that ``_check_and_roll_if_needed`` does not

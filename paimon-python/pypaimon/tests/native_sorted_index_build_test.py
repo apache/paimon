@@ -30,7 +30,7 @@ from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.write.native_commit import from_native_commit_messages
@@ -38,8 +38,8 @@ from pypaimon.write.table_commit import BatchTableCommit
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_global_index_build_builder'),
-    reason='Rust index builder required')]
+    not native_runtime_available(),
+    reason='pypaimon-rust not installed')]
 
 SCHEMA = pa.schema([('id', pa.int32()), ('name', pa.string()), ('pt', pa.int32())])
 ROWS = [
@@ -471,19 +471,18 @@ def test_partition_set_predicates_follow_java_null_semantics(rest_catalog, kind,
 
 @pytest.mark.parametrize('restricted', [False, True])
 def test_query_authorization_remains_on_python_build_path(rest_catalog, restricted):
-    from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+    from pypaimon.api.api_response import AuthTableQueryResponse
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
 
-    catalog, _ = rest_catalog
+    catalog, server = rest_catalog
     table = _create(catalog)
     _append(table, ROWS)
     table = table.copy({'query-auth.enabled': 'true'})
-    auth = TableQueryAuthResult(None, {'name': '{"name":"NULL"}'} if restricted else None)
+    server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
+        column_masking={'name': '{"name":"NULL"}'} if restricted else None)
     original = GlobalIndexBuilder._build_sorted_index
-    with patch.object(RESTCatalog, 'auth_table_query', return_value=auth), \
-            patch('pypaimon.globalindex.native_index_build._native_table',
-                  side_effect=AssertionError('native auth build')), \
+    with patch('pypaimon.globalindex.native_index_build._native_table',
+               side_effect=AssertionError('native auth build')), \
             patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         if restricted:
             with pytest.raises(TableNoPermissionException):

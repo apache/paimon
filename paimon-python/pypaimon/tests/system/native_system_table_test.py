@@ -37,7 +37,7 @@ def _table(name='files', enabled=True):
 @pytest.mark.parametrize('reason', ['disabled', 'old-binding', 'custom-io', 'unknown-table'])
 def test_unsupported_metadata_reads_do_not_create_native_tables(reason):
     table = _table('unknown' if reason == 'unknown-table' else 'files', enabled=reason != 'disabled')
-    with patch('pypaimon.table.system.native_system_table.native_method_available',
+    with patch('pypaimon.table.system.native_system_table.native_runtime_available',
                return_value=reason != 'old-binding'):
         with patch('pypaimon.table.system.native_system_table._rest_catalog_supported',
                    return_value=reason != 'custom-io'):
@@ -47,7 +47,7 @@ def test_unsupported_metadata_reads_do_not_create_native_tables(reason):
 
 
 def _read_with_native_result(result=None, error=None):
-    with patch('pypaimon.table.system.native_system_table.native_method_available', return_value=True):
+    with patch('pypaimon.table.system.native_system_table.native_runtime_available', return_value=True):
         with patch('pypaimon.table.system.native_system_table._rest_catalog_supported', return_value=True):
             with patch('pypaimon.table.system.native_system_table._native_table') as create:
                 read = create.return_value.new_system_read.return_value.read

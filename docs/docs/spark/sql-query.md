@@ -61,6 +61,25 @@ For example:
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
+Supported equality, membership and range predicates on `__paimon_bucket` are pushed down to
+select physical buckets before reading data files. For example, to read only buckets 0 and 1:
+
+```sql
+SELECT * FROM t WHERE __paimon_bucket IN (0, 1);
+```
+
+Bucket IDs refer to the physical buckets of the stored files, including historical buckets
+from partitions written with a different bucket count. Other predicates can be combined with
+the bucket condition as usual. A supported bucket predicate combined with other conditions
+using `AND` can still be pushed down. An `OR` expression that mixes bucket and business
+columns, such as `__paimon_bucket = 1 OR id = 42`, is evaluated by Spark and does not itself
+enable bucket pruning. Unsupported bucket expressions, such as `__paimon_bucket % 2 = 0`,
+are also evaluated by Spark.
+
+Bucket predicate pushdown reduces the data files selected for reading. Membership and range
+predicates may still require reading manifests to identify matching files; they do not
+guarantee that manifest files are skipped.
+
 ### Scan Layout and Storage Partition Joins
 
 By default, Paimon plans batch read tasks using its regular split packing. It does not report

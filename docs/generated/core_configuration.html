@@ -741,6 +741,12 @@ under the License.
             <td>Whether enabled read file index.</td>
         </tr>
         <tr>
+            <td><h5>file-index.read.ignore-unknown-type</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore unregistered file index types when reading. If true, skip these indexes with a warning and retain all rows for them. Other indexes can still filter rows. If false, fail when reading an unregistered non-empty index.</td>
+        </tr>
+        <tr>
             <td><h5>file-operation.thread-num</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

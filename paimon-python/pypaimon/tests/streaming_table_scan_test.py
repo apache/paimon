@@ -488,12 +488,10 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
 class StreamingConsumerTest(unittest.TestCase):
     """Tests for consumer management integration in AsyncStreamingTableScan."""
 
-    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     def test_consumer_restores_next_snapshot_id(
-        self, MockManifestFileManager, MockManifestListManager,
-        MockConsumerManager
+        self, MockManifestFileManager, MockManifestListManager
     ):
         """When consumer exists, stream() should resume from saved position."""
         from pypaimon.consumer.consumer import Consumer
@@ -502,7 +500,7 @@ class StreamingConsumerTest(unittest.TestCase):
 
         mock_snapshot_manager = Mock()
         table.snapshot_manager.return_value = mock_snapshot_manager
-        mock_consumer_manager = MockConsumerManager.return_value
+        mock_consumer_manager = table.consumer_manager.return_value
         mock_manifest_list_manager = MockManifestListManager.return_value
 
         # Consumer has saved progress at snapshot 8
@@ -536,12 +534,10 @@ class StreamingConsumerTest(unittest.TestCase):
         # then advanced after scanning snapshot 8
         self.assertEqual(scan.next_snapshot_id, 9)
 
-    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')
     def test_consumer_saves_after_yield(
-        self, MockFileScanner, MockManifestListManager,
-        MockConsumerManager
+        self, MockFileScanner, MockManifestListManager
     ):
         """Consumer progress is flushed on the next __anext__() call after yielding a plan.
 
@@ -553,7 +549,7 @@ class StreamingConsumerTest(unittest.TestCase):
 
         mock_snapshot_manager = Mock()
         table.snapshot_manager.return_value = mock_snapshot_manager
-        mock_consumer_manager = MockConsumerManager.return_value
+        mock_consumer_manager = table.consumer_manager.return_value
 
         # No existing consumer state
         mock_consumer_manager.consumer.return_value = None

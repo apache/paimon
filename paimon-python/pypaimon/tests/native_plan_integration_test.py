@@ -32,29 +32,10 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import (
-    _prepare_native_read, native_family_search_modes_available,
-    native_method_available, native_read, native_reader_available,
-    native_split_bridge_available, native_split_from_python,
-)
+    _prepare_native_read, native_runtime_available, native_read, native_split_from_python)
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 from pypaimon.utils.range import Range
-
-
-def _has_native_planner():
-    try:
-        from pypaimon_rust.datafusion import PaimonCatalog, Split
-    except Exception:
-        return False
-    return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
-
-
-def _has_native_row_ranges():
-    try:
-        from pypaimon_rust.datafusion import ReadBuilder
-    except ImportError:
-        return False
-    return hasattr(ReadBuilder, 'with_row_ranges')
 
 
 def _mosaic_supports_nested_row():
@@ -75,8 +56,8 @@ def _mosaic_supports_nested_row():
 
 
 @pytest.mark.native_plan
-@unittest.skipUnless(_has_native_planner(),
-                     "pypaimon_rust with split-planning API not installed")
+@unittest.skipUnless(native_runtime_available(),
+                     'pypaimon-rust not installed')
 class NativePlanIntegrationTest(unittest.TestCase):
     """Live round-trip guarding the cross-language SplitSerializer against drift:
     plan via pypaimon_rust, decode, and require the same rows as the normal plan.
@@ -208,8 +189,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_bypasses_python_split_reader(self):
         self.cat.create_table(
             'default.native_read_t', Schema.from_pyarrow_schema(self.schema), False)
@@ -235,8 +216,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(streamed, rows)
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_split_bridge_available(),
-                         "pypaimon-rust split bridge API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_bridges_python_planned_splits(self):
         self.cat.create_table(
             'default.python_plan_native_read',
@@ -270,8 +251,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(bridge.call_count, len(plan.splits()))
         self.assertGreaterEqual(rust_read.call_count, 1)
 
-    @unittest.skipUnless(native_split_bridge_available(),
-                         "pypaimon-rust split bridge API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_bridges_python_indexed_data_evolution_split(self):
         self.cat.create_table(
             'default.python_indexed_native_read',
@@ -330,19 +311,19 @@ class NativePlanIntegrationTest(unittest.TestCase):
             split.__class__.__name__ == 'QueryAuthSplit'
             for split in plan.splits()))
 
-        with patch(
-                'pypaimon.read.native_plan.native_read',
-                wraps=native_read) as rust_read:
+        # The Python adapter may reject this route, but it must never
+        # construct a core reader without the custom authorization provider.
+        with patch('pypaimon.read.native_plan._native_read_builder') as rust_builder:
             rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
             streamed = builder.new_read().to_arrow_batch_reader(
                 plan.splits()).read_all().to_pylist()
 
         self.assertEqual(rows, [{'k': None}])
         self.assertEqual(streamed, rows)
-        rust_read.assert_not_called()
+        rust_builder.assert_not_called()
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_uses_effective_split_parallelism(self):
         schema = pa.schema([
             ('k', pa.int64()),
@@ -404,8 +385,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
         prepare.assert_called_once()
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_primary_key_matches_python(self):
         self.cat.create_table('default.native_read_pk', Schema.from_pyarrow_schema(
             self.schema, primary_keys=['k'], options={'bucket': '1'}), False)
@@ -439,8 +420,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         )
 
     @unittest.skipUnless(
-        native_method_available('ReadBuilder', 'with_nested_projection'),
-        "pypaimon-rust nested native reader API not installed")
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_native_read_nested_rows_and_map_keys_across_formats(self):
         base_fields = [
             ('id', pa.int64()),
@@ -536,8 +517,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 self.assertEqual(actual, expected)
 
     @unittest.skipUnless(
-        native_method_available('ReadBuilder', 'with_nested_projection'),
-        "pypaimon-rust nested native reader API not installed")
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_native_read_nested_projection_after_primary_key_merge(self):
         nested_schema = pa.schema([
             ('id', pa.int64()),
@@ -584,8 +565,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
 
     @unittest.skipUnless(
-        native_method_available('ReadBuilder', 'with_nested_projection'),
-        "pypaimon-rust nested native reader API not installed")
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_native_nested_projection_after_partial_update_merge(self):
         nested_schema = pa.schema([
             ('id', pa.int64()),
@@ -636,8 +617,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
 
     @unittest.skipUnless(
-        native_method_available('ReadBuilder', 'with_nested_projection'),
-        "pypaimon-rust nested native reader API not installed")
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_native_nested_projection_across_schema_rename_filter_and_limit(self):
         name = 'default.native_nested_evolution'
         old_schema = pa.schema([
@@ -766,8 +747,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
             with self.subTest(selection=selection):
                 self.assertEqual(read(False, **selection), read(True, **selection))
 
-    @unittest.skipUnless(native_family_search_modes_available(),
-                         "pypaimon-rust 0.4+ required")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_dynamic_family_search_mode_uses_native_plan(self):
         self.cat.create_table(
             'default.search_mode_t', Schema.from_pyarrow_schema(self.schema), False)
@@ -864,8 +845,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         )
         self.assertTrue(descriptor_builder.explain().native_planned)
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_data_evolution_partial_appends(self):
         schema = pa.schema([
             ('f0', pa.int32()),
@@ -916,8 +897,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         ])
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_data_evolution_blob_parallelism(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -962,8 +943,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(batch_table.to_pydict(), expected)
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_data_evolution_nested_blobs(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -1017,8 +998,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(streamed.to_pydict(), expected)
         self.assertTrue(builder.explain().native_planned)
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_pruning_limit_defers_blob_payload_io(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -1056,8 +1037,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         native.assert_called_once()
         self.assertEqual(result.to_pydict(), {'id': [1], 'payload': [b'a']})
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_pruning_blob_limit_with_predicates(self):
         schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
         self.cat.create_table('default.native_blob_predicate_t',
@@ -1087,8 +1068,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 self.assertEqual(self._native_rows(builder, plan),
                                  [{'id': 2, 'payload': b'selected'}])
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_filesystem_blob_view_without_limit_stays_on_python_reader(self):
         schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
         options = {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
@@ -1128,8 +1109,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
                              [{'id': 10, 'payload': b'from-source'}])
         native.assert_not_called()
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_dynamic_blob_as_descriptor(self):
         schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
         self.cat.create_table(
@@ -1185,8 +1166,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 self.assertEqual(builder.new_read().to_arrow(splits).to_pydict(),
                                  {'id': [1], 'payload': [descriptor]})
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_pruning_limit_defers_descriptor_blob_payload_io(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -1239,8 +1220,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
             self.assertEqual(
                 result.to_pydict(), {'id': [1], 'payload': [b'first']})
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_limit_filters_before_descriptor_payload_io(self):
         schema = pa.schema([('id', pa.int32()), ('payload', pa.large_binary())])
         with tempfile.TemporaryDirectory() as payload_dir:
@@ -1282,8 +1263,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
             self.assertEqual(result.to_pydict(),
                              {'id': [2], 'payload': [b'selected']})
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_read_supports_precision_zero_timestamps(self):
         cases = [
             ('timestamp', pa.timestamp('s'), datetime.datetime(1970, 1, 1)),
@@ -1324,8 +1305,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
                 self.assertEqual(result.schema, schema)
                 self.assertEqual(result.num_rows, 2)
 
-    @unittest.skipUnless(_has_native_row_ranges(),
-                         "pypaimon_rust row-range API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_data_evolution_global_index_row_ranges(self):
         self.cat.create_table('default.de_range_t', Schema.from_pyarrow_schema(
             self.schema, options={
@@ -1546,8 +1527,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.snapshot_id, normal.snapshot_id)
         self.assertIn('native', str(native))   # render shows the Planner line
 
-    @unittest.skipUnless(native_method_available('Plan', 'snapshot_id'),
-                         "pypaimon_rust snapshot metadata API not installed")
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_explain_reports_split_metadata_and_pruning_counters(self):
         self.cat.create_table(
             'default.explain_metadata_t', Schema.from_pyarrow_schema(
@@ -1586,7 +1567,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
 
         self.assertEqual(native.native_planned,
-                         native_method_available('Plan', 'snapshot_id'))
+                         native_runtime_available())
         self.assertEqual(native.snapshot_id, normal.snapshot_id)
         self.assertEqual(native.split_count, 0)
         self.assertEqual('Planner:' in str(native), native.native_planned)

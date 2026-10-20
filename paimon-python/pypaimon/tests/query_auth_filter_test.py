@@ -157,6 +157,25 @@ def test_limit_is_applied_after_masked_filter(table):
     assert read(table, predicate, projection=['id'], limit=1) == [{'id': 2}]
 
 
+def test_plan_all_files_authorizes_every_column_before_exposing_inventory(table):
+    from pypaimon.catalog.catalog_exception import TableNoPermissionException
+    table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'})
+    selected = []
+
+    def auth(select):
+        selected.append(select)
+        if select is None:
+            raise TableNoPermissionException(table.identifier)
+        return TableQueryAuthResult(None, None)
+
+    table.catalog_environment.table_query_auth = lambda options, identifier: auth
+    scan = table.new_read_builder().with_projection(['id']).new_scan()
+    assert scan.plan().splits()
+    with pytest.raises(TableNoPermissionException):
+        scan.plan_all_files()
+    assert selected == [['id'], None]
+
+
 def test_filter_columns_are_authorized(table):
     selected = []
 
@@ -303,7 +322,7 @@ def test_write_scan_restores_filter_after_rules_are_removed(table):
     scan = builder.new_scan()
     scan.plan()
     state[0] = None
-    splits = scan.plan_for_write().splits()
+    splits = scan.plan_all_files().splits()
     assert scan.file_scanner.predicate == predicate
     assert not scan.file_scanner.auth_has_non_partition_filter
     assert arrow_rows(builder.new_read().to_arrow(splits)) == []

@@ -41,14 +41,14 @@ def _table(tmp_path, schema, primary_key=False, options=None, partition_keys=Non
     return catalog.get_table('default.t')
 
 
-def _rows(table, native_read, for_write=False, chunk_shuffle=False):
+def _rows(table, native_read, all_files=False, chunk_shuffle=False):
     table = table.copy({'read.native.enabled': str(native_read).lower(),
                         'scan.native-plan.enabled': str(native_read).lower()})
     builder = table.new_read_builder()
     scan = builder.new_scan()
     if chunk_shuffle:
         scan.with_chunk_shuffle(seed=7, chunk_size=1)
-    splits = (scan.plan_for_write() if for_write else scan.plan()).splits()
+    splits = (scan.plan_all_files() if all_files else scan.plan()).splits()
     read = builder.new_read()
     if native_read:
         with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):

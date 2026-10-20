@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import (
     ApplyDeletionVectorReader,
@@ -39,6 +40,8 @@ from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
     predicate_field_names,
+    predicate_for_physical_fields,
+    predicate_matches_physical_names,
     predicate_supports_arrow_filter,
     rewrite_predicate_indices,
     trim_predicate_by_fields,
@@ -92,7 +95,8 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
 KEY_PREFIX = "_KEY_"
-KEY_FIELD_ID_START = 1000000
+# Match Java's reserved key-field range without overlapping valid user IDs.
+KEY_FIELD_ID_START = SpecialFields.SYSTEM_FIELD_ID_START
 NULL_FIELD_INDEX = -1
 
 
@@ -194,6 +198,7 @@ class SplitRead(ABC):
         if (
                 self.predicate is not None
                 and predicate_field_names(self.predicate).issubset(read_type_names)
+                and predicate_matches_physical_names(self.predicate)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
                 self.predicate, read_type
@@ -259,12 +264,13 @@ class SplitRead(ABC):
             # see missing/NULL versions and renumber positional row IDs.
             return None
         elif self.table.is_primary_key_table:
-            pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
+            physical = predicate_for_physical_fields(self.predicate, self.table.fields)
+            pk_predicate = trim_predicate_by_fields(physical, self.table.primary_keys)
             if not pk_predicate:
                 return None
             return pk_predicate
         else:
-            return self.predicate
+            return predicate_for_physical_fields(self.predicate, self.table.fields)
 
     def _has_row_tracking_predicate(self) -> bool:
         return (self.table.options.row_tracking_enabled()
@@ -1664,6 +1670,7 @@ class DataEvolutionSplitRead(SplitRead):
         row_offsets = [-1] * len(all_read_fields)
         field_offsets = [-1] * len(all_read_fields)
         schema_pos = {f.id: p for p, f in enumerate(self.table.fields)}
+        partition_ids = [field.id for field in self.table.fields if field.name in self.table.partition_keys]
 
         for i, bunch in enumerate(fields_files):
             first_file = bunch.files()[0]
@@ -1672,9 +1679,9 @@ class DataEvolutionSplitRead(SplitRead):
             if DataFileMeta.is_blob_file(first_file.file_name):
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
             elif DataFileMeta.is_vector_file(first_file.file_name):
-                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+                field_ids = self._get_field_ids_from_write_cols(first_file)
             elif first_file.write_cols:
-                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+                field_ids = self._get_field_ids_from_write_cols(first_file)
             else:
                 # For regular files without write_cols, derive field IDs from
                 # the file's schema version, not the current table schema.
@@ -1686,6 +1693,12 @@ class DataEvolutionSplitRead(SplitRead):
                 ]
                 field_ids.append(SpecialFields.ROW_ID.id)
                 field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
+
+            if isinstance(bunch, DataBunch):
+                # Partition values belong to the split, even when write_cols
+                # omits them from every file. Let the normal reader's existing
+                # PartitionInfo provide them before the merged row is filtered.
+                field_ids.extend(field_id for field_id in partition_ids if field_id not in field_ids)
 
             read_fields = []
             for j, read_field_id in enumerate(read_field_index):
@@ -1762,7 +1775,9 @@ class DataEvolutionSplitRead(SplitRead):
                 if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
 
-        output_schema = PyarrowFieldParser.from_paimon_schema(all_read_fields)
+        # Bunch readers use runtime nullability after schema evolution. Keep
+        # the same nested types when assembling their columns into one batch.
+        output_schema = read_arrow_schema(all_read_fields)
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
 
     def _create_file_reader(
@@ -1855,10 +1870,14 @@ class DataEvolutionSplitRead(SplitRead):
                 return field.id
         raise ValueError(f"Field {field_name} not found in file schema {file.schema_id}")
 
-    def _get_field_ids_from_write_cols(self, write_cols: List[str]) -> List[int]:
+    def _get_field_ids_from_write_cols(self, file: DataFileMeta) -> List[int]:
+        # write_cols records names from the schema that wrote this file. Resolve
+        # them there so a rename cannot hide a newer column version, or rebind a
+        # dropped/re-added name to a different field ID.
+        file_fields = self._resolve_schema(file.schema_id).fields
         field_ids = []
-        for field_name in write_cols:
-            for field in self.table.fields:
+        for field_name in file.write_cols:
+            for field in file_fields:
                 if field.name == field_name:
                     field_ids.append(field.id)
         field_ids.append(SpecialFields.ROW_ID.id)

@@ -26,7 +26,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _native_table, native_method_available
+from pypaimon.read.native_plan import _native_table, native_runtime_available
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.system.native_system_table import _NATIVE_TABLES
@@ -35,7 +35,7 @@ from pypaimon.tests import native_plan_rest_test
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = pytest.mark.skipif(
-    not native_method_available('Table', 'new_system_read'),
+    not native_runtime_available(),
     reason='Native system-table reader required')
 
 SCHEMA = pa.schema([('id', pa.int32()), ('value', pa.string()), ('pt', pa.string())])

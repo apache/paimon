@@ -32,7 +32,6 @@ from typing import AsyncGenerator, Callable, Iterator, List, Optional
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.common.predicate import Predicate
 from pypaimon.consumer.consumer import Consumer
-from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
@@ -115,7 +114,7 @@ class AsyncStreamingTableScan:
         self._query_auth_fn = self.table.catalog_environment.table_query_auth(
             self.table.options, self.table.identifier)
         self._consumer_manager = (
-            ConsumerManager(table.file_io, table.table_path)
+            table.consumer_manager()
             if consumer_id else None
         )
 

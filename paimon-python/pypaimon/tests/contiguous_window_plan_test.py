@@ -30,7 +30,7 @@ from pypaimon import Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.table import MultimodalTable
-from pypaimon.read.native_plan import native_reader_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.table_scan import TableScan
 
@@ -150,8 +150,9 @@ class ContiguousWindowPlanTest(unittest.TestCase):
     def test_independent_payload_column_files_are_read(self):
         self._check_independent_column_files(native=False)
 
-    @unittest.skipUnless(native_reader_available(),
-                         "pypaimon-rust native reader API not installed")
+    @pytest.mark.native_plan
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_native_plan_retains_independent_payload_column_files(self):
         self._check_independent_column_files(native=True)
 

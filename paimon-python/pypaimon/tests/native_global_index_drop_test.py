@@ -24,14 +24,14 @@ import pytest
 
 from pypaimon.globalindex.drop_global_index import GlobalIndexDropper
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
 from pypaimon.tests import native_sorted_index_build_test as indexes
 from pypaimon.write.table_commit import BatchTableCommit
 
 rest_catalog = indexes.rest_catalog
 native_drop = pytest.mark.skipif(
-    not native_method_available('Table', 'new_global_index_drop_builder'),
-    reason='Rust global index drop builder required')
+    not native_runtime_available(),
+    reason='pypaimon-rust not installed')
 
 
 @native_drop
@@ -44,7 +44,7 @@ def test_preparation_failure_does_not_retry_python_planning():
     native.with_index_type.return_value = native
     native.build.side_effect = OSError('metadata read failed')
     factory = SimpleNamespace(supports_index_type=lambda kind: True)
-    with patch('pypaimon.read.native_plan.native_method_available', return_value=True), \
+    with patch('pypaimon.read.native_plan.native_runtime_available', return_value=True), \
             patch('pypaimon.write.native_commit._rest_catalog_supported', return_value=True), \
             patch('pypaimon.read.native_plan._native_table') as native_table, \
             patch('pypaimon_rust.datafusion.GlobalIndexDropBuilder', factory, create=True), \

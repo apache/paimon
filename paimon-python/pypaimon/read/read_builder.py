@@ -24,7 +24,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.explain import ExplainResult, ExplainSplitInfo, PruningStat
 from pypaimon.read.explain_render import render_predicate
-from pypaimon.read.push_down_utils import predicate_field_names
+from pypaimon.read.push_down_utils import predicate_field_names, predicate_matches_physical_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
@@ -86,9 +86,17 @@ def _normalize_sql_literals(expression: str) -> str:
 
 class _ReadPredicateBuilder(PredicateBuilder):
 
-    def __init__(self, fields, unsupported_fields):
+    def __init__(self, fields, unsupported_fields, paths=None):
         super().__init__(fields)
         self._unsupported_fields = unsupported_fields
+        self._paths = paths or {}
+
+    def _build_predicate(self, method, field, literals=None):
+        predicate = super()._build_predicate(method, field, literals)
+        path = self._paths.get(field)
+        if path:
+            predicate.field_path = list(path)
+        return predicate
 
     def _get_field_index(self, field: str) -> int:
         if field in self._unsupported_fields:
@@ -123,6 +131,7 @@ class ReadBuilder:
         """
         if partition_filter is not None and (
                 not self.table.partition_keys
+                or not predicate_matches_physical_names(partition_filter)
                 or not predicate_field_names(partition_filter).issubset(self.table.partition_keys)):
             raise ValueError('Partition filter must reference only partition keys of a partitioned table')
         self._partition_filter = partition_filter
@@ -208,10 +217,12 @@ class ReadBuilder:
         # List projections expose flat leaf names to the Python predicate
         # evaluator. Derive that view without changing the reader request.
         fields = self.read_type()
+        paths = {}
         if self._output_projection is not None and not self._output_projection.named:
-            fields = reader_adapter(fields, self._table_read_fields(), self._output_projection)[0]
+            fields, name_paths = reader_adapter(fields, self._table_read_fields(), self._output_projection)
+            paths = {field.name: path for field, path in zip(fields, name_paths)}
         return _ReadPredicateBuilder(
-            fields, self._map_key_output_names())
+            fields, self._map_key_output_names(), paths)
 
     def explain(self, verbose: bool = False) -> ExplainResult:
         """Produce a structured scan plan for this builder.

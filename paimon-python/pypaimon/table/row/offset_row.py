@@ -31,7 +31,7 @@ class OffsetRow(InternalRow):
         self.row_tuple = row_tuple
         self.offset = offset
         self.arity = arity
-        self.row_kind_byte: int = 1
+        self.row_kind_byte: int = RowKind.INSERT.value
         self._file_io = file_io
         self._blob_field_indices: FrozenSet[int] = (
             frozenset(blob_field_indices) if blob_field_indices is not None else frozenset()
