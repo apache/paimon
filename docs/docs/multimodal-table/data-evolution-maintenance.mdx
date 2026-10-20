@@ -33,6 +33,7 @@ have different effects on row IDs and dependent indexes.
 | Reduce column-file fragmentation | [Ordinary compaction](#ordinary-compaction) | Preserved |
 | Resize large normal files | [Split during compaction](#splitting-large-files-during-compaction) | Preserved |
 | Remove logically deleted positions | [Materialize deletion vectors](#materialize-deletion-vectors) | Reassigned in rewritten ranges |
+| Sort ordinary columns for pruning | [Incremental clustering](#incremental-clustering) | Reassigned in rewritten groups |
 
 For updates and logical deletes, see [Data Evolution](./data-evolution).
 For the normal/dedicated range contract, see [File Layout and Reads](./data-evolution-file-layout).
@@ -169,6 +170,46 @@ expiration to remove the files. The legacy
 `data-evolution.compaction.rewrite-row-ids = true` setting is rejected; use the
 materialization procedure instead.
 
+### Incremental Clustering
+
+Data Evolution tables can enable `clustering.incremental = true` with nonempty
+`clustering.columns` when they have no dedicated BLOB or VECTOR files. BLOB
+descriptor and view fields stored inline, and VECTOR columns stored in normal
+files, do not require dedicated files and remain supported.
+
+The existing [clustering strategies and file selection](../append-table/incremental-clustering)
+choose the work. Selection includes every column version in each selected
+row-ID group. Readers merge the latest column values and apply logical deletes
+before the existing Spark or Flink clustering pipeline sorts the surviving rows
+and writes new normal files with new row IDs. Unselected groups keep their row IDs.
+The output records the clustering columns and level for subsequent incremental
+selection. `clustering.incremental.mode` selects the same distributed global sort
+or task-local sort used by ordinary append-table clustering.
+
+For example, enable clustering with Spark SQL and run an explicit batch compact:
+
+```sql
+ALTER TABLE default.target_table SET TBLPROPERTIES (
+    'clustering.incremental' = 'true',
+    'clustering.columns' = 'id'
+);
+CALL sys.compact(table => 'default.target_table', compact_strategy => 'minor');
+```
+
+Use the corresponding Flink `ALTER TABLE ... SET` syntax and run the compact job
+in batch mode. Explicit compact jobs use clustering while this option is enabled.
+To consolidate column versions while preserving row IDs, disable clustering for
+the compact invocation with `options => 'clustering.incremental=false'`.
+
+Clustering removes the applied deletion vectors and drops global indexes in
+affected partitions because their row IDs no longer identify the same rows.
+Rebuild those indexes after clustering, or use `scalar-index.search-mode = full`
+for complete scalar query results while only part of the table remains indexed.
+Concurrent updates or deletes that overlap the selected row-ID groups cause
+commit to fail, preventing stale rewrites from replacing newer values.
+Historical snapshots and tags retain
+the previous files until expiration.
+
 ### Row-ID Lifetime
 
 | Operation | Effect on row IDs |
@@ -178,6 +219,7 @@ materialization procedure instead.
 | Logical delete | Hides IDs without shifting the remaining rows. |
 | Ordinary Data Evolution compaction | Preserves IDs, but may change file-group boundaries. |
 | Deletion-vector materialization | Assigns new IDs to surviving rows in the rewritten ranges. |
+| Data Evolution incremental clustering | Assigns new IDs to surviving rows in the selected groups. |
 | Explicit `reassign_row_id` maintenance | Changes IDs by remapping file metadata. |
 | Overwrite or partition removal | Removes the replaced rows from the current table state; do not assume their IDs remain usable. |
 

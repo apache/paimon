@@ -47,7 +47,9 @@ import java.util.stream.Collectors;
 public class IncrementalClusterRewriter {
 
     public static IncrementalClusterRewriter create(FileStoreTable table, Snapshot snapshot) {
-        return new IncrementalClusterRewriter();
+        return table.coreOptions().dataEvolutionEnabled()
+                ? new DataEvolutionIncrementalClusterRewriter(table, snapshot)
+                : new IncrementalClusterRewriter();
     }
 
     List<LevelSortedRun> constructPartitionLevels(List<DataFileMeta> partitionFiles) {

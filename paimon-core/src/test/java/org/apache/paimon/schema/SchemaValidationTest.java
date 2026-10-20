@@ -1564,6 +1564,93 @@ class SchemaValidationTest {
     }
 
     @Test
+    void testDataEvolutionIncrementalClustering() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "value", DataTypes.STRING()));
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        dataEvolutionClusteringOptions(),
+                        "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"blob-descriptor-field", "blob-view-field"})
+    void testDataEvolutionIncrementalClusteringAllowsInlineBlob(String inlineOption) {
+        Map<String, String> options = dataEvolutionClusteringOptions();
+        options.put(inlineOption, "payload");
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.BLOB()));
+        TableSchema schema = new TableSchema(1, fields, 1, emptyList(), emptyList(), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testDataEvolutionIncrementalClusteringRejectsDedicatedBlob() {
+        for (DataType blobType :
+                Arrays.asList(
+                        DataTypes.BLOB(),
+                        DataTypes.ARRAY(DataTypes.BLOB()),
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()))) {
+            List<DataField> fields =
+                    Arrays.asList(
+                            new DataField(0, "id", DataTypes.INT()),
+                            new DataField(1, "payload", blobType));
+            TableSchema schema =
+                    new TableSchema(
+                            1,
+                            fields,
+                            1,
+                            emptyList(),
+                            emptyList(),
+                            dataEvolutionClusteringOptions(),
+                            "");
+
+            assertThatThrownBy(() -> validateTableSchema(schema))
+                    .hasMessage(
+                            "Data evolution incremental clustering does not support dedicated BLOB files.");
+        }
+    }
+
+    @Test
+    void testDataEvolutionIncrementalClusteringVectorStorage() {
+        Map<String, String> options = dataEvolutionClusteringOptions();
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        TableSchema schema = new TableSchema(1, fields, 1, emptyList(), emptyList(), options, "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        options.put(VECTOR_FILE_FORMAT.key(), "json");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessage(
+                        "Data evolution incremental clustering does not support dedicated VECTOR files.");
+    }
+
+    private Map<String, String> dataEvolutionClusteringOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL.key(), "true");
+        options.put(CoreOptions.CLUSTERING_COLUMNS.key(), "id");
+        return options;
+    }
+
+    @Test
     public void testFileIndexColumns() {
         List<String> keys =
                 Arrays.asList(
