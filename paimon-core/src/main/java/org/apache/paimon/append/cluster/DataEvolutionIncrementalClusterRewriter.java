@@ -107,6 +107,10 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
         return runs;
     }
 
+    int groupLevel(List<DataFileMeta> group) {
+        return groupLevel(group, retrieveAnchorFile(group, file -> file));
+    }
+
     private int groupLevel(List<DataFileMeta> group, DataFileMeta anchor) {
         int level = anchor.level();
         CoreOptions anchorOptions = CoreOptions.fromMap(schema(anchor.schemaId()).options());
@@ -162,11 +166,21 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
     @Override
     public List<CommitMessage> prepareCommitMessages(List<CommitMessage> messages) {
         Map<BinaryRow, CompactIncrement> increments = new HashMap<>();
+        List<CommitMessage> prepared = new ArrayList<>();
         for (CommitMessage message : messages) {
             CommitMessageImpl impl = (CommitMessageImpl) message;
             checkArgument(
                     impl.bucket() == 0 && impl.newFilesIncrement().isEmpty(),
                     "Data evolution clustering requires compact messages for unaware bucket 0.");
+            CompactIncrement increment = impl.compactIncrement();
+            if (!increment.compactAfter().isEmpty()
+                    && increment.compactAfter().stream()
+                            .allMatch(file -> file.firstRowId() != null)) {
+                // Keep row-preserving tasks separate: their DVs move to the replacement anchor,
+                // whereas clustering outputs have already applied DVs and need fresh row IDs.
+                prepared.add(message);
+                continue;
+            }
             CompactIncrement merged =
                     increments.computeIfAbsent(
                             message.partition(),
@@ -177,14 +191,12 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
                                             new ArrayList<>(),
                                             new ArrayList<>(),
                                             new ArrayList<>()));
-            CompactIncrement increment = impl.compactIncrement();
             merged.compactBefore().addAll(increment.compactBefore());
             merged.compactAfter().addAll(increment.compactAfter());
             merged.changelogFiles().addAll(increment.changelogFiles());
             merged.newIndexFiles().addAll(increment.newIndexFiles());
             merged.deletedIndexFiles().addAll(increment.deletedIndexFiles());
         }
-        List<CommitMessage> prepared = new ArrayList<>();
         increments.forEach(
                 (partition, increment) -> {
                     checkArgument(
@@ -194,7 +206,7 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
                             new CommitMessageImpl(
                                     partition, 0, null, DataIncrement.emptyIncrement(), increment));
                 });
-        // The committer invalidates global indexes against the latest snapshot on every attempt.
+        // The committer maintains global indexes against the latest snapshot on every attempt.
         prepared.addAll(
                 new DataEvolutionCompactDeletionVectorRewriter(table, snapshot)
                         .rewriteDeletionVectors(prepared));
