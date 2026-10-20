@@ -24,7 +24,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
-import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
@@ -78,7 +77,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -1001,60 +999,30 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false, 2);
         BinaryRow partition = gen.getPartition(gen.next());
         IndexManifestEntry materializedBucketDelete =
-                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index", new Range(0, 0));
-        IndexManifestEntry disjointRangeDelete =
-                globalIndexDeleteEntry(partition, 0, "disjoint-range-index", new Range(1, 2));
+                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
         IndexManifestEntry otherBucketDelete =
-                globalIndexDeleteEntry(partition, 1, "other-bucket-index", new Range(0, 0));
-        IndexManifestEntry nonGlobalDelete =
-                new IndexManifestEntry(
-                        FileKind.DELETE,
-                        partition,
-                        0,
-                        new IndexFileMeta(HASH_INDEX, "non-global-index", 1, 1, null, null, null));
+                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
         CommitChanges changes =
                 new CommitChanges(
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Arrays.asList(
-                                materializedBucketDelete,
-                                disjointRangeDelete,
-                                otherBucketDelete,
-                                nonGlobalDelete));
+                        Arrays.asList(materializedBucketDelete, otherBucketDelete));
 
-        CommitMessage message =
-                new CommitMessageImpl(
-                        partition,
-                        0,
-                        2,
-                        DataIncrement.emptyIncrement(),
-                        new CompactIncrement(
-                                Collections.singletonList(
-                                        addFile(partition, 0, 2, 0).file().assignFirstRowId(0)),
-                                Collections.emptyList(),
-                                Collections.emptyList()));
-        MaterializeDeletionVectorsCommitChangesRewriter rewriter =
-                new MaterializeDeletionVectorsCommitChangesRewriter(
-                        FileStoreTableFactory.create(store.fileIO(), store.options().path()));
-        CommitChanges refreshed =
-                rewriter.compactChangesProvider(changes, Collections.singletonList(message))
-                        .provide(null);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            CommitChanges refreshed =
+                    commit.compactChangesProvider(
+                                    changes, Collections.singleton(Pair.of(partition, 0)))
+                            .provide(null);
 
-        // Global-index removals from earlier preparation are replaced for the entire bucket,
-        // even if their ranges do not overlap the materialized input.
-        assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete, nonGlobalDelete);
+            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+        }
     }
 
     private static IndexManifestEntry globalIndexDeleteEntry(
-            BinaryRow partition, int bucket, String fileName, Range range) {
+            BinaryRow partition, int bucket, String fileName) {
         IndexFileMeta file =
                 new IndexFileMeta(
-                        "btree",
-                        fileName,
-                        1,
-                        range.count(),
-                        new GlobalIndexMeta(range.from, range.to, 0, null, null),
-                        null);
+                        "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
         return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
     }
 

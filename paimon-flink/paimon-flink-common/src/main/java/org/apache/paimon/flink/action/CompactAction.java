@@ -75,7 +75,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.compact.CompactOptions.REWRITE_OPTIONS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Table compact action for Flink. */
@@ -107,7 +106,6 @@ public class CompactAction extends TableActionBase {
         }
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
-        dynamicOptions.putAll(REWRITE_OPTIONS);
         table = table.copy(dynamicOptions);
     }
 
@@ -156,15 +154,12 @@ public class CompactAction extends TableActionBase {
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
-            if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
-                checkArgument(
-                        !isStreaming || !fileStoreTable.coreOptions().dataEvolutionEnabled(),
-                        "Data evolution incremental clustering only supports batch mode yet.");
+            if (fileStoreTable.coreOptions().dataEvolutionEnabled()) {
+                buildForDataEvolutionTableCompact(env, fileStoreTable, isStreaming);
+            } else if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
                 new IncrementalClusterCompact(
                                 env, fileStoreTable, partitionPredicate, fullCompaction)
                         .build();
-            } else if (fileStoreTable.coreOptions().dataEvolutionEnabled()) {
-                buildForDataEvolutionTableCompact(env, fileStoreTable, isStreaming);
             } else {
                 buildForAppendTableCompact(env, fileStoreTable, isStreaming);
             }

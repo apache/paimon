@@ -26,7 +26,6 @@ import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
-import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -38,7 +37,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
@@ -46,7 +44,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.function.LongUnaryOperator;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -154,84 +151,5 @@ public class BTreeGlobalIndexer implements SortedGlobalIndexer {
                 totalRowCount,
                 rowRanges,
                 executor);
-    }
-
-    @Override
-    public List<ResultEntry> rewriteRowIds(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            long sourceRowCount,
-            long targetRowCount,
-            LongUnaryOperator mapping,
-            GlobalIndexFileWriter fileWriter)
-            throws IOException {
-        checkArgument(sourceRowCount >= 0 && targetRowCount >= 0, "Invalid row count.");
-        List<ResultEntry> results = new ArrayList<>();
-        if (targetRowCount == 0) {
-            return results;
-        }
-        for (GlobalIndexIOMeta file : files) {
-            try (BTreeIndexReader reader =
-                    new BTreeIndexReader(
-                            keySerializer, fileReader, file, cacheManager.get(), null)) {
-                RoaringNavigableMap64 nullRows = new RoaringNavigableMap64();
-                reader.scanNullRowIds(
-                        rowId ->
-                                addMappedRowId(
-                                        nullRows, rowId, sourceRowCount, targetRowCount, mapping));
-                BTreeIndexWriter writer = null;
-                try {
-                    if (!nullRows.isEmpty()) {
-                        writer = createWriter(fileWriter);
-                        for (long rowId : nullRows) {
-                            writer.write(null, rowId);
-                        }
-                    }
-                    BTreeIndexReader.EntryIterator entries = reader.entryIterator();
-                    while (entries.hasNext()) {
-                        BTreeIndexReader.KeyRowIds entry = entries.next();
-                        RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
-                        for (long rowId : entry.rowIds()) {
-                            addMappedRowId(rowIds, rowId, sourceRowCount, targetRowCount, mapping);
-                        }
-                        if (!rowIds.isEmpty()) {
-                            if (writer == null) {
-                                writer = createWriter(fileWriter);
-                            }
-                            // A permutation can reverse a posting list; v2 requires sorted,
-                            // unique IDs.
-                            for (long rowId : rowIds) {
-                                writer.write(entry.key(), rowId);
-                            }
-                        }
-                    }
-                    if (writer != null) {
-                        results.addAll(writer.finish());
-                    }
-                } finally {
-                    if (writer != null) {
-                        writer.close();
-                    }
-                }
-            }
-        }
-        return results;
-    }
-
-    private static void addMappedRowId(
-            RoaringNavigableMap64 result,
-            long sourceRowId,
-            long sourceRowCount,
-            long targetRowCount,
-            LongUnaryOperator mapping) {
-        checkArgument(
-                sourceRowId >= 0 && sourceRowId < sourceRowCount,
-                "Invalid source row ID: %s",
-                sourceRowId);
-        long target = mapping.applyAsLong(sourceRowId);
-        checkArgument(target >= -1 && target < targetRowCount, "Invalid target row ID: %s", target);
-        if (target >= 0) {
-            result.add(target);
-        }
     }
 }

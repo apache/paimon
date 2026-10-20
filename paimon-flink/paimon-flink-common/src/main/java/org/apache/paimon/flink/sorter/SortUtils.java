@@ -201,7 +201,7 @@ public class SortUtils {
                             },
                             InternalTypeInfo.fromRowType(valueRowType))
                     .setParallelism(sinkParallelism)
-                    .map(row -> new FlinkRowData(row, valueRowType), inputStream.getType())
+                    .map(FlinkRowData::new, inputStream.getType())
                     .setParallelism(sinkParallelism);
         } else {
             return rangeShuffleResult

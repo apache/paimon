@@ -27,11 +27,9 @@ import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -110,23 +108,15 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
             partitioned.setParallelism(parallelism);
         }
 
-        RowType readType =
-                table.coreOptions().dataEvolutionEnabled()
-                        ? SpecialFields.rowTypeWithRowId(table.rowType())
-                        : table.rowType();
-        ReadOperator reader =
-                table.coreOptions().dataEvolutionEnabled()
-                        ? new ReadOperator(() -> table.newRead().withReadType(readType), null, null)
-                        : new ReadOperator(table::newRead, null, null);
-
         return Pair.of(
                 new DataStream<>(source.getExecutionEnvironment(), partitioned)
                         .transform(
                                 String.format(
                                         "Incremental-cluster reader: %s - %s",
                                         table.fullName(), partitionSpec),
-                                InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(readType)),
-                                reader)
+                                InternalTypeInfo.of(
+                                        LogicalTypeConversion.toLogicalType(table.rowType())),
+                                new ReadOperator(table::newRead, null, null))
                         .setParallelism(partitioned.getParallelism()),
                 source.forward()
                         .transform(

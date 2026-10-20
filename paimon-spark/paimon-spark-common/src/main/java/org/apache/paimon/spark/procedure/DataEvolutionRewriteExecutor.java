@@ -105,6 +105,7 @@ final class DataEvolutionRewriteExecutor {
             CommitConfigurer commitConfigurer,
             @Nullable CommitMessageRewriter commitMessageRewriter,
             @Nullable Consumer<List<CommitMessage>> commitObserver) {
+        CommitMessageSerializer messageSerializer = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         Snapshot preparationSnapshot = initialSnapshot;
         int round = 0;
@@ -121,14 +122,64 @@ final class DataEvolutionRewriteExecutor {
                             table.fullName());
                     continue;
                 }
+                boolean containsMaterializeDeletion =
+                        compactionTasks.stream()
+                                .anyMatch(
+                                        task ->
+                                                task.type()
+                                                        == DataEvolutionCompactTask.TaskType
+                                                                .MATERIALIZE_DELETION);
+
+                DataEvolutionCompactTaskSerializer serializer =
+                        new DataEvolutionCompactTaskSerializer();
+                List<byte[]> serializedTasks = new ArrayList<>();
+                try {
+                    for (DataEvolutionCompactTask compactionTask : compactionTasks) {
+                        serializedTasks.add(serializer.serialize(compactionTask));
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException("Serialize data evolution rewrite task failed.", e);
+                }
+
+                int readParallelism = readParallelism(serializedTasks, sparkSession);
+                LOG.info(
+                        "Starting to execute {} data evolution rewrite tasks of table {} in round {} "
+                                + "with read parallelism {}, contains materialize deletion {}.",
+                        serializedTasks.size(),
+                        table.fullName(),
+                        round,
+                        readParallelism,
+                        containsMaterializeDeletion);
+                JavaRDD<byte[]> commitMessageJavaRDD =
+                        javaSparkContext
+                                .parallelize(serializedTasks, readParallelism)
+                                .mapPartitions(
+                                        (FlatMapFunction<Iterator<byte[]>, byte[]>)
+                                                taskIterator -> {
+                                                    DataEvolutionCompactTaskSerializer ser =
+                                                            new DataEvolutionCompactTaskSerializer();
+                                                    List<byte[]> messagesBytes = new ArrayList<>();
+                                                    CommitMessageSerializer messageSer =
+                                                            new CommitMessageSerializer();
+                                                    while (taskIterator.hasNext()) {
+                                                        DataEvolutionCompactTask task =
+                                                                ser.deserialize(
+                                                                        ser.getVersion(),
+                                                                        taskIterator.next());
+                                                        messagesBytes.add(
+                                                                messageSer.serialize(
+                                                                        task.doCompact(
+                                                                                table,
+                                                                                commitUser)));
+                                                    }
+                                                    return messagesBytes.iterator();
+                                                });
+
+                List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try {
                     List<CommitMessage> compactMessages =
-                            executeTasks(
-                                    table,
-                                    compactionTasks,
-                                    javaSparkContext,
-                                    sparkSession,
-                                    commitUser);
+                            deserializeCommitMessagesAndReleaseSerializedBytes(
+                                    messageSerializer, serializedMessages);
                     Snapshot committedSnapshot =
                             commitWithMergeConflictRetry(
                                     table,
@@ -156,54 +207,6 @@ final class DataEvolutionRewriteExecutor {
                     table.fullName(),
                     round);
         }
-    }
-
-    /** Executes one task batch without publishing it, so callers can share a commit. */
-    static List<CommitMessage> executeTasks(
-            FileStoreTable table,
-            List<DataEvolutionCompactTask> tasks,
-            JavaSparkContext javaSparkContext,
-            SparkSession sparkSession,
-            String commitUser)
-            throws IOException {
-        if (tasks.isEmpty()) {
-            return Collections.emptyList();
-        }
-        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
-        List<byte[]> serializedTasks = new ArrayList<>(tasks.size());
-        for (DataEvolutionCompactTask task : tasks) {
-            serializedTasks.add(serializer.serialize(task));
-        }
-        int parallelism = readParallelism(serializedTasks, sparkSession);
-        LOG.info(
-                "Executing {} data evolution rewrite tasks for table {} with parallelism {}.",
-                tasks.size(),
-                table.fullName(),
-                parallelism);
-        JavaRDD<byte[]> serializedMessages =
-                javaSparkContext
-                        .parallelize(serializedTasks, parallelism)
-                        .mapPartitions(
-                                (FlatMapFunction<Iterator<byte[]>, byte[]>)
-                                        taskIterator -> {
-                                            DataEvolutionCompactTaskSerializer taskSerializer =
-                                                    new DataEvolutionCompactTaskSerializer();
-                                            CommitMessageSerializer messageSerializer =
-                                                    new CommitMessageSerializer();
-                                            List<byte[]> messages = new ArrayList<>();
-                                            while (taskIterator.hasNext()) {
-                                                DataEvolutionCompactTask task =
-                                                        taskSerializer.deserialize(
-                                                                taskSerializer.getVersion(),
-                                                                taskIterator.next());
-                                                messages.add(
-                                                        messageSerializer.serialize(
-                                                                task.doCompact(table, commitUser)));
-                                            }
-                                            return messages.iterator();
-                                        });
-        return deserializeCommitMessagesAndReleaseSerializedBytes(
-                new CommitMessageSerializer(), new ArrayList<>(serializedMessages.collect()));
     }
 
     private static Snapshot commitWithMergeConflictRetry(

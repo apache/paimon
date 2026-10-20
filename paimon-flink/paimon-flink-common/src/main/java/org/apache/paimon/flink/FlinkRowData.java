@@ -24,12 +24,6 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.MultisetType;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VectorType;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
@@ -42,23 +36,15 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.types.variant.BinaryVariant;
 import org.apache.flink.types.variant.Variant;
 
-import javax.annotation.Nullable;
-
 import static org.apache.paimon.flink.FlinkRowWrapper.fromFlinkRowKind;
 
 /** Convert to Flink row data. */
 public class FlinkRowData implements RowData {
 
     protected InternalRow row;
-    @Nullable private final RowType rowType;
 
     public FlinkRowData(InternalRow row) {
-        this(row, null);
-    }
-
-    public FlinkRowData(InternalRow row, @Nullable RowType rowType) {
         this.row = row;
-        this.rowType = rowType;
     }
 
     public FlinkRowData replace(InternalRow row) {
@@ -148,39 +134,17 @@ public class FlinkRowData implements RowData {
 
     @Override
     public ArrayData getArray(int pos) {
-        // VECTOR and ARRAY have different binary layouts even though Flink exposes both as ARRAY.
-        DataType type = fieldType(pos);
-        return new FlinkArrayData(
-                type instanceof VectorType ? row.getVector(pos) : row.getArray(pos),
-                arrayElementType(type));
+        return new FlinkArrayData(row.getArray(pos));
     }
 
     @Override
     public MapData getMap(int pos) {
-        return new FlinkMapData(row.getMap(pos), fieldType(pos));
+        return new FlinkMapData(row.getMap(pos));
     }
 
     @Override
     public RowData getRow(int pos, int numFields) {
-        DataType type = fieldType(pos);
-        return new FlinkRowData(
-                row.getRow(pos, numFields), type instanceof RowType ? (RowType) type : null);
-    }
-
-    @Nullable
-    private DataType fieldType(int pos) {
-        return rowType == null ? null : rowType.getTypeAt(pos);
-    }
-
-    @Nullable
-    private static DataType arrayElementType(@Nullable DataType type) {
-        if (type instanceof ArrayType) {
-            return ((ArrayType) type).getElementType();
-        }
-        if (type instanceof VectorType) {
-            return ((VectorType) type).getElementType();
-        }
-        return null;
+        return new FlinkRowData(row.getRow(pos, numFields));
     }
 
     public Variant getVariant(int pos) {
@@ -192,15 +156,9 @@ public class FlinkRowData implements RowData {
     protected static class FlinkArrayData implements ArrayData {
 
         private final InternalArray array;
-        @Nullable private final DataType elementType;
 
         protected FlinkArrayData(InternalArray array) {
-            this(array, null);
-        }
-
-        private FlinkArrayData(InternalArray array, @Nullable DataType elementType) {
             this.array = array;
-            this.elementType = elementType;
         }
 
         @Override
@@ -280,21 +238,17 @@ public class FlinkRowData implements RowData {
 
         @Override
         public ArrayData getArray(int pos) {
-            return new FlinkArrayData(
-                    elementType instanceof VectorType ? array.getVector(pos) : array.getArray(pos),
-                    arrayElementType(elementType));
+            return new FlinkArrayData(array.getArray(pos));
         }
 
         @Override
         public MapData getMap(int pos) {
-            return new FlinkMapData(array.getMap(pos), elementType);
+            return new FlinkMapData(array.getMap(pos));
         }
 
         @Override
         public RowData getRow(int pos, int numFields) {
-            return new FlinkRowData(
-                    array.getRow(pos, numFields),
-                    elementType instanceof RowType ? (RowType) elementType : null);
+            return new FlinkRowData(array.getRow(pos, numFields));
         }
 
         @Override
@@ -336,21 +290,9 @@ public class FlinkRowData implements RowData {
     private static class FlinkMapData implements MapData {
 
         private final InternalMap map;
-        @Nullable private final DataType keyType;
-        @Nullable private final DataType valueType;
 
-        private FlinkMapData(InternalMap map, @Nullable DataType type) {
+        private FlinkMapData(InternalMap map) {
             this.map = map;
-            if (type instanceof MapType) {
-                this.keyType = ((MapType) type).getKeyType();
-                this.valueType = ((MapType) type).getValueType();
-            } else {
-                this.keyType =
-                        type instanceof MultisetType
-                                ? ((MultisetType) type).getElementType()
-                                : null;
-                this.valueType = null;
-            }
         }
 
         @Override
@@ -360,12 +302,12 @@ public class FlinkRowData implements RowData {
 
         @Override
         public ArrayData keyArray() {
-            return new FlinkArrayData(map.keyArray(), keyType);
+            return new FlinkArrayData(map.keyArray());
         }
 
         @Override
         public ArrayData valueArray() {
-            return new FlinkArrayData(map.valueArray(), valueType);
+            return new FlinkArrayData(map.valueArray());
         }
     }
 

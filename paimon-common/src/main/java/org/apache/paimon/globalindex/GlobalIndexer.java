@@ -29,7 +29,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.function.LongUnaryOperator;
 
 /** Abstract base class for global indexers. */
 public interface GlobalIndexer {
@@ -49,26 +48,6 @@ public interface GlobalIndexer {
             long totalRowCount,
             @Nullable List<Range> rowRanges,
             ExecutorService executor);
-
-    /**
-     * Rewrites stored index keys with mapped, relative row IDs without reading source data.
-     *
-     * <p>The input files share the relative row-ID domain {@code [0, sourceRowCount)}. The mapping
-     * returns a row ID in {@code [0, targetRowCount)}, or {@code -1} to exclude a source row.
-     * Output files share the target domain and may need to be read together, just like the input
-     * files.
-     */
-    default List<ResultEntry> rewriteRowIds(
-            GlobalIndexFileReader reader,
-            List<GlobalIndexIOMeta> files,
-            long sourceRowCount,
-            long targetRowCount,
-            LongUnaryOperator mapping,
-            GlobalIndexFileWriter writer)
-            throws IOException {
-        throw new UnsupportedOperationException(
-                "This global index does not support rewriting stored row IDs.");
-    }
 
     static GlobalIndexer create(String type, List<DataField> indexFields, Options options) {
         return GlobalIndexerFactoryUtils.load(type).create(indexFields, options);

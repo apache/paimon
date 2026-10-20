@@ -43,7 +43,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class DataEvolutionCompactTaskSerializer
         implements VersionedSerializer<DataEvolutionCompactTask> {
 
-    private static final int CURRENT_VERSION = 5;
+    private static final int CURRENT_VERSION = 4;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
@@ -83,7 +83,6 @@ public class DataEvolutionCompactTaskSerializer
                 view.writeLong(range.from);
                 view.writeLong(range.to);
             }
-            view.writeInt(((DataEvolutionNormalCompactTask) task).outputLevel());
         } else if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
             DeletionFile.serializeList(
                     view, ((DataEvolutionMaterializeDeletionCompactTask) task).deletionFiles());
@@ -109,7 +108,7 @@ public class DataEvolutionCompactTaskSerializer
     }
 
     private void checkVersion(int version) {
-        if (version != 4 && version != CURRENT_VERSION) {
+        if (version != CURRENT_VERSION) {
             throw new UnsupportedOperationException(
                     "Expecting DataEvolutionCompactTask version to be "
                             + CURRENT_VERSION
@@ -133,8 +132,7 @@ public class DataEvolutionCompactTaskSerializer
                 for (int i = 0; i < rangeCount; i++) {
                     ranges.add(new Range(view.readLong(), view.readLong()));
                 }
-                int outputLevel = version >= 5 ? view.readInt() : 0;
-                return new DataEvolutionNormalCompactTask(partition, files, ranges, outputLevel);
+                return new DataEvolutionNormalCompactTask(partition, files, ranges);
             case BLOB:
                 return new DataEvolutionBlobCompactTask(partition, files);
             case MATERIALIZE_DELETION:

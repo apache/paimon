@@ -20,33 +20,23 @@ package org.apache.paimon.globalindex.bitmap;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
-import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
-import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
-import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.function.LongUnaryOperator;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** The {@link GlobalIndexer} for bitmap index. */
 public class BitmapGlobalIndexer implements SortedGlobalIndexer {
@@ -95,106 +85,5 @@ public class BitmapGlobalIndexer implements SortedGlobalIndexer {
             ExecutorService executor) {
         return new LazyFilteredBitmapReader(
                 fileReader, files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
-    }
-
-    @Override
-    public List<ResultEntry> rewriteRowIds(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            long sourceRowCount,
-            long targetRowCount,
-            LongUnaryOperator mapping,
-            GlobalIndexFileWriter fileWriter)
-            throws IOException {
-        checkArgument(sourceRowCount >= 0 && targetRowCount >= 0, "Invalid row count.");
-        List<ResultEntry> results = new ArrayList<>();
-        if (targetRowCount == 0) {
-            return results;
-        }
-        for (GlobalIndexIOMeta file : files) {
-            try (SeekableInputStream input = fileReader.getInputStream(file)) {
-                BitmapGlobalIndexFormat.SeekableReader reader =
-                        (offset, length) -> {
-                            input.seek(offset);
-                            byte[] bytes = new byte[length];
-                            IOUtils.readFully(input, bytes);
-                            return bytes;
-                        };
-                BitmapGlobalIndexFormat.Footer footer =
-                        BitmapGlobalIndexFormat.readFooter(reader, file.fileSize());
-                RoaringNavigableMap64 nullRows =
-                        mapRowIds(
-                                BitmapGlobalIndexFormat.readBitmap(reader, footer.nullRowsBlock),
-                                sourceRowCount,
-                                targetRowCount,
-                                mapping);
-                RoaringNavigableMap64 nonNullRows =
-                        mapRowIds(
-                                BitmapGlobalIndexFormat.readBitmap(reader, footer.nonNullRowsBlock),
-                                sourceRowCount,
-                                targetRowCount,
-                                mapping);
-                if (nullRows.isEmpty() && nonNullRows.isEmpty()) {
-                    continue;
-                }
-                String fileName = fileWriter.newFileName(BitmapGlobalIndexerFactory.IDENTIFIER);
-                byte[] firstKey = null;
-                byte[] lastKey = null;
-                try (PositionOutputStream output = fileWriter.newOutputStream(fileName)) {
-                    BitmapGlobalIndexFormat.StreamingWriter writer =
-                            new BitmapGlobalIndexFormat.StreamingWriter(
-                                    output, dictionaryBlockSize, compressionFactory);
-                    for (BitmapGlobalIndexFormat.DictionaryBlockMeta block :
-                            BitmapGlobalIndexFormat.readIndexBlock(reader, footer.indexBlock)) {
-                        for (BitmapGlobalIndexFormat.DictionaryEntry entry :
-                                BitmapGlobalIndexFormat.readDictionaryBlock(reader, block)
-                                        .entries()) {
-                            RoaringNavigableMap64 rowIds =
-                                    mapRowIds(
-                                            BitmapGlobalIndexFormat.readBitmap(
-                                                    reader, entry.bitmapBlock()),
-                                            sourceRowCount,
-                                            targetRowCount,
-                                            mapping);
-                            if (!rowIds.isEmpty()) {
-                                // Dictionary order is unchanged, so encoded keys need no decoding.
-                                writer.write(entry.key(), rowIds);
-                                if (firstKey == null) {
-                                    firstKey = entry.key().bytes();
-                                }
-                                lastKey = entry.key().bytes();
-                            }
-                        }
-                    }
-                    writer.finish(nullRows, nonNullRows);
-                }
-                results.add(
-                        new ResultEntry(
-                                fileName,
-                                nullRows.getLongCardinality() + nonNullRows.getLongCardinality(),
-                                new SortedIndexFileMeta(firstKey, lastKey, !nullRows.isEmpty())
-                                        .serialize()));
-            }
-        }
-        return results;
-    }
-
-    private static RoaringNavigableMap64 mapRowIds(
-            RoaringNavigableMap64 rows,
-            long sourceRowCount,
-            long targetRowCount,
-            LongUnaryOperator mapping) {
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        for (long source : rows) {
-            checkArgument(
-                    source >= 0 && source < sourceRowCount, "Invalid source row ID: %s", source);
-            long target = mapping.applyAsLong(source);
-            checkArgument(
-                    target >= -1 && target < targetRowCount, "Invalid target row ID: %s", target);
-            if (target >= 0) {
-                result.add(target);
-            }
-        }
-        return result;
     }
 }

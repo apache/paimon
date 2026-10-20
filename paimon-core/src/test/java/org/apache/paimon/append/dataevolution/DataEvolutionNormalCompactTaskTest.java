@@ -81,57 +81,6 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                 .build();
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {0, 2})
-    public void testExplicitOutputLevelPreservesRowsAndRowIds(int outputLevel) throws Exception {
-        write();
-        FileStoreTable table = getTableDefault();
-        List<DataFileMeta> input =
-                table.store().newScan().plan().files().stream()
-                        .map(ManifestEntry::file)
-                        .collect(Collectors.toList());
-        if (outputLevel == 0) {
-            // Ordinary compaction must still reset an already clustered input to level zero.
-            DataEvolutionNormalCompactTask seed =
-                    new DataEvolutionNormalCompactTask(
-                            table.store().newScan().plan().files().get(0).partition(),
-                            input,
-                            Collections.emptyList(),
-                            2);
-            try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                commit.commit(Collections.singletonList(seed.doCompact(table, "seed-level")));
-            }
-            input = seed.compactAfter();
-        }
-        DataEvolutionNormalCompactTask task =
-                outputLevel == 0
-                        ? new DataEvolutionNormalCompactTask(
-                                table.store().newScan().plan().files().get(0).partition(), input)
-                        : new DataEvolutionNormalCompactTask(
-                                table.store().newScan().plan().files().get(0).partition(),
-                                input,
-                                Collections.emptyList(),
-                                outputLevel);
-        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
-        task =
-                (DataEvolutionNormalCompactTask)
-                        serializer.deserialize(serializer.getVersion(), serializer.serialize(task));
-        CommitMessage message = task.doCompact(table, "preserve-clustering-level");
-        assertThat(task.compactAfter()).hasSize(1);
-        assertThat(task.compactAfter().get(0).level()).isEqualTo(outputLevel);
-        assertThat(task.compactAfter().get(0).nonNullRowIdRange())
-                .isEqualTo(input.get(0).nonNullRowIdRange());
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.commit(Collections.singletonList(message));
-        }
-        List<InternalRow> rows = read(table);
-        assertThat(rows).hasSize(ROW_COUNT);
-        for (int i = 0; i < ROW_COUNT; i++) {
-            assertThat(rows.get(i).getInt(1)).isEqualTo(i);
-            assertThat(rows.get(i).getString(2).toString()).isEqualTo("f1_" + i);
-        }
-    }
-
     @Test
     public void testPropagateWriteColsSequencesAcrossCompactions() throws Exception {
         write();
@@ -179,22 +128,6 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         assertThat(writeColSequence(partialUpdate, f0Id))
                 .isEqualTo(fullUpdate.maxSequenceNumber())
                 .isLessThan(partialUpdate.maxSequenceNumber());
-    }
-
-    @Test
-    public void testLevelZeroClusteringCompactionPreservesFieldSequences() throws Exception {
-        write();
-        DataFileMeta compacted =
-                updateColumnsAndCompact(
-                        Collections.singletonList("f1"),
-                        1,
-                        CoreOptions.GlobalIndexColumnUpdateAction.THROW_ERROR,
-                        true);
-        assertThat(compacted.level()).isZero();
-        assertThat(writeColSequence(compacted, getTableDefault().rowType().getField("f0").id()))
-                .isLessThan(compacted.maxSequenceNumber());
-        assertThat(writeColSequence(compacted, getTableDefault().rowType().getField("f1").id()))
-                .isEqualTo(compacted.maxSequenceNumber());
     }
 
     @Test
@@ -807,22 +740,9 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
             int updateRound,
             CoreOptions.GlobalIndexColumnUpdateAction updateAction)
             throws Exception {
-        return updateColumnsAndCompact(columns, updateRound, updateAction, false);
-    }
-
-    private DataFileMeta updateColumnsAndCompact(
-            List<String> columns,
-            int updateRound,
-            CoreOptions.GlobalIndexColumnUpdateAction updateAction,
-            boolean incrementalClustering)
-            throws Exception {
         Map<String, String> writeOptions = new HashMap<>();
         writeOptions.put(
                 CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), updateAction.toString());
-        if (incrementalClustering) {
-            writeOptions.put(CoreOptions.CLUSTERING_INCREMENTAL.key(), "true");
-            writeOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "f0");
-        }
         FileStoreTable table = getTableDefault().copy(writeOptions);
         List<String> writeColumns = new ArrayList<>();
         writeColumns.add("dt");

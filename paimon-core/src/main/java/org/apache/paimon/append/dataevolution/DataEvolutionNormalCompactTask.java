@@ -69,7 +69,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionNormalCompactTask.class);
 
     private final List<Range> protectedRanges;
-    private final int outputLevel;
 
     public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         this(partition, files, Collections.emptyList());
@@ -77,19 +76,8 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
     public DataEvolutionNormalCompactTask(
             BinaryRow partition, List<DataFileMeta> files, List<Range> protectedRanges) {
-        this(partition, files, protectedRanges, 0);
-    }
-
-    /** Preserves a clustering level only when the caller has verified the complete input group. */
-    public DataEvolutionNormalCompactTask(
-            BinaryRow partition,
-            List<DataFileMeta> files,
-            List<Range> protectedRanges,
-            int outputLevel) {
         super(partition, files);
-        checkArgument(outputLevel >= 0, "Output level must not be negative.");
         checkContiguousRowRange(files);
-        this.outputLevel = outputLevel;
         this.protectedRanges =
                 Collections.unmodifiableList(Range.sortAndMergeOverlap(protectedRanges));
     }
@@ -98,20 +86,15 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         return protectedRanges;
     }
 
-    public int outputLevel() {
-        return outputLevel;
-    }
-
     @Override
     public boolean equals(Object other) {
         return super.equals(other)
-                && protectedRanges.equals(((DataEvolutionNormalCompactTask) other).protectedRanges)
-                && outputLevel == ((DataEvolutionNormalCompactTask) other).outputLevel;
+                && protectedRanges.equals(((DataEvolutionNormalCompactTask) other).protectedRanges);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), protectedRanges, outputLevel);
+        return Objects.hash(super.hashCode(), protectedRanges);
     }
 
     @Override
@@ -195,8 +178,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         long maxSequenceNumber = maxSequenceId(compactBefore);
         long nextRowId = firstRowId;
         long[] writeColsSequences =
-                (options.ignoreIndexColumnUpdate() || options.clusteringIncrementalEnabled())
-                                && !writeResult.isEmpty()
+                options.ignoreIndexColumnUpdate() && !writeResult.isEmpty()
                         ? compactedWriteColsSequences(
                                 table,
                                 writeResult
@@ -209,9 +191,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                             .assignSequenceNumber(minSequenceNumber, maxSequenceNumber);
             if (writeColsSequences != null) {
                 dataFileMeta = dataFileMeta.withWriteColsSequences(writeColsSequences);
-            }
-            if (outputLevel > 0) {
-                dataFileMeta = dataFileMeta.upgrade(outputLevel);
             }
             compactAfter.add(dataFileMeta);
             nextRowId += dataFileMeta.rowCount();

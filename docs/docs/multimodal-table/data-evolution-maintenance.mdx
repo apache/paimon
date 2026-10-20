@@ -33,7 +33,6 @@ have different effects on row IDs and dependent indexes.
 | Reduce column-file fragmentation | [Ordinary compaction](#ordinary-compaction) | Preserved |
 | Resize large normal files | [Split during compaction](#splitting-large-files-during-compaction) | Preserved |
 | Remove logically deleted positions | [Materialize deletion vectors](#materialize-deletion-vectors) | Reassigned in rewritten ranges |
-| Sort ordinary columns for pruning | [Incremental clustering](#incremental-clustering) | Reassigned in rewritten groups |
 
 For updates and logical deletes, see [Data Evolution](./data-evolution).
 For the normal/dedicated range contract, see [File Layout and Reads](./data-evolution-file-layout).
@@ -170,75 +169,6 @@ expiration to remove the files. The legacy
 `data-evolution.compaction.rewrite-row-ids = true` setting is rejected; use the
 materialization procedure instead.
 
-### Incremental Clustering
-
-Data Evolution tables can enable `clustering.incremental = true` with nonempty
-`clustering.columns` when they have no dedicated BLOB or VECTOR files. BLOB
-descriptor and view fields stored inline, and VECTOR columns stored in normal
-files, do not require dedicated files and remain supported.
-
-The existing [clustering strategies and file selection](../append-table/incremental-clustering)
-choose the work. Selection includes every column version in each selected
-row-ID group. Readers merge the latest column values and apply logical deletes
-before the existing Spark or Flink clustering pipeline sorts the surviving rows
-and writes new normal files with new row IDs. Unselected groups keep their row IDs.
-The output records the clustering columns and level for subsequent incremental
-selection. Updating only non-clustering columns does not make an already clustered
-group require sorting again: its row order remains valid. Unselected groups with
-at least `compaction.min.file-num` normal files (default 5) are instead compacted
-within the same job and snapshot. This merges their latest column values while
-preserving row IDs, clustering level, logical deletes, and indexes on unchanged
-columns. If minor selection skips a group whose sorting order is no longer
-valid, column-version compaction keeps it at level 0 for later clustering.
-Each such task handles one complete row-ID group; adjacent groups are
-not combined because row-ID order alone does not prove clustering-key order.
-Groups below the threshold can be skipped even by a full clustering call.
-Updating a clustering column
-makes the group eligible again. When a group is selected, all its column versions
-are rewritten together, including newer values of non-clustering columns.
-`clustering.incremental.mode` selects the same distributed global sort
-or task-local sort used by ordinary append-table clustering.
-
-For example, enable clustering with Spark SQL and run an explicit batch compact:
-
-```sql
-ALTER TABLE default.target_table SET TBLPROPERTIES (
-    'clustering.incremental' = 'true',
-    'clustering.columns' = 'id'
-);
-CALL sys.compact(table => 'default.target_table', compact_strategy => 'minor');
-```
-
-Use the corresponding Flink `ALTER TABLE ... SET` syntax and run the compact job
-in batch mode. Explicit compact jobs combine clustering and column-version
-compaction while this option is enabled. A group selected for clustering is
-rewritten only once. To run ordinary Data Evolution compaction across adjacent
-row-ID groups, disable clustering for the invocation with
-`options => 'clustering.incremental=false'`.
-
-The sorting path removes the applied deletion vectors; column-version compaction
-retains logical deletes and moves their vectors to the replacement files.
-Flink clustering also rewrites
-B-tree and bitmap index files with the new row IDs, reusing their stored keys.
-Indexes outside the rewritten row-ID ranges are preserved, including those in
-the same partition. Partially indexed data retains its exact coverage after sorting.
-The current contiguous-range index protocol limits rewriting to 64 new coverage
-fragments per index definition, and 64 retained plus new fragments per source file.
-If sorting would exceed either bound, clustering fails before committing; rebuild
-complete indexes with smaller shards first.
-The job records the old row IDs alongside each output file so that concurrent
-index creation and optimistic commit retries use the final assigned row IDs.
-
-Indexes with stale keys after indexed-column updates, and affected index types
-without RowID rewrite support, are dropped. Spark clustering drops index files
-whose coverage intersects the row-ID ranges selected for sorting. Rebuild dropped indexes, or use
-`scalar-index.search-mode = full` for complete scalar query results while part
-of the table remains unindexed.
-Concurrent updates or deletes that overlap the selected row-ID groups cause
-commit to fail, preventing stale rewrites from replacing newer values.
-Historical snapshots and tags retain
-the previous files until expiration.
-
 ### Row-ID Lifetime
 
 | Operation | Effect on row IDs |
@@ -248,7 +178,6 @@ the previous files until expiration.
 | Logical delete | Hides IDs without shifting the remaining rows. |
 | Ordinary Data Evolution compaction | Preserves IDs, but may change file-group boundaries. |
 | Deletion-vector materialization | Assigns new IDs to surviving rows in the rewritten ranges. |
-| Data Evolution incremental clustering | Assigns new IDs to surviving rows in groups selected for sorting; column-version compaction preserves IDs. |
 | Explicit `reassign_row_id` maintenance | Changes IDs by remapping file metadata. |
 | Overwrite or partition removal | Removes the replaced rows from the current table state; do not assume their IDs remain usable. |
 

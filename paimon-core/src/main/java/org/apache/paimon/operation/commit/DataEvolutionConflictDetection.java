@@ -63,7 +63,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
-import static org.apache.paimon.utils.DataEvolutionUtils.materializedRowIdRanges;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Conflict detection for Data Evolution tables. */
@@ -567,19 +566,19 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 SchemaManager schemaManager,
                 List<ManifestEntry> deltaFiles,
                 boolean nestedFieldEnabled) {
-            // Only materialized ranges require exclusive access. Row-ID-preserving compaction
-            // keeps column sequences and can coexist with later partial-column writes.
-            List<DataFileMeta> before =
+            // Materializing deletion vectors rewrites complete row ranges. A concurrent ADD in a
+            // deleted normal-file range can otherwise restore logically deleted rows.
+            List<DataFileMeta> deletedNormalFiles =
                     deltaFiles.stream()
                             .filter(entry -> entry.kind() == FileKind.DELETE)
                             .map(ManifestEntry::file)
+                            .filter(file -> file.firstRowId() != null)
+                            .filter(
+                                    file ->
+                                            !isBlobFile(file.fileName())
+                                                    && !isVectorStoreFile(file.fileName()))
                             .collect(Collectors.toList());
-            List<DataFileMeta> after =
-                    deltaFiles.stream()
-                            .filter(entry -> entry.kind() == FileKind.ADD)
-                            .map(ManifestEntry::file)
-                            .collect(Collectors.toList());
-            return RowIdRangeConflictChecker.fromRanges(materializedRowIdRanges(before, after));
+            return RowIdRangeConflictChecker.fromDataFiles(deletedNormalFiles);
         }
 
         @Override

@@ -79,8 +79,7 @@ public class HistoryPartitionClusterTest {
                                 table,
                                 PartitionPredicate.fromMultiple(
                                         RowType.of(DataTypes.INT()),
-                                        Lists.newArrayList(BinaryRow.singleColumn("pt1"))),
-                                table.snapshotManager().latestSnapshot())
+                                        Lists.newArrayList(BinaryRow.singleColumn("pt1"))))
                         .historyPartitionCluster();
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels =
                 historyPartitionCluster.constructLevelsForHistoryPartitions();
@@ -93,17 +92,14 @@ public class HistoryPartitionClusterTest {
                                 table,
                                 PartitionPredicate.fromMultiple(
                                         RowType.of(DataTypes.INT()),
-                                        Lists.newArrayList(BinaryRow.singleColumn("pt3"))),
-                                table.snapshotManager().latestSnapshot())
+                                        Lists.newArrayList(BinaryRow.singleColumn("pt3"))))
                         .historyPartitionCluster();
         partitionLevels = historyPartitionCluster.constructLevelsForHistoryPartitions();
         assertThat(partitionLevels.size()).isEqualTo(1);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt1"))).isNotEmpty();
 
         // test not specify partition and disable history partition auto clustering
-        historyPartitionCluster =
-                new IncrementalClusterManager(table, null, table.snapshotManager().latestSnapshot())
-                        .historyPartitionCluster();
+        historyPartitionCluster = new IncrementalClusterManager(table).historyPartitionCluster();
         assertThat(historyPartitionCluster).isNull();
     }
 

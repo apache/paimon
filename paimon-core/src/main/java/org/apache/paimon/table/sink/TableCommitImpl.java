@@ -31,7 +31,6 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
-import org.apache.paimon.operation.commit.CommitChangesRewriter;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.Tag;
@@ -179,11 +178,6 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl materializeDvRowIdCheck() {
         commit.materializeDvRowIdCheck();
-        return this;
-    }
-
-    public TableCommitImpl withCommitChangesRewriter(CommitChangesRewriter rewriter) {
-        commit.withCommitChangesRewriter(rewriter);
         return this;
     }
 

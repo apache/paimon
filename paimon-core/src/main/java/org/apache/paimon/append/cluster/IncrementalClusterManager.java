@@ -25,13 +25,21 @@ import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.mergetree.LevelSortedRun;
+import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -44,6 +52,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,17 +71,18 @@ public class IncrementalClusterManager {
     private final InternalRowPartitionComputer partitionComputer;
     private final Snapshot snapshot;
     private final SnapshotReader snapshotReader;
-    private final IncrementalClusterRewriter rewriter;
     private final IncrementalClusterStrategy incrementalClusterStrategy;
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
     private final int numLevels;
     private final @Nullable HistoryPartitionCluster historyPartitionCluster;
 
+    public IncrementalClusterManager(FileStoreTable table) {
+        this(table, null);
+    }
+
     public IncrementalClusterManager(
-            FileStoreTable table,
-            @Nullable PartitionPredicate specifiedPartitions,
-            Snapshot snapshot) {
+            FileStoreTable table, @Nullable PartitionPredicate specifiedPartitions) {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
@@ -89,8 +99,7 @@ public class IncrementalClusterManager {
                         table.store().partitionType(),
                         table.partitionKeys().toArray(new String[0]),
                         table.coreOptions().legacyPartitionName());
-        this.snapshot = snapshot;
-        this.rewriter = IncrementalClusterRewriter.create(table, snapshot);
+        this.snapshot = table.snapshotManager().latestSnapshot();
         this.snapshotReader =
                 table.newSnapshotReader()
                         .dropStats()
@@ -111,15 +120,10 @@ public class IncrementalClusterManager {
                         snapshot,
                         incrementalClusterStrategy,
                         partitionComputer,
-                        specifiedPartitions,
-                        rewriter::constructPartitionLevels);
+                        specifiedPartitions);
     }
 
     public Map<BinaryRow, CompactUnit> createCompactUnits(boolean fullCompaction) {
-        if (snapshot == null) {
-            return Collections.emptyMap();
-        }
-
         // 1. construct LSM structure for each partition
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels = constructLevels();
         logForPartitionLevel(partitionLevels, partitionComputer);
@@ -173,7 +177,33 @@ public class IncrementalClusterManager {
                 .collect(
                         Collectors.toMap(
                                 Map.Entry::getKey,
-                                entry -> rewriter.constructPartitionLevels(entry.getValue())));
+                                entry -> constructPartitionLevels(entry.getValue())));
+    }
+
+    public static List<LevelSortedRun> constructPartitionLevels(List<DataFileMeta> partitionFiles) {
+        List<LevelSortedRun> partitionLevels = new ArrayList<>();
+        Map<Integer, List<DataFileMeta>> levelMap =
+                partitionFiles.stream().collect(Collectors.groupingBy(DataFileMeta::level));
+
+        for (Map.Entry<Integer, List<DataFileMeta>> entry : levelMap.entrySet()) {
+            int level = entry.getKey();
+            if (level == 0) {
+                for (DataFileMeta level0File : entry.getValue()) {
+                    partitionLevels.add(
+                            new LevelSortedRun(level, SortedRun.fromSingle(level0File)));
+                }
+            } else {
+                // don't need to guarantee that the files within the same sorted run are
+                // non-overlapping here, so we call SortedRun.fromSorted() to avoid sorting and
+                // validation
+                partitionLevels.add(
+                        new LevelSortedRun(level, SortedRun.fromSorted(entry.getValue())));
+            }
+        }
+
+        // sort by level
+        partitionLevels.sort(Comparator.comparing(LevelSortedRun::level));
+        return partitionLevels;
     }
 
     public Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> toSplitsAndRewriteDvFiles(
@@ -191,7 +221,6 @@ public class IncrementalClusterManager {
 
             DataSplit.Builder builder =
                     DataSplit.builder()
-                            .withSnapshot(snapshot.id())
                             .withPartition(partition)
                             .withBucket(0)
                             .withTotalBuckets(1)
@@ -206,23 +235,53 @@ public class IncrementalClusterManager {
 
                 String bucketPath =
                         snapshotReader.pathFactory().bucketPath(partition, 0).toString();
-                builder.withDataFiles(dataFiles).withBucketPath(bucketPath);
+                builder.withDataFiles(dataFiles)
+                        .rawConvertible(splitGroup.rawConvertible)
+                        .withBucketPath(bucketPath);
 
-                rewriter.configureSplit(builder, splitGroup, dvMaintainer);
+                if (dvMaintainer != null) {
+                    List<DeletionFile> dataDeletionFiles = new ArrayList<>();
+                    for (DataFileMeta file : dataFiles) {
+                        DeletionFile deletionFile =
+                                dvMaintainer.notifyRemovedDeletionVector(file.fileName());
+                        dataDeletionFiles.add(deletionFile);
+                    }
+                    builder.withDataDeletionFiles(dataDeletionFiles);
+                }
                 splits.add(builder.build());
             }
 
-            CommitMessage dvCommitMessage =
-                    rewriter.finishPartition(dvMaintainer, table.coreOptions().bucket());
+            // generate delete dv index meta
+            CommitMessage dvCommitMessage = null;
+            if (dvMaintainer != null) {
+                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+                List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+                List<IndexManifestEntry> indexEntries = dvMaintainer.persist();
+                for (IndexManifestEntry entry : indexEntries) {
+                    if (entry.kind() == FileKind.ADD) {
+                        newIndexFiles.add(entry.indexFile());
+                    } else {
+                        deletedIndexFiles.add(entry.indexFile());
+                    }
+                }
+                dvCommitMessage =
+                        new CommitMessageImpl(
+                                dvMaintainer.getPartition(),
+                                0,
+                                table.coreOptions().bucket(),
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        newIndexFiles,
+                                        deletedIndexFiles));
+            }
 
             result.put(partition, Pair.of(splits, dvCommitMessage));
         }
 
         return result;
-    }
-
-    public List<CommitMessage> prepareCommitMessages(List<CommitMessage> messages) {
-        return rewriter.prepareCommitMessages(messages);
     }
 
     public static List<DataFileMeta> upgrade(

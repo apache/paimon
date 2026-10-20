@@ -48,10 +48,8 @@ by a query, and does not replace SQL `ORDER BY`.
 | Global/local sort mode | Configurable for batch clustering jobs. | Clustering is performed within each partition and bucket; the global/local option does not select this path. |
 | Historical-partition auto-clustering | Supported. | `clustering.history-partition.*` does not apply. |
 
-Data Evolution tables support incremental clustering without dedicated BLOB or VECTOR files; see
-[Data Evolution clustering](../multimodal-table/data-evolution-maintenance#incremental-clustering) for its execution
-and row-ID behavior. If streaming consumers require ordered append reads from a bucketed table, keep that ordering
-and do not enable clustering.
+Data Evolution tables cannot enable incremental clustering. If streaming consumers require ordered append reads from a
+bucketed table, keep that ordering and do not enable clustering.
 
 ## Enable Incremental Clustering
 
@@ -135,11 +133,6 @@ For unaware-bucket tables, the mode controls how the **selected files in each pa
 
 Here, “global” refers to the selected clustering work within a partition. It does not imply that all existing files or
 all table partitions become globally ordered after an incremental run.
-
-Data Evolution uses the same sort modes. Its readers merge the latest column values and apply deletion vectors
-for complete selected file groups before sorting. The rewritten rows receive new row IDs at commit time.
-Already-clustered groups with accumulated non-clustering column versions can instead be compacted in the same job,
-preserving their row IDs and logical deletes; see [Data Evolution clustering](../multimodal-table/data-evolution-maintenance#incremental-clustering).
 
 ## Run Incremental Clustering
 
