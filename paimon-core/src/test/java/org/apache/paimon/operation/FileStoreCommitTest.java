@@ -77,6 +77,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -999,14 +1000,26 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false, 2);
         BinaryRow partition = gen.getPartition(gen.next());
         IndexManifestEntry materializedBucketDelete =
-                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
+                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index", new Range(0, 0));
+        IndexManifestEntry disjointRangeDelete =
+                globalIndexDeleteEntry(partition, 0, "disjoint-range-index", new Range(1, 2));
         IndexManifestEntry otherBucketDelete =
-                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
+                globalIndexDeleteEntry(partition, 1, "other-bucket-index", new Range(0, 0));
+        IndexManifestEntry nonGlobalDelete =
+                new IndexManifestEntry(
+                        FileKind.DELETE,
+                        partition,
+                        0,
+                        new IndexFileMeta(HASH_INDEX, "non-global-index", 1, 1, null, null, null));
         CommitChanges changes =
                 new CommitChanges(
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Arrays.asList(materializedBucketDelete, otherBucketDelete));
+                        Arrays.asList(
+                                materializedBucketDelete,
+                                disjointRangeDelete,
+                                otherBucketDelete,
+                                nonGlobalDelete));
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             CommitChanges refreshed =
@@ -1014,15 +1027,22 @@ public class FileStoreCommitTest {
                                     changes, Collections.singleton(Pair.of(partition, 0)))
                             .provide(null);
 
-            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+            // Global-index removals from earlier preparation are replaced for the entire bucket,
+            // even if their ranges do not overlap the materialized input.
+            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete, nonGlobalDelete);
         }
     }
 
     private static IndexManifestEntry globalIndexDeleteEntry(
-            BinaryRow partition, int bucket, String fileName) {
+            BinaryRow partition, int bucket, String fileName, Range range) {
         IndexFileMeta file =
                 new IndexFileMeta(
-                        "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
+                        "btree",
+                        fileName,
+                        1,
+                        range.count(),
+                        new GlobalIndexMeta(range.from, range.to, 0, null, null),
+                        null);
         return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
     }
 

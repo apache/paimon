@@ -35,13 +35,17 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -49,6 +53,8 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.commit.RowIdExistenceConflictException;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
@@ -69,13 +75,16 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -83,6 +92,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -416,6 +426,689 @@ class DataEvolutionClusterTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @CsvSource({"btree,false", "btree,true", "bitmap,false", "bitmap,true"})
+    void testClusterRemapsScalarIndexPostings(String indexType, boolean deletionVectors)
+            throws Exception {
+        FileStoreTable table = createTable(deletionVectors);
+        appendIndexRows(
+                table,
+                new int[] {30, 10, 20, 40, 50},
+                new String[] {"x", "x", null, "deleted", "y"});
+        commit(
+                table,
+                prepareGlobalIndex(
+                        table, table.latestSnapshot().get(), "payload", indexType, null));
+        if (deletionVectors) {
+            delete(table, "a", new Range(0, 4), 3L);
+        }
+        table = table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_ROW_NUM.key(), "2"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMappedCluster(table, snapshot, true));
+
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int payload = table.rowType().getFieldIndex("payload");
+        assertIndexRows(
+                table,
+                predicates.equal(payload, BinaryString.fromString("x")),
+                new Range(5, 5),
+                new Range(7, 7));
+        assertIndexRows(table, predicates.isNull(payload), new Range(6, 6));
+        assertIndexRows(
+                table,
+                predicates.equal(payload, BinaryString.fromString("y")),
+                new Range(deletionVectors ? 8 : 9, deletionVectors ? 8 : 9));
+        assertIndexRows(
+                table,
+                predicates.equal(payload, BinaryString.fromString("deleted")),
+                deletionVectors ? new Range[0] : new Range[] {new Range(8, 8)});
+        assertThat(readRows(table))
+                .containsExactlyElementsOf(
+                        deletionVectors
+                                ? Arrays.asList("a|10|x|5", "a|20|null|6", "a|30|x|7", "a|50|y|8")
+                                : Arrays.asList(
+                                        "a|10|x|5",
+                                        "a|20|null|6",
+                                        "a|30|x|7",
+                                        "a|40|deleted|8",
+                                        "a|50|y|9"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    void testClusterPreservesExactPartialIndexCoverage(String indexType) throws Exception {
+        FileStoreTable table = createTable(false);
+        append(table, "a", 90, 10, 50);
+        append(table, "a", 80, 20, 40);
+        commit(
+                table,
+                prepareGlobalIndex(
+                        table, table.latestSnapshot().get(), "id", indexType, new Range(0, 2)));
+        table = table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_ROW_NUM.key(), "2"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMappedCluster(table, snapshot, true));
+
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        assertIndexRows(table, predicates.equal(id, 10), new Range(6, 6));
+        assertIndexRows(table, predicates.equal(id, 50), new Range(9, 9));
+        assertIndexRows(table, predicates.equal(id, 90), new Range(11, 11));
+        assertIndexRows(table, predicates.equal(id, 20));
+        List<Range> coverage =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                        .map(entry -> entry.indexFile().globalIndexMeta().rowRange())
+                        .collect(Collectors.toList());
+        assertThat(Range.sortAndMergeOverlap(coverage, true))
+                .containsExactly(new Range(6, 6), new Range(9, 9), new Range(11, 11));
+        FileStoreTable detail =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "detail"));
+        assertThat(readRows(detail, predicates.equal(id, 20))).containsExactly("a|20|base-20|7");
+        assertThat(readRows(detail, predicates.equal(id, 80))).containsExactly("a|80|base-80|10");
+    }
+
+    @Test
+    void testClusterRejectsTooManyIndexCoverageFragments() throws Exception {
+        FileStoreTable table = createTable(false);
+        int[] indexed = new int[65];
+        int[] unindexed = new int[65];
+        for (int i = 0; i < indexed.length; i++) {
+            indexed[i] = i * 2 + 1;
+            unindexed[i] = i * 2 + 2;
+        }
+        append(table, "a", indexed);
+        append(table, "a", unindexed);
+        commit(
+                table,
+                prepareGlobalIndex(
+                        table, table.latestSnapshot().get(), "id", "btree", new Range(0, 64)));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<String> beforeFiles = fileNames(table, "a");
+        List<String> beforeIndexes = globalIndexNames(table);
+        List<String> beforeRows = readRows(table);
+        List<CommitMessage> messages = prepareMappedCluster(table, snapshot, true);
+        assertThat(messages).hasSize(1);
+        assertThat(((CommitMessageImpl) messages.get(0)).compactIncrement().compactAfter())
+                .hasSize(1);
+
+        // One indexed row alternates with one unindexed row: 65 exact coverage fragments.
+        assertThatThrownBy(() -> commitCluster(table, snapshot, messages))
+                .isInstanceOf(RuntimeException.class)
+                .hasStackTraceContaining("coverage fragments")
+                .hasStackTraceContaining("64");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshot.id());
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(130L);
+        assertThat(fileNames(table, "a")).isEqualTo(beforeFiles);
+        assertThat(globalIndexNames(table)).isEqualTo(beforeIndexes);
+        assertThat(readRows(table)).isEqualTo(beforeRows);
+        assertIndexRows(
+                table,
+                new PredicateBuilder(table.rowType()).equal(table.rowType().getFieldIndex("id"), 1),
+                new Range(0, 0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    void testClusterCombinesFullyIndexedSourceRangesBeforeCountingFragments(String indexType)
+            throws Exception {
+        FileStoreTable table = createTable(false);
+        int[] odd = new int[65];
+        int[] even = new int[65];
+        for (int i = 0; i < odd.length; i++) {
+            odd[i] = i * 2 + 1;
+            even[i] = i * 2 + 2;
+        }
+        append(table, "a", odd);
+        append(table, "a", even);
+        Snapshot indexed = table.latestSnapshot().get();
+        List<CommitMessage> indexes =
+                new ArrayList<>(
+                        prepareGlobalIndex(table, indexed, "id", indexType, new Range(0, 64)));
+        indexes.addAll(prepareGlobalIndex(table, indexed, "id", indexType, new Range(65, 129)));
+        commit(table, indexes);
+        assertThat(globalIndexNames(table)).hasSize(2);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMappedCluster(table, snapshot, true);
+        assertThat(messages).hasSize(1);
+        assertThat(((CommitMessageImpl) messages.get(0)).compactIncrement().compactAfter())
+                .hasSize(1);
+
+        // Each old range maps to 65 alternating positions, but their union has no coverage gap.
+        commitCluster(table, snapshot, messages);
+
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(260L);
+        assertThat(
+                        table.store().newIndexFileHandler().scanEntries().stream()
+                                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                                .map(entry -> entry.indexFile().globalIndexMeta().rowRange()))
+                .isNotEmpty()
+                .allSatisfy(range -> assertThat(range).isEqualTo(new Range(130, 259)));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        List<String> expectedRows = new ArrayList<>();
+        for (int value = 1; value <= 130; value++) {
+            long rowId = 129L + value;
+            assertIndexRows(table, predicates.equal(id, value), new Range(rowId, rowId));
+            expectedRows.add("a|" + value + "|base-" + value + "|" + rowId);
+        }
+        assertIndexRows(table, predicates.equal(id, 0));
+        assertIndexRows(table, predicates.isNull(id));
+        assertThat(readRows(table)).containsExactlyElementsOf(expectedRows);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMinorClusterRemapsIndexesAcrossDisjointRanges(boolean deletionVectors)
+            throws Exception {
+        FileStoreTable table = createMinorClusterTable(deletionVectors);
+        List<String> untouchedRows = rowsInRange(table, new Range(12, 14));
+        List<String> untouchedFiles = filesInRange(table, new Range(12, 14));
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        List<String> oldIndexFiles = globalIndexNames(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMinorCluster(table, snapshot);
+        messages =
+                IncrementalClusterRewriter.create(table, snapshot).prepareCommitMessages(messages);
+        List<CommitMessage> preparedGapIndex =
+                prepareGlobalIndex(table, snapshot, "payload", "bitmap", new Range(12, 14));
+        commit(table, prepareGlobalIndex(table, snapshot, "payload"));
+        commitChecked(table, messages);
+
+        assertThat(globalIndexNames(table)).isNotEmpty().doesNotContainAnyElementsOf(oldIndexFiles);
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        int payload = table.rowType().getFieldIndex("payload");
+        assertIndexRows(table, predicates.equal(id, 40), new Range(12, 12));
+        assertIndexRows(table, predicates.equal(id, 50), new Range(13, 13));
+        assertIndexRows(table, predicates.equal(id, 60), new Range(14, 14));
+        long seventy = deletionVectors ? 23 : 24;
+        assertIndexRows(table, predicates.equal(id, 70), new Range(seventy, seventy));
+        assertIndexRows(
+                table,
+                predicates.equal(payload, BinaryString.fromString("updated-70")),
+                new Range(seventy, seventy));
+        assertMinorClusterResult(table, deletionVectors, untouchedRows, untouchedFiles, 21L, 4);
+
+        // A pre-clustering index can still commit for an unchanged row-ID group.
+        commit(table, preparedGapIndex);
+        assertIndexRows(table, predicates.equal(id, 40), new Range(12, 12));
+        assertMinorClusterResult(table, deletionVectors, untouchedRows, untouchedFiles, 21L, 4);
+    }
+
+    @Test
+    void testMinorClusterRemapsIndexWhenAllSelectedRowsAreDeleted() throws Exception {
+        FileStoreTable table = createMinorClusterTable(true);
+        List<String> untouchedRows = rowsInRange(table, new Range(12, 14));
+        List<String> untouchedFiles = filesInRange(table, new Range(12, 14));
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        delete(table, "a", new Range(9, 11), 9L, 10L, 11L);
+        delete(table, "a", new Range(15, 17), 15L, 16L, 17L);
+        delete(table, "a", new Range(18, 20), 18L, 19L, 20L);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMinorCluster(table, snapshot);
+        assertThat(messages)
+                .allSatisfy(
+                        message ->
+                                assertThat(
+                                                ((CommitMessageImpl) message)
+                                                        .compactIncrement()
+                                                        .compactAfter())
+                                        .isEmpty());
+        commitCluster(table, snapshot, messages);
+
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        assertIndexRows(table, predicates.equal(id, 40), new Range(12, 12));
+        assertIndexRows(table, predicates.equal(id, 20));
+        assertIndexRows(table, predicates.equal(id, 100));
+        assertThat(
+                        table.store().newIndexFileHandler().scanEntries().stream()
+                                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                                .map(entry -> entry.indexFile().globalIndexMeta().rowRange()))
+                .containsExactly(new Range(12, 14));
+        assertThat(readRows(table)).containsExactlyElementsOf(untouchedRows);
+        assertThat(fileNames(table, "a")).containsExactlyElementsOf(untouchedFiles);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(21L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMinorClusterRetryRemapsConcurrentIndexAfterAppend(boolean deletionVectors)
+            throws Exception {
+        Map<String, String> retryOptions = new HashMap<>();
+        retryOptions.put(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "0ms");
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "0ms");
+        FileStoreTable original = createMinorClusterTable(deletionVectors).copy(retryOptions);
+        List<String> untouchedRows = rowsInRange(original, new Range(12, 14));
+        List<String> untouchedFiles = filesInRange(original, new Range(12, 14));
+        commit(original, prepareGlobalIndex(original, original.latestSnapshot().get(), "id"));
+        Snapshot scanSnapshot = original.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMinorCluster(original, scanSnapshot);
+        AtomicInteger attempts = new AtomicInteger();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotCommit snapshotCommit(
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
+                            @Override
+                            protected boolean commitImpl(
+                                    String baseUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                assertThat(snapshot.commitKind())
+                                        .isEqualTo(Snapshot.CommitKind.COMPACT);
+                                int attempt = attempts.incrementAndGet();
+                                assertThat(
+                                                original.store()
+                                                        .indexManifestFileFactory()
+                                                        .create()
+                                                        .read(snapshot.indexManifest()))
+                                        .isNotEmpty();
+                                if (attempt == 1) {
+                                    assertThat(original.latestSnapshot().get().id())
+                                            .isEqualTo(scanSnapshot.id());
+                                    DataEvolutionClusterTest.this.commit(
+                                            original,
+                                            prepareGlobalIndex(original, scanSnapshot, "payload"));
+                                    append(original, "a", 200, 180, 190);
+                                }
+                                boolean committed =
+                                        delegate.commit(baseUuid, snapshot, branch, statistics);
+                                assertThat(committed).isEqualTo(attempt == 2);
+                                return committed;
+                            }
+
+                            @Override
+                            protected void closeImpl() throws Exception {
+                                delegate.close();
+                            }
+                        };
+                    }
+                };
+        FileStoreTable committingTable =
+                FileStoreTableFactory.create(
+                        original.fileIO(), original.location(), original.schema(), environment);
+        commitCluster(committingTable, scanSnapshot, messages);
+
+        assertThat(attempts).hasValue(2);
+        assertThat(original.latestSnapshot().get().id()).isEqualTo(scanSnapshot.id() + 3);
+        long seventy = deletionVectors ? 26 : 27;
+        PredicateBuilder predicates = new PredicateBuilder(original.rowType());
+        assertIndexRows(
+                original,
+                predicates.equal(original.rowType().getFieldIndex("id"), 70),
+                new Range(seventy, seventy));
+        assertIndexRows(
+                original,
+                predicates.equal(
+                        original.rowType().getFieldIndex("payload"),
+                        BinaryString.fromString("updated-70")),
+                new Range(seventy, seventy));
+        untouchedRows.addAll(
+                Arrays.asList("a|200|base-200|21", "a|180|base-180|22", "a|190|base-190|23"));
+        assertMinorClusterResult(original, deletionVectors, untouchedRows, untouchedFiles, 24L, 5);
+        FileStoreTable detail =
+                original.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "detail"));
+        assertThat(readRows(detail, predicates.equal(original.rowType().getFieldIndex("id"), 180)))
+                .containsExactly("a|180|base-180|22");
+    }
+
+    @Test
+    void testClusterDoesNotMakeStaleIndexKeysFresh() throws Exception {
+        FileStoreTable table =
+                createTable(false)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(),
+                                        "ignore"));
+        append(table, "a", 30, 10, 20);
+        Snapshot indexed = table.latestSnapshot().get();
+        List<CommitMessage> indexes =
+                new ArrayList<>(prepareGlobalIndex(table, indexed, "payload"));
+        indexes.addAll(prepareGlobalIndex(table, indexed, "id"));
+        commit(table, indexes);
+        updatePayload(table, "a", 0L, 30, 10, 20);
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMappedCluster(table, snapshot, true));
+
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        assertIndexRows(
+                table, predicates.equal(table.rowType().getFieldIndex("id"), 20), new Range(4, 4));
+        assertThat(
+                        table.store().newIndexFileHandler().scanEntries().stream()
+                                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                                .flatMap(
+                                        entry ->
+                                                entry.indexFile().globalIndexMeta()
+                                                        .getIndexedFieldIds().stream()))
+                .doesNotContain(table.rowType().getField("payload").id());
+        FileStoreTable detail =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "detail"));
+        assertThat(
+                        readRows(
+                                detail,
+                                predicates.equal(
+                                        table.rowType().getFieldIndex("payload"),
+                                        BinaryString.fromString("updated-20"))))
+                .containsExactly("a|20|updated-20|4");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testClusterKeepsIndexPayloadsAfterUncertainPublication(boolean publicationThrows)
+            throws Exception {
+        FileStoreTable original = createTable(false);
+        append(original, "a", 30, 10, 20);
+        commit(original, prepareGlobalIndex(original, original.latestSnapshot().get(), "id"));
+        Snapshot scanSnapshot = original.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMappedCluster(original, scanSnapshot, true);
+        AtomicInteger publications = new AtomicInteger();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotCommit snapshotCommit(
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
+                            @Override
+                            protected boolean commitImpl(
+                                    String baseUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                publications.incrementAndGet();
+                                assertThat(delegate.commit(baseUuid, snapshot, branch, statistics))
+                                        .isTrue();
+                                if (publicationThrows) {
+                                    throw new IOException("Publication response lost");
+                                }
+                                return false;
+                            }
+
+                            @Override
+                            protected void closeImpl() throws Exception {
+                                delegate.close();
+                            }
+                        };
+                    }
+                };
+        FileStoreTable committingTable =
+                FileStoreTableFactory.create(
+                        original.fileIO(), original.location(), original.schema(), environment);
+        commitCluster(committingTable, scanSnapshot, messages);
+
+        assertThat(publications).hasValue(1);
+        assertThat(original.latestSnapshot().get().id()).isEqualTo(scanSnapshot.id() + 1);
+        assertThat(original.latestSnapshot().get().nextRowId()).isEqualTo(6L);
+        List<IndexFileMeta> indexes =
+                original.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> file.globalIndexMeta() != null)
+                        .collect(Collectors.toList());
+        assertThat(indexes).isNotEmpty();
+        for (IndexFileMeta index : indexes) {
+            assertThat(
+                            original.fileIO()
+                                    .exists(
+                                            original.store()
+                                                    .pathFactory()
+                                                    .globalIndexFileFactory()
+                                                    .toPath(index)))
+                    .isTrue();
+        }
+        PredicateBuilder predicates = new PredicateBuilder(original.rowType());
+        int id = original.rowType().getFieldIndex("id");
+        assertIndexRows(original, predicates.equal(id, 10), new Range(3, 3));
+        assertIndexRows(original, predicates.equal(id, 20), new Range(4, 4));
+        assertIndexRows(original, predicates.equal(id, 30), new Range(5, 5));
+        assertThat(readRows(original))
+                .containsExactly("a|10|base-10|3", "a|20|base-20|4", "a|30|base-30|5");
+    }
+
+    @Test
+    void testClusterRemapsCompositeBTreeIndex() throws Exception {
+        FileStoreTable table = createTable(false);
+        appendIndexRows(table, new int[] {30, 10, 20, 40}, new String[] {"x", "x", null, "y"});
+        Snapshot indexed = table.latestSnapshot().get();
+        List<String> fields = Arrays.asList("id", "payload");
+        List<CommitMessage> indexes = new ArrayList<>();
+        for (DataSplit split :
+                GlobalIndexBuilderUtils.splitByContiguousRowRange(
+                        new SortedGlobalIndexScanner(table, "btree")
+                                .withIndexFields(fields)
+                                .withSnapshot(indexed)
+                                .scan()
+                                .get()
+                                .entries())) {
+            indexes.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", fields, split, indexed.id()));
+        }
+        assertThat(indexes).isNotEmpty();
+        commit(table, indexes);
+        table = table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_ROW_NUM.key(), "2"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMappedCluster(table, snapshot, true));
+
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        int payload = table.rowType().getFieldIndex("payload");
+        assertIndexRows(
+                table,
+                PredicateBuilder.and(
+                        predicates.equal(id, 10),
+                        predicates.equal(payload, BinaryString.fromString("x"))),
+                new Range(4, 4));
+        assertIndexRows(
+                table,
+                PredicateBuilder.and(predicates.equal(id, 20), predicates.isNull(payload)),
+                new Range(5, 5));
+        assertIndexRows(
+                table,
+                PredicateBuilder.and(
+                        predicates.equal(id, 30),
+                        predicates.equal(payload, BinaryString.fromString("x"))),
+                new Range(6, 6));
+        assertIndexRows(
+                table,
+                PredicateBuilder.and(
+                        predicates.equal(id, 20),
+                        predicates.equal(payload, BinaryString.fromString("y"))));
+    }
+
+    @Test
+    void testClusterPreservesIndexOnlyDeleteForAnotherPartition() throws Exception {
+        FileStoreTable table = createTable(false);
+        append(table, "a", 30, 10, 20);
+        append(table, "b", 60, 40, 50);
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        List<String> untouchedFiles = fileNames(table, "b");
+        List<IndexFileMeta> deletedIndexes =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(entry -> entry.partition().equals(partition(table, "b")))
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> file.globalIndexMeta() != null)
+                        .collect(Collectors.toList());
+        assertThat(deletedIndexes).hasSize(1);
+        Snapshot snapshot = table.latestSnapshot().get();
+        IncrementalClusterManager manager =
+                new IncrementalClusterManager(table, partitionPredicate(table, "a"), snapshot);
+        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(true);
+        assertThat(units).containsOnlyKeys(partition(table, "a"));
+        List<CommitMessage> messages =
+                manager.prepareCommitMessages(rewriteClusterUnits(table, manager, units, true));
+        messages.add(
+                new CommitMessageImpl(
+                                partition(table, "b"),
+                                UNAWARE_BUCKET,
+                                null,
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        deletedIndexes))
+                        .withCheckFromSnapshot(snapshot.id()));
+        commitChecked(table, messages);
+
+        assertThat(table.store().newIndexFileHandler().scanEntries())
+                .allSatisfy(
+                        entry -> assertThat(entry.partition()).isEqualTo(partition(table, "a")));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        assertIndexRows(table, predicates.equal(id, 10), new Range(6, 6));
+        assertIndexRows(table, predicates.equal(id, 20), new Range(7, 7));
+        assertIndexRows(table, predicates.equal(id, 30), new Range(8, 8));
+        assertIndexRows(table, predicates.equal(id, 40));
+        assertThat(fileNames(table, "b")).isEqualTo(untouchedFiles);
+        assertThat(readRows(table))
+                .containsExactly(
+                        "b|60|base-60|3",
+                        "b|40|base-40|4",
+                        "b|50|base-50|5",
+                        "a|10|base-10|6",
+                        "a|20|base-20|7",
+                        "a|30|base-30|8");
+    }
+
+    @Test
+    void testAdjacentIndexCoverageKeepsSeparateFreshnessBaselines() throws Exception {
+        FileStoreTable table = createTable(false);
+        append(table, "a", 30, 10, 20);
+        append(table, "a", 60, 40, 50);
+        Snapshot indexed = table.latestSnapshot().get();
+        commit(table, prepareGlobalIndex(table, indexed, "id"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<DataFileMeta> selected =
+                table.store().newScan().withSnapshot(snapshot).plan().files().stream()
+                        .map(entry -> entry.file())
+                        .filter(file -> file.nonNullRowIdRange().equals(new Range(0, 2)))
+                        .collect(Collectors.toList());
+        assertThat(selected).hasSize(1);
+        List<String> untouchedFiles = filesInRange(table, new Range(3, 5));
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
+        Map<BinaryRow, CompactUnit> units =
+                Collections.singletonMap(
+                        partition(table, "a"), CompactUnit.fromFiles(1, selected, true));
+        commitCluster(table, snapshot, rewriteClusterUnits(table, manager, units, true));
+
+        Snapshot clustered = table.latestSnapshot().get();
+        Map<Range, Long> baselines =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> file.globalIndexMeta() != null)
+                        .collect(
+                                Collectors.toMap(
+                                        file -> file.globalIndexMeta().rowRange(),
+                                        file ->
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(file)
+                                                        .scanSnapshotId()));
+        assertThat(baselines)
+                .hasSize(2)
+                .containsEntry(new Range(3, 5), indexed.id())
+                .containsEntry(new Range(6, 8), clustered.id());
+        assertThat(filesInRange(table, new Range(3, 5))).isEqualTo(untouchedFiles);
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        assertIndexRows(table, predicates.equal(id, 10), new Range(6, 6));
+        assertIndexRows(table, predicates.equal(id, 60), new Range(3, 3));
+
+        append(table, "a", 90, 70, 80);
+        Snapshot next = table.latestSnapshot().get();
+        commitCluster(table, next, prepareMappedCluster(table, next, true));
+
+        // Neither the retained coverage nor the first rewrite became stale on the second pass.
+        assertIndexRows(table, predicates.equal(id, 10), new Range(12, 12));
+        assertIndexRows(table, predicates.equal(id, 20), new Range(13, 13));
+        assertIndexRows(table, predicates.equal(id, 40), new Range(15, 15));
+        assertIndexRows(table, predicates.equal(id, 60), new Range(17, 17));
+        assertIndexRows(table, predicates.equal(id, 70));
+        assertThat(readRows(table))
+                .containsExactly(
+                        "a|10|base-10|12",
+                        "a|20|base-20|13",
+                        "a|30|base-30|14",
+                        "a|40|base-40|15",
+                        "a|50|base-50|16",
+                        "a|60|base-60|17",
+                        "a|70|base-70|18",
+                        "a|80|base-80|19",
+                        "a|90|base-90|20");
+    }
+
+    @Test
+    void testMetadataOnlyCompactDoesNotReplayOldClusteringMapping() throws Exception {
+        FileStoreTable table = createTable(false);
+        append(table, "a", 30, 10, 20);
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<DataFileMeta> initialFiles =
+                table.store().newScan().withSnapshot(snapshot).plan().files().stream()
+                        .map(entry -> entry.file())
+                        .collect(Collectors.toList());
+        assertThat(initialFiles).hasSize(1);
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
+        Map<BinaryRow, CompactUnit> units =
+                Collections.singletonMap(
+                        partition(table, "a"), CompactUnit.fromFiles(1, initialFiles, true));
+        commitCluster(table, snapshot, rewriteClusterUnits(table, manager, units, true));
+
+        Snapshot clustered = table.latestSnapshot().get();
+        DataFileMeta clusteredFile =
+                table.store().newScan().withSnapshot(clustered).plan().files().get(0).file();
+        assertThat(clusteredFile.nonNullRowIdRange()).isEqualTo(new Range(3, 5));
+        assertThat(clusteredFile.extraFiles()).anyMatch(ClusteringRowIdMapping::isMappingFile);
+        List<IndexFileMeta> deletedIndexes =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> file.globalIndexMeta() != null)
+                        .collect(Collectors.toList());
+        assertThat(deletedIndexes).isNotEmpty();
+        commit(
+                table,
+                new CommitMessageImpl(
+                        partition(table, "a"),
+                        UNAWARE_BUCKET,
+                        null,
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.singletonList(clusteredFile),
+                                Collections.singletonList(clusteredFile.upgrade(2)),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                deletedIndexes)));
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(clustered.id() + 1);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(6L);
+        assertThat(fileNames(table, "a")).containsExactly(clusteredFile.fileName());
+        DataFileMeta upgraded =
+                table.store()
+                        .newScan()
+                        .withSnapshot(table.latestSnapshot().get())
+                        .plan()
+                        .files()
+                        .get(0)
+                        .file();
+        assertThat(upgraded.level()).isEqualTo(2);
+        assertThat(upgraded.nonNullRowIdRange()).isEqualTo(new Range(3, 5));
+        assertThat(upgraded.extraFiles()).isEqualTo(clusteredFile.extraFiles());
+        assertThat(globalIndexNames(table)).isEmpty();
+        assertThat(readRows(table))
+                .containsExactly("a|10|base-10|3", "a|20|base-20|4", "a|30|base-30|5");
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testClusterRetryDropsIndexCommittedBeforeSnapshotPublication(boolean deletionVectors)
             throws Exception {
@@ -589,6 +1282,119 @@ class DataEvolutionClusterTest extends TableTestBase {
         return getTableDefault();
     }
 
+    private FileStoreTable createMinorClusterTable(boolean deletionVectors) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "3");
+        options.put(CoreOptions.FILE_COMPRESSION.key(), "none");
+        options.put(CoreOptions.COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT.key(), "10000");
+        options.put(CoreOptions.COMPACTION_SIZE_RATIO.key(), "0");
+        FileStoreTable table = createTable(deletionVectors).copy(options);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int id : new int[] {90, 10, 60, 30, 80, 40, 20, 70, 50}) {
+                Random random = new Random(id);
+                int length = id >= 40 && id <= 60 ? 262144 : 8192;
+                StringBuilder payload = new StringBuilder(length);
+                for (int i = 0; i < length; i++) {
+                    payload.append((char) ('a' + random.nextInt(26)));
+                }
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("a"),
+                                id,
+                                BinaryString.fromString(payload.toString())));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        Snapshot initial = table.latestSnapshot().get();
+        commitCluster(table, initial, prepareCluster(table, initial, null, true));
+        List<DataFileMeta> clusteredFiles =
+                table.store().newScan().withSnapshot(table.latestSnapshot().get()).plan().files()
+                        .stream()
+                        .map(entry -> entry.file())
+                        .sorted(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId))
+                        .collect(Collectors.toList());
+        assertThat(clusteredFiles)
+                .extracting(DataFileMeta::nonNullRowIdRange)
+                .containsExactly(new Range(9, 11), new Range(12, 14), new Range(15, 17));
+        assertThat(clusteredFiles.get(1).fileSize())
+                .isGreaterThan(
+                        (clusteredFiles.get(0).fileSize() + clusteredFiles.get(2).fileSize()) * 8);
+
+        updatePayload(table, "a", 9L, 10, 20, 30);
+        updatePayload(table, "a", 15L, 70, 80, 90);
+        append(table, "a", 120, 100, 110);
+        if (deletionVectors) {
+            delete(table, "a", new Range(9, 11), 9L);
+        }
+        return table;
+    }
+
+    private List<CommitMessage> prepareMinorCluster(FileStoreTable table, Snapshot snapshot)
+            throws Exception {
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
+        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(false);
+        assertThat(units).hasSize(1);
+        List<DataFileMeta> selected = units.get(partition(table, "a")).files();
+        assertThat(selected)
+                .extracting(DataFileMeta::nonNullRowIdRange)
+                .containsExactlyInAnyOrder(
+                        new Range(9, 11),
+                        new Range(9, 11),
+                        new Range(15, 17),
+                        new Range(15, 17),
+                        new Range(18, 20));
+        assertThat(selected)
+                .extracting(DataFileMeta::fileName)
+                .doesNotContainAnyElementsOf(filesInRange(table, new Range(12, 14)));
+        return rewriteClusterUnits(table, manager, units, true);
+    }
+
+    private void assertMinorClusterResult(
+            FileStoreTable table,
+            boolean deletionVectors,
+            List<String> untouchedRows,
+            List<String> untouchedFiles,
+            long firstAssignedRowId,
+            int expectedFileCount)
+            throws Exception {
+        List<String> expected = new ArrayList<>(untouchedRows);
+        long rowId = firstAssignedRowId;
+        for (int id : new int[] {10, 20, 30, 70, 80, 90, 100, 110, 120}) {
+            if (deletionVectors && id == 10) {
+                continue;
+            }
+            expected.add("a|" + id + "|" + (id < 100 ? "updated-" : "base-") + id + "|" + rowId++);
+        }
+        assertThat(readRows(table)).containsExactlyElementsOf(expected);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(rowId);
+        assertThat(filesInRange(table, new Range(12, 14)))
+                .containsExactlyElementsOf(untouchedFiles);
+        assertThat(fileNames(table, "a")).hasSize(expectedFileCount).containsAll(untouchedFiles);
+    }
+
+    private List<String> rowsInRange(FileStoreTable table, Range range) throws Exception {
+        return readRows(table).stream()
+                .filter(
+                        row -> {
+                            long rowId = Long.parseLong(row.substring(row.lastIndexOf('|') + 1));
+                            return rowId >= range.from && rowId <= range.to;
+                        })
+                .collect(Collectors.toList());
+    }
+
+    private List<String> filesInRange(FileStoreTable table, Range range) {
+        return table.store().newScan().withSnapshot(table.latestSnapshot().get()).plan().files()
+                .stream()
+                .filter(entry -> entry.partition().equals(partition(table, "a")))
+                .map(entry -> entry.file())
+                .filter(file -> file.nonNullRowIdRange().equals(range))
+                .map(DataFileMeta::fileName)
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
     private void append(FileStoreTable table, String partition, int... values) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
@@ -651,12 +1457,28 @@ class DataEvolutionClusterTest extends TableTestBase {
         return rewriteClusterUnits(table, manager, manager.createCompactUnits(fullCompaction));
     }
 
+    private List<CommitMessage> prepareMappedCluster(
+            FileStoreTable table, Snapshot snapshot, boolean fullCompaction) throws Exception {
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
+        return rewriteClusterUnits(
+                table, manager, manager.createCompactUnits(fullCompaction), true);
+    }
+
     // Run the engine-independent read/sort/write stages in-process. The source selection and
     // split planning are the same shared manager used by the distributed engine implementations.
     private List<CommitMessage> rewriteClusterUnits(
             FileStoreTable table,
             IncrementalClusterManager manager,
             Map<BinaryRow, CompactUnit> units)
+            throws Exception {
+        return rewriteClusterUnits(table, manager, units, false);
+    }
+
+    private List<CommitMessage> rewriteClusterUnits(
+            FileStoreTable table,
+            IncrementalClusterManager manager,
+            Map<BinaryRow, CompactUnit> units,
+            boolean preserveIndexes)
             throws Exception {
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> planned =
                 manager.toSplitsAndRewriteDvFiles(units);
@@ -667,10 +1489,17 @@ class DataEvolutionClusterTest extends TableTestBase {
             Pair<List<DataSplit>, CommitMessage> partitionPlan = planned.get(entry.getKey());
             assertThat(partitionPlan.getRight()).isNull();
             List<DataFileMeta> after = new ArrayList<>();
+            List<Long> oldRowIds = new ArrayList<>();
+            RowType readType =
+                    preserveIndexes
+                            ? SpecialFields.rowTypeWithRowId(table.rowType())
+                            : table.rowType();
+            ProjectedRow dataRow = ProjectedRow.from(table.rowType(), readType);
             try (IOManager ioManager = IOManager.create(tempPath.toString());
                     RecordReaderIterator<InternalRow> reader =
                             new RecordReaderIterator<>(
                                     table.newReadBuilder()
+                                            .withReadType(readType)
                                             .newRead()
                                             .createReader(
                                                     new ArrayList<>(partitionPlan.getLeft())));
@@ -681,13 +1510,16 @@ class DataEvolutionClusterTest extends TableTestBase {
                                     .withWriteType(table.rowType())) {
                 if (reader.hasNext()) {
                     Sorter sorter =
-                            Sorter.getSorter(
-                                    reader, ioManager, table.rowType(), table.coreOptions());
+                            Sorter.getSorter(reader, ioManager, readType, table.coreOptions());
                     try {
                         MutableObjectIterator<BinaryRow> sorted = sorter.sort();
                         BinaryRow row = new BinaryRow(sorter.arity());
                         while ((row = sorted.next(row)) != null) {
-                            write.write(sorter.removeSortKey(row));
+                            InternalRow sortedRow = sorter.removeSortKey(row);
+                            if (preserveIndexes) {
+                                oldRowIds.add(sortedRow.getLong(readType.getFieldCount() - 1));
+                            }
+                            write.write(dataRow.replaceRow(sortedRow));
                         }
                     } finally {
                         sorter.close();
@@ -697,6 +1529,24 @@ class DataEvolutionClusterTest extends TableTestBase {
                     after.addAll(((CommitMessageImpl) output).newFilesIncrement().newFiles());
                 }
             }
+            DataFilePathFactory pathFactory =
+                    table.store().pathFactory().createDataFilePathFactory(entry.getKey(), 0);
+            int rowOffset = 0;
+            for (int i = 0; preserveIndexes && i < after.size(); i++) {
+                DataFileMeta file = after.get(i);
+                String mappingName = ClusteringRowIdMapping.fileName(file.fileName());
+                try (ClusteringRowIdMapping.Writer mapping =
+                        ClusteringRowIdMapping.createWriter(
+                                table.fileIO(), pathFactory.toAlignedPath(mappingName, file))) {
+                    for (long row = 0; row < file.rowCount(); row++) {
+                        mapping.write(oldRowIds.get(rowOffset++));
+                    }
+                }
+                List<String> extraFiles = new ArrayList<>(file.extraFiles());
+                extraFiles.add(mappingName);
+                after.set(i, file.copy(extraFiles));
+            }
+            assertThat(rowOffset).isEqualTo(oldRowIds.size());
             messages.add(
                     new CommitMessageImpl(
                             entry.getKey(),
@@ -774,6 +1624,11 @@ class DataEvolutionClusterTest extends TableTestBase {
     private void addGlobalIndex(
             FileStoreTable table, String value, String fileName, Range range, String column)
             throws Exception {
+        commit(table, globalIndexMessage(table, value, fileName, range, column));
+    }
+
+    private CommitMessage globalIndexMessage(
+            FileStoreTable table, String value, String fileName, Range range, String column) {
         IndexFileMeta index =
                 new IndexFileMeta(
                         "test-global-index",
@@ -787,14 +1642,12 @@ class DataEvolutionClusterTest extends TableTestBase {
                                 null,
                                 null),
                         null);
-        commit(
-                table,
-                new CommitMessageImpl(
-                        partition(table, value),
-                        UNAWARE_BUCKET,
-                        null,
-                        DataIncrement.indexIncrement(Collections.singletonList(index)),
-                        CompactIncrement.emptyIncrement()));
+        return new CommitMessageImpl(
+                partition(table, value),
+                UNAWARE_BUCKET,
+                null,
+                DataIncrement.indexIncrement(Collections.singletonList(index)),
+                CompactIncrement.emptyIncrement());
     }
 
     private void commit(FileStoreTable table, CommitMessage message) throws Exception {
@@ -809,45 +1662,105 @@ class DataEvolutionClusterTest extends TableTestBase {
 
     private List<CommitMessage> prepareGlobalIndex(
             FileStoreTable table, Snapshot snapshot, String column) throws Exception {
+        return prepareGlobalIndex(table, snapshot, column, "btree", null);
+    }
+
+    private List<CommitMessage> prepareGlobalIndex(
+            FileStoreTable table,
+            Snapshot snapshot,
+            String column,
+            String indexType,
+            Range fileRange)
+            throws Exception {
         List<CommitMessage> messages = new ArrayList<>();
         for (DataSplit split :
                 GlobalIndexBuilderUtils.splitByContiguousRowRange(
-                        new SortedGlobalIndexScanner(table, "btree")
+                        new SortedGlobalIndexScanner(table, indexType)
                                 .withIndexFields(Collections.singletonList(column))
                                 .withSnapshot(snapshot)
                                 .scan()
                                 .get()
                                 .entries())) {
+            if (fileRange != null) {
+                Optional<DataSplit> filtered =
+                        split.filterDataFile(file -> file.nonNullRowIdRange().equals(fileRange));
+                if (!filtered.isPresent()) {
+                    continue;
+                }
+                split = filtered.get();
+            }
             messages.addAll(
                     SortedGlobalIndexTestUtils.buildIndex(
-                            table, "btree", column, split, snapshot.id()));
+                            table, indexType, column, split, snapshot.id()));
         }
         assertThat(messages).isNotEmpty();
         return messages;
     }
 
     private List<String> readRows(FileStoreTable table) throws Exception {
+        return readRows(table, null);
+    }
+
+    private List<String> readRows(FileStoreTable table, Predicate predicate) throws Exception {
         ReadBuilder builder =
                 table.newReadBuilder()
                         .withReadType(SpecialFields.rowTypeWithRowId(table.rowType()));
+        if (predicate != null) {
+            builder.withFilter(predicate);
+        }
         List<String> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 builder.newRead().createReader(builder.newScan().plan())) {
             reader.forEachRemaining(
-                    row ->
+                    row -> {
+                        if (predicate == null || predicate.test(row)) {
                             rows.add(
                                     row.getString(0)
                                             + "|"
                                             + row.getInt(1)
                                             + "|"
-                                            + row.getString(2)
+                                            + (row.isNullAt(2) ? "null" : row.getString(2))
                                             + "|"
-                                            + row.getLong(3)));
+                                            + row.getLong(3));
+                        }
+                    });
         }
         rows.sort(
                 Comparator.comparingLong(
                         row -> Long.parseLong(row.substring(row.lastIndexOf('|') + 1))));
         return rows;
+    }
+
+    private void appendIndexRows(FileStoreTable table, int[] ids, String[] payloads)
+            throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < ids.length; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("a"),
+                                ids[i],
+                                payloads[i] == null ? null : BinaryString.fromString(payloads[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private void assertIndexRows(FileStoreTable table, Predicate predicate, Range... expected)
+            throws Exception {
+        Optional<DataEvolutionGlobalIndexScanner> scanner =
+                DataEvolutionGlobalIndexScanner.create(
+                        table, PartitionPredicate.ALWAYS_TRUE, predicate);
+        if (!scanner.isPresent() && expected.length == 0) {
+            return;
+        }
+        assertThat(scanner).isPresent();
+        try (DataEvolutionGlobalIndexScanner index = scanner.get()) {
+            Optional<GlobalIndexResult> result = index.scan(predicate);
+            assertThat(result).isPresent();
+            assertThat(result.get().results().toRangeList()).containsExactly(expected);
+        }
     }
 
     private List<String> fileNames(FileStoreTable table, String value) {
