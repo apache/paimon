@@ -88,7 +88,9 @@ public class IncrementalClusterCompact {
             @Nullable Boolean fullCompaction) {
         this.env = env;
         this.table = table;
-        this.clusterManager = new IncrementalClusterManager(table, partitionPredicate);
+        this.clusterManager =
+                new IncrementalClusterManager(
+                        table, partitionPredicate, table.snapshotManager().latestSnapshot());
         Options options = new Options(table.options());
         this.partitionComputer = table.store().partitionComputer();
         this.commitUser = CoreOptions.createCommitUser(options);
