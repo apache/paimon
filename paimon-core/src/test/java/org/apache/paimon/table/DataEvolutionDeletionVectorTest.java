@@ -26,6 +26,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
+import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
@@ -1492,7 +1493,10 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                             ((CommitMessageImpl) message)
                                                     .withCheckFromSnapshot(snapshot.id()))
                             .collect(Collectors.toList());
-            commit.materializeDvRowIdCheck().commit(checkedMessages);
+            commit.materializeDvRowIdCheck()
+                    .withCommitChangesRewriter(
+                            new MaterializeDeletionVectorsCommitChangesRewriter(table))
+                    .commit(checkedMessages);
         }
     }
 

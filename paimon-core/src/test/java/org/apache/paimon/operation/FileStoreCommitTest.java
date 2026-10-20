@@ -24,7 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
-import org.apache.paimon.append.dataevolution.DataEvolutionCommitChangesRewriter;
+import org.apache.paimon.append.dataevolution.MaterializeDeletionVectorsCommitChangesRewriter;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
@@ -51,6 +51,7 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.ReassignCompactChangesRewriter;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -1033,14 +1034,9 @@ public class FileStoreCommitTest {
                                         addFile(partition, 0, 2, 0).file().assignFirstRowId(0)),
                                 Collections.emptyList(),
                                 Collections.emptyList()));
-        DataEvolutionCommitChangesRewriter rewriter =
-                new DataEvolutionCommitChangesRewriter(
-                        store.fileIO(),
-                        store.pathFactory(),
-                        new FileSystemSchemaManager(store.fileIO(), store.options().path()),
-                        store.options(),
-                        store.snapshotManager(),
-                        store.indexManifestFileFactory().create());
+        MaterializeDeletionVectorsCommitChangesRewriter rewriter =
+                new MaterializeDeletionVectorsCommitChangesRewriter(
+                        FileStoreTableFactory.create(store.fileIO(), store.options().path()));
         CommitChanges refreshed =
                 rewriter.compactChangesProvider(changes, Collections.singletonList(message), false)
                         .provide(null);
@@ -3109,15 +3105,14 @@ public class FileStoreCommitTest {
                                         store.snapshotManager(),
                                         scanner),
                         null);
-        if (dataEvolutionEnabled) {
+        Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
+        if (dataEvolutionEnabled && lastSafeSnapshot != null && lastSafeSnapshot >= 0) {
             commit.withCommitChangesRewriter(
-                    new DataEvolutionCommitChangesRewriter(
+                    new ReassignCompactChangesRewriter(
                             store.fileIO(),
                             store.pathFactory(),
-                            new FileSystemSchemaManager(store.fileIO(), store.options().path()),
-                            options,
                             store.snapshotManager(),
-                            store.indexManifestFileFactory().create()));
+                            lastSafeSnapshot));
         }
         return commit;
     }

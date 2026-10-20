@@ -35,10 +35,10 @@ import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.DataEvolutionClusterSink;
 import org.apache.paimon.flink.sink.DataEvolutionCommitPreparationOperator;
 import org.apache.paimon.flink.sink.DataEvolutionCompactionTaskTypeInfo;
 import org.apache.paimon.flink.sink.DataEvolutionCompactionWorkerOperator;
-import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.RowAppendTableSink;
 import org.apache.paimon.flink.sorter.SortOperator;
@@ -407,8 +407,7 @@ public class IncrementalClusterCompact {
                                     DataEvolutionCommitPreparationOperator.Factory.forClustering(
                                             table, snapshot))
                             .forceNonParallel();
-            new DataEvolutionDeletionVectorMaterializeSink(table, snapshot)
-                    .doCommit(dataStream, commitUser);
+            new DataEvolutionClusterSink(table).doCommit(dataStream, commitUser);
         } else {
             sink.doCommit(dataStream, commitUser);
         }

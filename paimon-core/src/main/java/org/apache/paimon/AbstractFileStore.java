@@ -19,7 +19,6 @@
 package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
-import org.apache.paimon.append.dataevolution.DataEvolutionCommitChangesRewriter;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
@@ -50,6 +49,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.ReassignCompactChangesRewriter;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
@@ -334,14 +334,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         conflictDetectFactory,
                         rollback);
         if (options.dataEvolutionEnabled()) {
-            commit.withCommitChangesRewriter(
-                    new DataEvolutionCommitChangesRewriter(
-                            fileIO,
-                            pathFactory(),
-                            schemaManager,
-                            options,
-                            snapshotManager,
-                            indexManifestFileFactory().create()));
+            options.commitLastSafeSnapshot()
+                    .filter(id -> id >= 0)
+                    .ifPresent(
+                            id ->
+                                    commit.withCommitChangesRewriter(
+                                            new ReassignCompactChangesRewriter(
+                                                    fileIO, pathFactory(), snapshotManager, id)));
         }
         return commit;
     }
