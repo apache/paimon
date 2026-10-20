@@ -109,9 +109,13 @@ def merge_into(
     # unrestricted whole-table grant before any user callback or staging.
     from pypaimon.write.table_update import _authorize_update
     _authorize_update(target_table)
+    target_on, source_on = _normalize_on(on)
+    self_merge = _is_self_merge(target_table, source, target_on, source_on)
     from pypaimon.snapshot.time_travel_util import TimeTravelUtil
     base_snapshot = TimeTravelUtil.resolve_snapshot(target_table)
     target_table = target_table._copy_with_snapshot(base_snapshot)
+    if self_merge:
+        source = target_table
     source_table, matched_specs, not_matched_specs, ctx = _prepare(
         target_table,
         source,
@@ -265,7 +269,8 @@ def _prepare(
         source_col_names = set(full_target_field_names) | set(source_on_cols)
     else:
         # Native table input needs schema validation without Python I/O.
-        source_table = source_schema.empty_table() if source_schema is not None else _normalize_source(source)
+        source_table = (source_schema.empty_table() if source_schema is not None
+                        else _normalize_source(source, source_on_cols))
         _validate_source_on_cols(source_table, source_on_cols)
         source_col_names = set(source_table.schema.names)
 
@@ -763,13 +768,14 @@ def _build_insert_transform(
     return _transform
 
 
-def _normalize_source(source: Any) -> pa.Table:
+def _normalize_source(source: Any, on_columns=()) -> pa.Table:
     if isinstance(source, pa.Table):
         return source
     if _is_table_like(source):
         # Let the read resolve its branch and point-in-time selectors once.
         # Pinning the latest snapshot here would override the source's options.
-        return _read_table(source)
+        projection = list(dict.fromkeys(list(source.field_names) + list(on_columns)))
+        return _read_table(source, projection=projection)
     try:
         import pandas as pd
     except ImportError:
@@ -840,9 +846,17 @@ def _is_self_merge(target_table, source, target_on, source_on) -> bool:
     return (
         _is_table_like(source)
         and _same_table(target_table, source)
+        and (source is target_table or not (
+            _has_selected_read_view(target_table) or _has_selected_read_view(source)))
         and target_on == [row_id_name]
         and source_on == [row_id_name]
     )
+
+
+def _has_selected_read_view(table):
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+    return ('_read_snapshot' in vars(table)
+            or any(key in table.table_schema.options for key in SCAN_KEYS))
 
 
 def _is_table_like(obj) -> bool:

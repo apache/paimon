@@ -253,3 +253,50 @@ def test_captured_empty_update_view_stays_empty(native_rest_catalog, native, ope
     assignment.assert_not_called()
     assert _rows(latest) == {
         'id': [1, 2, 3], 'value': [10, 20, 30], 'keep': [100, 200, 300], 'extra': [None, None, 999]}
+
+
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+@pytest.mark.parametrize('source_view', [
+    'latest', 'snapshot', 'captured', 'empty', 'same-current', 'same-captured'])
+def test_row_id_merge_respects_independent_source_read_view(native_rest_catalog, native, source_view):
+    latest, historical, snapshot_id = _tables(native_rest_catalog, native, 'scan.snapshot-id')
+    builder = latest.new_batch_write_builder()
+    _commit(latest, builder.new_update().update_by_arrow_with_row_id(
+        pa.table({'_ROW_ID': [0], 'value': [99]})))
+    current_snapshot = latest.snapshot_manager().get_latest_snapshot()
+    target = historical
+    if source_view == 'snapshot':
+        source = latest.copy({'scan.snapshot-id': str(current_snapshot.id)})
+    elif source_view == 'captured':
+        source = latest._copy_with_snapshot(current_snapshot)
+    elif source_view == 'empty':
+        source = latest._copy_with_snapshot(None)
+    elif source_view == 'same-current':
+        target = source = latest
+    elif source_view == 'same-captured':
+        target = source = historical._copy_with_snapshot(
+            historical.snapshot_manager().get_snapshot_by_id(snapshot_id))
+    else:
+        source = latest
+    assignment = Mock(side_effect=lambda batch: batch['s.value'])
+    guard = patch('pypaimon.table.data_evolution_merge_into._build_tables',
+                  side_effect=AssertionError('Python MERGE fallback')) if native else ExitStack()
+    with guard:
+        messages = target.new_batch_write_builder().new_update().merge_into(
+            source, on=['_ROW_ID'], when_matched=[WhenMatched.update({'keep': assignment})])
+    expected = {'id': [1, 2, 3], 'value': [99, 20, 30], 'keep': [100, 200, 300],
+                'extra': [None, None, 999]}
+    if source_view == 'empty':
+        assert messages == []
+        assignment.assert_not_called()
+    else:
+        expected_values = ([99, 20, 30] if source_view == 'same-current' else
+                           [10, 20] if source_view == 'same-captured' else [99, 20])
+        assignment.assert_called_once()
+        assert assignment.call_args[0][0]['s.value'].to_pylist() == expected_values
+        assert messages
+        baseline = current_snapshot.id if source_view == 'same-current' else snapshot_id
+        assert all(message.check_from_snapshot == baseline for message in messages)
+        _commit(latest, messages)
+        expected['keep'] = expected_values + ([300] if len(expected_values) == 2 else [])
+    assert _rows(latest) == expected

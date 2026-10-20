@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability, project_arrow_batch)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
@@ -54,6 +54,10 @@ def _pandas_write_schema(table, schema):
 
 def _pandas_write_batch(table, dataframe, schema, table_schema):
     """Retain event/routing inputs omitted from the physical write type."""
+    # Convert the selected fields before building a wider transport. PyArrow
+    # validates missing columns and can resolve selected values from a named
+    # DataFrame index; filling a full DataFrame layout first would erase both.
+    batch = pa.RecordBatch.from_pandas(dataframe, schema=_pandas_write_schema(table, schema))
     if table is not None and schema.names != table_schema.names:
         from pypaimon.table.bucket_mode import BucketMode
         required = list(table.partition_keys)
@@ -63,17 +67,18 @@ def _pandas_write_batch(table, dataframe, schema, table_schema):
         if row_kind_field is not None:
             required.append(row_kind_field)
         if not set(required).issubset(schema.names):
-            require_columns(dataframe, required, 'write_pandas')
-            retained = set(schema.names) | set(required)
-            # Full transport preserves the declared field order. Unwritten
-            # payloads must not be converted, including live BLOB objects.
-            dataframe = dataframe.reindex(columns=table_schema.names).copy()
-            for name in table_schema.names:
-                if name not in retained:
-                    dataframe[name] = None
-            schema = pa.schema([field if field.name in schema.names else field.with_nullable(True)
-                                for field in table_schema], metadata=table_schema.metadata)
-    return pa.RecordBatch.from_pandas(dataframe, schema=_pandas_write_schema(table, schema))
+            extra_schema = pa.schema([field.with_nullable(True) for field in table_schema
+                                      if field.name in required and field.name not in schema.names])
+            extra = pa.RecordBatch.from_pandas(dataframe, schema=extra_schema)
+            columns = dict(zip(batch.schema.names, batch.columns))
+            columns.update(zip(extra.schema.names, extra.columns))
+            # Only written/event/routing fields were converted. Do not touch
+            # unwritten payloads, including live BLOB objects.
+            fields = [field if field.name in schema.names else field.with_nullable(True) for field in table_schema]
+            arrays = [columns[field.name] if field.name in columns else pa.nulls(batch.num_rows, field.type)
+                      for field in fields]
+            batch = pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields, metadata=table_schema.metadata))
+    return batch
 
 
 def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
@@ -175,11 +180,7 @@ class TableWrite:
         if write_cols is not None:
             # Keep routing columns available for full-schema inputs, then
             # write only the columns and order recorded in the file metadata.
-            # RecordBatch.select is unavailable in Arrow 6 (Python 3.6).
-            data = pa.RecordBatch.from_arrays(
-                [data.column(name) for name in write_cols],
-                schema=pa.schema([data.schema.field(name) for name in write_cols],
-                                 metadata=data.schema.metadata))
+            data = project_arrow_batch(data, write_cols)
         self.file_store_write.write(partition, bucket, data)
 
     def _write_precomputed_bucket(self, data, bucket):

@@ -297,3 +297,75 @@ def test_pandas_partial_event_transport_does_not_convert_unwritten_blob(tmp_path
         commit.close()
     assert source['payload'].iloc[0] is blob
     assert _read(table) == [dict(id=2, op=None, payload=None)]
+
+
+def _pandas_subset_table(tmp_path, native):
+    schema = pa.schema([('id', pa.int32()), ('payload', pa.int32()), ('op', pa.string()), ('pt', pa.string())])
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, partition_keys=['pt'], options={
+        'write.native.enabled': str(native).lower(), 'commit.native.enabled': 'false',
+        'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false', 'rowkind.field': 'op',
+    }), False)
+    return catalog.get_table('default.t')
+
+
+@pytest.mark.parametrize('native', _NATIVE)
+def test_pandas_partial_write_requires_every_selected_input(tmp_path, native):
+    import pandas as pd
+    table = _pandas_subset_table(tmp_path, native)
+    writer = table.new_batch_write_builder().new_write()
+    writer.with_write_type(['payload'])
+    try:
+        with pytest.raises(KeyError, match='payload'):
+            writer.write_pandas(pd.DataFrame({'id': [1], 'op': ['+I'], 'pt': ['p']}))
+        assert writer.prepare_commit() == []
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('native', _NATIVE)
+def test_pandas_partial_write_keeps_selected_named_index(tmp_path, native):
+    import pandas as pd
+    table = _pandas_subset_table(tmp_path, native)
+    builder = table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    writer.with_write_type(['payload'])
+    source = pd.DataFrame({'id': [1], 'payload': [42], 'op': ['+I'], 'pt': ['p']}).set_index('payload')
+    try:
+        writer.write_pandas(source)
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    assert _read(table) == [dict(id=None, payload=42, op=None, pt='p')]
+    assert source.index.tolist() == [42]
+
+
+@pytest.mark.parametrize('columns', [['payload', 'id'], []])
+def test_partial_batch_projection_uses_columns_and_preserves_schema_metadata(columns):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from pypaimon.write.table_write import TableWrite
+    schema = pa.schema([pa.field('id', pa.int32()),
+                        pa.field('payload', pa.string(), metadata={'role': 'value'})],
+                       metadata={'source': 'batch'})
+    batch = pa.RecordBatch.from_pylist([dict(id=1, payload='kept')], schema=schema)
+
+    class ColumnBatch:
+        # Arrow 6 exposes column access, but has no RecordBatch.select API.
+        schema = batch.schema
+        num_rows = batch.num_rows
+
+        def column(self, index):
+            return batch.column(index)
+
+    writer = object.__new__(TableWrite)
+    writer.file_store_write = SimpleNamespace(write_cols=columns, write=Mock())
+    writer._write_partition_bucket_batch((), 0, ColumnBatch())
+    actual = writer.file_store_write.write.call_args[0][2]
+    assert actual.num_rows == batch.num_rows
+    assert actual.to_pydict() == {name: batch.column(name).to_pylist() for name in columns}
+    assert actual.schema.metadata == schema.metadata
+    if 'payload' in columns:
+        assert actual.schema.field('payload').metadata == schema.field('payload').metadata

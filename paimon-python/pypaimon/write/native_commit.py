@@ -109,6 +109,7 @@ def _rest_source_uuid(table):
 def _native_rest_table(table, schema_json):
     from pypaimon_rust.datafusion import PaimonCatalog as NativeCatalog
     from pypaimon.read.native_plan import _validate_native_fuse_binding, _with_native_resolved_schema
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 
     identifier = _validate_native_fuse_binding(table) or table.identifier
     catalog_options = _catalog_context_options(table)
@@ -122,7 +123,8 @@ def _native_rest_table(table, schema_json):
         native_table = native_table.copy({'branch': table.current_branch()})
     if native_table.location() != table.table_path or native_table.branch() != table.current_branch():
         return None
-    if table.options.query_auth_enabled:
+    if (table.options.query_auth_enabled
+            and any(key in table.table_schema.options for key in SCAN_KEYS)):
         # Resolve a legitimate historical read schema through core before
         # replacing its options, preserving the catalog's read authorization.
         native_table = _with_native_resolved_schema(table, native_table)
