@@ -1109,18 +1109,12 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                        |tblproperties('partition.legacy-name'='$legacyPartName');
                        |""".stripMargin)
 
-          if (legacyPartName) {
-            spark.sql("insert into table p_t values(1, 'a', cast('2021' as binary))")
-            intercept[Exception] {
-              spark.sql("SELECT * FROM p_t").collect()
-            }
-          } else {
-            spark.sql("insert into table p_t values(1, 'a', cast('2021' as binary))")
-            checkAnswer(spark.sql("SELECT * FROM p_t"), Row(1, "a", "2021".getBytes))
-            val path = spark.sql("SELECT __paimon_file_path FROM p_t").collect()
-            assert(path.length == 1)
-            assert(path.head.getString(0).contains("/day=2021/"))
-          }
+          // binary partition names are UTF-8 strings with the legacy name as well
+          spark.sql("insert into table p_t values(1, 'a', cast('2021' as binary))")
+          checkAnswer(spark.sql("SELECT * FROM p_t"), Row(1, "a", "2021".getBytes))
+          val path = spark.sql("SELECT __paimon_file_path FROM p_t").collect()
+          assert(path.length == 1)
+          assert(path.head.getString(0).contains("/day=2021/"))
         }
 
         withTable("p_t") {
