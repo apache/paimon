@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.append.cluster.IncrementalClusterRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -80,7 +80,8 @@ public class DataEvolutionCommitPreparationOperator
         if (clustering) {
             List<Committable> prepared = new ArrayList<>();
             for (CommitMessage message :
-                    IncrementalClusterManager.prepareCommitMessages(table, snapshot, messages)) {
+                    IncrementalClusterRewriter.create(table, snapshot)
+                            .prepareCommitMessages(messages)) {
                 prepared.add(new Committable(checkpointId, message));
             }
             return prepared;

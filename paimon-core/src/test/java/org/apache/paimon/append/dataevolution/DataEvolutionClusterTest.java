@@ -21,6 +21,7 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.append.cluster.IncrementalClusterRewriter;
 import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
@@ -401,7 +402,8 @@ class DataEvolutionClusterTest extends TableTestBase {
         addGlobalIndex(table, "a", "index-before-plan", new Range(0, 2), "id");
         Snapshot snapshot = table.latestSnapshot().get();
         List<CommitMessage> messages = prepareCluster(table, snapshot, null, true);
-        messages = IncrementalClusterManager.prepareCommitMessages(table, snapshot, messages);
+        messages =
+                IncrementalClusterRewriter.create(table, snapshot).prepareCommitMessages(messages);
 
         addGlobalIndex(table, "a", "index-after-preparation", new Range(0, 2), "payload");
         assertThat(globalIndexNames(table))
@@ -714,7 +716,8 @@ class DataEvolutionClusterTest extends TableTestBase {
             FileStoreTable table, Snapshot snapshot, List<CommitMessage> messages)
             throws Exception {
         commitChecked(
-                table, IncrementalClusterManager.prepareCommitMessages(table, snapshot, messages));
+                table,
+                IncrementalClusterRewriter.create(table, snapshot).prepareCommitMessages(messages));
     }
 
     private void commitChecked(FileStoreTable table, List<CommitMessage> messages)

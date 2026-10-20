@@ -96,7 +96,7 @@ public class IncrementalClusterManagerTest {
 
         // Call the method under test
         List<LevelSortedRun> result =
-                IncrementalClusterManager.constructPartitionLevels(partitionFiles, false);
+                new IncrementalClusterRewriter().constructPartitionLevels(partitionFiles);
 
         // Verify the results
         assertThat(result).hasSize(4); // 2 level-0 runs + 1 level-1 run + 1 level-2 run

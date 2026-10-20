@@ -44,9 +44,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.append.cluster.IncrementalClusterManager.constructPartitionLevels;
 import static org.apache.paimon.append.cluster.IncrementalClusterManager.logForPartitionLevel;
 
 /** Handle historical partition for full clustering. */
@@ -62,6 +62,7 @@ public class HistoryPartitionCluster {
     private final Duration historyPartitionIdleTime;
     private final int historyPartitionLimit;
     private final int maxLevel;
+    private final Function<List<DataFileMeta>, List<LevelSortedRun>> levelConstructor;
 
     public HistoryPartitionCluster(
             FileStoreTable table,
@@ -70,7 +71,8 @@ public class HistoryPartitionCluster {
             InternalRowPartitionComputer partitionComputer,
             PartitionPredicate specifiedPartitions,
             Duration historyPartitionIdleTime,
-            int historyPartitionLimit) {
+            int historyPartitionLimit,
+            Function<List<DataFileMeta>, List<LevelSortedRun>> levelConstructor) {
         this.table = table;
         this.snapshot = snapshot;
         this.incrementalClusterStrategy = incrementalClusterStrategy;
@@ -79,6 +81,7 @@ public class HistoryPartitionCluster {
         this.historyPartitionIdleTime = historyPartitionIdleTime;
         this.historyPartitionLimit = historyPartitionLimit;
         this.maxLevel = table.coreOptions().numLevels() - 1;
+        this.levelConstructor = levelConstructor;
     }
 
     @Nullable
@@ -87,7 +90,8 @@ public class HistoryPartitionCluster {
             Snapshot snapshot,
             IncrementalClusterStrategy incrementalClusterStrategy,
             InternalRowPartitionComputer partitionComputer,
-            @Nullable PartitionPredicate specifiedPartitions) {
+            @Nullable PartitionPredicate specifiedPartitions,
+            Function<List<DataFileMeta>, List<LevelSortedRun>> levelConstructor) {
         if (table.schema().partitionKeys().isEmpty()) {
             return null;
         }
@@ -108,7 +112,8 @@ public class HistoryPartitionCluster {
                 partitionComputer,
                 specifiedPartitions,
                 idleTime,
-                limit);
+                limit,
+                levelConstructor);
     }
 
     public Map<BinaryRow, CompactUnit> pickForHistoryPartitions() {
@@ -163,10 +168,7 @@ public class HistoryPartitionCluster {
                 .collect(
                         Collectors.toMap(
                                 Map.Entry::getKey,
-                                entry ->
-                                        constructPartitionLevels(
-                                                entry.getValue(),
-                                                table.coreOptions().dataEvolutionEnabled())));
+                                entry -> levelConstructor.apply(entry.getValue())));
     }
 
     private Map<BinaryRow, List<DataFileMeta>> filterPartitions(
