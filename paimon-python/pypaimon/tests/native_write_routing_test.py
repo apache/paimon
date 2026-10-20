@@ -175,22 +175,47 @@ def test_append_write_type_preserves_input_routing_columns_for_core(tmp_path, fu
 
 
 @pytest.mark.parametrize('query_auth', ['true', 'on'])
-def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog, query_auth):
+@pytest.mark.parametrize('invalid', [None, 'fresh-uuid', 'captured-uuid', 'captured-path', 'captured-branch'])
+def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog, query_auth, invalid):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import SchemaChange
+
     catalog, _ = rest_catalog
     table = _table(None, catalog=catalog, guarded=True).copy({'query-auth.enabled': query_auth})
+    catalog.alter_table('default.t', [SchemaChange.add_column('extra', AtomicType('INT'))])
+    assert table.table_schema.id != catalog.get_table('default.t').table_schema.id
     module = ModuleType('pypaimon_rust.datafusion')
     module.Table = Mock()
     module.PaimonCatalog = Mock()
     resolved = Mock(spec=['location', 'rest_table_uuid', 'branch', 'copy_with_resolved_schema'])
     module.PaimonCatalog.return_value.get_table.return_value = resolved
     resolved.location.return_value = table.table_path
-    resolved.rest_table_uuid.return_value = table.catalog_environment.uuid
+    resolved.rest_table_uuid.return_value = (
+        'replacement-uuid' if invalid == 'fresh-uuid' else table.catalog_environment.uuid)
     resolved.branch.return_value = 'main'
     resolved.copy_with_resolved_schema.return_value = resolved
-    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}):
-        assert create_native_write_table(table) is resolved
-    resolved.copy_with_resolved_schema.assert_called_once()
-    schema = json.loads(resolved.copy_with_resolved_schema.call_args[0][0])
+    captured = Mock(spec=['location', 'rest_table_uuid', 'branch', 'copy_with_resolved_schema'])
+    captured.location.return_value = '/different' if invalid == 'captured-path' else table.table_path
+    captured.rest_table_uuid.return_value = (
+        'replacement-uuid' if invalid == 'captured-uuid' else table.catalog_environment.uuid)
+    captured.branch.return_value = 'dev' if invalid == 'captured-branch' else 'main'
+    captured.copy_with_resolved_schema.return_value = captured
+    with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
+            patch('pypaimon.read.native_plan._native_table', return_value=captured) as restore:
+        result = create_native_write_table(table)
+    resolved.copy_with_resolved_schema.assert_not_called()
+    if invalid is not None:
+        assert result is None
+        captured.copy_with_resolved_schema.assert_not_called()
+        if invalid == 'fresh-uuid':
+            restore.assert_not_called()
+        else:
+            restore.assert_called_once_with(table)
+        return
+    assert result is captured
+    restore.assert_called_once_with(table)
+    captured.copy_with_resolved_schema.assert_called_once()
+    schema = json.loads(captured.copy_with_resolved_schema.call_args[0][0])
     assert schema['options']['query-auth.enabled'] == 'true'
 
 
