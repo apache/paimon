@@ -87,7 +87,7 @@ def _render_value(value, data_type=None) -> str:
             year, month, day = _epoch_day_to_date(day)
             hour, second_of_day = divmod(second_of_day, 3600)
             minute, second = divmod(second_of_day, 60)
-            nanos += millis % 1000 * 1000000 + getattr(value, 'nanosecond', 0)
+            nanos += millis % 1000 * 1000000
             precision, _ = _parse_type_precision_scale(data_type)
             return format_timestamp_parts(year, month, day, hour, minute, second, nanos, precision)
         return cast_value_to_string(value, data_type)

@@ -252,7 +252,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         res = table_read.to_pandas(table_scan.plan().splits())
-        print(res)
+        self.assertEqual(['id', 'name', 'category', 'value'], list(res.columns))
+        self.assertEqual(
+            {
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+            },
+            res.sort_values('id').to_dict(orient='list'),
+        )
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_pk_table(self, file_format):

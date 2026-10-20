@@ -98,8 +98,11 @@ run_batched_java_write_tests() {
     local result=0
 
     local core_tests="org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable"
+    core_tests="${core_tests}+testJavaWriteReadAppendTable"
     core_tests="${core_tests}+testJavaWriteDynamicBucketHashIndex"
     core_tests="${core_tests}+testPKDeletionVectorWrite"
+    core_tests="${core_tests}+testPKDeletionVectorWriteMultiBatch"
+    core_tests="${core_tests}+testPKDeletionVectorWriteMultiBatchRawConvertable"
     core_tests="${core_tests}+testBtreeIndexWrite"
     core_tests="${core_tests}+testBtreeRawFallbackWrite"
     core_tests="${core_tests}+testBitmapIndexWrite"
@@ -124,6 +127,7 @@ run_batched_java_write_tests() {
     # lance has no Python wheel on <3.8; its readers are all skipped there.
     if [[ "$PYTHON_MINOR" -ge 8 ]]; then
         local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
+        lance_tests="${lance_tests}+testJavaWriteReadAppendTableLance"
         lance_tests="${lance_tests}+testDataEvolutionWriteLance"
         if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
             result=1
@@ -187,7 +191,7 @@ run_java_write_test() {
     echo "Running Maven test for JavaPyE2ETest.testJavaWriteReadPkTable (Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable+testJavaWriteDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable+testJavaWriteReadAppendTable+testJavaWriteDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java write Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java write Parquet/Orc/Avro test failed${NC}"
@@ -201,7 +205,7 @@ run_java_write_test() {
     if [[ "$PYTHON_MINOR" -ge 8 ]]; then
         echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
         echo "Note: Maven may download dependencies on first run, this may take a while..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance+testJavaWriteReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true; then
             echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
         else
             echo -e "${RED}✗ Java write lance test failed${NC}"
@@ -225,7 +229,7 @@ run_python_read_test() {
 
     # Run the parameterized Python test method (runs for both Parquet/Orc/Avro and Lance)
     echo "Running Python test for JavaPyReadWriteTest.test_read_pk_table..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table or test_read_java_dynamic_bucket_hash_index" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table or test_read_append_table or test_read_java_dynamic_bucket_hash_index" -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
 #        source deactivate
         return 0
@@ -244,7 +248,7 @@ run_python_write_test() {
 
     # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
     echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_dynamic_bucket_hash_index or test_py_write_floating_sequence" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_read_append_table or test_py_write_dynamic_bucket_hash_index or test_py_write_floating_sequence" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
     else
@@ -263,7 +267,7 @@ run_java_read_test() {
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadPythonDynamicBucketHashIndex+testReadPythonFloatingSequence -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadAppendTable+testReadPythonDynamicBucketHashIndex+testReadPythonFloatingSequence -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read Parquet/Orc/Avro test failed${NC}"
@@ -277,7 +281,7 @@ run_java_read_test() {
     if [[ "$PYTHON_MINOR" -ge 8 ]]; then
         echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
         echo "Note: Maven may download dependencies on first run, this may take a while..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance+testReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
             echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
         else
             echo -e "${RED}✗ Java read lance test failed${NC}"
@@ -302,7 +306,7 @@ run_pk_dv_test() {
 
         # Run the specific Java test method
         echo "Running Maven test for JavaPyE2ETest.testPKDeletionVectorWrite..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testPKDeletionVectorWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testPKDeletionVectorWrite+testPKDeletionVectorWriteMultiBatch+testPKDeletionVectorWriteMultiBatchRawConvertable -pl paimon-core -q -Drun.e2e.tests=true; then
             echo -e "${GREEN}✓ Java test completed successfully${NC}"
         else
             echo -e "${RED}✗ Java test failed${NC}"
@@ -312,7 +316,7 @@ run_pk_dv_test() {
     cd "$PAIMON_PYTHON_DIR"
     # Run the specific Python test method
     echo "Running Python test for JavaPyReadWriteTest.test_pk_dv_read..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_pk_dv_read -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_pk_dv_read" -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
         return 0
     else

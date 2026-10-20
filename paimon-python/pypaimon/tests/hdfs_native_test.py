@@ -102,9 +102,9 @@ class HdfsNativeFileIORoutingTest(unittest.TestCase):
         self.assertEqual(type(fio).__name__, "PyArrowFileIO")
 
     def test_native_init_failure_falls_back_to_pyarrow(self):
-        # hdfs_native not installed; default fallback enabled.
+        # Simulate the missing optional SDK even when it is installed locally.
         _uninstall_fake_hdfs_native()
-        with patch(
+        with patch.dict(sys.modules, {"hdfs_native": None}), patch(
             "pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO.__init__",
             return_value=None,
         ):
@@ -113,7 +113,7 @@ class HdfsNativeFileIORoutingTest(unittest.TestCase):
 
     def test_native_init_failure_no_fallback_raises(self):
         _uninstall_fake_hdfs_native()
-        with self.assertRaises(ImportError):
+        with patch.dict(sys.modules, {"hdfs_native": None}), self.assertRaises(ImportError):
             FileIO.get(
                 "hdfs://ns/foo",
                 Options({"hdfs.client.fallback-to-pyarrow": "false"}),
