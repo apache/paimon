@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.SerializationAssignment;
 import org.apache.paimon.fs.FileIO;
@@ -65,6 +66,26 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         this.snapshots = snapshots;
         this.checkedSnapshot = scanSnapshotId;
         this.changes = changes;
+    }
+
+    /** Selects the ordinary compaction provider, allowing reuse across concurrent reassignment. */
+    public static CommitChangesProvider create(
+            FileIO fileIO,
+            FileStorePathFactory paths,
+            SnapshotManager snapshots,
+            CoreOptions options,
+            CommitChanges changes,
+            boolean checkRowIdsFromSnapshot) {
+        Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
+        if (options.dataEvolutionEnabled()
+                && !checkRowIdsFromSnapshot
+                && lastSafeSnapshot != null
+                && lastSafeSnapshot >= 0) {
+            return new ReassignCompactChangesProvider(
+                    fileIO, paths, snapshots, lastSafeSnapshot, changes);
+        }
+        return CommitChangesProvider.provider(
+                changes.tableFiles, changes.changelogFiles, changes.indexFiles);
     }
 
     @Override

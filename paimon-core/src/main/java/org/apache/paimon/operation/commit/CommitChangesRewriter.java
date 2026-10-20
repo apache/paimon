@@ -36,7 +36,7 @@ public interface CommitChangesRewriter {
 
     /** Creates one provider whose state is retained across optimistic retries of this compact. */
     default CommitChangesProvider compactChangesProvider(
-            CommitChanges changes, List<CommitMessage> messages, boolean checkRowIdsFromSnapshot) {
+            CommitChanges changes, List<CommitMessage> messages) {
         return CommitChangesProvider.provider(
                 changes.tableFiles, changes.changelogFiles, changes.indexFiles);
     }

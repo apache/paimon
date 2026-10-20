@@ -52,7 +52,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
-import org.apache.paimon.operation.commit.ReassignCompactChangesRewriter;
+import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -168,7 +168,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
 
-    private CommitChangesRewriter commitChangesRewriter = CommitChangesRewriter.IDENTITY;
+    @Nullable private CommitChangesRewriter commitChangesRewriter;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
@@ -241,15 +241,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
-        if (options.dataEvolutionEnabled()) {
-            options.commitLastSafeSnapshot()
-                    .filter(id -> id >= 0)
-                    .ifPresent(
-                            id ->
-                                    this.commitChangesRewriter =
-                                            new ReassignCompactChangesRewriter(
-                                                    fileIO, pathFactory, snapshotManager, id));
-        }
     }
 
     private <T> T runWithLock(Callable<T> callable) {
@@ -415,14 +406,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                commitChangesRewriter.compactChangesProvider(
+                                compactChangesProvider(
                                         new CommitChanges(
                                                 changes.compactTableFiles,
                                                 changes.compactChangelog,
                                                 changes.compactIndexFiles),
-                                        commitMessages,
-                                        conflictDetection.shouldCheckRowIdFromSnapshot(
-                                                CommitKind.COMPACT)),
+                                        commitMessages),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -606,14 +595,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                commitChangesRewriter.compactChangesProvider(
+                                compactChangesProvider(
                                         new CommitChanges(
                                                 changes.compactTableFiles,
                                                 emptyList(),
                                                 changes.compactIndexFiles),
-                                        Collections.emptyList(),
-                                        conflictDetection.shouldCheckRowIdFromSnapshot(
-                                                CommitKind.COMPACT)),
+                                        Collections.emptyList()),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -852,6 +839,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // A committer can be reused; an untagged commit must not inherit a previous baseline.
             conflictDetection.setRowIdCheckFromSnapshot(checkFromSnapshot);
         }
+    }
+
+    private CommitChangesProvider compactChangesProvider(
+            CommitChanges changes, List<CommitMessage> messages) {
+        if (commitChangesRewriter != null) {
+            return commitChangesRewriter.compactChangesProvider(changes, messages);
+        }
+        return ReassignCompactChangesProvider.create(
+                fileIO,
+                pathFactory,
+                snapshotManager,
+                options,
+                changes,
+                conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT));
     }
 
     private int tryCommit(
@@ -1103,12 +1104,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> changelogFiles = changes.changelogFiles;
         List<IndexManifestEntry> indexFiles = changes.indexFiles;
         CommitChangesRewriter.Attempt rewriteAttempt =
-                commitChangesRewriter.createAttempt(
-                        commitKind,
-                        new CommitChanges(
-                                Collections.unmodifiableList(changes.tableFiles),
-                                Collections.unmodifiableList(changes.changelogFiles),
-                                Collections.unmodifiableList(changes.indexFiles)));
+                commitChangesRewriter == null
+                        ? CommitChangesRewriter.Attempt.IDENTITY
+                        : commitChangesRewriter.createAttempt(
+                                commitKind,
+                                new CommitChanges(
+                                        Collections.unmodifiableList(changes.tableFiles),
+                                        Collections.unmodifiableList(changes.changelogFiles),
+                                        Collections.unmodifiableList(changes.indexFiles)));
         Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;

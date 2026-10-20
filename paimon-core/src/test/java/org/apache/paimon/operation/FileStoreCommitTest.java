@@ -1037,7 +1037,7 @@ public class FileStoreCommitTest {
                 new MaterializeDeletionVectorsCommitChangesRewriter(
                         FileStoreTableFactory.create(store.fileIO(), store.options().path()));
         CommitChanges refreshed =
-                rewriter.compactChangesProvider(changes, Collections.singletonList(message), false)
+                rewriter.compactChangesProvider(changes, Collections.singletonList(message))
                         .provide(null);
 
         // Global-index removals from earlier preparation are replaced for the entire bucket,

@@ -47,7 +47,7 @@ public abstract class DataEvolutionCommitChangesRewriter implements CommitChange
 
     @Override
     public CommitChangesProvider compactChangesProvider(
-            CommitChanges changes, List<CommitMessage> messages, boolean checkRowIdsFromSnapshot) {
+            CommitChanges changes, List<CommitMessage> messages) {
         Set<Pair<BinaryRow, Integer>> materializedBuckets = new HashSet<>();
         for (CommitMessage message : messages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
@@ -59,8 +59,7 @@ public abstract class DataEvolutionCommitChangesRewriter implements CommitChange
             }
         }
         if (materializedBuckets.isEmpty()) {
-            return CommitChangesRewriter.super.compactChangesProvider(
-                    changes, messages, checkRowIdsFromSnapshot);
+            return CommitChangesRewriter.super.compactChangesProvider(changes, messages);
         }
 
         return latestSnapshot -> {
