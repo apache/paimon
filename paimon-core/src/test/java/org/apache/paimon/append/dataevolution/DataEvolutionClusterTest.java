@@ -269,7 +269,7 @@ class DataEvolutionClusterTest extends TableTestBase {
         append(table, "a", 90, 70, 80);
         Snapshot appended = table.latestSnapshot().get();
         IncrementalClusterManager manager = new IncrementalClusterManager(table, null, appended);
-        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(true);
+        Map<BinaryRow, CompactUnit> units = manager.plan(true).clusteringUnits();
         assertThat(units).containsOnlyKeys(partition(table, "a"));
         assertThat(units.get(partition(table, "a")).files())
                 .hasSize(5)
@@ -366,7 +366,7 @@ class DataEvolutionClusterTest extends TableTestBase {
         append(table, "a", 90, 70, 80);
         Snapshot snapshot = table.latestSnapshot().get();
         IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
-        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(false);
+        Map<BinaryRow, CompactUnit> units = manager.plan(false).clusteringUnits();
         assertThat(units).hasSize(1);
         CompactUnit unit = units.get(partition(table, "a"));
         assertThat(unit.files())
@@ -1056,7 +1056,7 @@ class DataEvolutionClusterTest extends TableTestBase {
         Snapshot snapshot = table.latestSnapshot().get();
         IncrementalClusterManager manager =
                 new IncrementalClusterManager(table, partitionPredicate(table, "a"), snapshot);
-        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(true);
+        Map<BinaryRow, CompactUnit> units = manager.plan(true).clusteringUnits();
         assertThat(units).containsOnlyKeys(partition(table, "a"));
         List<CommitMessage> messages =
                 manager.prepareCommitMessages(rewriteClusterUnits(table, manager, units, true));
@@ -1863,7 +1863,7 @@ class DataEvolutionClusterTest extends TableTestBase {
     private List<CommitMessage> prepareMinorCluster(FileStoreTable table, Snapshot snapshot)
             throws Exception {
         IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
-        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(false);
+        Map<BinaryRow, CompactUnit> units = manager.plan(false).clusteringUnits();
         assertThat(units).hasSize(1);
         List<DataFileMeta> selected = units.get(partition(table, "a")).files();
         assertThat(selected)
@@ -2000,14 +2000,14 @@ class DataEvolutionClusterTest extends TableTestBase {
             throws Exception {
         IncrementalClusterManager manager =
                 new IncrementalClusterManager(table, partitionPredicate, snapshot);
-        return rewriteClusterUnits(table, manager, manager.createCompactUnits(fullCompaction));
+        return rewriteClusterUnits(table, manager, manager.plan(fullCompaction).clusteringUnits());
     }
 
     private List<CommitMessage> prepareMappedCluster(
             FileStoreTable table, Snapshot snapshot, boolean fullCompaction) throws Exception {
         IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
         return rewriteClusterUnits(
-                table, manager, manager.createCompactUnits(fullCompaction), true);
+                table, manager, manager.plan(fullCompaction).clusteringUnits(), true);
     }
 
     // Run the engine-independent read/sort/write stages in-process. The source selection and

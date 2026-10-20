@@ -19,6 +19,7 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -37,6 +38,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -51,9 +53,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 /** Test for {@link IncrementalClusterManager}. */
 public class IncrementalClusterManagerTest {
@@ -85,19 +92,86 @@ public class IncrementalClusterManagerTest {
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), String.valueOf(dataEvolution));
         FileStoreTable table = createTable(options, Collections.emptyList());
         assertThat(table.snapshotManager().latestSnapshot()).isNull();
-        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, null);
+        FileStoreTable input = spy(table);
+        SnapshotReader reader = spy(table.newSnapshotReader());
+        doReturn(reader).when(input).newSnapshotReader();
+        IncrementalClusterManager manager = new IncrementalClusterManager(input, null, null);
 
         writeOnce(
                 table,
                 GenericRow.of(1, 2, BinaryString.fromString("a"), BinaryString.fromString("b")));
 
-        assertThat(manager.createCompactUnits(true)).isEmpty();
-        assertThat(manager.createCompactUnits(false)).isEmpty();
+        IncrementalClusterManager.Plan full = manager.plan(true);
+        IncrementalClusterManager.Plan minor = manager.plan(false);
+        assertThat(full.isEmpty()).isTrue();
+        assertThat(full.clusteringUnits()).isEmpty();
+        assertThat(full.compactionTasks()).isEmpty();
+        assertThat(minor.isEmpty()).isTrue();
+        assertThat(minor.clusteringUnits()).isEmpty();
+        assertThat(minor.compactionTasks()).isEmpty();
+        verify(reader, never()).read();
         assertThat(
                         new IncrementalClusterManager(
                                         table, null, table.snapshotManager().latestSnapshot())
-                                .createCompactUnits(true))
+                                .plan(true)
+                                .clusteringUnits())
                 .isNotEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPlanUsesSpecifiedPartitionAndPinnedSnapshot(boolean dataEvolution)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), String.valueOf(dataEvolution));
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), String.valueOf(dataEvolution));
+        FileStoreTable table = createTable(options, Collections.singletonList("f2"));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1,
+                        1,
+                        BinaryString.fromString("selected"),
+                        BinaryString.fromString("first")),
+                GenericRow.of(
+                        3,
+                        3,
+                        BinaryString.fromString("excluded"),
+                        BinaryString.fromString("other")));
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        BinaryRow partition = BinaryRow.singleColumn("selected");
+        List<String> pinnedFiles =
+                table.store().newScan().withSnapshot(snapshot).plan().files().stream()
+                        .filter(entry -> entry.partition().equals(partition))
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toList());
+        writeOnce(
+                table,
+                GenericRow.of(
+                        2,
+                        2,
+                        BinaryString.fromString("selected"),
+                        BinaryString.fromString("later")),
+                GenericRow.of(
+                        4,
+                        4,
+                        BinaryString.fromString("excluded"),
+                        BinaryString.fromString("later")));
+        PartitionPredicate predicate =
+                PartitionPredicate.fromMultiple(
+                        table.schema().logicalPartitionType(),
+                        Collections.singletonList(partition));
+
+        IncrementalClusterManager.Plan plan =
+                new IncrementalClusterManager(table, predicate, snapshot).plan(true);
+
+        assertThat(plan.isEmpty()).isFalse();
+        assertThat(plan.clusteringUnits()).containsOnlyKeys(partition);
+        assertThat(plan.clusteringUnits().get(partition).files())
+                .extracting(DataFileMeta::fileName)
+                .containsExactlyInAnyOrderElementsOf(pinnedFiles);
+        assertThat(plan.compactionTasks()).isEmpty();
     }
 
     @Test
@@ -245,7 +319,7 @@ public class IncrementalClusterManagerTest {
                                 Lists.newArrayList(BinaryRow.singleColumn("pt3"))),
                         table.snapshotManager().latestSnapshot());
         Map<BinaryRow, CompactUnit> partitionLevels =
-                incrementalClusterManager.createCompactUnits(true);
+                incrementalClusterManager.plan(true).clusteringUnits();
         assertThat(partitionLevels.size()).isEqualTo(2);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt1"))).isNotNull();
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotNull();
@@ -254,7 +328,7 @@ public class IncrementalClusterManagerTest {
         incrementalClusterManager =
                 new IncrementalClusterManager(
                         table, null, table.snapshotManager().latestSnapshot());
-        partitionLevels = incrementalClusterManager.createCompactUnits(true);
+        partitionLevels = incrementalClusterManager.plan(true).clusteringUnits();
         assertThat(partitionLevels.size()).isEqualTo(4);
 
         // test specify partition and disable history partition auto clustering
@@ -271,7 +345,7 @@ public class IncrementalClusterManagerTest {
                                 RowType.of(DataTypes.INT()),
                                 Lists.newArrayList(BinaryRow.singleColumn("pt3"))),
                         tableWithoutHistoryClustering.snapshotManager().latestSnapshot());
-        partitionLevels = incrementalClusterManager.createCompactUnits(true);
+        partitionLevels = incrementalClusterManager.plan(true).clusteringUnits();
         assertThat(partitionLevels.size()).isEqualTo(1);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotNull();
     }

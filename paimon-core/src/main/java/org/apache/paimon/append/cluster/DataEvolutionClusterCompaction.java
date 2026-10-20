@@ -18,22 +18,16 @@
 
 package org.apache.paimon.append.cluster;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionNormalCompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.RangeHelper;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,32 +38,15 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts column versions left outside the incremental clustering selection. */
-public final class DataEvolutionClusterCompaction {
+final class DataEvolutionClusterCompaction {
 
     private DataEvolutionClusterCompaction() {}
 
-    public static List<DataEvolutionCompactTask> plan(
+    static List<DataEvolutionCompactTask> plan(
             FileStoreTable table,
-            Snapshot snapshot,
-            @Nullable PartitionPredicate predicate,
+            DataEvolutionIncrementalClusterRewriter rewriter,
+            Map<BinaryRow, List<DataFileMeta>> partitions,
             Map<BinaryRow, CompactUnit> clusteringUnits) {
-        if (!table.coreOptions().dataEvolutionEnabled()) {
-            return Collections.emptyList();
-        }
-        Map<BinaryRow, List<DataFileMeta>> partitions = new HashMap<>();
-        for (DataSplit split :
-                table.newSnapshotReader()
-                        .dropStats()
-                        .withSnapshot(snapshot)
-                        .withPartitionFilter(predicate)
-                        .read()
-                        .dataSplits()) {
-            partitions
-                    .computeIfAbsent(split.partition(), ignored -> new ArrayList<>())
-                    .addAll(split.dataFiles());
-        }
-        DataEvolutionIncrementalClusterRewriter rewriter =
-                new DataEvolutionIncrementalClusterRewriter(table, snapshot);
         RangeHelper<DataFileMeta> helper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<DataEvolutionCompactTask> tasks = new ArrayList<>();
         partitions.forEach(

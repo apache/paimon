@@ -21,6 +21,8 @@ package org.apache.paimon.append.cluster;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.io.CompactIncrement;
@@ -109,6 +111,13 @@ class DataEvolutionIncrementalClusterRewriter extends IncrementalClusterRewriter
 
     int groupLevel(List<DataFileMeta> group) {
         return groupLevel(group, retrieveAnchorFile(group, file -> file));
+    }
+
+    @Override
+    List<DataEvolutionCompactTask> compactionTasks(
+            Map<BinaryRow, List<DataFileMeta>> partitionFiles,
+            Map<BinaryRow, CompactUnit> clusteringUnits) {
+        return DataEvolutionClusterCompaction.plan(table, this, partitionFiles, clusteringUnits);
     }
 
     private int groupLevel(List<DataFileMeta> group, DataFileMeta anchor) {

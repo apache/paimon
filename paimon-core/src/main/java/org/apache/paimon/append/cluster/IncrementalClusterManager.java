@@ -21,6 +21,7 @@ package org.apache.paimon.append.cluster;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
@@ -115,13 +116,26 @@ public class IncrementalClusterManager {
                         rewriter::constructPartitionLevels);
     }
 
-    public Map<BinaryRow, CompactUnit> createCompactUnits(boolean fullCompaction) {
+    public Plan plan(boolean fullCompaction) {
         if (snapshot == null) {
-            return Collections.emptyMap();
+            return new Plan(Collections.emptyMap(), Collections.emptyList());
         }
 
+        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
+        for (DataSplit split : snapshotReader.read().dataSplits()) {
+            partitionFiles
+                    .computeIfAbsent(split.partition(), ignored -> new ArrayList<>())
+                    .addAll(split.dataFiles());
+        }
         // 1. construct LSM structure for each partition
-        Map<BinaryRow, List<LevelSortedRun>> partitionLevels = constructLevels();
+        Map<BinaryRow, List<LevelSortedRun>> partitionLevels =
+                partitionFiles.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry ->
+                                                rewriter.constructPartitionLevels(
+                                                        entry.getValue())));
         logForPartitionLevel(partitionLevels, partitionComputer);
 
         // 2. pick files to be clustered for each partition
@@ -158,22 +172,33 @@ public class IncrementalClusterManager {
                                 filesInfo);
                     });
         }
-        return units;
+        return new Plan(units, rewriter.compactionTasks(partitionFiles, units));
     }
 
-    public Map<BinaryRow, List<LevelSortedRun>> constructLevels() {
-        List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
-        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
-        for (DataSplit dataSplit : dataSplits) {
-            partitionFiles
-                    .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
-                    .addAll(dataSplit.dataFiles());
+    /** Clustering and row-ID-preserving compaction selected from the same planning snapshot. */
+    public static final class Plan {
+
+        private final Map<BinaryRow, CompactUnit> clusteringUnits;
+        private final List<DataEvolutionCompactTask> compactionTasks;
+
+        private Plan(
+                Map<BinaryRow, CompactUnit> clusteringUnits,
+                List<DataEvolutionCompactTask> compactionTasks) {
+            this.clusteringUnits = clusteringUnits;
+            this.compactionTasks = compactionTasks;
         }
-        return partitionFiles.entrySet().stream()
-                .collect(
-                        Collectors.toMap(
-                                Map.Entry::getKey,
-                                entry -> rewriter.constructPartitionLevels(entry.getValue())));
+
+        public Map<BinaryRow, CompactUnit> clusteringUnits() {
+            return clusteringUnits;
+        }
+
+        public List<DataEvolutionCompactTask> compactionTasks() {
+            return compactionTasks;
+        }
+
+        public boolean isEmpty() {
+            return clusteringUnits.isEmpty() && compactionTasks.isEmpty();
+        }
     }
 
     public Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> toSplitsAndRewriteDvFiles(

@@ -19,6 +19,9 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.compact.CompactUnit;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -76,6 +79,12 @@ public class IncrementalClusterRewriter {
         // sort by level
         partitionLevels.sort(Comparator.comparing(LevelSortedRun::level));
         return partitionLevels;
+    }
+
+    List<DataEvolutionCompactTask> compactionTasks(
+            Map<BinaryRow, List<DataFileMeta>> partitionFiles,
+            Map<BinaryRow, CompactUnit> clusteringUnits) {
+        return Collections.emptyList();
     }
 
     void configureSplit(

@@ -478,12 +478,29 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
             }
             commit.commit(write.prepareCommit());
         }
+        sql("INSERT INTO T VALUES (13, 'thirteen', 'B'), (11, 'eleven', 'B'), (12, 'twelve', 'B')");
         sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
         createIdIndex("btree");
-        sql("DELETE FROM T WHERE id = 2");
-        DataFileMeta base = table.store().newScan().plan().files().get(0).file();
+        sql("DELETE FROM T WHERE id IN (2, 12)");
+        DataFileMeta base =
+                table.store().newScan().plan().files().stream()
+                        .filter(entry -> entry.partition().getString(0).toString().equals("A"))
+                        .findFirst()
+                        .get()
+                        .file();
+        DataFileMeta otherBase =
+                table.store().newScan().plan().files().stream()
+                        .filter(entry -> entry.partition().getString(0).toString().equals("B"))
+                        .findFirst()
+                        .get()
+                        .file();
         List<String> retainedIndexes = scalarIndexFiles(table, "btree", "A");
-        List<Row> originalIds = sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id");
+        List<String> otherIndexes = scalarIndexFiles(table, "btree", "B");
+        assertThat(otherIndexes).isNotEmpty();
+        List<Row> originalIds =
+                sql("SELECT id, _ROW_ID FROM T$row_tracking WHERE dt = 'A' ORDER BY id");
+        List<Row> otherIds =
+                sql("SELECT id, _ROW_ID FROM T$row_tracking WHERE dt = 'B' ORDER BY id");
         for (int version = 0; version < 4; version++) {
             writePartialGroup(
                     table,
@@ -492,6 +509,15 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                     "one-" + version,
                     "two-" + version,
                     "three-" + version);
+            // B has no clustering candidate, but its column versions must join the same commit.
+            writePartialGroup(
+                    table,
+                    "B",
+                    "name",
+                    otherBase.nonNullFirstRowId(),
+                    "eleven-" + version,
+                    "twelve-" + version,
+                    "thirteen-" + version);
         }
         sql("INSERT INTO T VALUES (6, 'six', 'A'), (4, 'four', 'A'), (5, 'five', 'A')");
         sql("INSERT INTO T VALUES (9, 'nine', 'A'), (7, 'seven', 'A'), (8, 'eight', 'A')");
@@ -504,7 +530,7 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         rewrittenIndexes.removeAll(retainedIndexes);
         Snapshot before = table.latestSnapshot().get();
         List<String> beforeFiles = plannedFiles(table);
-        assertThat(beforeFiles).hasSize(7);
+        assertThat(beforeFiles).hasSize(12);
 
         sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'minor')");
 
@@ -516,36 +542,46 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                 table.store().newScan().plan().files().stream()
                         .map(entry -> entry.file())
                         .collect(Collectors.toList());
-        assertThat(afterFiles).hasSize(3);
-        assertThat(afterFiles)
-                .filteredOn(file -> file.nonNullFirstRowId() == base.nonNullFirstRowId())
-                .singleElement()
-                .satisfies(
-                        file -> {
-                            assertThat(file.level()).isEqualTo(base.level());
-                            assertThat(file.nonNullRowIdRange())
-                                    .isEqualTo(base.nonNullRowIdRange());
-                        });
+        assertThat(afterFiles).hasSize(4);
+        for (DataFileMeta original : Arrays.asList(base, otherBase)) {
+            assertThat(afterFiles)
+                    .filteredOn(file -> file.nonNullFirstRowId() == original.nonNullFirstRowId())
+                    .singleElement()
+                    .satisfies(
+                            file -> {
+                                assertThat(file.level()).isEqualTo(original.level());
+                                assertThat(file.nonNullRowIdRange())
+                                        .isEqualTo(original.nonNullRowIdRange());
+                                assertThat(file.rowCount()).isEqualTo(3);
+                            });
+        }
         assertThat(plannedFiles(table)).doesNotContainAnyElementsOf(beforeFiles);
         assertThat(scalarIndexFiles(table, "btree", "A"))
                 .containsAll(retainedIndexes)
                 .doesNotContainAnyElementsOf(rewrittenIndexes);
+        assertThat(scalarIndexFiles(table, "btree", "B")).isEqualTo(otherIndexes);
         assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking WHERE id <= 3 ORDER BY id"))
                 .containsExactlyElementsOf(originalIds);
-        assertThat(sql("SELECT _ROW_ID FROM T$row_tracking WHERE id >= 4"))
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking WHERE dt = 'B' ORDER BY id"))
+                .containsExactlyElementsOf(otherIds);
+        assertThat(sql("SELECT _ROW_ID FROM T$row_tracking WHERE id >= 4 AND dt = 'A'"))
                 .hasSize(6)
                 .allSatisfy(
                         row ->
                                 assertThat((Long) row.getField(0))
                                         .isGreaterThanOrEqualTo(before.nextRowId()));
-        assertThat(deletionVectorCardinality(table)).isEqualTo(1L);
+        assertThat(deletionVectorCardinality(table)).isEqualTo(2L);
         sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')");
-        assertThat(sql("SELECT id, name FROM T WHERE id IN (1, 2, 3, 4, 9) ORDER BY id"))
+        assertThat(
+                        sql(
+                                "SELECT id, name FROM T WHERE id IN (1, 2, 3, 4, 9, 11, 12, 13) ORDER BY id"))
                 .containsExactly(
                         Row.of(1, "one-3"),
                         Row.of(3, "three-3"),
                         Row.of(4, "four"),
-                        Row.of(9, "nine"));
+                        Row.of(9, "nine"),
+                        Row.of(11, "eleven-3"),
+                        Row.of(13, "thirteen-3"));
     }
 
     @ParameterizedTest
@@ -867,12 +903,27 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         writePartialGroup(table, "name", 0L, names.toArray());
     }
 
-    @SuppressWarnings("unchecked")
     private static void writePartialGroup(
             FileStoreTable table, String column, long firstRowId, Object... values)
             throws Exception {
+        writePartialGroup(table, "A", column, firstRowId, values);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void writePartialGroup(
+            FileStoreTable table,
+            String partitionValue,
+            String column,
+            long firstRowId,
+            Object... values)
+            throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        BinaryRow partition = ((DataSplit) table.newScan().plan().splits().get(0)).partition();
+        BinaryRow partition =
+                table.newScan().plan().splits().stream()
+                        .map(split -> ((DataSplit) split).partition())
+                        .filter(row -> row.getString(0).toString().equals(partitionValue))
+                        .findFirst()
+                        .get();
         try (BatchTableWrite write =
                         builder.newWrite()
                                 .withWriteType(
@@ -889,7 +940,7 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                                 value instanceof String
                                         ? BinaryString.fromString((String) value)
                                         : value,
-                                BinaryString.fromString("A")));
+                                BinaryString.fromString(partitionValue)));
             }
             List<CommitMessage> messages = write.prepareCommit();
             for (CommitMessage message : messages) {

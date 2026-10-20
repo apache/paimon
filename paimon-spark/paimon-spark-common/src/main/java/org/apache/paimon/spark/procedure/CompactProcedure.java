@@ -23,7 +23,6 @@ import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
-import org.apache.paimon.append.cluster.DataEvolutionClusterCompaction;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.ClusteringCommitChangesRewriter;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
@@ -858,11 +857,9 @@ public class CompactProcedure extends BaseProcedure {
         }
         IncrementalClusterManager incrementalClusterManager =
                 new IncrementalClusterManager(table, partitionPredicate, snapshot);
-        Map<BinaryRow, CompactUnit> compactUnits =
-                incrementalClusterManager.createCompactUnits(fullCompaction);
-        List<DataEvolutionCompactTask> compactionTasks =
-                DataEvolutionClusterCompaction.plan(
-                        table, snapshot, partitionPredicate, compactUnits);
+        IncrementalClusterManager.Plan plan = incrementalClusterManager.plan(fullCompaction);
+        Map<BinaryRow, CompactUnit> compactUnits = plan.clusteringUnits();
+        List<DataEvolutionCompactTask> compactionTasks = plan.compactionTasks();
         if (partitionIdleTime != null) {
             Set<BinaryRow> idlePartitions =
                     getPartitionsToCompact(
@@ -876,7 +873,7 @@ public class CompactProcedure extends BaseProcedure {
                 table.fullName(),
                 fullCompaction);
 
-        if (compactUnits.isEmpty() && compactionTasks.isEmpty()) {
+        if (plan.isEmpty()) {
             return;
         }
 

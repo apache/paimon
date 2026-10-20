@@ -53,6 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -174,6 +175,66 @@ class DataEvolutionClusterCompactionTest {
         assertUnsortedCompaction(plan(table, files, Collections.emptyMap()), files);
     }
 
+    @Test
+    void testOneScanPlansClusteringAndCompactionWithoutDuplicateFiles() throws Exception {
+        FileStoreTable table =
+                createTable()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(), "2"));
+        List<DataFileMeta> firstGroup = versions(table, 0, 5, 0, 1);
+        List<DataFileMeta> middleGroup = versions(table, 3, 5, 1, 1);
+        List<DataFileMeta> retainedGroup = versions(table, 6, 5);
+        List<DataFileMeta> files = new ArrayList<>(firstGroup);
+        files.addAll(middleGroup);
+        files.addAll(retainedGroup);
+        FileStoreTable input = spy(table);
+        Snapshot snapshot = mock(Snapshot.class);
+        PartitionPredicate predicate = PartitionPredicate.ALWAYS_TRUE;
+        SnapshotReader reader = mockReader(input, snapshot, predicate, files);
+
+        IncrementalClusterManager.Plan plan =
+                new IncrementalClusterManager(input, predicate, snapshot).plan(false);
+
+        assertThat(plan.isEmpty()).isFalse();
+        assertThat(plan.clusteringUnits()).containsOnlyKeys(BinaryRow.EMPTY_ROW);
+        CompactUnit clustering = plan.clusteringUnits().get(BinaryRow.EMPTY_ROW);
+        List<DataFileMeta> clusteredFiles = new ArrayList<>(firstGroup);
+        clusteredFiles.addAll(middleGroup);
+        assertThat(clustering.files()).containsExactlyInAnyOrderElementsOf(clusteredFiles);
+        assertThat(clustering.outputLevel()).isEqualTo(1);
+        assertThat(plan.compactionTasks()).hasSize(1);
+        assertThat(plan.compactionTasks().get(0).compactBefore())
+                .containsExactlyInAnyOrderElementsOf(retainedGroup);
+        assertThat(((DataEvolutionNormalCompactTask) plan.compactionTasks().get(0)).outputLevel())
+                .isEqualTo(2);
+        verify(input, times(1)).newSnapshotReader();
+        verify(reader, times(1)).read();
+        verify(reader).withSnapshot(snapshot);
+        verify(reader).withPartitionFilter(predicate);
+    }
+
+    @Test
+    void testPlanWithOnlyNormalCompactionIsNotEmpty() throws Exception {
+        FileStoreTable table = createTable();
+        List<DataFileMeta> files = versions(table, 0, 5);
+        FileStoreTable input = spy(table);
+        Snapshot snapshot = mock(Snapshot.class);
+        SnapshotReader reader = mockReader(input, snapshot, null, files);
+
+        IncrementalClusterManager.Plan plan =
+                new IncrementalClusterManager(input, null, snapshot).plan(true);
+
+        assertThat(plan.isEmpty()).isFalse();
+        assertThat(plan.clusteringUnits()).isEmpty();
+        assertThat(plan.compactionTasks()).hasSize(1);
+        assertThat(plan.compactionTasks().get(0).compactBefore())
+                .containsExactlyInAnyOrderElementsOf(files);
+        assertThat(((DataEvolutionNormalCompactTask) plan.compactionTasks().get(0)).outputLevel())
+                .isEqualTo(2);
+        verify(reader, times(1)).read();
+    }
+
     private static void assertUnsortedCompaction(
             List<DataEvolutionCompactTask> tasks, List<DataFileMeta> input) {
         assertThat(tasks).hasSize(1);
@@ -185,9 +246,18 @@ class DataEvolutionClusterCompactionTest {
             FileStoreTable table,
             List<DataFileMeta> files,
             Map<BinaryRow, CompactUnit> clustering) {
-        FileStoreTable input = spy(table);
-        Snapshot snapshot = mock(Snapshot.class);
-        PartitionPredicate predicate = mock(PartitionPredicate.class);
+        return DataEvolutionClusterCompaction.plan(
+                table,
+                new DataEvolutionIncrementalClusterRewriter(table, null),
+                Collections.singletonMap(BinaryRow.EMPTY_ROW, files),
+                clustering);
+    }
+
+    private SnapshotReader mockReader(
+            FileStoreTable input,
+            Snapshot snapshot,
+            PartitionPredicate predicate,
+            List<DataFileMeta> files) {
         SnapshotReader reader = mock(SnapshotReader.class);
         SnapshotReader.Plan plan = mock(SnapshotReader.Plan.class);
         doReturn(reader).when(input).newSnapshotReader();
@@ -207,11 +277,7 @@ class DataEvolutionClusterCompactionTest {
                             .build());
         }
         when(plan.dataSplits()).thenReturn(splits);
-        List<DataEvolutionCompactTask> result =
-                DataEvolutionClusterCompaction.plan(input, snapshot, predicate, clustering);
-        verify(reader).withSnapshot(snapshot);
-        verify(reader).withPartitionFilter(predicate);
-        return result;
+        return reader;
     }
 
     private FileStoreTable createTable() throws Exception {
@@ -234,8 +300,13 @@ class DataEvolutionClusterCompactionTest {
     }
 
     private static List<DataFileMeta> versions(FileStoreTable table, long firstRowId, int count) {
+        return versions(table, firstRowId, count, 2, 100);
+    }
+
+    private static List<DataFileMeta> versions(
+            FileStoreTable table, long firstRowId, int count, int anchorLevel, long size) {
         List<DataFileMeta> files = new ArrayList<>();
-        files.add(file(table, "base-" + firstRowId, firstRowId, 10, 2, null));
+        files.add(file(table, "base-" + firstRowId, firstRowId, 10, anchorLevel, null, size));
         for (int i = 1; i < count; i++) {
             files.add(
                     file(
@@ -244,7 +315,8 @@ class DataEvolutionClusterCompactionTest {
                             firstRowId,
                             10 + i,
                             0,
-                            "payload"));
+                            "payload",
+                            size));
         }
         return files;
     }
@@ -256,10 +328,21 @@ class DataEvolutionClusterCompactionTest {
             long sequence,
             int level,
             String writeColumn) {
+        return file(table, name, firstRowId, sequence, level, writeColumn, 100);
+    }
+
+    private static DataFileMeta file(
+            FileStoreTable table,
+            String name,
+            long firstRowId,
+            long sequence,
+            int level,
+            String writeColumn,
+            long size) {
         DataFileMeta file =
                 DataFileMeta.forAppend(
                         name + ".parquet",
-                        100,
+                        size,
                         3,
                         EMPTY_STATS,
                         sequence,

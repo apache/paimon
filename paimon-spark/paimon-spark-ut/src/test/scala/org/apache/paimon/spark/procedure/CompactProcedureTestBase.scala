@@ -2758,6 +2758,14 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           sql("DELETE FROM T WHERE id = 2")
           val before = table.latestSnapshot().get()
           assert(normalDataFiles(table).size == 5)
+          // An otherwise eligible normal compaction must also honor the idle filter.
+          sql(
+            "CALL sys.compact(table => 'T', compact_strategy => 'full', " +
+              "partition_idle_time => '1 d')")
+          assert(lastSnapshotId(table) == before.id())
+          assert(table.latestSnapshot().get().nextRowId() == before.nextRowId())
+          assert(normalDataFiles(table).size == 5)
+          assert(deletionVectorCardinality(table) == 1)
           sql(
             "CALL sys.compact(table => 'T', compact_strategy => 'full', " +
               "partitions => 'pt=a', partition_idle_time => '0 s')")
@@ -2780,6 +2788,12 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
               "(8, 80, 'b'), (6, 60, 'b')")
           val mixed = table.latestSnapshot().get()
+          // Both task kinds must be filtered before executing a shared maintenance plan.
+          sql(
+            "CALL sys.compact(table => 'T', compact_strategy => 'full', " +
+              "partition_idle_time => '1 d')")
+          assert(lastSnapshotId(table) == mixed.id())
+          assert(table.latestSnapshot().get().nextRowId() == mixed.nextRowId())
           sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
           assert(lastSnapshotId(table) == mixed.id() + 1)
           assert(table.latestSnapshot().get().nextRowId() == mixed.nextRowId() + 2)
