@@ -25,14 +25,13 @@ import pyarrow.compute as pc
 from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, VectorType, is_blob_file_field
-from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.native_write import _native_partition_types_supported
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
@@ -43,31 +42,33 @@ def _native_update_formats_supported(table):
                  or not any(isinstance(field.type, VectorType) for field in table.table_schema.fields)))
 
 
-def _native_update_table(table, *, allow_changelog=False):
+def _native_update_table(table, *, allow_changelog=False, allow_time_travel=False):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
             or not _native_update_formats_supported(table)
             or (not allow_changelog and table.options.changelog_producer() != ChangelogProducer.NONE)
-            or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
+            or (not allow_time_travel and (
+                '_read_snapshot' in vars(table)
+                or any(table.options.options.contains_key(key) for key in SCAN_KEYS)))
             or not native_runtime_available()
             or not _native_query_auth_supported(table)):
         return None
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    if not _native_partition_types_supported(
-            schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
-        return None
-    return create_native_write_table(table)
+    native_table = create_native_write_table(table)
+    if native_table is not None and allow_time_travel:
+        from pypaimon.read.native_plan import _with_native_read_snapshot
+        native_table = _with_native_read_snapshot(table, native_table)
+    return native_table
 
 
-def _native_row_id_table(table):
+def _native_row_id_table(table, *, allow_time_travel=True):
     """Row-level operations additionally require a data-evolution table."""
     if (type(table) is not FileStoreTable
             or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
             or table.is_primary_key_table):
         return None
-    return _native_update_table(table)
+    return _native_update_table(table, allow_time_travel=allow_time_travel)
 
 
 def create_native_update(table, commit_user, columns):
@@ -290,7 +291,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         # An upsert can append unmatched rows; packed video writing is still
         # provided by the Python writer.
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(table, allow_time_travel=False)
     if native_table is None:
         return None
     fields = table.table_schema.fields
@@ -315,6 +316,14 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         # surviving payloads before applying row-ID update or append rules;
         # validating all payload types here would reject valid matched updates.
         key_names = list(dict.fromkeys(keys + table.partition_keys))
+        for name in key_names:
+            field = data.schema.field(name)
+            if pa.types.is_null(field.type):
+                # An untyped NULL has the same match identity as a typed NULL.
+                # Give core the declared key layout without casting payloads.
+                data = data.set_column(
+                    data.schema.get_field_index(name), field.with_type(schema.field(name).type),
+                    pa.nulls(data.num_rows, type=schema.field(name).type))
         if not all(_native_upsert_key_compatible(data.column(name), schema.field(name).type)
                    for name in key_names):
             return None
@@ -381,7 +390,7 @@ def create_native_predicate_delete(table, commit_user, predicate):
     # Partition deletion removes complete file/index metadata. It does not
     # produce row-level changes, even when the PK writer emits changelogs.
     # Core still validates the translated predicate and selects this fast path.
-    native_table = _native_update_table(table, allow_changelog=partition_delete)
+    native_table = _native_update_table(table, allow_changelog=partition_delete, allow_time_travel=True)
     if native_table is None:
         return None
     native_predicate = None if predicate is None else _predicate_to_native(predicate)

@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 
 import pyarrow as pa
 
@@ -562,14 +563,12 @@ class PkReaderTest(unittest.TestCase):
                     epoch_millis = entry.file.creation_time_epoch_millis()
                     self.assertIsNotNone(epoch_millis)
                     self.assertGreater(epoch_millis, 0)
-                    import time
-                    expected_epoch_millis = creation_time.get_millisecond()
-                    local_dt = creation_time.to_local_date_time()
-                    local_time_struct = local_dt.timetuple()
-                    local_timestamp = time.mktime(local_time_struct)
-                    local_time_struct_utc = time.gmtime(local_timestamp)
-                    utc_timestamp = time.mktime(local_time_struct_utc)
-                    expected_epoch_millis = int(utc_timestamp * 1000)
+                    # Java resolves the stored local TIMESTAMP in the system
+                    # zone once and retains all millisecond digits.
+                    instant = creation_time.to_local_date_time().astimezone(timezone.utc)
+                    delta = instant - datetime(1970, 1, 1, tzinfo=timezone.utc)
+                    expected_epoch_millis = ((delta.days * 86400 + delta.seconds) * 1000
+                                             + delta.microseconds // 1000)
                     self.assertEqual(epoch_millis, expected_epoch_millis)
                     creation_times_found.append(epoch_millis)
 

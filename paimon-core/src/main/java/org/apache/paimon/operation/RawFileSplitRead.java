@@ -86,6 +86,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
+    private final boolean fileIndexReadIgnoreUnknownType;
     private final boolean rowTrackingEnabled;
     private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
@@ -114,6 +115,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
+        this.fileIndexReadIgnoreUnknownType = coreOptions.fileIndexReadIgnoreUnknownType();
         this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
@@ -335,7 +337,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             formatReaderMapping.getLimit(),
                             dataFilePathFactory,
                             file,
-                            deletionVector);
+                            deletionVector,
+                            0L,
+                            fileIndexReadIgnoreUnknownType);
             if (!fileIndexResult.remain()) {
                 return new EmptyFileRecordReader<>();
             }

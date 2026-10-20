@@ -64,6 +64,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final MergeEngine mergeEngine;
     private final ChangelogProducer changelogProducer;
     private final boolean fileIndexReadEnabled;
+    private final boolean fileIndexReadIgnoreUnknownType;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
@@ -90,7 +91,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean fileIndexReadIgnoreUnknownType) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -112,6 +114,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.mergeEngine = mergeEngine;
         this.changelogProducer = changelogProducer;
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.fileIndexReadIgnoreUnknownType = fileIndexReadIgnoreUnknownType;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -186,7 +189,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                             id ->
                                     fieldValueStatsConverters.tryDevolveFilter(
                                             entry.file().schemaId(), valueFilter));
-            return predicate.evaluate(dataPredicate).remain();
+            return predicate.evaluate(dataPredicate, fileIndexReadIgnoreUnknownType).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking fileIndex predicate.", e);
         }

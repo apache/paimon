@@ -3066,6 +3066,85 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             writer.write_arrow(bad_data)
         self.assertIn("blob-view-field", str(context.exception))
 
+    def test_blob_view_rejects_non_row_tracking_upstream_table(self):
+        from pypaimon import Schema
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.json_util import JSON
+        from pypaimon.schema.table_schema import TableSchema
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+
+        # 1. Persist schema-0 directly to simulate a primary-key BLOB table created by Java/Spark
+        # in the shared catalog (pypaimon's create_table currently disallows primary_keys + BLOB).
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source_identifier = Identifier.from_string('test_db.blob_view_non_rt_source')
+        source_table_path = self.catalog.get_table_path(source_identifier)
+        non_rt_table_schema = TableSchema.from_schema(
+            0,
+            Schema.from_pyarrow_schema(
+                source_schema,
+                primary_keys=['id'],
+                options={'bucket': '1'},
+            ),
+        )
+        self.catalog.file_io.try_to_write_atomic(
+            f"{source_table_path}/schema/schema-0",
+            JSON.to_json(non_rt_table_schema, indent=2),
+        )
+        source_table = self.catalog.get_table('test_db.blob_view_non_rt_source')
+
+        # 2. Verify write/construction-time validation rejects the upstream table immediately.
+        expected_msg = (
+            r"Upstream table test_db\.blob_view_non_rt_source referenced by blob view "
+            r"must enable 'row-tracking\.enabled'\."
+        )
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            BlobViewStruct.of(source_table, 'picture', 0)
+
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            Blob.from_view(source_table, 'picture', 0)
+
+        # 3. Simulate a caller bypassing BlobViewStruct.of by serializing a raw BlobViewStruct
+        # with integer field_id directly, and verify BlobViewLookup rejects it on read.
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            },
+        )
+        self.catalog.create_table('test_db.blob_view_non_rt_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_non_rt_target')
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        raw_view_bytes = BlobViewStruct(
+            'test_db.blob_view_non_rt_source', picture_field_id, 0
+        ).serialize()
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10],
+            'picture': [raw_view_bytes],
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            target_table.new_read_builder().new_read().to_arrow(
+                target_table.new_read_builder().new_scan().plan().splits()
+            )
+
     def test_blob_inline_fields_reject_overlap_and_unknown_fields(self):
         from pypaimon import Schema
 

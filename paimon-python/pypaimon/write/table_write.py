@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability, project_arrow_batch)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
@@ -34,6 +34,51 @@ from pypaimon.write.file_store_write import FileStoreWrite
 
 if TYPE_CHECKING:
     from ray.data import Dataset
+
+
+def _pandas_write_schema(table, schema):
+    """Keep ignored events available for the normal row-kind NULL checks."""
+    if table is None or not table.is_primary_key_table:
+        return schema
+    from pypaimon.write.row_kind import write_value_schema
+    schema = write_value_schema(table, schema)
+    options = table.options
+    raw = options.options.to_map()
+    if (raw.get('rowkind.field') is None
+            or not (options.ignore_delete() or str(raw.get('ignore-update-before', 'false')).lower() == 'true')):
+        return schema
+    # Pandas checks top-level NOT NULL before Arrow reaches the writer. Only
+    # relax the transport; the declared schema and nested fields stay intact.
+    return pa.schema([field.with_nullable(True) for field in schema], metadata=schema.metadata)
+
+
+def _pandas_write_batch(table, dataframe, schema, table_schema):
+    """Retain event/routing inputs omitted from the physical write type."""
+    # Convert the selected fields before building a wider transport. PyArrow
+    # validates missing columns and can resolve selected values from a named
+    # DataFrame index; filling a full DataFrame layout first would erase both.
+    batch = pa.RecordBatch.from_pandas(dataframe, schema=_pandas_write_schema(table, schema))
+    if table is not None and schema.names != table_schema.names:
+        from pypaimon.table.bucket_mode import BucketMode
+        required = list(table.partition_keys)
+        if table.bucket_mode() == BucketMode.HASH_FIXED and table.options.bucket() > 1:
+            required.extend(table.table_schema.bucket_keys)
+        row_kind_field = table.options.options.to_map().get('rowkind.field')
+        if row_kind_field is not None:
+            required.append(row_kind_field)
+        if not set(required).issubset(schema.names):
+            extra_schema = pa.schema([field.with_nullable(True) for field in table_schema
+                                      if field.name in required and field.name not in schema.names])
+            extra = pa.RecordBatch.from_pandas(dataframe, schema=extra_schema)
+            columns = dict(zip(batch.schema.names, batch.columns))
+            columns.update(zip(extra.schema.names, extra.columns))
+            # Only written/event/routing fields were converted. Do not touch
+            # unwritten payloads, including live BLOB objects.
+            fields = [field if field.name in schema.names else field.with_nullable(True) for field in table_schema]
+            arrays = [columns[field.name] if field.name in columns else pa.nulls(batch.num_rows, field.type)
+                      for field in fields]
+            batch = pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields, metadata=table_schema.metadata))
+    return batch
 
 
 def _write_ray(writer, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
@@ -135,7 +180,7 @@ class TableWrite:
         if write_cols is not None:
             # Keep routing columns available for full-schema inputs, then
             # write only the columns and order recorded in the file metadata.
-            data = data.select(write_cols)
+            data = project_arrow_batch(data, write_cols)
         self.file_store_write.write(partition, bucket, data)
 
     def _write_precomputed_bucket(self, data, bucket):
@@ -180,7 +225,7 @@ class TableWrite:
         require_columns(values_by_name, column_names, "write_row")
         require_columns(values_by_name, self.table.partition_keys, "write_row")
         from pypaimon.write.row_kind import skip_write_row
-        if skip_write_row(self.table, values_by_name, row.get_row_kind()):
+        if skip_write_row(self.table, values_by_name, row.get_row_kind(), self.file_store_write.write_cols):
             return
         partition, bucket = (
             self.row_key_extractor.extract_partition_bucket_row(values_by_name)
@@ -205,7 +250,8 @@ class TableWrite:
             pa_schema = self._write_cols_pyarrow_schema(write_cols)
         else:
             pa_schema = self.table_pyarrow_schema
-        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
+        record_batch = _pandas_write_batch(
+            getattr(self, 'table', None), dataframe, pa_schema, self.table_pyarrow_schema)
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
@@ -251,7 +297,7 @@ class TableWrite:
     ) -> None:
         """
         Write a Ray Dataset to Paimon table.
-        
+
         Args:
             dataset: Ray Dataset to write. This is a distributed data collection
                 from Ray Data (ray.data.Dataset).
@@ -328,18 +374,26 @@ class TableWrite:
             return data
         data = self._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
-        return filter_write_batch(table, data)
-
-    def _prepare_arrow_schema(self, data):
+        data = filter_write_batch(table, data, self.file_store_write.write_cols)
+        if not data.num_rows:
+            return data
         data = normalize_arrow_strings(data)
         target = self.table_pyarrow_schema
         if data.schema.names != target.names and self.file_store_write.write_cols is not None:
             target = self._write_cols_pyarrow_schema(self.file_store_write.write_cols)
+        # Validate only surviving values. Keep the input transport metadata:
+        # PyArrow otherwise rejects hidden NULL children of NULL ROW parents.
         validated = normalize_arrow_write_nullability(data, target)
         self._validate_pyarrow_schema(validated.schema)
-        # Core checks only visible NOT NULL children. PyArrow's Parquet writer
-        # also rejects hidden NULL children under NULL ROW parents when their
-        # Arrow field is nonnullable, so retain the input's transport metadata.
+        return data
+
+    def _prepare_arrow_schema(self, data):
+        # Legacy schema-only callers have no row-kind options to evaluate.
+        # A real writer must defer casts until ignored events have been removed.
+        if getattr(self, 'table', None) is None:
+            data = normalize_arrow_strings(data)
+        self._validate_pyarrow_schema(
+            data.schema, check_nested_nullability=getattr(self, 'table', None) is None)
         return data
 
     def _normalize_arrow_write_schema(self, data):
@@ -352,28 +406,33 @@ class TableWrite:
             fields.append(pa.field(field.name, field.type, nullable=declared.nullable,
                                    metadata=declared.metadata))
         schema = pa.schema(fields, metadata=self.table_pyarrow_schema.metadata)
+        from pypaimon.write.row_kind import write_value_schema
+        schema = write_value_schema(self.table, schema)
         if data.schema.equals(schema, check_metadata=True):
             return data
         if isinstance(data, pa.RecordBatch):
             return pa.RecordBatch.from_arrays(data.columns, schema=schema)
         return pa.Table.from_arrays(data.columns, schema=schema)
 
-    def _validate_pyarrow_schema(self, data_schema: pa.Schema):
-        if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
+    def _validate_pyarrow_schema(self, data_schema: pa.Schema, *, check_nested_nullability=True):
+        if self._is_compatible_pyarrow_schema(
+                data_schema, self.table_pyarrow_schema, check_nested_nullability=check_nested_nullability):
             return
 
         write_cols = self.file_store_write.write_cols
         if write_cols is not None:
             write_cols_schema = self._write_cols_pyarrow_schema(write_cols)
-            if self._is_compatible_pyarrow_schema(data_schema, write_cols_schema):
+            if self._is_compatible_pyarrow_schema(
+                    data_schema, write_cols_schema, check_nested_nullability=check_nested_nullability):
                 return
 
         self._raise_inconsistent_schema(data_schema)
 
     def _is_compatible_pyarrow_schema(
-            self, data_schema: pa.Schema, expected_schema: pa.Schema) -> bool:
+            self, data_schema: pa.Schema, expected_schema: pa.Schema, *, check_nested_nullability=True) -> bool:
         return arrow_schemas_compatible(
-            data_schema, expected_schema, check_top_level_nullability=False, allow_binary_compatibility=True)
+            data_schema, expected_schema, check_top_level_nullability=False,
+            allow_binary_compatibility=True, check_nested_nullability=check_nested_nullability)
 
     def _write_cols_pyarrow_schema(self, write_cols: List[str]) -> pa.Schema:
         table_fields = {

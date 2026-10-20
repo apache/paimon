@@ -470,9 +470,9 @@ def test_postpone_blob_row_bridge_keeps_sources_until_prepare(fail):
     fields = [DataField(0, 'id', AtomicType('INT')), DataField(1, 'pt', AtomicType('STRING')),
               DataField(2, 'payload', AtomicType('BLOB'))]
     table = SimpleNamespace(
-        table_schema=SimpleNamespace(fields=fields), fields=fields,
+        table_schema=SimpleNamespace(fields=fields, primary_keys=['id', 'pt']), fields=fields,
         field_dict={field.name: field for field in fields}, partition_keys=['pt'],
-        is_primary_key_table=True,
+        is_primary_key_table=True, cross_partition_update=False,
         options=CoreOptions(Options({'bucket': '-2', 'postpone.target-row-num-per-bucket': '1'})))
     backend = Mock()
     staged, payloads = [], []

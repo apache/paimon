@@ -19,7 +19,7 @@
 
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -308,18 +308,37 @@ def test_mixed_index_metrics_are_rejected(vector_table, filtered, mode):
 
 
 @pytest.mark.parametrize('option', ['hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'])
-def test_custom_io_context_keeps_python_search(vector_table, option):
+@pytest.mark.parametrize('batch', [False, True], ids=['single', 'batch'])
+def test_unused_context_attributes_preserve_native_search(vector_table, option, batch):
     from copy import copy
-    from pypaimon.table.source import native_vector_search
+    from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
     table = vector_table.copy({'read.native.enabled': 'true'})
     loader = table.catalog_environment.catalog_loader
     context = copy(loader.context())
-    setattr(context, option, object())
-    expected = _scores(_single(table.copy({'read.native.enabled': 'false'})).execute_local())
+    unused = Mock(side_effect=AssertionError('An unused IO loader was invoked'))
+    setattr(context, option, {'unused': 'value'} if option == 'hadoop_conf' else unused)
+    classic = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+    predicate = classic.new_read_builder().new_predicate_builder()
+    queries = [[1, 0], [0, 1]] if batch else [[1, 0]]
+
+    def configure(builder):
+        return (builder.with_options({'ivf-flat.metric': 'l2'})
+                .with_filter(predicate.greater_than('id', 1)).with_partition_filter(predicate.equal('pt', 1)))
+
+    expected = [_scores(configure(_single(classic, query, 2)).execute_local()) for query in queries]
     with patch.object(loader, 'context', return_value=context), \
-            patch.object(native_vector_search, '_native_table',
-                         side_effect=AssertionError('Unsupported Native context')):
-        _assert_scores(_scores(_single(table).execute_local()), expected)
+            patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
+            patch.object(BatchVectorSearchReadImpl, 'read_batch_plan',
+                         side_effect=AssertionError('Python batch search ran')):
+        if batch:
+            actual = configure(table.new_batch_vector_search_builder().with_vector_column('embedding')
+                               .with_query_vectors(queries).with_limit(2)).execute_batch_local()
+        else:
+            actual = [configure(_single(table, queries[0], 2)).execute_local()]
+    assert len(actual) == len(expected)
+    for result, scores in zip(actual, expected):
+        _assert_scores(_scores(result), scores)
+    unused.assert_not_called()
 
 
 @pytest.mark.parametrize('mode', ['fast', 'full', 'detail'])

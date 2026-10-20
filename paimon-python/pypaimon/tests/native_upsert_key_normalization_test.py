@@ -332,10 +332,14 @@ def _dictionary_array(values, value_type):
 
 
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
-def test_untyped_null_keys_match_only_existing_null_key_rows(tmp_path, native):
-    table, _ = _table(tmp_path, native, pa.int32(), 1, 2)
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+@pytest.mark.parametrize('partitioned', [False, True])
+def test_untyped_null_keys_match_only_existing_null_key_rows(tmp_path, native, stream, partitioned):
+    table, _ = _table(tmp_path, native, pa.int32(), 1, 2, partitioned=partitioned)
     source = pa.table({'key': pa.nulls(1), 'value': pa.array([9], type=pa.int32())})
-    _upsert(table, source, native, False)
+    if partitioned:
+        source = source.append_column('pt', pa.array(['a']))
+    _upsert(table, source, native, stream)
     for rows in _rows(table):
         assert [row['value'] for row in rows] == [0, 0, 0, 9]
 
