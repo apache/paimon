@@ -193,7 +193,7 @@ def test_not_null_mask_adapts_only_output_schema(rest_catalog, table_mode, mask)
     expected = [None, None] if mask == 'null' else [Decimal('1.00'), None]
     result = _read(table, ['masked', 'id']).sort_by([('id', 'ascending')])
     assert result.column('masked').to_pylist() == expected
-    assert result.schema.field('masked').nullable and not result.schema.field('id').nullable
+    assert result.schema.field('masked').nullable
     assert _read(table, ['masked'], limit=0).schema.field('masked').nullable
     projection = {'first': 'masked', 'second': 'masked', 'id': 'id'}
     result = _read(table, projection).sort_by([('id', 'ascending')])

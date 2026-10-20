@@ -510,7 +510,7 @@ Partial-column BLOB updates differ by engine:
 | Engine | Managed BLOB fields | Descriptor and view fields |
 | --- | --- | --- |
 | Spark `MERGE INTO` | Supports scalar BLOBs, BLOB arrays, and BLOB maps, including updates to `NULL`. | Supports scalar fields. |
-| Flink `sys.merge_into` | Rejects updates to raw-data BLOB fields, including arrays and maps. Other columns in the same table can still be updated. | Supports scalar fields. |
+| Flink `sys.data_evolution_merge_into` | Supports scalar BLOBs, BLOB arrays, and BLOB maps, including updates to `NULL`. Unchanged rows keep their previous payload. | Supports scalar fields. |
 
 For example, Spark can replace the payload for an existing row from the earlier
 `image_table` example:
@@ -539,6 +539,7 @@ for Python partial writes.
 6. **Collection Storage Mode**: `ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
 7. **Append Write Buffer**: Writers that write BLOB payload files ignore `write-buffer-for-append`
    and write directly, because the buffer cannot preserve descriptor source readers.
+8. **Flink Merge Sort Buffer**: `sys.data_evolution_merge_into` sorts updated rows before writing. A managed BLOB value is inlined into that sort buffer. A single row larger than `write-buffer-size` (256 MB by default) fails the job. Raise `write-buffer-size` when updating large payloads. Video-frame fields cannot be updated by this procedure.
 
 ## Best Practices
 

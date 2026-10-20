@@ -447,6 +447,38 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit.commit_scanner.read_incremental_changes.assert_not_called()
         read_all.assert_called_once()
 
+    def test_conflict_rollback_failure_preserves_original_conflict(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        conflict = RuntimeError("conflicting compaction")
+        latest_snapshot = Mock(id=3)
+        file_store_commit.commit_scanner.read_all_entries_from_changed_partitions = Mock(
+            return_value=[]
+        )
+        file_store_commit.conflict_detection.check_conflicts = Mock(
+            return_value=conflict
+        )
+        file_store_commit.rollback = Mock()
+        file_store_commit.rollback.try_to_rollback.return_value = False
+
+        with self.assertRaises(RuntimeError) as failure:
+            file_store_commit._try_commit_once(
+                retry_result=None,
+                commit_kind="APPEND",
+                commit_entries=[Mock()],
+                changelog_entries=[],
+                commit_identifier=11,
+                latest_snapshot=latest_snapshot,
+                detect_conflicts=True,
+                allow_rollback=True,
+            )
+
+        self.assertIs(failure.exception, conflict)
+        file_store_commit.rollback.try_to_rollback.assert_called_once_with(latest_snapshot)
+        self.mock_snapshot_commit.commit.assert_not_called()
+        mock_manifest_file_manager.return_value.write.assert_not_called()
+        mock_manifest_list_manager.return_value.write.assert_not_called()
+
     def test_commit_fail_retry_missing_snapshot_still_fails_closed(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         file_store_commit = self._create_file_store_commit()

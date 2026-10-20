@@ -47,6 +47,7 @@ class NativeBlobRows:
 
     def __init__(self, fallback=None):
         self.readers = {}
+        self._consumed = set()
         self.fallback = fallback
 
     def _supports_uri(self, uri):
@@ -62,8 +63,19 @@ class NativeBlobRows:
 
     def create(self, uri):
         if uri in self.readers:
+            self._consumed.add(uri)
             return self.readers[uri]
         return self.fallback.create(uri)
+
+    def release_consumed(self):
+        """Release inputs consumed by core, retaining unplanned partition rows."""
+        for uri in self._consumed:
+            self.readers.pop(uri, None)
+        self._consumed.clear()
+
+    def clear(self):
+        self.readers.clear()
+        self._consumed.clear()
 
     def to_batch(self, table, rows, names):
         """Transport existing row values; core owns physical input validation."""

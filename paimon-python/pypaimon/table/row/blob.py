@@ -405,13 +405,75 @@ class BlobViewStruct:
     MAGIC = 0x424C4F4256494557  # "BLOBVIEW"
 
     def __init__(self, identifier: Union[Identifier, str], field_id: int, row_id: int):
-        if isinstance(identifier, str):
-            identifier = Identifier.from_string(identifier)
-        if not isinstance(identifier, Identifier):
-            raise TypeError("BlobViewStruct identifier must be Identifier or str.")
-        self._identifier = identifier
+        self._identifier = self._coerce_identifier(identifier)
         self._field_id = field_id
         self._row_id = row_id
+
+    @staticmethod
+    def _coerce_identifier(identifier: Union[Identifier, str]) -> Identifier:
+        if isinstance(identifier, str):
+            return Identifier.from_string(identifier)
+        if not isinstance(identifier, Identifier):
+            raise TypeError("BlobViewStruct identifier must be Identifier or str.")
+        return identifier
+
+    @staticmethod
+    def _extract_fields(upstream):
+        if hasattr(upstream, 'fields') and upstream.fields is not None:
+            return upstream.fields
+        if hasattr(upstream, 'table_schema') and getattr(upstream.table_schema, 'fields', None) is not None:
+            return upstream.table_schema.fields
+        if isinstance(upstream, (list, tuple)):
+            return upstream
+        raise TypeError("Expected Table, TableSchema, RowType, or sequence of DataField.")
+
+    @classmethod
+    def resolve_blob_field_id(
+            cls,
+            identifier: Union[Identifier, str],
+            upstream,
+            field_name: str,
+    ) -> int:
+        from pypaimon.schema.data_types import is_blob_type
+
+        identifier = cls._coerce_identifier(identifier)
+        if not isinstance(field_name, str):
+            raise TypeError("BlobViewStruct field_name must be a str.")
+        fields = cls._extract_fields(upstream)
+        matched_field = None
+        for field in fields:
+            if field.name == field_name:
+                matched_field = field
+                break
+        if matched_field is None:
+            raise ValueError(
+                f"Cannot find blob field {field_name} in upstream table {identifier.get_full_name()}."
+            )
+        if not is_blob_type(matched_field.type):
+            raise ValueError(
+                f"Field {field_name} in upstream table {identifier.get_full_name()} is not a BLOB field."
+            )
+        return matched_field.id
+
+    @classmethod
+    def of(cls, *args) -> 'BlobViewStruct':
+        if len(args) == 3:
+            upstream_table, field_name, row_id = args
+            if not hasattr(upstream_table, 'identifier'):
+                raise TypeError(
+                    "3-argument BlobViewStruct.of expects an upstream Table with an identifier."
+                )
+            identifier = upstream_table.identifier
+            field_id = cls.resolve_blob_field_id(identifier, upstream_table, field_name)
+            return cls(identifier, field_id, row_id)
+        if len(args) == 4:
+            identifier, upstream, field_name, row_id = args
+            field_id = cls.resolve_blob_field_id(identifier, upstream, field_name)
+            return cls(identifier, field_id, row_id)
+        raise TypeError(
+            "BlobViewStruct.of expects (upstream_table, field_name, row_id) or "
+            "(identifier, upstream_schema, field_name, row_id)."
+        )
 
     @property
     def identifier(self) -> Identifier:
@@ -672,8 +734,28 @@ class Blob(ABC):
             descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
 
     @staticmethod
-    def from_view(view_struct: BlobViewStruct) -> 'BlobView':
-        return BlobView(view_struct)
+    def from_view(*args, view_struct: Optional[BlobViewStruct] = None) -> 'BlobView':
+        # Case 1: Keyword argument form (backward compatible)
+        if view_struct is not None:
+            if len(args) > 0:
+                raise ValueError("Cannot provide both view_struct keyword argument and positional arguments")
+            return BlobView(view_struct)
+        # Case 2: Positional argument forms
+        if len(args) == 1 and isinstance(args[0], BlobViewStruct):
+            return BlobView(args[0])
+        if len(args) == 3:
+            target, field, row_id = args
+            if isinstance(field, int) and not isinstance(field, bool):
+                return BlobView(BlobViewStruct(target, field, row_id))
+            if isinstance(field, str):
+                return BlobView(BlobViewStruct.of(target, field, row_id))
+        if len(args) == 4:
+            return BlobView(BlobViewStruct.of(*args))
+        raise TypeError(
+            "Blob.from_view expects (BlobViewStruct), (identifier, field_id, row_id), "
+            "(upstream_table, field_name, row_id), or "
+            "(identifier, upstream_schema, field_name, row_id)."
+        )
 
     @staticmethod
     def from_bytes(

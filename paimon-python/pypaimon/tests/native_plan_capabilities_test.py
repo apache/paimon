@@ -31,11 +31,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
-from pypaimon.read.native_plan import (
-    native_method_available,
-    native_runtime_available,
-    native_version_at_least,
-)
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
@@ -46,7 +42,7 @@ from pypaimon.write.table_delete import TableDeleteByRowId
 
 @pytest.mark.native_plan
 @unittest.skipUnless(native_runtime_available(),
-                     "pypaimon_rust split-planning API not installed")
+                     'pypaimon-rust not installed')
 class NativePlanCapabilitiesTest(unittest.TestCase):
 
     def setUp(self):
@@ -156,9 +152,8 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         return plans[1]
 
     @unittest.skipUnless(
-        native_method_available('ReadBuilder', 'with_row_ranges')
-        and native_method_available('Plan', 'snapshot_id'),
-        'pypaimon_rust row ranges and plan snapshot metadata required')
+        native_runtime_available(),
+        'pypaimon-rust not installed')
     def test_explicit_row_ranges_preserve_selection_and_snapshot(self):
         table = self._create('ranges', self._de_options())
         rows = [{'k': k, 'v': 'v%d' % k} for k in range(6)]
@@ -174,8 +169,8 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
             with self.subTest(ranges=ranges):
                 self._assert_parity(table, expected, 2, row_ranges=ranges)
 
-    @unittest.skipUnless(native_method_available('ReadBuilder', 'with_row_ranges'),
-                         'pypaimon_rust row-range API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_explicit_row_ranges_combine_with_filter_and_projection(self):
         table = self._create('filtered_ranges', self._de_options())
         self._write(table, [{'k': k, 'v': 'v%d' % k} for k in range(6)])
@@ -186,8 +181,8 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         self._assert_parity(
             table, [], 1, row_ranges=[Range(0, 1)], predicate=predicate)
 
-    @unittest.skipUnless(native_version_at_least(0, 4),
-                         'pypaimon_rust 0.4 watermark support required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_watermark_selects_first_matching_snapshot(self):
         table = self._create('watermarks')
         rows = [{'k': k, 'v': 'v%d' % k} for k in range(4)]
@@ -201,8 +196,8 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
                     table.copy({'scan.watermark': str(watermark)}),
                     rows[:snapshot_id], snapshot_id)
 
-    @unittest.skipUnless(native_version_at_least(0, 4),
-                         'pypaimon_rust 0.4 watermark support required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_watermark_uses_historical_schema(self):
         table = self._create('watermark_schema')
         self._write(table, [{'k': 1, 'v': 'old'}])
@@ -218,8 +213,8 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         self.assertEqual(historical.field_names, ['k', 'v'])
         self._assert_parity(historical, [{'k': 1, 'v': 'old'}], 1)
 
-    @unittest.skipUnless(native_version_at_least(0, 4),
-                         'pypaimon_rust 0.4 watermark support required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_unmatched_watermark_fails_in_both_planners(self):
         from pypaimon_rust.datafusion import PaimonCatalog
 
@@ -240,8 +235,8 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
                     rust_table.new_read_builder({
                         'scan.watermark': '101'}).new_scan().plan()
 
-    @unittest.skipUnless(native_method_available('Table', 'branch'),
-                         'pypaimon_rust branch API required')
+    @unittest.skipUnless(native_runtime_available(),
+                         'pypaimon-rust not installed')
     def test_branch_does_not_read_subsequent_main_commits(self):
         table = self._create('branched')
         self._write(table, [{'k': 1, 'v': 'shared'}])
@@ -261,7 +256,7 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         self._assert_parity(branch.copy({'scan.snapshot-id': '1'}),
                             [{'k': 1, 'v': 'shared'}], 1)
 
-    @unittest.skipUnless(native_version_at_least(0, 4, 0),
+    @unittest.skipUnless(native_runtime_available(),
                          'pypaimon-rust>=0.4.0 required for native DV scans')
     def test_deletion_vectors_preserve_deletes_and_historical_snapshots(self):
         options = self._de_options()
@@ -286,7 +281,7 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         self._assert_parity(
             table, [rows[k] for k in (0, 3)], 3, row_ranges=[Range(0, 4)])
 
-    @unittest.skipUnless(native_version_at_least(0, 4, 0),
+    @unittest.skipUnless(native_runtime_available(),
                          'pypaimon-rust>=0.4.0 required for native DV scans')
     def test_primary_key_deletion_vectors_preserve_compacted_rows(self):
         table = self._create('pk_deletions', {
@@ -364,7 +359,7 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
                 self._assert_parity(table.copy({'scan.snapshot-id': '1'}),
                                     [expected[0], expected[2]], 1)
 
-    @unittest.skipUnless(native_version_at_least(0, 4, 0),
+    @unittest.skipUnless(native_runtime_available(),
                          'pypaimon-rust>=0.4.0 required for native DV scans')
     def test_external_deletion_vector_path_is_preserved(self):
         options = self._de_options()

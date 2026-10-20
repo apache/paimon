@@ -18,6 +18,7 @@
 import threading
 import time
 import unittest
+from decimal import Decimal, localcontext
 from concurrent.futures import ThreadPoolExecutor
 
 from pypaimon.common.predicate import Predicate
@@ -68,6 +69,37 @@ def _result_of(*row_ids):
 
 
 class GlobalIndexEvaluatorTest(unittest.TestCase):
+
+    def test_decimal_literals_cannot_round_to_an_index_key(self):
+        for precision in [10, 38]:
+            field = DataField(0, 'amount', AtomicType('DECIMAL(%d,2)' % precision))
+            evaluator = GlobalIndexEvaluator([field], lambda field: self.fail('Unsafe index lookup'))
+            try:
+                for method, values in [('equal', ['1.235']), ('notEqual', ['-1.235']),
+                                       ('in', ['1.23', '1.235']), ('notIn', ['1.235']),
+                                       ('between', ['1.23', '1.235'])]:
+                    literals = [Decimal(value) for value in values]
+                    predicate = Predicate(method, 0, 'amount', literals)
+                    with localcontext() as context:
+                        context.prec = 3
+                        self.assertIsNone(evaluator.evaluate(predicate))
+                    self.assertEqual(predicate.literals, literals)
+            finally:
+                evaluator.close()
+
+    def test_exact_decimal_literals_still_use_the_index(self):
+        field = DataField(0, 'amount', AtomicType('DECIMAL(10,2)'))
+        expected = _result_of(1, 3)
+        evaluator = GlobalIndexEvaluator([field], lambda field: [StubGlobalIndexReader(expected)])
+        try:
+            for value in ['1.2300', '-1.23', '0E+100']:
+                predicate = Predicate('equal', 0, 'amount', [Decimal(value)])
+                with localcontext() as context:
+                    context.prec = 3
+                    self.assertIs(evaluator.evaluate(predicate), expected)
+            self.assertIsNone(evaluator.evaluate(Predicate('equal', 0, 'amount', [Decimal('1E+37')])))
+        finally:
+            evaluator.close()
 
     def test_single_field_sequential(self):
         fields = _make_fields()

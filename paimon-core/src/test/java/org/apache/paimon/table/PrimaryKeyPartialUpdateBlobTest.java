@@ -26,7 +26,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobView;
-import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -275,7 +274,6 @@ public class PrimaryKeyPartialUpdateBlobTest extends TableTestBase {
                 GenericRow.of(1, new BlobData(imageBytes)),
                 GenericRow.of(2, new BlobData(secondImageBytes)));
 
-        int imageFieldId = upstreamTable.rowType().getField("image").id();
         RowTrackingTable upstreamRowTracking = new RowTrackingTable(upstreamTable);
         ReadBuilder rowIdReader =
                 upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 2});
@@ -300,25 +298,25 @@ public class PrimaryKeyPartialUpdateBlobTest extends TableTestBase {
         catalog.createTable(identifier(downstreamName), downstreamSchema, true);
         FileStoreTable downstreamTable = getTable(identifier(downstreamName));
 
-        String upstreamFullName = database + "." + upstreamName;
+        Identifier upstreamIdentifier = Identifier.fromString(database + "." + upstreamName);
         write(
                 downstreamTable,
                 GenericRow.of(
                         1,
                         BinaryString.fromString("label1"),
                         Blob.fromView(
-                                new BlobViewStruct(
-                                        Identifier.fromString(upstreamFullName),
-                                        imageFieldId,
-                                        idToRowId.get(1)))),
+                                upstreamIdentifier,
+                                upstreamTable.rowType(),
+                                "image",
+                                idToRowId.get(1))),
                 GenericRow.of(
                         2,
                         BinaryString.fromString("label2"),
                         Blob.fromView(
-                                new BlobViewStruct(
-                                        Identifier.fromString(upstreamFullName),
-                                        imageFieldId,
-                                        idToRowId.get(2)))));
+                                upstreamIdentifier,
+                                upstreamTable.rowType(),
+                                "image",
+                                idToRowId.get(2))));
 
         try (StreamTableWrite write = downstreamTable.newWrite(commitUser);
                 StreamTableCommit commit = downstreamTable.newCommit(commitUser)) {

@@ -52,7 +52,7 @@ def _rows(table, native):
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
                           'read.native.enabled': str(native).lower()}).new_read_builder()
     # Java first-row scans hide un-compacted L0 files; a write scan includes them.
-    splits = builder.new_scan().plan_for_write().splits()
+    splits = builder.new_scan().plan_all_files().splits()
     reader = builder.new_read()
     if native:
         with patch.object(reader, '_create_split_read', side_effect=AssertionError('fallback')):

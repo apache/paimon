@@ -166,7 +166,7 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     pinned = table.copy({
         'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
     })
-    assert create_native_update(pinned, builder.commit_user, ['name']) is None
+    assert create_native_update(pinned, builder.commit_user, ['name']) is not None
 
     update_builder = table.new_batch_write_builder()
     update = update_builder.new_update().with_update_type(['name', 'age'])
@@ -219,7 +219,7 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
     pinned = table.copy({
         'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
     })
-    assert create_native_delete(pinned, builder.commit_user) is None
+    assert create_native_delete(pinned, builder.commit_user) is not None
 
     with patch.object(TableDeleteByRowId, 'delete',
                       side_effect=AssertionError('Python delete was selected')):
@@ -655,6 +655,8 @@ def test_predicate_assignment_order_with_later_partial_file(
         'row-tracking.enabled': 'true',
         'data-evolution.enabled': 'true',
         'write.native.enabled': str(native).lower(),
+        # Compare against Python's scan order, independently of the CI lane.
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
     }), False)
     table = catalog.get_table('default.t')
     for ids in ([1, 2], [3, 4]):
@@ -1013,8 +1015,8 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
         native_calls.append(operation)
         return original(*args, **kwargs)
 
-    # Check a second update too: fallback outputs must remain readable on the
-    # next operation, and canonical files must continue using native updates.
+    # Check a second update too: outputs must remain readable and all supported
+    # partition layouts must continue using native updates.
     with patch.object(wrapper, method, track):
         for value in [11, 12]:
             builder = table.new_batch_write_builder()
@@ -1027,5 +1029,4 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
             read = table.new_read_builder()
             actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
             assert actual.to_pydict() == {'id': [1, 2], 'part': parts, 'value': [value, value]}
-    expected_calls = 0 if layout == 'external-binary' else 2
-    assert len(native_calls) == expected_calls
+    assert len(native_calls) == 2

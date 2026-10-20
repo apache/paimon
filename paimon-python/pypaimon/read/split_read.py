@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import (
     ApplyDeletionVectorReader,
@@ -39,6 +40,8 @@ from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
     predicate_field_names,
+    predicate_for_physical_fields,
+    predicate_matches_physical_names,
     predicate_supports_arrow_filter,
     rewrite_predicate_indices,
     trim_predicate_by_fields,
@@ -92,7 +95,8 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
 KEY_PREFIX = "_KEY_"
-KEY_FIELD_ID_START = 1000000
+# Match Java's reserved key-field range without overlapping valid user IDs.
+KEY_FIELD_ID_START = SpecialFields.SYSTEM_FIELD_ID_START
 NULL_FIELD_INDEX = -1
 
 
@@ -194,6 +198,7 @@ class SplitRead(ABC):
         if (
                 self.predicate is not None
                 and predicate_field_names(self.predicate).issubset(read_type_names)
+                and predicate_matches_physical_names(self.predicate)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
                 self.predicate, read_type
@@ -259,12 +264,13 @@ class SplitRead(ABC):
             # see missing/NULL versions and renumber positional row IDs.
             return None
         elif self.table.is_primary_key_table:
-            pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
+            physical = predicate_for_physical_fields(self.predicate, self.table.fields)
+            pk_predicate = trim_predicate_by_fields(physical, self.table.primary_keys)
             if not pk_predicate:
                 return None
             return pk_predicate
         else:
-            return self.predicate
+            return predicate_for_physical_fields(self.predicate, self.table.fields)
 
     def _has_row_tracking_predicate(self) -> bool:
         return (self.table.options.row_tracking_enabled()
@@ -1393,7 +1399,8 @@ class DataEvolutionSplitRead(SplitRead):
             outer_flat_read_type: Optional[List[DataField]] = None,
             post_merge_filter=None,
             eager_blob_fields=None,
-            post_filter_after_inline=False):
+            post_filter_after_inline=False,
+            defer_blob_resolution=False):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -1409,6 +1416,7 @@ class DataEvolutionSplitRead(SplitRead):
         self._post_merge_filter = post_merge_filter
         # Apply the auth filter after inline BLOB resolution, so scalar BLOBs still defer.
         self._post_filter_after_inline = post_filter_after_inline
+        self._defer_blob_resolution = defer_blob_resolution
         self._eager_blob_fields = set(eager_blob_fields or [])
         self._deferred_blob_fields = self._deferred_blob_field_names()
 
@@ -1427,11 +1435,18 @@ class DataEvolutionSplitRead(SplitRead):
             if self.limit is not None:
                 reader = LimitedRecordBatchReader(reader, self.limit)
 
+        if not self._defer_blob_resolution:
+            reader = self._resolve_deferred_blobs(reader)
+        return reader
+
+    def _resolve_deferred_blobs(self, reader, excluded_fields=()):
         if self._deferred_blob_fields:
             blob_names = [
                 field.name for field in self.read_fields
-                if field.name in self._deferred_blob_fields
+                if field.name in self._deferred_blob_fields and field.name not in excluded_fields
             ]
+            if not blob_names:
+                return reader
             reader = DeferredBlobResolveReader(
                 reader,
                 self.table.file_io,
@@ -1447,7 +1462,7 @@ class DataEvolutionSplitRead(SplitRead):
             self.read_fields,
             self.predicate_for_reader,
             self.limit,
-            has_post_filter=self._post_merge_filter is not None,
+            has_post_filter=self._post_merge_filter is not None or self._defer_blob_resolution,
         ) - self._eager_blob_fields
 
     def _create_raw_reader(self) -> RecordReader:
@@ -1663,9 +1678,9 @@ class DataEvolutionSplitRead(SplitRead):
             if DataFileMeta.is_blob_file(first_file.file_name):
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
             elif DataFileMeta.is_vector_file(first_file.file_name):
-                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+                field_ids = self._get_field_ids_from_write_cols(first_file)
             elif first_file.write_cols:
-                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+                field_ids = self._get_field_ids_from_write_cols(first_file)
             else:
                 # For regular files without write_cols, derive field IDs from
                 # the file's schema version, not the current table schema.
@@ -1753,7 +1768,9 @@ class DataEvolutionSplitRead(SplitRead):
                 if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
 
-        output_schema = PyarrowFieldParser.from_paimon_schema(all_read_fields)
+        # Bunch readers use runtime nullability after schema evolution. Keep
+        # the same nested types when assembling their columns into one batch.
+        output_schema = read_arrow_schema(all_read_fields)
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
 
     def _create_file_reader(
@@ -1846,10 +1863,14 @@ class DataEvolutionSplitRead(SplitRead):
                 return field.id
         raise ValueError(f"Field {field_name} not found in file schema {file.schema_id}")
 
-    def _get_field_ids_from_write_cols(self, write_cols: List[str]) -> List[int]:
+    def _get_field_ids_from_write_cols(self, file: DataFileMeta) -> List[int]:
+        # write_cols records names from the schema that wrote this file. Resolve
+        # them there so a rename cannot hide a newer column version, or rebind a
+        # dropped/re-added name to a different field ID.
+        file_fields = self._resolve_schema(file.schema_id).fields
         field_ids = []
-        for field_name in write_cols:
-            for field in self.table.fields:
+        for field_name in file.write_cols:
+            for field in file_fields:
                 if field.name == field_name:
                     field_ids.append(field.id)
         field_ids.append(SpecialFields.ROW_ID.id)

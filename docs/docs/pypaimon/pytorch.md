@@ -275,6 +275,51 @@ torch.stack}` converts the raw list of `CHW` frames to `TCHW`. Install
 `pypaimon[torch,video]` for PyAV, or install TorchCodec separately. Select the
 backend with `video_backend="pyav"` or `"torchcodec"`; omitting the option
 selects an available backend.
+
+### Task-local context and anchor selection
+
+The scan query defines the readable context, including its filters and limit.
+For a task or rank-local dataset, restrict that query to complete episodes.
+Use `anchor_row_ids` to select training anchors without removing the history
+or future frames needed by their windows:
+
+```python
+context = frames.scan(tag_name="train-v1").where("task_id = 'pick'")
+eligible = (
+    frames.scan(tag_name="train-v1")
+    .where("task_id = 'pick' AND eligible = true")
+    .select(["episode_index", "frame_index"])
+    .with_row_id()
+    .to_arrow()
+)
+dataset = context.to_contiguous_window_dataset(
+    columns=["state", "image", "action"],
+    frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+    anchor_row_ids=eligible.column("_ROW_ID").to_pylist(),
+    boundary="pad",
+)
+```
+
+Both scans must resolve to the same fixed snapshot. Row IDs outside the
+context raise `ValueError`. Selection intersects the original stride schedule;
+it neither changes its starting position nor orders or repeats samples.
+Duplicates in `anchor_row_ids` are ignored. An empty selection produces an
+empty dataset. Boundary handling applies only to selected scheduled anchors.
+
+The context is planned once for the index and all requested value columns.
+Only index columns are read at construction; payloads remain lazy. All
+projections and DataLoader workers reuse that plan's split metadata and apply
+the authorization rules resolved for the complete request at construction.
+There is no per-projection full-table planning when the first batch is read.
+
+A context filter or limit that cuts an episode changes its boundaries. It
+does not automatically supply missing history or future frames. Use anchor
+selection for frame eligibility; keep complete episodes in the context when
+preserving their original boundaries and stride. Windows can still read across
+physical file/split boundaries inside those episodes. If context has already
+been divided among ranks, use a local sampler instead of sharding it again
+with a world-size `DistributedSampler`; coordinate rank step counts separately.
+
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

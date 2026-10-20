@@ -32,10 +32,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -45,25 +47,124 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOExceptionSupplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RawFileSplitRead}. */
 class RawFileSplitReadTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @CsvSource({
+        "row, false",
+        "avro, false",
+        "avro, true",
+        "parquet, false",
+        "parquet, true",
+        "orc, false",
+        "orc, true"
+    })
+    void testRawConvertibleReadUsesKeyValueSchema(String format, boolean thinMode)
+            throws Exception {
+        Path tablePath = new Path(tempDir.resolve("primary-key-raw").toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.WRITE_ONLY, true);
+        options.set(CoreOptions.FILE_FORMAT, format);
+        options.set(CoreOptions.DATA_FILE_THIN_MODE, thinMode);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.BIGINT())
+                        .partitionKeys("pt")
+                        .primaryKey("pt", "a")
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath), schema);
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10, 100L));
+            write.write(GenericRow.of(1, 20, 200L));
+            write.write(GenericRow.of(1, 30, 300L));
+            write.write(GenericRow.of(1, 40, 400L));
+            write.write(GenericRow.of(2, 20, 220L));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<DataSplit> dataSplits = table.newSnapshotReader().read().dataSplits();
+        assertThat(dataSplits).hasSize(2);
+        for (DataSplit split : dataSplits) {
+            assertThat(split.rawConvertible()).isTrue();
+            assertThat(split.dataFiles()).hasSize(1);
+        }
+        List<Split> splits = new ArrayList<>(dataSplits);
+        for (int schemaVersion = 0; schemaVersion < 2; schemaVersion++) {
+            RowType readType =
+                    new RowType(
+                            Arrays.asList(
+                                    table.rowType().getField(2),
+                                    table.rowType().getField(1),
+                                    table.rowType().getField(0)));
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            TableRead read =
+                    table.newRead()
+                            .withReadType(readType)
+                            .withFilter(
+                                    and(
+                                            builder.equal(0, 1),
+                                            builder.greaterOrEqual(1, 20),
+                                            builder.lessOrEqual(2, 300L)))
+                            .executeFilter();
+            List<String> actual = new ArrayList<>();
+            try (RecordReader<InternalRow> reader = read.createReader(splits)) {
+                reader.forEachRemaining(
+                        row -> {
+                            assertThat(row.getFieldCount()).isEqualTo(3);
+                            assertThat(row.getRowKind()).isEqualTo(RowKind.INSERT);
+                            actual.add(row.getLong(0) + "|" + row.getInt(1) + "|" + row.getInt(2));
+                        });
+            }
+            assertThat(actual).containsExactlyInAnyOrder("200|20|1", "300|30|1");
+
+            if (schemaVersion == 0) {
+                table.schemaManager()
+                        .commitChanges(
+                                Arrays.asList(
+                                        SchemaChange.renameColumn("a", "renamed_a"),
+                                        SchemaChange.renameColumn("b", "renamed_b")));
+                table = table.copyWithLatestSchema();
+                assertThat(dataSplits.get(0).dataFiles().get(0).schemaId())
+                        .isLessThan(table.schema().id());
+            }
+        }
+    }
 
     @Test
     void testReaderMappingIsNotSharedBetweenReadTypes() throws Exception {
@@ -117,6 +218,7 @@ class RawFileSplitReadTest {
                         table.schemaManager(),
                         table.schema(),
                         table.rowType(),
+                        TableSchema::fields,
                         ignored -> countingFormat,
                         table.store().pathFactory(),
                         table.coreOptions());

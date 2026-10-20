@@ -169,7 +169,11 @@ public class CompactorSourceBuilder {
                     dataStream.filter(
                             rowData -> {
                                 BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
-                                return partitionInfo.get(partition) <= historyMilli;
+                                // a partition missing from the map was first written after the job
+                                // was built
+                                Long lastFileCreationTime = partitionInfo.get(partition);
+                                return lastFileCreationTime != null
+                                        && lastFileCreationTime <= historyMilli;
                             });
             if (parallelism != null) {
                 filterStream.setParallelism(parallelism);

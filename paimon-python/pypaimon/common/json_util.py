@@ -70,6 +70,8 @@ class JSON:
     def from_json(json_str: str, target_class: Type[T]) -> T:
         """Create instance from JSON string"""
         data = json.loads(json_str)
+        if data is None:
+            return None
         return JSON.__from_dict(data, target_class)
 
     @staticmethod

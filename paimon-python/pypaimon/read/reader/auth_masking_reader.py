@@ -217,13 +217,15 @@ def apply_auth_masking(batch: pa.RecordBatch, parsed_rules: Dict[str, dict]):
             target_col_type = original_batch.schema.field(col_idx).type
             masked_columns[col_idx] = _apply_predicate_transform(
                 transform, original_batch, null_type=target_col_type)
+    if not masked_columns:
+        return batch
+    columns = list(batch.columns)
+    fields = list(batch.schema)
     for col_idx, masked_array in masked_columns.items():
         original_field = original_batch.schema.field(col_idx)
-        batch = batch.set_column(
-            col_idx,
-            original_field.with_type(masked_array.type).with_nullable(True),
-            masked_array)
-    return batch
+        columns[col_idx] = masked_array
+        fields[col_idx] = original_field.with_type(masked_array.type).with_nullable(True)
+    return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields, metadata=batch.schema.metadata))
 
 
 class AuthMaskingReader(RecordBatchReader):
@@ -262,7 +264,11 @@ class ColumnProjectReader(RecordBatchReader):
         columns = self._columns
         if "_row_kind" in batch.schema.names and "_row_kind" not in columns:
             columns = ["_row_kind"] + list(columns)
-        return batch.select(columns)
+        if not columns:
+            return zero_column_batch(batch.num_rows, batch.schema.metadata)
+        return pa.RecordBatch.from_arrays(
+            [batch.column(name) for name in columns],
+            schema=pa.schema([batch.schema.field(name) for name in columns], metadata=batch.schema.metadata))
 
     def close(self):
         self._inner.close()

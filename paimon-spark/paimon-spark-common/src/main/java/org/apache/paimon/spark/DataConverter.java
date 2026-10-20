@@ -37,6 +37,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -154,18 +155,17 @@ public class DataConverter {
             throw new UnsupportedOperationException("Unsupported type: " + mapType);
         }
 
-        if (valueType.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BLOB) {
-            InternalArray keys = map.keyArray();
-            for (int i = 0; i < keys.size(); i++) {
-                if (keys.isNullAt(i)) {
-                    throw new IllegalArgumentException(
-                            "Spark MAP<X, BLOB> does not support null keys.");
-                }
-            }
+        InternalArray keys = map.keyArray();
+        String nullKeyErrorMessage =
+                valueType.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BLOB
+                        ? "Spark MAP<X, BLOB> does not support null keys."
+                        : "Spark map data does not support null keys.";
+        for (int i = 0; i < keys.size(); i++) {
+            Preconditions.checkArgument(!keys.isNullAt(i), nullKeyErrorMessage);
         }
 
         return new ArrayBasedMapData(
-                fromPaimonArrayElementType(map.keyArray(), keyType),
+                fromPaimonArrayElementType(keys, keyType),
                 fromPaimonArrayElementType(map.valueArray(), valueType, blobAsDescriptor));
     }
 }

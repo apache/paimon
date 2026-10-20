@@ -51,6 +51,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
@@ -68,9 +69,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
@@ -80,6 +81,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final TableSchema schema;
+    private final Function<TableSchema, List<DataField>> fieldsExtractor;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
@@ -100,12 +102,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             SchemaManager schemaManager,
             TableSchema schema,
             RowType rowType,
+            Function<TableSchema, List<DataField>> fieldsExtractor,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
+        this.fieldsExtractor = fieldsExtractor;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
@@ -263,14 +267,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         return new Builder(
                 formatDiscover,
                 outputRowType.getFields(),
-                schema -> {
-                    if (rowTrackingEnabled) {
-                        // maybe file has no row id and sequence number, but in manifest entry
-                        return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
-                                .getFields();
-                    }
-                    return schema.fields();
-                },
+                fieldsExtractor,
                 filters,
                 pushDownTopN,
                 pushDownLimit,

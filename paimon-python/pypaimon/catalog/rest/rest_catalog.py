@@ -655,7 +655,9 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
-            raise TableNotExistException(identifier) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TABLE:
+                raise TableNotExistException(identifier) from e
+            raise
         except AlreadyExistsException as e:
             raise BranchAlreadyExistException(branch_name) from e
         except ForbiddenException as e:
@@ -675,16 +677,7 @@ class RESTCatalog(Catalog):
 
     def rename_branch(self, identifier: Union[str, Identifier], from_branch: str,
                       to_branch: str) -> None:
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
-        try:
-            self.rest_api.rename_branch(identifier, from_branch, to_branch)
-        except NoSuchResourceException as e:
-            raise BranchNotExistException(from_branch) from e
-        except AlreadyExistsException as e:
-            raise BranchAlreadyExistException(to_branch) from e
-        except ForbiddenException as e:
-            raise TableNoPermissionException(identifier) from e
+        raise NotImplementedError('REST branch rename is not supported, matching Java RESTCatalog.')
 
     def fast_forward(self, identifier: Union[str, Identifier], branch_name: str) -> None:
         if not isinstance(identifier, Identifier):

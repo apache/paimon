@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Range;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -36,6 +37,10 @@ public class LuminaVectorGlobalIndexer implements VectorGlobalIndexer {
 
     private final DataType fieldType;
     private final LuminaVectorIndexOptions options;
+
+    // Metric persisted in the index files read by this indexer, guarded by this.
+    private volatile String persistedMetric;
+    private boolean persistedMetricConflict;
 
     public LuminaVectorGlobalIndexer(DataType fieldType, Options options) {
         this.fieldType = fieldType;
@@ -54,11 +59,41 @@ public class LuminaVectorGlobalIndexer implements VectorGlobalIndexer {
             long totalRowCount,
             List<Range> rowRanges,
             ExecutorService executor) {
-        return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
+        LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
+        recordPersistedMetric(files.get(0).metadata());
+        return reader;
     }
 
+    /**
+     * Returns the metric persisted in the index files read so far, so that raw search and
+     * refinement score rows in the same metric as the index. Falls back to the configured metric
+     * before any reader is created.
+     */
     @Override
     public String metric() {
-        return options.metric().getLuminaName();
+        String metric = persistedMetric;
+        return metric == null ? options.metric().getLuminaName() : metric;
+    }
+
+    private synchronized void recordPersistedMetric(byte[] metadata) {
+        if (persistedMetricConflict) {
+            return;
+        }
+        String metric;
+        try {
+            metric = LuminaIndexMeta.deserialize(metadata).metric().getLuminaName();
+        } catch (IOException | IllegalArgumentException e) {
+            // The reader reports invalid metadata when it loads the index.
+            return;
+        }
+        if (persistedMetric == null) {
+            persistedMetric = metric;
+        } else if (!persistedMetric.equals(metric)) {
+            // Shards built with different metrics have no common metric. Keep using the
+            // configured metric, as before, instead of failing the search.
+            persistedMetricConflict = true;
+            persistedMetric = null;
+        }
     }
 }

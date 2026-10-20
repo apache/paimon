@@ -50,6 +50,7 @@ def test_write_builder_creates_row_id_updater_with_commit_identity(
         stream, commit_identifier):
     table = mock.Mock()
     table.options.commit_user_prefix.return_value = None
+    table.catalog_environment.table_query_auth.return_value = None
     files_info = mock.Mock(
         snapshot_id=42,
         first_row_ids=[0],
@@ -366,6 +367,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['name'].to_pylist(),
         )
 
+    @pytest.mark.python_plan
     @pytest.mark.python_write
     def test_update_by_predicate_processes_one_file_group_at_a_time(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -376,7 +378,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
             ['age'],
         )
-        splits = table.new_read_builder().new_scan().plan_for_write().splits()
+        splits = table.new_read_builder().new_scan().plan_all_files().splits()
         self.assertEqual(1, len(splits))
 
         group_sizes = []

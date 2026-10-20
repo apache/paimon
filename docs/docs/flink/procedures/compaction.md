@@ -128,7 +128,7 @@ To compact databases. Arguments:
 
 - `includingDatabases`: to specify databases. You can use regular expression.
 
-- `mode`: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job; "combined": start a single combined sink for all tables, the new table will be automatically detected.
+- `mode`: compact mode. "divided" (default): start a sink for each table, detecting the new table requires restarting the job; "combined": start a single combined sink for all tables, the new table will be automatically detected. If no table matches, a batch job fails, while a streaming job logs a warning and keeps waiting for matching tables.
 
 - `includingTables`: to specify tables. The format is `databaseName.tableName`, and the whole name must match. You can use regular expression, for example `.*\.table_.*`.
 

@@ -185,7 +185,7 @@ class GlobalIndexBuilder:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
         scan = read_builder.new_scan()
-        plan = scan.plan_for_write()
+        plan = scan.plan_all_files()
         splits = plan.splits()
         if not splits:
             return []
@@ -518,7 +518,7 @@ class GlobalIndexBuilder:
             )
 
     def _validate_generic_index_table(self) -> None:
-        if (self._core_options.deletion_vectors_enabled()
+        if (self._table.options.deletion_vectors_enabled()
                 and not (self._index_type in VINDEX_IDENTIFIERS
                          and self._table.options.data_evolution_enabled())):
             raise ValueError(

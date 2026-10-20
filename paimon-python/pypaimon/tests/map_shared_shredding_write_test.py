@@ -170,7 +170,8 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 reader = table.new_read_builder()
                 result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
                 # Arrow 6 cannot convert non-nullable MAP values to scalars.
-                actual = result.column('metrics').cast(pa.map_(pa.string(), value_type))
+                read_value_type = result.schema.field('metrics').type.item_type
+                actual = result.column('metrics').cast(pa.map_(pa.string(), read_value_type))
                 self.assertEqual(expected, actual.to_pylist())
 
     def test_nested_non_nullable_map_values_in_subprocess(self):

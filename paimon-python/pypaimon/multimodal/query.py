@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type
@@ -184,7 +185,8 @@ class ScanQuery:
             fps=None,
             tolerance_s=None,
             boundary=None,
-            video_backend=None):
+            video_backend=None,
+            anchor_row_ids=None):
         """Build snapshot-pinned training windows from this single-table scan.
 
         The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
@@ -223,6 +225,11 @@ class ScanQuery:
                 Drop retains only anchors valid for every requested offset.
             video_backend: Decoder for video-frame-field columns: ``pyav``,
                 ``torchcodec``, or ``None`` to select the available backend.
+            anchor_row_ids: Optional iterable of Paimon row IDs selecting
+                anchors within this scan's context. Does not remove history or
+                future frames, change stride, reorder or repeat samples. IDs
+                outside the context raise ValueError. This scan, including its
+                filters and limit, still defines the context's group bounds.
 
         Returns:
             A snapshot-pinned ``ContiguousWindowDataset``. See that class for
@@ -248,6 +255,7 @@ class ScanQuery:
             tolerance_s=tolerance_s,
             boundary=boundary,
             video_backend=video_backend,
+            anchor_row_ids=anchor_row_ids,
         )
 
     def to_ray(
@@ -533,7 +541,7 @@ class _PreFilterQuery(ScanQuery):
         added_row_id = projection is None or row_id_name not in projection
         if metadata_only:
             row_ids = pa.array(list(result.results()), type=pa.int64())
-            fields = [pa.field(row_id_name, pa.int64(), nullable=False)] * (len(projection) or 1)
+            fields = [read_arrow_schema([SpecialFields.ROW_ID]).field(row_id_name)] * (len(projection) or 1)
             table = pa.Table.from_arrays(
                 [row_ids] * len(fields), schema=pa.schema(fields))
         else:

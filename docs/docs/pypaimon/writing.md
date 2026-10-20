@@ -72,6 +72,64 @@ Use `new_postpone_fixed_bucket_write_builder()` to write real buckets. New
 partitions are buffered until `prepare_commit()`; existing ones are incremental.
 This builder currently supports `bucket-function.type=default` only.
 
+### Native Write and Commit
+
+With the `pypaimon-rust` extension installed, set `write.native.enabled=true`
+to use Rust for Parquet/BLOB writes and `commit.native.enabled=true` to use
+Rust for REST snapshot publication. Batch and stream writers retain the same
+prepare-and-commit lifecycle. Native commits also support overwrite,
+`truncate_table()`, `truncate_partitions()` and commit callbacks.
+Overwrite and truncate record an OVERWRITE snapshot even when no files match,
+and remove index metadata for the replaced partitions. Physical files remain
+available to historical snapshots. Changelog-only commits also publish a snapshot.
+For Parquet tables, both paths support `manifest.compression=null`, `deflate`,
+`snappy`, `zstd`, `bzip2` and `xz`, including manifests retained from earlier
+snapshots. Overwrite and truncate partition specs convert textual values to the
+declared partition type. `None` and the configured default partition name select
+NULL partitions; malformed values are rejected before publication.
+
+Standard REST tables with `query-auth.enabled=true` can write and commit
+without requesting SELECT permission. The REST server still authorizes snapshot
+publication. Row filters and column masks continue to apply to explicit reads;
+internal sequence-number and HASH-index restoration reads manifest metadata.
+For query-authorized targets, Native row-ID updates, predicate updates/deletes,
+upserts, shard updates and MERGE require an unrestricted whole-table SELECT grant
+before reading target rows or evaluating assignments. A row filter, column mask
+or denied grant rejects the operation; ordinary writes still require no SELECT
+grant. MERGE table sources obtain their own grants independently from the target,
+including historical snapshots and branches.
+Query-authorized cross-partition index bootstrap remains unsupported.
+
+Whole-partition predicate deletes can use Native on primary-key tables configured
+with input changelogs. Native upserts also accept fully NULL source key columns
+with a different physical type, including selected NULL dictionary values.
+
+Native selection checks the formats used by the operation. An unused
+`changelog-file.format` does not prevent Native Parquet writes when no INPUT
+changelog is produced, including batch overwrite. Likewise, `vector.file.format`
+does not prevent Native updates on tables without VECTOR fields. These operations
+continue to write Parquet/BLOB files; an active dedicated format must still be
+supported by the Native path.
+
+`write_ray()` uses the shared Python coordinator and lets workers select Native
+writers. For postpone fixed-bucket writes, overwrite plans use the new input
+unless an explicit bucket plan was supplied. A complete primary-key
+`with_write_type()` leaves the writer unchanged; primary-key column subsets
+remain unsupported.
+
+Append `with_write_type()` preserves the selected column order. Both the full
+table schema and the selected schema are accepted as Arrow input; only selected
+columns are written. Full Arrow inputs and named Rows can carry partition and
+hash columns used only for routing, independently of the physical write type.
+Reads restore omitted partition columns from split metadata. Selected-schema
+inputs must include the routing columns they need; `write_arrow(data, bucket=...)`
+also accepts a bucket assigned upstream.
+
+Native commit selection requires a standard REST catalog and a reconstructible
+built-in FileIO. Other catalogs and custom Python FileIO implementations retain
+the Python path. Binary partition keys require `partition.legacy-name=false` for
+portable names across implementations.
+
 To replace data, configure overwrite on the write builder before creating the
 writer and commit object:
 

@@ -158,6 +158,22 @@ public class TableStatsUtil {
                         null != longColStat.getNullCount() ? longColStat.getNullCount() : null,
                         null,
                         null);
+            } else if (typeRoot.equals(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+                // Flink reports a TIMESTAMP column as the epoch seconds of its wall-clock time
+                return ColStats.newColStats(
+                        field.id(),
+                        null != longColStat.getNdv() ? longColStat.getNdv() : null,
+                        null != longColStat.getMin()
+                                ? org.apache.paimon.data.Timestamp.fromEpochMillis(
+                                        longColStat.getMin() * 1000L)
+                                : null,
+                        null != longColStat.getMax()
+                                ? org.apache.paimon.data.Timestamp.fromEpochMillis(
+                                        longColStat.getMax() * 1000L)
+                                : null,
+                        null != longColStat.getNullCount() ? longColStat.getNullCount() : null,
+                        null,
+                        null);
             } else if (typeRoot.equals(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
                 return ColStats.newColStats(
                         field.id(),

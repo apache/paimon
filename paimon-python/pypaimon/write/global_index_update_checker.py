@@ -58,6 +58,36 @@ def indexed_field_names(global_index_meta, field_by_id) -> set:
     }
 
 
+def _updated_columns_for_commit(table, messages):
+    """Resolve physical update columns by field identity across schema changes."""
+    if table.options.global_index_column_update_action() == GlobalIndexColumnUpdateAction.IGNORE:
+        return set(), set()
+    current = table.table_schema
+    schemas = {current.id: current}
+    names_by_id = {field.id: field.name for field in current.fields}
+    columns, partitions = set(), set()
+    for message in messages:
+        if message.check_from_snapshot is None:
+            continue
+        for file in message.new_files:
+            if file.first_row_id is None and '_ROW_ID' not in (file.write_cols or []):
+                continue
+            if file.schema_id not in schemas:
+                schema = table.schema_manager.get_schema(file.schema_id)
+                if schema is None:
+                    raise ValueError('Cannot resolve update file schema %s' % file.schema_id)
+                schemas[file.schema_id] = schema
+            schema = schemas[file.schema_id]
+            # None also represents full-row updates and compact normal files.
+            # Dedicated Blob/vector files retain their explicit write columns.
+            written = {names_by_id[field.id] for field in schema.data_file_fields(file.write_cols)
+                       if field.id in names_by_id}
+            if written:
+                columns.update(written)
+                partitions.add(message.partition)
+    return columns, partitions
+
+
 def apply_global_index_update_action(
     table,
     snapshot,

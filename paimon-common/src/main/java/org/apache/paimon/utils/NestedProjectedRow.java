@@ -21,16 +21,23 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowKind;
@@ -54,17 +61,20 @@ public class NestedProjectedRow implements InternalRow {
     @Nullable private final NestedProjectedRow[] nestedProjections;
     @Nullable private final int[] nestedArity;
     @Nullable private final ElementProjection[] elementProjections;
+    @Nullable private final VariantProjection[] variantProjections;
     private InternalRow row;
 
     private NestedProjectedRow(
             int[] indexMapping,
             @Nullable NestedProjectedRow[] nestedProjections,
             @Nullable int[] nestedArity,
-            @Nullable ElementProjection[] elementProjections) {
+            @Nullable ElementProjection[] elementProjections,
+            @Nullable VariantProjection[] variantProjections) {
         this.indexMapping = indexMapping;
         this.nestedProjections = nestedProjections;
         this.nestedArity = nestedArity;
         this.elementProjections = elementProjections;
+        this.variantProjections = variantProjections;
     }
 
     public NestedProjectedRow replaceRow(InternalRow row) {
@@ -93,6 +103,7 @@ public class NestedProjectedRow implements InternalRow {
         NestedProjectedRow[] nestedProjections = null;
         int[] nestedArity = null;
         ElementProjection[] elementProjections = null;
+        VariantProjection[] variantProjections = null;
 
         for (int i = 0; i < projectedSize; i++) {
             DataField projected = projectedFields.get(i);
@@ -105,6 +116,15 @@ public class NestedProjectedRow implements InternalRow {
                     dataField.name(),
                     projected.name());
             indexMapping[i] = dataIdx;
+
+            if (dataField.type().is(DataTypeRoot.VARIANT)
+                    && VariantMetadataUtils.isVariantRowType(projected.type())) {
+                if (variantProjections == null) {
+                    variantProjections = new VariantProjection[projectedSize];
+                }
+                variantProjections[i] = new VariantProjection((RowType) projected.type());
+                continue;
+            }
 
             DataTypeRoot typeRoot = projected.type().getTypeRoot();
             if (typeRoot == DataTypeRoot.ROW) {
@@ -131,7 +151,11 @@ public class NestedProjectedRow implements InternalRow {
         }
 
         return new NestedProjectedRow(
-                indexMapping, nestedProjections, nestedArity, elementProjections);
+                indexMapping,
+                nestedProjections,
+                nestedArity,
+                elementProjections,
+                variantProjections);
     }
 
     @Nullable
@@ -318,11 +342,41 @@ public class NestedProjectedRow implements InternalRow {
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
+        if (variantProjections != null && variantProjections[pos] != null) {
+            return row.isNullAt(indexMapping[pos])
+                    ? null
+                    : variantProjections[pos].project(row.getVariant(indexMapping[pos]));
+        }
         if (nestedProjections != null && nestedProjections[pos] != null) {
             InternalRow inner = row.getRow(indexMapping[pos], nestedArity[pos]);
             return nestedProjections[pos].replaceRow(inner);
         }
         return row.getRow(indexMapping[pos], numFields);
+    }
+
+    /** Extracts requested fields from an ordinary Variant using the shared cast semantics. */
+    private static class VariantProjection {
+
+        private final VariantSchema schema;
+        private final FieldToExtract[] fields;
+
+        private VariantProjection(RowType projectedType) {
+            this.schema =
+                    PaimonShreddingUtils.buildVariantSchema(
+                            PaimonShreddingUtils.variantShreddingSchema(DataTypes.VARIANT()));
+            this.fields = PaimonShreddingUtils.getFieldsToExtract(projectedType, schema);
+        }
+
+        private InternalRow project(Variant variant) {
+            GenericVariant value =
+                    variant instanceof GenericVariant
+                            ? (GenericVariant) variant
+                            : new GenericVariant(variant.valueBuffer(), variant.metadataBuffer());
+            GenericRow physicalRow = new GenericRow(schema.numFields);
+            physicalRow.setField(schema.variantIdx, value.value());
+            physicalRow.setField(schema.topLevelMetadataIdx, value.metadata());
+            return PaimonShreddingUtils.assembleVariantStruct(physicalRow, schema, fields);
+        }
     }
 
     // ======================== ElementProjection ========================

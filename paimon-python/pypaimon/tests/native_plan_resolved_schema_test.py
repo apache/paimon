@@ -23,7 +23,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.read.native_plan import native_method_available, native_runtime_available
+from pypaimon.read.native_plan import native_runtime_available
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
@@ -31,7 +31,7 @@ from pypaimon.tests.native_plan_rest_test import rest_catalog  # noqa: F401
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_runtime_available(), reason='Rust planner required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 
 @pytest.fixture(params=[(mode, catalog) for mode in ('append', 'pk', 'de')
@@ -92,7 +92,7 @@ def _read(table, native, predicate=None, projection=None):
             stack.enter_context(patch.object(table.schema_manager, 'latest',
                                              side_effect=AssertionError('schema reload')))
             if (type(table.catalog_environment.catalog_loader) is not RESTCatalogLoader
-                    or native_method_available('Table', 'from_rest_response')):
+                    or native_runtime_available()):
                 stack.enter_context(patch('pypaimon_rust.datafusion.PaimonCatalog',
                                           side_effect=AssertionError('catalog reload')))
             if type(table.catalog_environment.catalog_loader) is JdbcCatalogLoader:

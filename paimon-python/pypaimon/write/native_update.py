@@ -20,45 +20,55 @@
 import json
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
-from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, is_blob_file_field
-from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
+from pypaimon.read.native_plan import _native_query_auth_supported, native_runtime_available
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
+from pypaimon.schema.data_types import MapType, PyarrowFieldParser, RowType, VectorType, is_blob_file_field
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.native_write import native_write_available, _native_partition_types_supported
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
 
-def _native_update_table(table):
+def _native_update_formats_supported(table):
+    return (table.options.file_format() == 'parquet'
+            and (not table.options.with_vector_format() or table.options.vector_file_format() == 'parquet'
+                 or not any(isinstance(field.type, VectorType) for field in table.table_schema.fields)))
+
+
+def _native_update_table(table, *, allow_changelog=False, allow_time_travel=False):
     """Resolve common native update prerequisites before preparing changes."""
     if (type(table) is not FileStoreTable
             or not table.options.native_write_enabled()
-            or table.options.file_format() != 'parquet'
-            or table.options.with_vector_format()
-            or table.options.changelog_producer() != ChangelogProducer.NONE
-            or any(table.options.options.contains_key(key) for key in SCAN_KEYS)
-            or not native_write_available()):
+            or not _native_update_formats_supported(table)
+            or (not allow_changelog and table.options.changelog_producer() != ChangelogProducer.NONE)
+            or (not allow_time_travel and (
+                '_read_snapshot' in vars(table)
+                or any(table.options.options.contains_key(key) for key in SCAN_KEYS)))
+            or not native_runtime_available()
+            or not _native_query_auth_supported(table)):
         return None
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    if not _native_partition_types_supported(
-            schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME)):
-        return None
-    return create_native_write_table(table)
+    native_table = create_native_write_table(table)
+    if native_table is not None and allow_time_travel:
+        from pypaimon.read.native_plan import _with_native_read_snapshot
+        native_table = _with_native_read_snapshot(table, native_table)
+    return native_table
 
 
-def _native_row_id_table(table):
+def _native_row_id_table(table, *, allow_time_travel=True):
     """Row-level operations additionally require a data-evolution table."""
     if (type(table) is not FileStoreTable
             or not table.options.data_evolution_enabled()
             or not table.options.row_tracking_enabled()
             or table.is_primary_key_table):
         return None
-    return _native_update_table(table)
+    return _native_update_table(table, allow_time_travel=allow_time_travel)
 
 
 def create_native_update(table, commit_user, columns):
@@ -97,9 +107,6 @@ def create_native_update_by_row_id(table, commit_user, commit_identifier):
 
 def create_native_shard_updator(table, commit_user, projection, columns, shard, shard_count, stream=False):
     """Core owns whole-file sharding, the captured reader and positional updates."""
-    from pypaimon.read.native_plan import native_method_available
-    if not native_method_available('BatchTableUpdate', 'new_shard_updator'):
-        return None
     if not _native_update_columns_supported(table, columns):
         return None
     native_table = _native_row_id_table(table)
@@ -153,6 +160,95 @@ def _supported_upsert_key_type(data_type):
     ))
 
 
+def _dictionary_value_type(data_type):
+    while pa.types.is_dictionary(data_type):
+        data_type = data_type.value_type
+    return data_type
+
+
+def _native_upsert_key_type_compatible(source, target):
+    """Qualify layouts; exact values and conversion bounds belong to core."""
+    dictionary = pa.types.is_dictionary(source)
+    source = _dictionary_value_type(source)
+    if dictionary:
+        # Python's take kernel can select dictionary indices even when it
+        # cannot take the underlying view/run-end values directly. These
+        # layouts are therefore valid existing matched-upsert inputs.
+        while getattr(pa.types, 'is_run_end_encoded', lambda _: False)(source):
+            source = _dictionary_value_type(source.value_type)
+        if getattr(pa.types, 'is_string_view', lambda _: False)(source):
+            source = pa.string()
+        elif getattr(pa.types, 'is_binary_view', lambda _: False)(source):
+            source = pa.binary()
+    if pa.types.is_union(source):
+        # A Union can contain unused children of unrelated types. Qualify a
+        # possible match here; core validates only the active values exactly.
+        return any(_native_upsert_key_type_compatible(field.type, target) for field in source)
+    if pa.types.is_null(source):
+        return True
+
+    def numeric(data_type):
+        return (pa.types.is_integer(data_type) or pa.types.is_floating(data_type)
+                or pa.types.is_decimal(data_type))
+    if numeric(source) and numeric(target):
+        return True
+    for family in (pa.types.is_date, pa.types.is_time):
+        if family(source) and family(target):
+            return True
+
+    def binary(data_type):
+        return (pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
+                or pa.types.is_fixed_size_binary(data_type))
+    if binary(source) and binary(target):
+        return True
+    if pa.types.is_timestamp(source) and pa.types.is_timestamp(target):
+        return (source.tz is None) == (target.tz is None)
+    return arrow_schemas_compatible(
+        pa.schema([pa.field('key', source)]), pa.schema([pa.field('key', target)]),
+        check_top_level_nullability=False, allow_binary_compatibility=True)
+
+
+def _native_upsert_key_compatible(source, target):
+    if _native_upsert_key_type_compatible(source.type, target):
+        return True
+
+    def nulls(array):
+        if pa.types.is_dictionary(array.type):
+            # Index validity alone misses a selected NULL dictionary value.
+            # Select only its validity bitmap, without decoding key payloads.
+            return pc.fill_null(pc.take(nulls(array.dictionary), array.indices), True)
+        if pa.types.is_union(array.type):
+            # Unions have no validity bitmap. Only the active child's NULL
+            # counts; inactive children can contain unrelated non-NULL values.
+            # Read the parent buffers at its offset because PyArrow's union
+            # type_codes/offsets accessors can omit the offset of a slice.
+            buffers = array.buffers()
+            codes = pa.Array.from_buffers(pa.int8(), len(array), [None, buffers[1]], offset=array.offset)
+            offsets = (pa.Array.from_buffers(pa.int32(), len(array), [None, buffers[2]], offset=array.offset)
+                       if array.type.mode == 'dense' else None)
+            result = pc.fill_null(pa.nulls(len(array), type=pa.bool_()), False)
+            for index, code in enumerate(array.type.type_codes):
+                active = pc.equal(codes, code)
+                child_nulls = nulls(array.field(index))
+                if offsets is not None:
+                    child_nulls = pc.take(child_nulls, pc.if_else(active, offsets, None))
+                result = pc.if_else(active, child_nulls, result)
+            return result
+        return array.is_null()
+
+    try:
+        chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
+        for chunk in chunks:
+            if chunk.null_count != len(chunk) and not pc.all(nulls(chunk)).as_py():
+                return False
+            # Keep Python's existing input contract. In particular, bare view
+            # and run-end inputs have no take kernel on supported PyArrow.
+            pc.take(chunk, pa.array([], type=pa.int64()))
+        return True
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError, TypeError):
+        return False
+
+
 def _native_update_columns_supported(table, columns):
     """Core writes Parquet columns and Java-compatible sparse Blob deltas."""
     if type(table) is not FileStoreTable:
@@ -195,7 +291,7 @@ def create_native_upsert(table, commit_user, data, keys, columns):
         # An upsert can append unmatched rows; packed video writing is still
         # provided by the Python writer.
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(table, allow_time_travel=False)
     if native_table is None:
         return None
     fields = table.table_schema.fields
@@ -212,11 +308,25 @@ def create_native_upsert(table, commit_user, data, keys, columns):
             from pypaimon.write.native_blob_rows import NativeBlobRows
             blob_rows = NativeBlobRows()
         data = _upsert_row_batches(data, fields, schema, table, blob_rows)
-    elif (len(data.column_names) != len(set(data.column_names))
-            or not set(data.column_names) <= set(schema.names)
-            or any(data.schema.field(name).type != schema.field(name).type
-                   for name in data.column_names)):
-        return None
+    else:
+        if (len(data.column_names) != len(set(data.column_names))
+                or not set(data.column_names) <= set(schema.names)):
+            return None
+        # Keys need a shared representation before matching. Core selects
+        # surviving payloads before applying row-ID update or append rules;
+        # validating all payload types here would reject valid matched updates.
+        key_names = list(dict.fromkeys(keys + table.partition_keys))
+        for name in key_names:
+            field = data.schema.field(name)
+            if pa.types.is_null(field.type):
+                # An untyped NULL has the same match identity as a typed NULL.
+                # Give core the declared key layout without casting payloads.
+                data = data.set_column(
+                    data.schema.get_field_index(name), field.with_type(schema.field(name).type),
+                    pa.nulls(data.num_rows, type=schema.field(name).type))
+        if not all(_native_upsert_key_compatible(data.column(name), schema.field(name).type)
+                   for name in key_names):
+            return None
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user)
               .new_update()
@@ -246,11 +356,8 @@ def create_native_predicate_update(table, commit_user, predicate, columns=None):
 
 def native_predicate_row_ids(scan_table, predicate, splits):
     """Match a batch delete predicate in Rust and return its row IDs."""
-    from pypaimon.read.native_plan import (
-        _prepare_native_read, native_split_bridge_available,
-        native_split_from_python,
-    )
-    if not native_split_bridge_available():
+    from pypaimon.read.native_plan import _prepare_native_read, native_split_from_python
+    if not native_runtime_available():
         return None
     reader = _prepare_native_read(
         scan_table, predicate=predicate, projection=['_ROW_ID']
@@ -264,12 +371,26 @@ def native_predicate_row_ids(scan_table, predicate, splits):
 
 def create_native_predicate_delete(table, commit_user, predicate):
     """Delegate matching and partition metadata deletion to the core updater."""
-    from pypaimon.read.native_plan import _predicate_to_native, native_method_available
-    if not native_method_available('BatchTableUpdate', 'delete_by_predicate'):
+    from pypaimon.read.native_plan import _predicate_to_native
+    if type(table) is not FileStoreTable:
         return None
+
+    def canonical_paths(node):
+        if node.field_path and node.field_path != [node.field]:
+            return False
+        return (all(canonical_paths(child) for child in (node.literals or []))
+                if node.method in ('and', 'or') else True)
+
     # Core selects whole-partition metadata deletes for append/PK tables too;
     # only the row-level branch requires row tracking and deletion vectors.
-    native_table = _native_update_table(table)
+    from pypaimon.write.table_update import TableUpdate
+    fields = set() if predicate is None else TableUpdate._predicate_fields(predicate)
+    partition_delete = (table.is_primary_key_table and bool(fields)
+                        and fields.issubset(table.partition_keys) and canonical_paths(predicate))
+    # Partition deletion removes complete file/index metadata. It does not
+    # produce row-level changes, even when the PK writer emits changelogs.
+    # Core still validates the translated predicate and selects this fast path.
+    native_table = _native_update_table(table, allow_changelog=partition_delete, allow_time_travel=True)
     if native_table is None:
         return None
     native_predicate = None if predicate is None else _predicate_to_native(predicate)
@@ -400,7 +521,7 @@ class NativeTableUpsert:
                 self.writer.upsert_by_arrow_with_key(self.data, self.keys))
         finally:
             if self.blob_rows is not None:
-                self.blob_rows.readers.clear()
+                self.blob_rows.clear()
 
 
 class NativePredicateTableUpdate:

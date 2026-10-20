@@ -20,10 +20,12 @@ import shutil
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.common.options.core_options import CoreOptions
 
 
@@ -48,7 +50,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=cls.pa_schema)
+        }, schema=read_arrow_schema(Schema.from_pyarrow_schema(cls.pa_schema).fields))
 
     @classmethod
     def tearDownClass(cls):
@@ -276,7 +278,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=self.pa_schema)
+        }, schema=read_arrow_schema(table.fields))
         self.assertEqual(actual, expected)
 
     def test_nullable_primary_key(self):
@@ -481,7 +483,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=self.pa_schema)
+        }, schema=read_arrow_schema(table.fields))
         self.assertEqual(expected, actual)
         # test 3
         table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(t1) + ',' + str(t2)})
@@ -492,7 +494,7 @@ class PkReaderTest(unittest.TestCase):
             "item_id": [1002, 1005, 1007, 1008],
             "behavior": ["b-new", "e", "g", "h"],
             "dt": ["p1", "p2", "p1", "p2"]
-        }, schema=self.pa_schema)
+        }, schema=read_arrow_schema(table.fields))
         self.assertEqual(expected, actual)
 
     def test_incremental_read_multi_snapshots(self):
@@ -530,7 +532,7 @@ class PkReaderTest(unittest.TestCase):
             'item_id': [1000 + i for i in range(11, 21)],
             'behavior': [f'snap{i}' for i in range(11, 21)],
             'dt': ['p1' if i % 2 == 1 else 'p2' for i in range(11, 21)],
-        }, schema=self.pa_schema).sort_by('user_id')
+        }, schema=read_arrow_schema(table.fields)).sort_by('user_id')
         self.assertEqual(expected, actual)
 
     def test_manifest_creation_time_timestamp(self):
@@ -561,14 +563,12 @@ class PkReaderTest(unittest.TestCase):
                     epoch_millis = entry.file.creation_time_epoch_millis()
                     self.assertIsNotNone(epoch_millis)
                     self.assertGreater(epoch_millis, 0)
-                    import time
-                    expected_epoch_millis = creation_time.get_millisecond()
-                    local_dt = creation_time.to_local_date_time()
-                    local_time_struct = local_dt.timetuple()
-                    local_timestamp = time.mktime(local_time_struct)
-                    local_time_struct_utc = time.gmtime(local_timestamp)
-                    utc_timestamp = time.mktime(local_time_struct_utc)
-                    expected_epoch_millis = int(utc_timestamp * 1000)
+                    # Java resolves the stored local TIMESTAMP in the system
+                    # zone once and retains all millisecond digits.
+                    instant = creation_time.to_local_date_time().astimezone(timezone.utc)
+                    delta = instant - datetime(1970, 1, 1, tzinfo=timezone.utc)
+                    expected_epoch_millis = ((delta.days * 86400 + delta.seconds) * 1000
+                                             + delta.microseconds // 1000)
                     self.assertEqual(epoch_millis, expected_epoch_millis)
                     creation_times_found.append(epoch_millis)
 

@@ -220,7 +220,9 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public SnapshotLoader snapshotLoader() {
-        if (catalogLoader == null) {
+        // Catalogs without version management cannot load snapshots, avoid loading the catalog
+        // only to fall back to the file system.
+        if (catalogLoader == null || !supportsVersionManagement) {
             return null;
         }
         return new SnapshotLoaderImpl(catalogLoader, identifier, uuid);

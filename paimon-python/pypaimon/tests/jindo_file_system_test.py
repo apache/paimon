@@ -19,11 +19,13 @@ import gc
 import io
 import os
 import pickle
+import signal
 import threading
 import time
 import types
 import unittest
 import uuid
+import warnings
 import weakref
 from unittest import mock
 
@@ -93,6 +95,68 @@ class JindoInputFileTest(unittest.TestCase):
 
         self.assertEqual(b"x" * 60, input_file.read())
         self.assertEqual([60], stream.reads)
+
+
+class JindoStreamStatsTest(unittest.TestCase):
+
+    def setUp(self):
+        stats = jindo_module._StreamStats
+        for name in ("open", "milestone"):
+            self.addCleanup(setattr, stats, name, getattr(stats, name))
+        stats.open, stats.milestone = 0, 2
+
+    def test_logs_only_when_open_streams_pass_a_power_of_two(self):
+        with self.assertLogs(jindo_module.__name__, level="INFO") as logs:
+            files = [JindoInputFile(_RecordingInputStream(), owner=object()) for _ in range(3)]
+            # The output stream is the one that passes 4.
+            files.append(JindoOutputFile(_RecordingInputStream(), owner=object()))
+        self.assertEqual(["2 streams of JindoFileSystemHandler are open",
+                          "4 streams of JindoFileSystemHandler are open"],
+                         [r.getMessage().split(";")[0] for r in logs.records])
+
+        files.pop().close()
+        self.assertEqual(3, jindo_module._StreamStats.open)
+        files.pop(0).close()
+        # Dropping an unclosed stream closes it, so it no longer counts as open.
+        files.pop(0)
+        gc.collect()
+        self.assertEqual(1, jindo_module._StreamStats.open)
+        files[0].close()
+        files[0].close()
+        self.assertEqual(0, jindo_module._StreamStats.open)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs os.fork")
+    def test_forked_child_counts_streams_while_a_parent_thread_holds_the_lock(self):
+        held, release = threading.Event(), threading.Event()
+
+        def hold():
+            with jindo_module._StreamStats._lock:
+                held.set()
+                release.wait()
+
+        thread = threading.Thread(target=hold)
+        thread.start()
+        held.wait()
+        try:
+            with warnings.catch_warnings():
+                # Python 3.12+ warns about forking with other threads alive, which this test does on purpose.
+                warnings.simplefilter("ignore", DeprecationWarning)
+                pid = os.fork()
+            if pid == 0:
+                code = 1
+                try:
+                    signal.alarm(10)
+                    JindoInputFile(_RecordingInputStream(), owner=object()).close()
+                    code = 0 if jindo_module._StreamStats.open == 0 else 2
+                finally:
+                    os._exit(code)
+            status = os.waitpid(pid, 0)[1]
+        finally:
+            release.set()
+            thread.join()
+        self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
+                         "the forked child blocked on a lock held by a parent thread")
+        self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
 
 
 class JindoConfigTest(unittest.TestCase):

@@ -207,8 +207,7 @@ class RayIntegrationTest(unittest.TestCase):
         from pypaimon.data.generic_variant import GenericVariant
         from pypaimon.read.datasource.ray_datasource import RayDatasource
         from pypaimon.read.datasource.split_provider import CatalogSplitProvider
-        from pypaimon.read.native_plan import (
-            native_method_available, native_split_bridge_available)
+        from pypaimon.read.native_plan import native_runtime_available
         from pypaimon.ray import read_paimon
 
         variant_type = pa.struct([
@@ -241,8 +240,7 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(len(datasource.get_read_tasks(1)), 1)
         self.assertEqual(datasource._schema.names, list(expressions))
         self.assertEqual(datasource._schema.field('x').type, pa.float32())
-        if (native_split_bridge_available()
-                and native_method_available('ReadBuilder', 'with_read_type')):
+        if native_runtime_available():
             rows = read_paimon(
                 identifier, self.catalog_options,
                 projection=expressions).take_all()

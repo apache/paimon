@@ -116,17 +116,48 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
-        if (auxiliaryFileWriters.isEmpty()
-                && sequenceNumberTracker.supportsRowCountUpdate()
-                && !requiresPerRecordStats()) {
-            long rowCount = bundle.rowCount();
-            super.writeBundle(bundle);
-            sequenceNumberTracker.updateByRowCount(rowCount);
+        if (!canForwardBundle(bundle)) {
+            for (InternalRow row : bundle) {
+                write(row);
+            }
             return;
         }
 
-        for (InternalRow row : bundle) {
-            write(row);
+        long rowCount = bundle.rowCount();
+        writeFileIndexes(bundle);
+        super.writeBundle(bundle);
+        sequenceNumberTracker.updateByRowCount(rowCount);
+    }
+
+    private boolean canForwardBundle(BundleRecords bundle) {
+        if (!sequenceNumberTracker.supportsRowCountUpdate() || requiresPerRecordStats()) {
+            return false;
+        }
+        return auxiliaryFileWriters.isEmpty()
+                || (bundle instanceof VectorizedBundleRecords
+                        && auxiliaryFileWriters.stream()
+                                .allMatch(
+                                        writer -> writer instanceof DataFileIndexAuxiliaryWriter));
+    }
+
+    private void writeFileIndexes(BundleRecords bundle) throws IOException {
+        if (auxiliaryFileWriters.isEmpty()) {
+            return;
+        }
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+        // Vectorized bundles expose repeatable row views without consuming the batch.
+        // Read index fields before the format writer may transfer the borrowed buffers.
+        try {
+            for (InternalRow row : bundle) {
+                for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
+                    auxiliaryFileWriter.write(row);
+                }
+            }
+        } catch (Throwable e) {
+            abort();
+            throw e;
         }
     }
 

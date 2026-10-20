@@ -2689,6 +2689,18 @@ public class CoreOptions implements Serializable {
                                     + "selected row count is no more than "
                                     + "data-evolution.row-sidecar.max-selected-rows.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED =
+            key("data-evolution.merged-read.stats-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to push filters down into a row-id range whose columns are "
+                                    + "merged from several data files. The rows which may match "
+                                    + "are computed from the file statistics and page indexes of "
+                                    + "the files holding the latest values of the filtered "
+                                    + "columns, then every file of the range reads only these "
+                                    + "rows. Only Parquet files are supported.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")
                     .booleanType()
@@ -3858,17 +3870,6 @@ public class CoreOptions implements Serializable {
         return fields;
     }
 
-    /**
-     * Returns the set of BLOB fields that support partial updates (e.g. via MERGE INTO).
-     *
-     * <p>Currently, only descriptor-based BLOB fields (configured via {@link
-     * #BLOB_DESCRIPTOR_FIELD}) are updatable. Raw-data BLOB fields are not updatable because the
-     * update cost is too high.
-     */
-    public Set<String> updatableBlobFields() {
-        return blobInlineField();
-    }
-
     private Set<String> parseCommaSeparatedSet(ConfigOption<String> option) {
         return options.getOptional(option)
                 .map(
@@ -4653,6 +4654,10 @@ public class CoreOptions implements Serializable {
                 "The option %s must be greater than 0.",
                 DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.key());
         return maxSelectedRows;
+    }
+
+    public boolean dataEvolutionMergedReadStatsPushdownEnabled() {
+        return options.get(DATA_EVOLUTION_MERGED_READ_STATS_PUSHDOWN_ENABLED);
     }
 
     public double dataEvolutionRowSidecarMaxSelectionRatio() {

@@ -22,12 +22,15 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -203,6 +206,69 @@ public class IcebergDVCompatibilityTest {
     }
 
     @Test
+    public void testChangedPartitionCountWithDeletionVectorOnlyChange() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        customOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        1,
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        BinaryRow pt1 = partition(1);
+        BinaryRow pt2 = partition(2);
+
+        for (int pt = 1; pt <= 2; pt++) {
+            for (int k = 1; k <= 3; k++) {
+                write.write(GenericRow.of(pt, k, k));
+            }
+        }
+        write.compact(pt1, 0, true);
+        write.compact(pt2, 0, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // compact to generate dv index in both partitions
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 1));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 2, 1, 1));
+        write.compact(pt1, 0, false);
+        write.compact(pt2, 0, false);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(
+                        table.store().newIndexFileHandler()
+                                .scan(DeletionVectorsIndexFile.DELETION_VECTORS_INDEX).stream()
+                                .map(IndexManifestEntry::partition)
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(pt1, pt2);
+        assertThat(latestIcebergSummary(table)).containsEntry("changed-partition-count", "2");
+
+        // only the deletion vector of pt=1 changes
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 2, 2));
+        write.compact(pt1, 0, false);
+        commit.commit(3, write.prepareCommit(true, 3));
+        validateIcebergResult(
+                Arrays.asList(
+                        new Object[] {1, 3, 3}, new Object[] {2, 2, 2}, new Object[] {2, 3, 3}));
+        assertThat(latestIcebergSummary(table)).containsEntry("changed-partition-count", "1");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testUpgradeFormatVersion() throws Exception {
         RowType rowType =
                 RowType.of(
@@ -281,6 +347,24 @@ public class IcebergDVCompatibilityTest {
             paimonCatalog.createTable(paimonIdentifier, schema, false);
             return (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
         }
+    }
+
+    private static BinaryRow partition(int pt) {
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, pt);
+        writer.complete();
+        return partition;
+    }
+
+    private Map<String, String> latestIcebergSummary(FileStoreTable table) {
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        return IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json"))
+                .currentSnapshot()
+                .summary()
+                .getSummary();
     }
 
     private void validateIcebergResult(List<Object[]> expected) throws Exception {

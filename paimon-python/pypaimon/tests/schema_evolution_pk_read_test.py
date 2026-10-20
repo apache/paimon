@@ -247,7 +247,7 @@ class SchemaEvolutionPkReadTest(unittest.TestCase):
         builder = table.new_read_builder()
         scan = builder.new_scan()
         self.assertEqual(scan.plan().splits(), [])
-        rows = builder.new_read().to_arrow(scan.plan_for_write().splits()).to_pylist()
+        rows = builder.new_read().to_arrow(scan.plan_all_files().splits()).to_pylist()
         self.assertEqual(rows, [
             {'id': 1, 'v': 'first', 'w': None}])
 

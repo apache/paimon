@@ -16,13 +16,11 @@
 
 """Optional Rust data writer behind PyPaimon's batch and stream builders."""
 
-from importlib import import_module
-
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.native_commit import (
@@ -31,40 +29,22 @@ from pypaimon.write.native_commit import (
 from pypaimon.write.row_utils import require_columns, row_to_named_values, row_values_to_arrow_table
 
 
-def native_write_available() -> bool:
-    """Whether the optional Rust bindings are installed."""
-    try:
-        import_module('pypaimon_rust.datafusion')
-    except ImportError:
-        return False
-    return True
-
-
-def _native_partition_types_supported(schema, partition_keys, legacy_partition_name=True):
-    """Partition keys which Rust can encode and use to locate existing files."""
-    # Java's legacy byte[].toString() contains an allocation identity, so binary
-    # partitions only have portable names with the cast-based option.
-    return not legacy_partition_name or not any(
-        pa.types.is_binary(data_type) or pa.types.is_large_binary(data_type)
-        or pa.types.is_fixed_size_binary(data_type)
-        for data_type in (schema.field(name).type for name in partition_keys))
-
-
 def create_native_write(table, commit_user, static_partition=None, stream=False,
                         *, fixed_bucket=False, bucket_plan=None, restore_snapshot_id=None):
     """Return a native writer if the table can use the filesystem write path."""
-    schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
     # DV tables flush normal level-0 files using the configured merge engine.
     # Batch visibility is controlled by deletion-vectors.merge-on-read.
-    if (not native_write_available()
+    if (not native_runtime_available()
             or table.bucket_mode() not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC,
                                            BucketMode.BUCKET_UNAWARE,
                                            BucketMode.CROSS_PARTITION,
                                            BucketMode.POSTPONE_MODE)
-            or table.options.changelog_file_format() not in (None, 'parquet')
+            # The format matters only when this write emits INPUT changelogs.
+            # Batch overwrites suppress them because they cannot be committed.
+            or (table.options.changelog_file_format() not in (None, 'parquet')
+                and table.options.changelog_producer() == ChangelogProducer.INPUT
+                and (stream or static_partition is None))
             or table.options.file_format() != 'parquet'
-            or not _native_partition_types_supported(
-                schema, table.partition_keys, table.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME))
             or table.options.video_frame_fields()):
         return None
     native_table = create_native_write_table(table)
@@ -114,6 +94,7 @@ class NativeTableWrite:
         self._blob_uri_reader_factory = None
         self._restore_snapshot_id = restore_snapshot_id
         self._blob_rows = None
+        self._defer_blob_input = False
         if any(is_blob_file_field(field) for field in table.table_schema.fields):
             from pypaimon.write.native_blob_rows import NativeBlobRows
             self._blob_rows = NativeBlobRows()
@@ -159,11 +140,15 @@ class NativeTableWrite:
             return self._python_writer.with_write_type(write_cols)
         if self._written:
             raise RuntimeError('with_write_type must be called before writing; after native data it cannot change')
+        names = list(write_cols)
         if self.table.is_primary_key_table:
+            if len(names) == len(self._table_schema.names) and set(names) == set(self._table_schema.names):
+                # Python treats a complete PK write type as the unchanged table
+                # schema. It does not configure a PK column-subset writer.
+                return self
             # Core's write type is an append-table operation. Keep the existing
             # Python writer contract for PK setters before any data is staged.
-            return self._switch_to_python().with_write_type(write_cols)
-        names = list(write_cols)
+            return self._switch_to_python().with_write_type(names)
         self._native_writer.with_write_type(names)
         self._schema = pa.schema([self._table_schema.field(name) for name in names])
         self._write_cols = names
@@ -227,28 +212,46 @@ class NativeTableWrite:
         self._native_writer.write_arrow(data, bucket)
 
     def _prepare_native_arrow_data(self, data):
-        data = normalize_arrow_strings(data)
-        target = self._table_schema if data.schema.names == self._table_schema.names else self._schema
-        data = normalize_arrow_write_nullability(data, target)
-        if self._write_cols is not None and arrow_schemas_compatible(
-                data.schema, self._table_schema, check_top_level_nullability=False,
-                allow_binary_compatibility=True):
-            # Python accepts either the table schema or the selected schema.
-            # Project the input before handing its actual write type to core.
-            data = data.select(self._write_cols)
-        if not arrow_schemas_compatible(
-                data.schema, self._schema, check_top_level_nullability=False,
-                allow_binary_compatibility=True):
+        # Core resolves row kinds and filters ignored events before inspecting
+        # payload values. This facade checks only the logical Arrow schema.
+        compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True,
+                          check_nested_nullability=False)
+        if not (arrow_schemas_compatible(data.schema, self._schema, **compatible)
+                or (self._write_cols is not None
+                    and arrow_schemas_compatible(data.schema, self._table_schema, **compatible))):
             raise ValueError(
                 "Input schema isn't consistent with table schema and write cols. "
                 f"Input schema is: {data.schema} Table schema is: {self._schema} "
                 f"Write cols is: {self._write_cols}")
+        # Full input can carry routing columns outside the physical write type.
+        # Core routes rows first and writes only the selected columns.
         return data
 
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
             return self._python_writer.write_pandas(dataframe)
-        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=self._schema))
+        from pypaimon.write.table_write import _pandas_write_batch
+        self.write_arrow_batch(_pandas_write_batch(self.table, dataframe, self._schema, self._table_schema))
+
+    def write_ray(self, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
+                  hash_fixed_precluster='auto', static_partition=None):
+        if self._python_writer is not None:
+            return self._python_writer.write_ray(
+                dataset, overwrite, concurrency, ray_remote_args, hash_fixed_precluster, static_partition)
+        from pypaimon.write.table_write import _write_ray
+        _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
+                   hash_fixed_precluster, static_partition)
+
+    def _distributed_write_options(self, *, overwrite=False):
+        return {}
+
+    def roll_before_group_if_needed(self, row_count):
+        if self._python_writer is not None:
+            return self._python_writer.roll_before_group_if_needed(row_count)
+        if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count <= 0:
+            raise ValueError('Group row count must be a positive integer.')
+        # Python's group boundary only affects packed video writers. Native
+        # selection excludes video, so ordinary Parquet/BLOB writes do not roll.
 
     def write_row(self, row):
         if self._python_writer is not None:
@@ -258,8 +261,23 @@ class NativeTableWrite:
         require_columns(values, names, 'write_row')
         require_columns(values, self.table.partition_keys, 'write_row')
         from pypaimon.write.row_kind import skip_write_row, with_row_kind
-        if skip_write_row(self.table, values, row.get_row_kind()):
+        if skip_write_row(self.table, values, row.get_row_kind(), self._write_cols):
             return
+        if self._write_cols is not None:
+            routing = list(self.table.partition_keys)
+            if ((self.table.bucket_mode() == BucketMode.HASH_FIXED and self.table.options.bucket() > 1)
+                    or isinstance(self, NativePostponeFixedBucketTableWrite)):
+                routing.extend(self.table.table_schema.bucket_keys)
+            row_kind_field = self.table.options.options.to_map().get('rowkind.field')
+            if row_kind_field is not None:
+                routing.append(row_kind_field)
+            require_columns(values, routing, 'write_row')
+            if not set(routing).issubset(names):
+                retained = set(names) | set(routing)
+                names = self._table_schema.names
+                # Only routing and written values need transport. In particular,
+                # an unwritten Blob object must not be opened or encoded.
+                values = {name: values.get(name) if name in retained else None for name in names}
         try:
             data = (self._blob_rows.to_batch(self.table, [values], names)
                     if self._blob_rows is not None else
@@ -270,7 +288,9 @@ class NativeTableWrite:
             # Core externalizes Blob values during write, before buffering PK
             # records. Their live Python objects need not survive the call.
             if self._blob_rows is not None:
-                self._blob_rows.readers.clear()
+                self._blob_rows.release_consumed()
+                if not self._defer_blob_input:
+                    self._blob_rows.clear()
 
     def prepare_commit(self, commit_identifier=None):
         if self._python_writer is not None:
@@ -284,7 +304,11 @@ class NativeTableWrite:
         else:
             if commit_identifier is not None:
                 raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
-            messages = self._native_writer.prepare_commit()
+            try:
+                messages = self._native_writer.prepare_commit()
+            finally:
+                if self._blob_rows is not None and self._defer_blob_input:
+                    self._blob_rows.clear()
         return from_native_commit_messages(self.table, messages)
 
     def close(self):
@@ -294,7 +318,7 @@ class NativeTableWrite:
             self._native_writer.close()
             self._native_writer = None
         if self._blob_rows is not None:
-            self._blob_rows.readers.clear()
+            self._blob_rows.clear()
 
     def abort(self):
         if self._python_writer is not None:
@@ -316,8 +340,18 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
     def __init__(self, table, commit_user, static_partition, bucket_plan, native_writer):
         super().__init__(table, commit_user, static_partition, False, native_writer)
         self._bucket_plan = bucket_plan
+        # Automatic planning stages input until all partition sizes are known.
+        self._defer_blob_input = (bucket_plan is None
+                                  and table.options.postpone_default_bucket_num() is None)
 
     def _new_python_writer(self):
         from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
         return self._configure_python_writer(PostponeFixedBucketBatchTableWrite(
             self.table, self.commit_user, self.static_partition, self._bucket_plan))
+
+    def _distributed_write_options(self, *, overwrite=False):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+        return {'postpone_bucket_planner': PostponeBucketPlanner(
+            self.table, known_num_buckets=(
+                self._bucket_plan.as_dict() if self._bucket_plan is not None
+                else {} if overwrite else None))}

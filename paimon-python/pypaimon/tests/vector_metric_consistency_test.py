@@ -167,13 +167,23 @@ class VectorMetricResolutionTest(unittest.TestCase):
         self.assertEqual('inner_product', _raw_search_metric(
             self.table, self.column, {'fields.other.metric': 'l2'}, 'ivf-flat'))
 
-    def test_raw_only_defaults_match_vindex_writers(self):
-        for kind in ('ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann'):
+    def test_raw_only_defaults_match_index_writers(self):
+        for kind in ('ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann', 'lumina', 'lumina-vector-ann'):
             self.assertEqual('inner_product', _raw_search_metric(self.table, self.column, {}, kind))
             self.assertEqual('cosine', _raw_search_metric(
                 self.table, self.column, {'metric': 'cosine'}, kind))
         self.assertEqual('l2', _raw_search_metric(self.table, self.column, {}))
-        self.assertEqual('l2', _raw_search_metric(self.table, self.column, {}, 'lumina'))
+
+    def test_known_families_ignore_other_columns_metric(self):
+        for kind in ('ivf-flat', 'lumina', 'lumina-vector-ann'):
+            with self.subTest(index_type=kind):
+                self.table.options.options.to_map()['fields.other.metric'] = 'l2'
+                self.assertEqual('inner_product', _raw_search_metric(
+                    self.table, self.column, {'fields.other.metric': 'cosine'}, kind))
+                self.assertEqual('cosine', _raw_search_metric(
+                    self.table, self.column, {kind + '.distance.metric': 'cosine'}, kind))
+                self.assertEqual('l2', _raw_search_metric(
+                    self.table, self.column, {'fields.embedding.distance.metric': 'l2'}, kind))
 
     def test_reader_closes_on_metadata_and_metric_errors(self):
         entry = _entry(None, field_id=1, index_type='ivf-flat', file_name='vectors.index',

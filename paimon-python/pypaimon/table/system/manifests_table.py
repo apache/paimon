@@ -24,7 +24,7 @@ import pyarrow
 from pypaimon.casting.row_to_string import cast_row_to_string
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
-from pypaimon.table.system.system_table import SystemTable
+from pypaimon.table.system.system_table import SystemTable, metadata_snapshot
 
 
 TABLE_TYPE = RowType(False, [
@@ -53,7 +53,7 @@ class ManifestsTable(SystemTable):
         return ["file_name"]
 
     def _build_arrow_table(self) -> pyarrow.Table:
-        snapshot = self.base_table.snapshot_manager().get_latest_snapshot()
+        snapshot = metadata_snapshot(self.base_table)
         if snapshot is None:
             return self._empty_table()
 

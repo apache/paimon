@@ -27,10 +27,10 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.native_write import NativeTableWrite, native_write_available
+from pypaimon.write.native_write import NativeTableWrite, native_runtime_available
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_write_available(), reason='pypaimon-rust runtime required')]
+    not native_runtime_available(), reason='pypaimon-rust not installed')]
 
 
 @pytest.mark.parametrize('stream', [False, True])
@@ -360,23 +360,28 @@ def test_old_sidecar_schema_evolves_by_field_id(tmp_path, external):
     assert actual.schema.field('id').type == pa.int64()
 
 
-def test_bitmap_and_limit_keep_primary_without_requested_row_ranges(tmp_path):
+@pytest.mark.parametrize('mode', ['bitmap', 'limit'])
+def test_bitmap_and_limit_select_expected_source_without_requested_row_ranges(tmp_path, mode):
     table = _table(tmp_path, options={'file-index.bitmap.columns': 'id'})
     messages = _append(table)
-    for message in messages:
-        for file in message.new_files:
-            os.remove(next(path for path in file.collect_files() if path.endswith('.row')))
-    for mode in ['bitmap', 'limit']:
-        builder = table.new_read_builder()
-        if mode == 'bitmap':
-            builder.with_filter(builder.new_predicate_builder().equal('id', 5))
-        else:
-            builder.with_limit(1)
-        read = builder.new_read()
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
-            actual = read.to_arrow(builder.new_scan().plan().splits())
-        expected_id = 5 if mode == 'bitmap' else 0
-        assert actual.to_pydict() == {'id': [expected_id], 'value': ['v%d' % expected_id]}
+    if mode == 'bitmap':
+        # A selective bitmap now chooses ROW even without caller row ranges.
+        _remove_primaries(messages)
+    else:
+        # LIMIT alone still reads the primary Parquet file.
+        for message in messages:
+            for file in message.new_files:
+                os.remove(next(path for path in file.collect_files() if path.endswith('.row')))
+    builder = table.new_read_builder()
+    if mode == 'bitmap':
+        builder.with_filter(builder.new_predicate_builder().equal('id', 5))
+    else:
+        builder.with_limit(1)
+    read = builder.new_read()
+    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+        actual = read.to_arrow(builder.new_scan().plan().splits())
+    expected_id = 5 if mode == 'bitmap' else 0
+    assert actual.to_pydict() == {'id': [expected_id], 'value': ['v%d' % expected_id]}
 
 
 @pytest.mark.parametrize('option', ['blob-descriptor-field', 'blob.stored-descriptor-fields'])

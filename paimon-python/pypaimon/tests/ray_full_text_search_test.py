@@ -91,5 +91,75 @@ def test_multiple_index_shards_and_worker_failure(docs, ray_cluster):
     assert query.to_list(execution="ray") == query.to_list()
 
 
-def _fail_index(reader, item):
+def _fail_index(reader, item, scalar_filter=None):
     raise RuntimeError("injected full-text failure")
+
+
+@pytest.mark.parametrize("scalar_index", [None, "btree", "bitmap"])
+def test_prefilter_and_deletion_vector_reads_stay_off_driver(docs, ray_cluster, scalar_index):
+    from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
+    from pypaimon.table.source import global_index_live_row_filter
+
+    if scalar_index:
+        docs.raw_table.copy({"deletion-vectors.enabled": "false"}).create_global_index("label", scalar_index)
+    text_fixtures.append_rows(docs)
+    docs.delete("id = 1")
+    query = docs.search("paimon", column="text", pre_filter="label LIKE '%target%'").select(
+        ["id"]).with_score().order_by_score()
+    expected = query.to_list()
+    # Workers load their own module globals; these guards apply to the driver.
+    with patch.object(DataEvolutionFullTextRead, "_matched_indexed_rows",
+                      side_effect=AssertionError("driver scalar evaluation")), \
+            patch.object(DataEvolutionFullTextRead, "_matching_rows",
+                         side_effect=AssertionError("driver candidate data read")), \
+            patch.object(global_index_live_row_filter, "live_rows",
+                         side_effect=AssertionError("driver deletion-vector read")):
+        assert query.to_list(execution="ray", concurrency=2) == expected
+
+
+def test_shared_scalar_indexes_are_evaluated_once(tmp_path, ray_cluster):
+    import pyarrow as pa
+
+    docs = pm.connect(options={"warehouse": str(tmp_path / "warehouse")}).create_table(
+        "docs", schema=pa.schema([("id", pa.int64()), ("text", pa.string()), ("label", pa.string())]),
+        options={"file.format": "parquet", "write.native.enabled": "false", "commit.native.enabled": "false",
+                 "full-text-index.search-mode": "full"})
+    docs.add([{"id": i, "text": "paimon " * (i + 1), "label": "keep" if i % 2 else "drop"}
+              for i in range(6)])
+    table = docs.raw_table.copy({"deletion-vectors.enabled": "false"})
+    table.create_global_index("label", "btree")
+    table.create_global_index("text", "full-text", options={"global-index.row-count-per-shard": "2"})
+    query = docs.search("paimon", column="text", pre_filter="label = 'keep'").select(
+        ["id"]).with_score().order_by_score()
+    expected = query.to_list()
+    calls_path = str(tmp_path / "filter-calls")
+    original = module._prepare_scalar_filter
+
+    def record(reader, split):
+        with open(calls_path, "a") as calls:
+            calls.write("filter\n")
+        return original(reader, split)
+
+    with patch.object(module, "_prepare_scalar_filter", record):
+        assert query.to_list(execution="ray", concurrency=2) == expected
+    with open(calls_path) as calls:
+        assert calls.read().splitlines() == ["filter"]
+
+
+def test_worker_filters_use_planned_snapshot(docs, ray_cluster):
+    query = docs.search("paimon", column="text", pre_filter="id >= 0").select(["id"]).order_by_score()
+    expected = query.to_list()
+    original = module._map_tasks
+    committed = []
+
+    def commit_before_dispatch(*args):
+        if not committed:
+            docs.delete("id = 0")
+            committed.append(True)
+        return original(*args)
+
+    with patch.object(module, "_map_tasks", commit_before_dispatch):
+        assert query.to_list(execution="ray", concurrency=2) == expected
+    assert committed == [True]
+    assert query.to_list(execution="ray") == query.to_list()
+    assert query.to_list() != expected

@@ -104,9 +104,9 @@ def pytest_configure(config):
 
         original_plan = TableScan._try_native_plan
 
-        def tracked_plan(self):
+        def tracked_plan(self, *args, **kwargs):
             global _native_plan_count
-            plan = original_plan(self)
+            plan = original_plan(self, *args, **kwargs)
             if plan is not None and _force_native_for_test:
                 _native_plan_count += 1
             return plan
@@ -163,9 +163,9 @@ def pytest_configure(config):
 
         original_prepare = TableCommit._prepare_native_commit
 
-        def tracked_prepare(self, messages):
+        def tracked_prepare(self, messages, *args, **kwargs):
             global _native_commit_count
-            prepared = original_prepare(self, messages)
+            prepared = original_prepare(self, messages, *args, **kwargs)
             if prepared is not None and _force_native_commit_for_test:
                 _native_commit_count += 1
             return prepared

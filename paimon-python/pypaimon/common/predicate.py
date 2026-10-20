@@ -53,6 +53,8 @@ class Predicate:
     index: Optional[int]
     field: Optional[str]
     literals: Optional[List[Any]] = None
+    # Physical source path for predicates built against a flat projection view.
+    field_path: Optional[List[str]] = None
 
     testers: ClassVar[Dict[str, Any]] = {}
 
@@ -61,14 +63,16 @@ class Predicate:
             method=self.method,
             index=index,
             field=self.field,
-            literals=self.literals)
+            literals=self.literals,
+            field_path=self.field_path)
 
     def new_literals(self, literals: List[Any]):
         return Predicate(
             method=self.method,
             index=self.index,
             field=self.field,
-            literals=literals)
+            literals=literals,
+            field_path=self.field_path)
 
     def test(self, record: InternalRow) -> bool:
         if self.method == 'and':
@@ -88,6 +92,9 @@ class Predicate:
             return all(p.test_by_simple_stats(stat, row_count) for p in self.literals)
         if self.method == 'or':
             return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
+        if self.field_path and len(self.field_path) > 1:
+            # Parent ROW stats do not describe a nested field transform.
+            return True
 
         index = self.index
         if index is None or index < 0:
