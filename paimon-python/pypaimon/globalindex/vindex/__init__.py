@@ -15,18 +15,32 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""paimon-vindex based global index readers and writers."""
+"""Public vector index API with lazy Python writer loading."""
 
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
-    VINDEX_IDENTIFIERS,
-    VindexVectorGlobalIndexReader,
-)
-from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
-    VindexVectorIndexWriter,
-)
+import importlib
+import sys
+
+from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
+from pypaimon.globalindex.vindex_reader import VindexVectorGlobalIndexReader
+
+if sys.version_info[:2] < (3, 7):
+    from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
+        VindexVectorIndexWriter,
+    )
 
 __all__ = [
     'VINDEX_IDENTIFIERS',
     'VindexVectorGlobalIndexReader',
     'VindexVectorIndexWriter',
 ]
+
+
+def __getattr__(name):
+    if name != 'VindexVectorIndexWriter':
+        raise AttributeError(
+            "module 'pypaimon.globalindex.vindex' has no attribute {}".format(name))
+    module = importlib.import_module(
+        'pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer')
+    value = module.VindexVectorIndexWriter
+    globals()[name] = value
+    return value

@@ -25,7 +25,7 @@ from pypaimon.common.like_optimization import try_optimize_like
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef, GlobalIndexReader, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.key_serializer import KeySerializer
+from pypaimon.execution.python.globalindex.key_serializer import KeySerializer
 from pypaimon.execution.python.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64

@@ -17,8 +17,8 @@
 
 """Decode BTree postings into a query result bitmap."""
 
-from pypaimon.globalindex.btree_format.btree_file_footer import BTreeFileFooter
-from pypaimon.globalindex.memory_slice_input import MemorySliceInput
+from pypaimon.execution.python.globalindex.btree.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.memory_slice_input import MemorySliceInput
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 

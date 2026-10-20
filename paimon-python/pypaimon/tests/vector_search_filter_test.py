@@ -34,7 +34,7 @@ from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchM
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
+from pypaimon.execution.python.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
 from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_reader import _completed_future

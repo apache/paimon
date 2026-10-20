@@ -39,6 +39,7 @@ pypaimon/
       table.py                Rust table/configuration bridge
       read/                   Native scan/read/search adapters
       write/                  Native write/commit/update/index adapters
+    vindex_input.py           Shared vector-index streams and I/O callbacks
 ```
 
 ## Dependencies
@@ -50,13 +51,20 @@ select an executor when needed. Python scanners, readers, writers and committers
 are created only when Python execution is selected. Direct access to a Python
 scanner, writer router or committer through an existing public property explicitly
 selects that implementation. Attribute inspection and configuration getters do
-not select Python. Shared index interfaces, options, results and wire formats remain
-in `globalindex`; shared search plans and splits remain in `table/source`.
+not select Python. Public index entry points, interfaces, options, results and
+shared metadata remain in `globalindex`; shared search plans and splits remain in
+`table/source`. Python index file codecs, compression and reader/writer helpers
+live in `execution/python/globalindex`. Vector-index stream ownership and I/O
+callbacks are shared by both backends through `execution/vindex_input.py`.
 
 Native adapters convert requests and results and invoke `pypaimon_rust`. General
 execution algorithms belong in Rust Core. The optional extension is loaded only
 when a Native operation is requested. Importing the Python implementation does
 not require or initialize it.
+
+Python schema evolution uses Python cast rules and builds Arrow read schemas
+directly, including runtime child nullability. It does not select a cast engine
+based on whether the Native extension is installed.
 
 Ray and Daft input grouping share bucket arithmetic, binary-row size estimation
 and fixed/dynamic hash routing in `write/bucket_planning.py` and
@@ -103,4 +111,4 @@ checks backend dependencies, lazy imports, empty results, preparation failures,
 fork errors, public updater types and prevention of write replay.
 The lazy read/search and execution lifecycle tests also reject Python executor
 construction on Native paths. Global index boundary tests verify those imports
-in fresh processes and preserve old serialized class paths.
+in fresh processes and preserve the exported public index contracts.

@@ -17,12 +17,12 @@
 
 """Bitmap global index support."""
 
-from pypaimon.globalindex.bitmap.bitmap_index_reader import BitmapIndexReader
-from pypaimon.globalindex.bitmap.bitmap_index_writer import (
+from pypaimon.execution.python.globalindex.bitmap.bitmap_index_reader import BitmapIndexReader
+from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import (
     BITMAP_IDENTIFIER,
     BitmapIndexWriter,
 )
-from pypaimon.globalindex.bitmap.lazy_filtered_bitmap_reader import LazyFilteredBitmapReader
+from pypaimon.execution.python.globalindex.bitmap.lazy_filtered_bitmap_reader import LazyFilteredBitmapReader
 
 __all__ = [
     'BITMAP_IDENTIFIER',

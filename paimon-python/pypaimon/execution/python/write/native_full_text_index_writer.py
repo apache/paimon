@@ -19,8 +19,8 @@
 
 from typing import List, Mapping
 
-from pypaimon.globalindex.index_file_utils import new_global_index_file_name
-from pypaimon.globalindex.result_entry import ResultEntry
+from pypaimon.execution.python.globalindex.index_file_utils import new_global_index_file_name
+from pypaimon.execution.python.globalindex.result_entry import ResultEntry
 from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
 from pypaimon.schema.data_types import AtomicType, DataType
 

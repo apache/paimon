@@ -40,7 +40,7 @@ from pypaimon.execution.python.globalindex.build_plan import (
     unindexed_row_ranges as _unindexed_row_ranges,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
-from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text_options import FULL_TEXT_IDENTIFIER
 from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
 from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS

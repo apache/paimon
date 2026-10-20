@@ -29,11 +29,11 @@ from lumina_data import LuminaBuilder
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
+from pypaimon.execution.python.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
 from pypaimon.execution.python.globalindex.lumina.lumina_vector_global_index_reader import (
     LuminaVectorGlobalIndexReader,
 )
-from pypaimon.globalindex.lumina.lumina_vector_index_options import (
+from pypaimon.execution.python.globalindex.lumina.lumina_vector_index_options import (
     strip_lumina_options,
 )
 from pypaimon.globalindex.vector_search import VectorSearch

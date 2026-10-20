@@ -30,7 +30,7 @@ from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import Bit
 from pypaimon.execution.python.globalindex.btree.btree_index_reader import BTreeIndexReader
 from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.schema.data_types import AtomicType
 
 

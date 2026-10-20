@@ -21,7 +21,7 @@ import numpy as np
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.globalindex.vindex_input import VindexReaderResources, _filter_bytes
+from pypaimon.execution.vindex_input import VindexReaderResources, _filter_bytes
 from pypaimon.globalindex.vindex_options import NPROBE_PARAMETER, L_SEARCH_PARAMETER
 
 

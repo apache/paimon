@@ -94,7 +94,10 @@ import io
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vindex_reader import VindexVectorGlobalIndexReader
+from pypaimon.globalindex.vindex import VindexVectorGlobalIndexReader as PublicVindexReader
 from pypaimon.execution.native.read import vindex_reader
+
+assert PublicVindexReader is VindexVectorGlobalIndexReader
 
 class RustReader:
     failure_phase = None
@@ -158,33 +161,33 @@ assert not any(name.startswith('pypaimon.execution.python.globalindex') for name
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize('old_module,new_module,name', [
-    ('globalindex.btree.btree_index_reader',
+@pytest.mark.parametrize('public_module,new_module,name', [
+    ('globalindex.btree',
      'execution.python.globalindex.btree.btree_index_reader', 'BTreeIndexReader'),
-    ('globalindex.btree.btree_index_writer',
+    ('globalindex.btree',
      'execution.python.globalindex.btree.btree_index_writer', 'BTreeIndexWriter'),
-    ('globalindex.bitmap.bitmap_index_reader',
+    ('globalindex.bitmap',
      'execution.python.globalindex.bitmap.bitmap_index_reader', 'BitmapIndexReader'),
-    ('globalindex.bitmap.bitmap_index_writer',
+    ('globalindex.bitmap',
      'execution.python.globalindex.bitmap.bitmap_index_writer', 'BitmapIndexWriter'),
-    ('globalindex.vindex.vindex_vector_global_index_reader',
+    ('globalindex.vindex',
      'globalindex.vindex_reader', 'VindexVectorGlobalIndexReader'),
-    ('globalindex.vindex.vindex_vector_index_writer',
+    ('globalindex.vindex',
      'execution.python.globalindex.vindex.vindex_vector_index_writer', 'VindexVectorIndexWriter'),
-    ('globalindex.lumina.lumina_vector_global_index_reader',
+    ('globalindex.lumina',
      'execution.python.globalindex.lumina.lumina_vector_global_index_reader', 'LuminaVectorGlobalIndexReader'),
-    ('globalindex.global_index_evaluator',
+    ('globalindex',
      'execution.python.globalindex.global_index_evaluator', 'GlobalIndexEvaluator'),
-    ('globalindex.data_evolution_global_index_scanner',
+    ('globalindex',
      'execution.python.globalindex.data_evolution_global_index_scanner', 'DataEvolutionGlobalIndexScanner'),
-    ('globalindex.global_index_evaluator',
-     'globalindex.global_index_evaluation', 'GlobalIndexEvaluation'),
-    ('globalindex.btree.btree_file_footer',
-     'globalindex.btree_format.btree_file_footer', 'BTreeFileFooter'),
+    ('globalindex', 'execution.python.globalindex.key_serializer', 'KeySerializer'),
+    ('globalindex', 'execution.python.globalindex.memory_slice_input', 'MemorySliceInput'),
+    ('globalindex.btree',
+     'execution.python.globalindex.btree.btree_index_meta', 'BTreeIndexMeta'),
 ])
-def test_original_import_and_pickle_paths_resolve_to_canonical_class(old_module, new_module, name):
-    old_module, new_module = 'pypaimon.' + old_module, 'pypaimon.' + new_module
+def test_public_index_exports_resolve_to_canonical_class(public_module, new_module, name):
+    public_module, new_module = 'pypaimon.' + public_module, 'pypaimon.' + new_module
     canonical = getattr(importlib.import_module(new_module), name)
-    assert getattr(importlib.import_module(old_module), name) is canonical
-    legacy_pickle = ('c%s\n%s\n.' % (old_module, name)).encode('ascii')
-    assert pickle.loads(legacy_pickle) is canonical
+    assert getattr(importlib.import_module(public_module), name) is canonical
+    public_pickle = ('c%s\n%s\n.' % (public_module, name)).encode('ascii')
+    assert pickle.loads(public_pickle) is canonical

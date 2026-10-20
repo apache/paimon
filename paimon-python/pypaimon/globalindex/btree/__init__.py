@@ -17,12 +17,12 @@
 
 """B-tree index implementation for global index."""
 
-from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
-from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
-from pypaimon.globalindex.btree.btree_file_meta_selector import BTreeFileMetaSelector
-from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
-from pypaimon.globalindex.btree.key_serializer import KeySerializer
-from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
+from pypaimon.execution.python.globalindex.btree.btree_index_reader import BTreeIndexReader
+from pypaimon.execution.python.globalindex.btree.btree_index_meta import BTreeIndexMeta
+from pypaimon.execution.python.globalindex.btree.btree_file_meta_selector import BTreeFileMetaSelector
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.execution.python.globalindex.key_serializer import KeySerializer
+from pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
 
 __all__ = [
     'BTreeIndexReader',

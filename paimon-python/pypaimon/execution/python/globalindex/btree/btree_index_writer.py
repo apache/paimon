@@ -22,18 +22,18 @@ import struct
 import zlib
 from typing import List, Optional
 
-from pypaimon.globalindex.index_file_utils import (
+from pypaimon.execution.python.globalindex.index_file_utils import (
     PositionOutput,
     new_global_index_file_name,
     write_uncompressed_block,
     write_var_len_int,
     write_var_len_long,
 )
-from pypaimon.globalindex.btree_format.bloom_filter import (
+from pypaimon.execution.python.globalindex.btree.bloom_filter import (
     BloomFilter,
     murmur_hash_bytes,
 )
-from pypaimon.globalindex.result_entry import ResultEntry
+from pypaimon.execution.python.globalindex.result_entry import ResultEntry
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 

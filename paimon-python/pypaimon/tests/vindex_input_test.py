@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from unittest import mock
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.vindex_input import (
+from pypaimon.execution.vindex_input import (
     PaimonVindexInput,
     _read_parallelism,
 )

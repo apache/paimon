@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
+from pypaimon.execution.python.globalindex.lumina.lumina_vector_global_index_reader import (
     LUMINA_IDENTIFIER,
     LUMINA_IDENTIFIERS,
     LUMINA_VECTOR_ANN_IDENTIFIER,

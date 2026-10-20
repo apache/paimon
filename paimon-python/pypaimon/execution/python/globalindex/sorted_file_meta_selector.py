@@ -20,7 +20,7 @@
 from typing import List, Optional, Tuple
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.key_serializer import KeySerializer
+from pypaimon.execution.python.globalindex.key_serializer import KeySerializer
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 
 

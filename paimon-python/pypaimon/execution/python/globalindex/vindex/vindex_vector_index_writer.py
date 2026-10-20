@@ -24,7 +24,7 @@ import uuid
 from array import array
 from typing import BinaryIO, Dict, List, Mapping, Optional
 
-from pypaimon.globalindex.result_entry import ResultEntry
+from pypaimon.execution.python.globalindex.result_entry import ResultEntry
 from pypaimon.schema.data_types import DataType
 from pypaimon.globalindex.vindex_options import native_options, train_sample_ratio, validate_vector_type
 

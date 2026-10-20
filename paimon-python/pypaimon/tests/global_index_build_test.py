@@ -38,9 +38,9 @@ from pypaimon import Schema
 from pypaimon.common.json_util import JSON
 from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import BITMAP_IDENTIFIER
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.btree_format.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
-from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.full_text_options import (
     FULL_TEXT_IDENTIFIER,
     NativeFullTextIndexOptions,

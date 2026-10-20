@@ -124,11 +124,15 @@ class PackagingTest(unittest.TestCase):
             self.assertIn(name, names)
         execution_files = (
             "pypaimon/execution/dispatch.py",
+            "pypaimon/execution/vindex_input.py",
             "pypaimon/execution/python/read/table_read.py",
             "pypaimon/execution/python/read/table_scan.py",
             "pypaimon/execution/python/read/search/vector_search_read.py",
             "pypaimon/execution/python/read/search/hybrid_search.py",
             "pypaimon/execution/python/globalindex/btree/btree_index_reader.py",
+            "pypaimon/execution/python/globalindex/btree/block_handle.py",
+            "pypaimon/execution/python/globalindex/block_compression.py",
+            "pypaimon/execution/python/globalindex/key_serializer.py",
             "pypaimon/execution/python/globalindex/vindex/vindex_vector_global_index_reader.py",
             "pypaimon/execution/python/write/table_write.py",
             "pypaimon/execution/python/write/table_commit.py",
@@ -143,7 +147,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/read/blob_read_support.py",
             "pypaimon/read/scan_request.py",
             "pypaimon/table/source/search_types.py",
-            "pypaimon/globalindex/btree_format/block_handle.py",
             "pypaimon/globalindex/vindex_reader.py",
             "pypaimon/write/bucket_planning.py",
             "pypaimon/write/commit_options.py",
@@ -151,6 +154,15 @@ class PackagingTest(unittest.TestCase):
         )
         for name in execution_files:
             self.assertIn(name, names)
+        internal_aliases = (
+            "pypaimon/globalindex/btree/block_reader.py",
+            "pypaimon/globalindex/btree_format/block_handle.py",
+            "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
+            "pypaimon/globalindex/block_compression.py",
+            "pypaimon/globalindex/vindex_input.py",
+        )
+        for name in internal_aliases:
+            self.assertNotIn(name, names)
         for suffix in ("/LICENSE", "/NOTICE"):
             self.assertTrue(any(".dist-info/" in name and name.endswith(suffix)
                                 for name in names))
@@ -161,6 +173,8 @@ class PackagingTest(unittest.TestCase):
                 self.assertIn(prefix + name, names)
             for name in execution_files:
                 self.assertIn(prefix + name, names)
+            for name in internal_aliases:
+                self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
                                  or name.startswith((prefix + "pypaimon/tests/",
                                                      prefix + "pypaimon/acceptance/"))

@@ -15,15 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Python schema casts transport Arrow arrays into the core Java executors."""
+"""Rust schema-cast bindings and Native reader schema evolution."""
 
 from decimal import Decimal
-from unittest.mock import patch
+import json
 
 import pyarrow as pa
 import pytest
 
-from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField, DataTypeParser,
                                         MapType, PyarrowFieldParser, RowType)
 from pypaimon.tests import native_schema_evolution_cast_test
@@ -60,19 +59,26 @@ def _type(name):
     return logical, PyarrowFieldParser.from_paimon_type(logical)
 
 
+def _cast_in_rust(array, source_type, target_type):
+    from pypaimon_rust.data import cast_array_for_schema_evolution
+
+    source, target = json.dumps(source_type.to_dict()), json.dumps(target_type.to_dict())
+    if isinstance(array, pa.ChunkedArray):
+        chunks = array.chunks or [pa.array([], type=array.type)]
+        return pa.chunked_array([cast_array_for_schema_evolution(chunk, source, target) for chunk in chunks])
+    return cast_array_for_schema_evolution(array, source, target)
+
+
 @pytest.mark.parametrize('source,target,values,expected', _CASES,
                          ids=lambda value: value if isinstance(value, str) else None)
 @pytest.mark.parametrize('chunked', [False, True])
-def test_python_schema_casts_use_rust(source, target, values, expected, chunked):
+def test_rust_schema_cast_binding(source, target, values, expected, chunked):
     source_type, source_arrow = _type(source)
     target_type, target_arrow = _type(target)
     array = pa.array(values, type=source_arrow)
     if chunked:
         array = pa.chunked_array([array.slice(0, 1), array.slice(1), pa.array([], type=source_arrow)])
-    with patch('pypaimon.casting.schema_evolution.cast_decimal', side_effect=AssertionError('Python scalar cast')), \
-            patch('pypaimon.casting.schema_evolution.cast_temporal',
-                  side_effect=AssertionError('Python temporal cast')):
-        result = cast_array_for_schema_evolution(array, target_arrow, source_type, target_type)
+    result = _cast_in_rust(array, source_type, target_type)
     if chunked:
         assert isinstance(result, pa.ChunkedArray)
         result = result.combine_chunks()
@@ -97,14 +103,14 @@ def test_existing_scalar_evolution_uses_native_rest_reader(rest_catalog, mode, s
 
 @pytest.mark.parametrize('target', ['INT', 'FLOAT', 'DOUBLE', 'DATE', 'TIMESTAMP(3)'])
 def test_invalid_scalar_text_is_an_error_instead_of_null(target):
-    logical, arrow = _type(target)
+    logical, _ = _type(target)
     with pytest.raises((ValueError, RuntimeError)):
-        cast_array_for_schema_evolution(pa.array(['bad']), arrow, AtomicType('STRING'), logical)
+        _cast_in_rust(pa.array(['bad']), AtomicType('STRING'), logical)
 
 
 def test_empty_chunked_input_retains_the_requested_type():
-    result = cast_array_for_schema_evolution(
-        pa.chunked_array([], type=pa.string()), pa.int32(), AtomicType('STRING'), AtomicType('INT'))
+    result = _cast_in_rust(
+        pa.chunked_array([], type=pa.string()), AtomicType('STRING'), AtomicType('INT'))
     assert result.type == pa.int32() and len(result) == 0
 
 
@@ -112,8 +118,8 @@ def test_time_precision_changes_are_not_executable():
     from pypaimon.casting.data_type_casts import can_execute_cast
     assert not can_execute_cast(AtomicType('TIME(3)'), AtomicType('TIME(1)'))
     with pytest.raises(NotImplementedError):
-        cast_array_for_schema_evolution(
-            pa.array([], type=pa.time32('ms')), pa.time32('ms'), AtomicType('TIME(3)'), AtomicType('TIME(1)'))
+        _cast_in_rust(
+            pa.array([], type=pa.time32('ms')), AtomicType('TIME(3)'), AtomicType('TIME(1)'))
 
 
 @pytest.mark.parametrize('source,target', [('TIME', 'TIME(0)'), ('TIME(3)', 'TIME( 3 )'), ('TIME(3)', 'TIME(03)')])
@@ -121,7 +127,7 @@ def test_time_equivalent_precision_spellings_are_identity(source, target):
     from pypaimon.casting.data_type_casts import can_execute_cast
     assert can_execute_cast(AtomicType(source), AtomicType(target))
     data = pa.array([100, None], type=pa.time32('ms'))
-    assert cast_array_for_schema_evolution(data, data.type, AtomicType(source), AtomicType(target)).equals(data)
+    assert _cast_in_rust(data, AtomicType(source), AtomicType(target)).equals(data)
 
 
 def _decimal_container(kind, precision):
@@ -153,7 +159,7 @@ def test_not_null_casts_can_return_java_runtime_nulls(kind, values, expected, ch
     data = pa.array(values, type=PyarrowFieldParser.from_paimon_type(source))
     if chunked:
         data = pa.chunked_array([data.slice(0, 1), data.slice(1)])
-    result = cast_array_for_schema_evolution(data, PyarrowFieldParser.from_paimon_type(target), source, target)
+    result = _cast_in_rust(data, source, target)
     assert result.to_pylist() == expected
     result.validate(full=True)
 
@@ -188,7 +194,7 @@ def test_not_null_decimal_evolution_uses_native_rest_reader(rest_catalog, mode, 
 def test_decimal256_physical_storage_uses_the_logical_decimal_type(target, expected):
     logical, arrow = _type(target)
     data = pa.array([Decimal('1.235'), None], type=pa.decimal256(20, 3))
-    result = cast_array_for_schema_evolution(data, arrow, AtomicType('DECIMAL(20,3)'), logical)
+    result = _cast_in_rust(data, AtomicType('DECIMAL(20,3)'), logical)
     assert result.equals(pa.array(expected, type=arrow))
 
 
@@ -206,7 +212,7 @@ def test_large_list_rows_align_by_field_id_in_the_shared_core(chunked):
                      [{'old': 'bad', 'dropped': 0}]], type=physical).slice(1, 3)
     if chunked:
         data = pa.chunked_array([data.slice(0, 1), data.slice(1)])
-    result = cast_array_for_schema_evolution(data, PyarrowFieldParser.from_paimon_type(target), source, target)
+    result = _cast_in_rust(data, source, target)
     assert result.to_pylist() == [[{'dropped': 7, 'renamed': 1, 'added': None}, None], None, []]
 
 

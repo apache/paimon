@@ -24,7 +24,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 
 from pypaimon.execution.python.globalindex.btree.btree_file_meta_selector import BTreeFileMetaSelector
-from pypaimon.globalindex.btree_format.btree_index_meta import BTreeIndexMeta
+from pypaimon.execution.python.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef
@@ -83,7 +83,7 @@ class LazyFilteredBTreeReaderThreadTest(unittest.TestCase):
     """Thread-safety tests for LazyFilteredBTreeReader."""
 
     def _create_reader(self, num_files, pool_size, reader_cls=None):
-        from pypaimon.globalindex.btree.key_serializer import create_serializer
+        from pypaimon.execution.python.globalindex.key_serializer import create_serializer
         from pypaimon.schema.data_types import AtomicType
 
         if reader_cls is None:
@@ -250,7 +250,7 @@ class LazyFilteredBTreeReaderThreadTest(unittest.TestCase):
 
     def test_selector_prunes_files_correctly(self):
         """BTreeFileMetaSelector correctly prunes files that cannot match."""
-        from pypaimon.globalindex.btree.key_serializer import create_serializer
+        from pypaimon.execution.python.globalindex.key_serializer import create_serializer
         from pypaimon.schema.data_types import AtomicType
 
         key_serializer = create_serializer(AtomicType("INT"))

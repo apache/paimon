@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Optional
 import struct
 
-from pypaimon.globalindex.btree_format.block_handle import BlockHandle
+from pypaimon.execution.python.globalindex.btree.block_handle import BlockHandle
 
 
 @dataclass

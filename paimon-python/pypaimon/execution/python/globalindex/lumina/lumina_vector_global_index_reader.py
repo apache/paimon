@@ -158,8 +158,8 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
                 return
 
             from lumina_data import LuminaSearcher
-            from pypaimon.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
-            from pypaimon.globalindex.lumina.lumina_vector_index_options import (
+            from pypaimon.execution.python.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
+            from pypaimon.execution.python.globalindex.lumina.lumina_vector_index_options import (
                 strip_lumina_options,
             )
 

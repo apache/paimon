@@ -20,7 +20,7 @@
 import struct
 import zlib
 
-from pypaimon.globalindex.memory_slice_input import MemorySliceInput
+from pypaimon.execution.python.globalindex.memory_slice_input import MemorySliceInput
 
 
 COMPRESSION_NONE = 0

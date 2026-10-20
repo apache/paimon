@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import struct
 from typing import Dict, List
 
-from pypaimon.globalindex.index_file_utils import (
+from pypaimon.execution.python.globalindex.index_file_utils import (
     BlockInfo,
     PositionOutput,
     new_global_index_file_name,
@@ -31,7 +31,7 @@ from pypaimon.globalindex.index_file_utils import (
     write_var_len_int,
     write_var_len_long,
 )
-from pypaimon.globalindex.result_entry import ResultEntry
+from pypaimon.execution.python.globalindex.result_entry import ResultEntry
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 

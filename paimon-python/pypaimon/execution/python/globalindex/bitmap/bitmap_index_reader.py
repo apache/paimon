@@ -23,14 +23,14 @@ import threading
 from typing import Callable, Dict, List, Optional
 
 from pypaimon.common.file_io import FileIO, pread, supports_pread
-from pypaimon.globalindex.block_compression import (
+from pypaimon.execution.python.globalindex.block_compression import (
     BLOCK_TRAILER_LENGTH,
     decompress_block_with_trailer,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.key_serializer import KeySerializer
-from pypaimon.globalindex.memory_slice_input import MemorySliceInput
+from pypaimon.execution.python.globalindex.key_serializer import KeySerializer
+from pypaimon.execution.python.globalindex.memory_slice_input import MemorySliceInput
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 

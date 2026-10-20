@@ -18,7 +18,7 @@
 """Ray shard construction with one driver-side global-index commit."""
 
 from pypaimon.execution.python.globalindex.build_plan import split_by_global_index_shard
-from pypaimon.globalindex.index_file_utils import new_global_index_file_name
+from pypaimon.execution.python.globalindex.index_file_utils import new_global_index_file_name
 from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
 from pypaimon.ray.vector_search import _execution_options
 

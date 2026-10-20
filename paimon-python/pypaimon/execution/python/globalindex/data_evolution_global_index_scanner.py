@@ -358,7 +358,7 @@ def _create_inner_readers(
     core_options = options or CoreOptions(Options.from_none())
     if index_type == 'btree':
         from pypaimon.execution.python.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
-        from pypaimon.globalindex.key_serializer import create_serializer
+        from pypaimon.execution.python.globalindex.key_serializer import create_serializer
         key_serializer = create_serializer(field.type)
         return [LazyFilteredBTreeReader(
             key_serializer=key_serializer,
@@ -371,7 +371,7 @@ def _create_inner_readers(
 
     if index_type == 'bitmap':
         from pypaimon.execution.python.globalindex.bitmap.lazy_filtered_bitmap_reader import LazyFilteredBitmapReader
-        from pypaimon.globalindex.key_serializer import create_serializer
+        from pypaimon.execution.python.globalindex.key_serializer import create_serializer
         key_serializer = create_serializer(field.type)
         return [LazyFilteredBitmapReader(
             key_serializer=key_serializer,

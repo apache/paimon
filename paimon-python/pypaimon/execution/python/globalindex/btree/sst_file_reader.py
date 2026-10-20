@@ -31,20 +31,20 @@ from typing import Optional, Callable
 from typing import BinaryIO
 
 from pypaimon.common.file_io import pread
-from pypaimon.globalindex.block_compression import (
+from pypaimon.execution.python.globalindex.block_compression import (
     BLOCK_TRAILER_LENGTH,
     crc32c,
     decompress_block,
 )
-from pypaimon.globalindex.btree_format.block_handle import BlockHandle
-from pypaimon.globalindex.btree_format.block_entry import BlockEntry
+from pypaimon.execution.python.globalindex.btree.block_handle import BlockHandle
+from pypaimon.execution.python.globalindex.btree.block_entry import BlockEntry
 from pypaimon.execution.python.globalindex.btree.block_reader import BlockReader, BlockIterator
-from pypaimon.globalindex.btree_format.bloom_filter import (
+from pypaimon.execution.python.globalindex.btree.bloom_filter import (
     BloomFilter,
     murmur_hash_bytes,
 )
-from pypaimon.globalindex.btree_format.btree_file_footer import BloomFilterHandle
-from pypaimon.globalindex.memory_slice_input import MemorySliceInput
+from pypaimon.execution.python.globalindex.btree.btree_file_footer import BloomFilterHandle
+from pypaimon.execution.python.globalindex.memory_slice_input import MemorySliceInput
 
 
 class SstFileIterator:

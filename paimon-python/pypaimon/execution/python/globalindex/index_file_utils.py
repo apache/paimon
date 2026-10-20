@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import struct
 import uuid
 
-from pypaimon.globalindex.block_compression import COMPRESSION_NONE, crc32c
+from pypaimon.execution.python.globalindex.block_compression import COMPRESSION_NONE, crc32c
 
 
 @dataclass(frozen=True)

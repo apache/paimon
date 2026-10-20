@@ -26,7 +26,7 @@ from typing import Callable, Collection, Dict, List, Optional
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.global_index_evaluation import GlobalIndexEvaluation
-from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import AtomicType, DataField
 

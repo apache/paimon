@@ -28,14 +28,14 @@ from contextlib import suppress
 from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
-from pypaimon.globalindex.btree_format.btree_index_meta import BTreeIndexMeta
+from pypaimon.execution.python.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.key_serializer import KeySerializer
+from pypaimon.execution.python.globalindex.key_serializer import KeySerializer
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
-from pypaimon.globalindex.btree_format.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.execution.python.globalindex.btree.sst_file_reader import SstFileReader
-from pypaimon.globalindex.btree_format.btree_posting_list import add_row_ids
+from pypaimon.execution.python.globalindex.btree.btree_posting_list import add_row_ids
 from pypaimon.execution.python.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 
 
