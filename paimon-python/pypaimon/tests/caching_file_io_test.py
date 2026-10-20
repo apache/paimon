@@ -382,6 +382,57 @@ class CachingFileIOTest(unittest.TestCase):
         result = caching_io.new_input_stream("global-index-uuid.index")
         self.assertNotIsInstance(result, CachingInputStream)
 
+    def test_structured_data_cache_preserves_existing_selectors(self):
+        from pypaimon.filesystem.caching_file_io import LocalMemoryCacheManager
+        from pypaimon.utils.file_type import FileType
+
+        for disk in (False, True):
+            for whitelist in ('meta,global-index', 'data', 'structured-data',
+                              'meta,global-index,structured-data', '*'):
+                for name in ('data.parquet', 'data.blob', 'data.orc', 'data.avro',
+                             'data.row', 'data.mosaic', 'data.vortex', 'data.lance',
+                             'data.video', 'data.unknown', 'data.parquet.index',
+                             'snapshot-1', 'snapshot-1.blob'):
+                    with self.subTest(disk=disk, whitelist=whitelist, name=name):
+                        with tempfile.TemporaryDirectory() as directory:
+                            cache = (LocalDiskCacheManager(directory, 1024, block_size=4) if disk
+                                     else LocalMemoryCacheManager(1024, block_size=4))
+                            delegate = self._make_delegate({name: b'abcdefgh'})
+                            caching_io = CachingFileIO(
+                                delegate, cache, FileType.parse_whitelist(whitelist))
+                            if whitelist == '*':
+                                cached = True
+                            elif whitelist == 'data':
+                                cached = name.startswith('data.') and not name.endswith('.index')
+                            elif whitelist == 'structured-data':
+                                cached = name in (
+                                    'data.parquet', 'data.orc', 'data.avro',
+                                    'data.row', 'data.mosaic')
+                            elif whitelist == 'meta,global-index,structured-data':
+                                cached = name in (
+                                    'data.parquet', 'data.orc', 'data.avro', 'data.row',
+                                    'data.mosaic', 'snapshot-1', 'snapshot-1.blob')
+                            else:
+                                cached = name.startswith('snapshot-')
+                            for _ in range(2):
+                                with caching_io.new_input_stream(name) as stream:
+                                    stream.seek(1)
+                                    self.assertEqual(b'bcdefg', stream.read(6))
+                            self.assertEqual(1 if cached else 2,
+                                             delegate.new_input_stream.call_count)
+                            if not cached:
+                                delegate.get_file_size.assert_not_called()
+
+    def test_data_whitelist_still_caches_blob(self):
+        from pypaimon.utils.file_type import FileType
+        delegate = self._make_delegate({"data.blob": b"abcdefgh"})
+        cache = LocalDiskCacheManager(self.cache_dir, 1024, block_size=4)
+        caching_io = CachingFileIO(delegate, cache, {FileType.DATA})
+        for _ in range(2):
+            with caching_io.new_input_stream("data.blob") as stream:
+                self.assertEqual(b"abcdefgh", stream.read())
+        delegate.new_input_stream.assert_called_once()
+
     def test_data_file_not_cached(self):
         data = b"data content"
         delegate = self._make_delegate({"data-abc.orc": data})
