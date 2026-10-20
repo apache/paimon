@@ -52,11 +52,8 @@ object SparkRowUtils {
   }
 
   def getFieldIndex(schema: StructType, colName: String): Int = {
-    try {
-      schema.fieldIndex(colName)
-    } catch {
-      case _: IllegalArgumentException =>
-        -1
-    }
+    // StructType.fieldIndex formats missing-field errors as SQL identifiers, which can fail for
+    // field names containing backticks.
+    schema.fieldNames.lastIndexOf(colName)
   }
 }
