@@ -37,6 +37,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.GenericVariantBuilder;
@@ -85,6 +86,7 @@ import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -107,6 +109,7 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -730,6 +733,63 @@ public class JavaPyE2ETest {
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "hello-java, 42, java-new", "python-only, 7, python-only");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonColumnDefaultValues() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(identifier("column_defaults_python_to_java"));
+        assertThat(table.rowType().getFields())
+                .extracting(DataField::defaultValue)
+                .containsExactly(
+                        null,
+                        "12:30+01",
+                        "2024-02-31 24:00:00",
+                        "+12345-01-01",
+                        "2024-01-01T24:00",
+                        "0e-2147483645",
+                        "12345678901");
+
+        // Opening the writer casts every default; null fields take their default.
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, null, null, null, null, null, null));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<String> result =
+                getResult(
+                        table.newRead(),
+                        table.newScan().plan().splits(),
+                        row ->
+                                row.getInt(0)
+                                        + ", "
+                                        + row.getInt(1)
+                                        + ", "
+                                        + row.getTimestamp(2, 3)
+                                        + ", "
+                                        + row.getTimestamp(3, 3)
+                                        + ", "
+                                        + row.getTimestamp(4, 3)
+                                        + ", "
+                                        + row.getDecimal(5, 10, 2)
+                                        + ", "
+                                        + row.isNullAt(6));
+        Timestamp nextLocalMidnight =
+                Timestamp.fromInstant(
+                        LocalDateTime.of(2024, 1, 2, 0, 0)
+                                .atZone(ZoneId.systemDefault())
+                                .toInstant());
+        // parseTime adds a '+hh' offset to the hour, so 12:30+01 is 13:30.
+        assertThat(result)
+                .containsExactly(
+                        "1, "
+                                + (13 * 3600 + 30 * 60) * 1000
+                                + ", 2024-03-01T00:00, +12345-01-01T00:00, "
+                                + nextLocalMidnight
+                                + ", 0.00, true");
     }
 
     private int assignDynamicBucket(FileStoreTable table, InternalRow row) {

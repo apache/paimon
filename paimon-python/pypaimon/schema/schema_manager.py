@@ -33,9 +33,11 @@ from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         is_blob_file_type, is_blob_type,
                                         is_map_blob_type, reassign_field_id)
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.default_value import validate_default_value
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
                                            SetOption, UpdateColumnComment,
+                                           UpdateColumnDefaultValue,
                                            UpdateColumnNullability,
                                            UpdateColumnPosition,
                                            UpdateColumnType, UpdateComment)
@@ -172,6 +174,18 @@ def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
         if isinstance(change, RenameColumn) and len(change.field_names) == 1:
             rename_mappings[change.field_names[0]] = change.new_name
     return rename_mappings
+
+
+def _handle_update_column_default_value(
+    change: UpdateColumnDefaultValue, new_fields: List[DataField]
+):
+    def update_func(field: DataField, depth: int) -> DataField:
+        validate_default_value(field.type, change.new_default_value)
+        return DataField(
+            field.id, field.name, field.type, field.description,
+            change.new_default_value
+        )
+    _update_nested_column(new_fields, change.field_names, update_func)
 
 
 def _handle_update_column_comment(
@@ -852,6 +866,8 @@ class SchemaManager:
                     change, new_fields, disable_null_to_not_null)
             elif isinstance(change, UpdateColumnComment):
                 _handle_update_column_comment(change, new_fields)
+            elif isinstance(change, UpdateColumnDefaultValue):
+                _handle_update_column_default_value(change, new_fields)
             elif isinstance(change, UpdateColumnPosition):
                 _apply_move(new_fields, None, change.move)
             else:

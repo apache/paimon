@@ -248,7 +248,7 @@ run_python_write_test() {
 
     # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
     echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_read_append_table or test_py_write_dynamic_bucket_hash_index or test_py_write_floating_sequence" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_read_append_table or test_py_write_dynamic_bucket_hash_index or test_py_write_floating_sequence or test_py_write_column_default_values" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
     else
@@ -267,7 +267,7 @@ run_java_read_test() {
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadAppendTable+testReadPythonDynamicBucketHashIndex+testReadPythonFloatingSequence -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadAppendTable+testReadPythonDynamicBucketHashIndex+testReadPythonFloatingSequence+testReadPythonColumnDefaultValues -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read Parquet/Orc/Avro test failed${NC}"
