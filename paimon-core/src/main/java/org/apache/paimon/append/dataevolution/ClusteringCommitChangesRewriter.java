@@ -29,11 +29,8 @@ import java.util.stream.Collectors;
 /** Remaps scalar indexes after clustering outputs receive their final row IDs. */
 public final class ClusteringCommitChangesRewriter extends DataEvolutionCommitChangesRewriter {
 
-    private final FileStoreTable table;
-
     public ClusteringCommitChangesRewriter(FileStoreTable table) {
-        super(table.store().indexManifestFileFactory().create());
-        this.table = table;
+        super(table);
     }
 
     @Override
@@ -57,27 +54,6 @@ public final class ClusteringCommitChangesRewriter extends DataEvolutionCommitCh
                                                                 entry.file().fileName())))
                         .map(entry -> entry.file().fileName())
                         .collect(Collectors.toSet());
-        Set<String> rowIdPreservingOutputs =
-                changes.tableFiles.stream()
-                        .filter(entry -> entry.kind() == FileKind.ADD)
-                        .filter(entry -> entry.file().firstRowId() != null)
-                        .map(entry -> entry.file().fileName())
-                        .collect(Collectors.toSet());
-        return (newSnapshotId, assignedFiles, indexFiles, ioManager) -> {
-            if (assignedFiles.stream().noneMatch(entry -> entry.kind() == FileKind.DELETE)) {
-                return indexFiles;
-            }
-            return DataEvolutionIndexRewriter.rewrite(
-                    table.fileIO(),
-                    table.store().pathFactory(),
-                    table.schemaManager(),
-                    table.coreOptions(),
-                    ioManager,
-                    assignedFiles,
-                    indexFiles,
-                    mappedClusteringOutputs,
-                    rowIdPreservingOutputs,
-                    newSnapshotId);
-        };
+        return indexRewriteAttempt(changes, mappedClusteringOutputs);
     }
 }

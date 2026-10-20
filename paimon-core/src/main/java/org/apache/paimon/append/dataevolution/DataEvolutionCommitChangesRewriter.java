@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.CommitChangesProvider;
 import org.apache.paimon.operation.commit.CommitChangesRewriter;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Pair;
@@ -36,13 +37,15 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.materializedRowIdRanges;
 
-/** Refreshes index changes for operations which replace data-evolution row IDs. */
+/** Maintains index changes for operations which replace data-evolution row IDs. */
 public abstract class DataEvolutionCommitChangesRewriter implements CommitChangesRewriter {
 
+    private final FileStoreTable table;
     private final IndexManifestFile indexManifestFile;
 
-    protected DataEvolutionCommitChangesRewriter(IndexManifestFile indexManifestFile) {
-        this.indexManifestFile = indexManifestFile;
+    protected DataEvolutionCommitChangesRewriter(FileStoreTable table) {
+        this.table = table;
+        this.indexManifestFile = table.store().indexManifestFileFactory().create();
     }
 
     @Override
@@ -90,6 +93,33 @@ public abstract class DataEvolutionCommitChangesRewriter implements CommitChange
             }
 
             return new CommitChanges(changes.tableFiles, changes.changelogFiles, indexFiles);
+        };
+    }
+
+    protected Attempt indexRewriteAttempt(CommitChanges changes, Set<String> mappedOutputs) {
+        // Capture this before assignment makes newly allocated outputs indistinguishable from
+        // ordinary compaction outputs which preserve their existing row IDs.
+        Set<String> rowIdPreservingOutputs =
+                changes.tableFiles.stream()
+                        .filter(entry -> entry.kind() == FileKind.ADD)
+                        .filter(entry -> entry.file().firstRowId() != null)
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toSet());
+        return (newSnapshotId, assignedFiles, indexFiles, ioManager) -> {
+            if (assignedFiles.stream().noneMatch(entry -> entry.kind() == FileKind.DELETE)) {
+                return indexFiles;
+            }
+            return DataEvolutionIndexRewriter.rewrite(
+                    table.fileIO(),
+                    table.store().pathFactory(),
+                    table.schemaManager(),
+                    table.coreOptions(),
+                    ioManager,
+                    assignedFiles,
+                    indexFiles,
+                    mappedOutputs,
+                    rowIdPreservingOutputs,
+                    newSnapshotId);
         };
     }
 }

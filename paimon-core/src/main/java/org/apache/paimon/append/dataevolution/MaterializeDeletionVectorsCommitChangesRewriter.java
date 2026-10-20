@@ -19,23 +19,17 @@
 package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.Snapshot.CommitKind;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.util.Collections;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /** Maintains index coverage for deletion-vector materialization. */
 public final class MaterializeDeletionVectorsCommitChangesRewriter
         extends DataEvolutionCommitChangesRewriter {
 
-    private final FileStoreTable table;
-
     public MaterializeDeletionVectorsCommitChangesRewriter(FileStoreTable table) {
-        super(table.store().indexManifestFileFactory().create());
-        this.table = table;
+        super(table);
     }
 
     @Override
@@ -43,27 +37,6 @@ public final class MaterializeDeletionVectorsCommitChangesRewriter
         if (kind != CommitKind.COMPACT) {
             return Attempt.IDENTITY;
         }
-        Set<String> rowIdPreservingOutputs =
-                changes.tableFiles.stream()
-                        .filter(entry -> entry.kind() == FileKind.ADD)
-                        .filter(entry -> entry.file().firstRowId() != null)
-                        .map(entry -> entry.file().fileName())
-                        .collect(Collectors.toSet());
-        return (newSnapshotId, assignedFiles, indexFiles, ioManager) -> {
-            if (assignedFiles.stream().noneMatch(entry -> entry.kind() == FileKind.DELETE)) {
-                return indexFiles;
-            }
-            return DataEvolutionIndexRewriter.rewrite(
-                    table.fileIO(),
-                    table.store().pathFactory(),
-                    table.schemaManager(),
-                    table.coreOptions(),
-                    ioManager,
-                    assignedFiles,
-                    indexFiles,
-                    Collections.emptySet(),
-                    rowIdPreservingOutputs,
-                    newSnapshotId);
-        };
+        return indexRewriteAttempt(changes, Collections.emptySet());
     }
 }
