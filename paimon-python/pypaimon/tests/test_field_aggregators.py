@@ -2680,7 +2680,7 @@ class RegistrationTest(unittest.TestCase):
         # the two can drift. Adding an aggregator without updating the
         # guard would leave it rejected at read time even though it is
         # registered; pin them together here.
-        from pypaimon.read.merge_engine_support import (
+        from pypaimon.execution.python.read.merge_engine_support import (
             _AGGREGATION_SUPPORTED_AGG_FUNCS)
         self.assertEqual(set(_AGGREGATION_SUPPORTED_AGG_FUNCS),
                          set(self.EXPECTED))

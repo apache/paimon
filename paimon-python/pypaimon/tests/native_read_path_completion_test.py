@@ -412,8 +412,9 @@ def test_native_write_plan_restores_all_de_column_files_for_callable_updates(res
     try:
         with ExitStack() as guards:
             if native:
-                guards.enter_context(patch('pypaimon.read.scanner.file_scanner.FileScanner.scan',
-                                           side_effect=AssertionError('Native write plan fell back')))
+                guards.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Native write plan fell back')))
             messages = update.update_by_predicate(
                 predicate, {'b': lambda data: pc.multiply(data['a'], 10)}, read_columns=['a'])
         commit.commit(messages)

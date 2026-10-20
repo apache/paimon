@@ -278,7 +278,9 @@ def test_python_filters_before_nested_normalization(tmp_path):
         return selected.cast(expected)
 
     try:
-        with patch('pypaimon.write.table_write.normalize_arrow_write_nullability', side_effect=normalize):
+        with patch(
+                'pypaimon.execution.python.write.table_write.normalize_arrow_write_nullability',
+                side_effect=normalize):
             selected = TableWrite._prepare_arrow_data(writer, data)
         assert selected.to_pydict() == {'id': [2], 'op': ['+I'], 'seq': [2], 'value': [[42]]}
     finally:

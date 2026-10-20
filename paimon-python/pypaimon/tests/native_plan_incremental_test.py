@@ -488,7 +488,7 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
                 return plans
 
     with patch(
-            'pypaimon.read.streaming_table_scan.ManifestFileManager',
+            'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
             side_effect=AssertionError(
                 'streaming changelog native plan fell back to Python')):
         plans = asyncio.run(first_two_frames())

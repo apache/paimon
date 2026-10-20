@@ -70,8 +70,8 @@ def _create_mock_table(latest_snapshot_id: int = 5):
 class AsyncStreamingTableScanTest(unittest.TestCase):
     """Tests for AsyncStreamingTableScan async streaming functionality."""
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner')
     def test_initial_scan(self, MockStartingScanner, MockManifestListManager):
         """Initial scan should yield a Plan and set next_snapshot_id to latest + 1."""
         table, _ = _create_mock_table(latest_snapshot_id=5)
@@ -94,8 +94,8 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
         self.assertIsInstance(plan, Plan)
         self.assertEqual(scan.next_snapshot_id, 6)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner')
     def test_stream_skips_non_append_commits(self, MockStartingScanner, MockManifestListManager):
         """Stream should skip COMPACT/OVERWRITE commits."""
         table, _ = _create_mock_table(latest_snapshot_id=7)
@@ -140,8 +140,8 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
         # Verify lookahead skipped 1 snapshot
         self.assertEqual(scan._lookahead_skips, 1)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner')
     def test_stream_sync_yields_plans(self, MockStartingScanner, MockManifestListManager):
         """stream_sync() should provide a synchronous iterator."""
         table, _ = _create_mock_table(latest_snapshot_id=5)
@@ -162,7 +162,7 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
             self.assertIsInstance(plan, Plan)
             break  # Just get one
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
     def test_poll_interval_configurable(self, MockManifestListManager):
         """Poll interval should be configurable."""
         table, _ = _create_mock_table()
@@ -171,8 +171,8 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
 
         self.assertEqual(scan.poll_interval, 0.5)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner')
     def test_no_snapshot_waits_and_polls(self, MockStartingScanner, MockManifestListManager):
         """When no new snapshot exists, should wait and poll again."""
         table, _ = _create_mock_table(latest_snapshot_id=5)
@@ -218,24 +218,24 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
 class StreamingPrefetchTest(unittest.TestCase):
     """Tests for prefetching functionality in AsyncStreamingTableScan."""
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_prefetch_enabled_by_default(self, MockManifestFileManager, MockManifestListManager):
         """Prefetching should be enabled by default."""
         table, _ = _create_mock_table()
         scan = AsyncStreamingTableScan(table)
         self.assertTrue(scan._prefetch_enabled)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_prefetch_can_be_disabled(self, MockManifestFileManager, MockManifestListManager):
         """Prefetching can be disabled via constructor parameter."""
         table, _ = _create_mock_table()
         scan = AsyncStreamingTableScan(table, prefetch_enabled=False)
         self.assertFalse(scan._prefetch_enabled)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_prefetch_starts_after_yielding_plan(
             self,
             MockManifestFileManager,
@@ -291,8 +291,8 @@ class StreamingPrefetchTest(unittest.TestCase):
         plans = asyncio.run(get_two_plans())
         self.assertEqual(len(plans), 2)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_prefetch_returns_same_data_as_sequential(
             self,
             MockManifestFileManager,
@@ -344,8 +344,8 @@ class StreamingPrefetchTest(unittest.TestCase):
         # Both should get the same number of plans
         self.assertEqual(len(plans_prefetch), len(plans_sequential))
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_prefetch_handles_no_next_snapshot(
             self,
             MockManifestFileManager,
@@ -388,8 +388,8 @@ class StreamingPrefetchTest(unittest.TestCase):
         plan = asyncio.run(get_one_plan())
         self.assertIsInstance(plan, Plan)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_prefetch_disabled_no_prefetch_future(
             self,
             MockManifestFileManager,
@@ -432,9 +432,9 @@ class StreamingPrefetchTest(unittest.TestCase):
 class StreamingCatchUpDiffTest(unittest.TestCase):
     """Tests for diff-based catch-up optimization in AsyncStreamingTableScan."""
 
-    @patch('pypaimon.read.streaming_table_scan.IncrementalDiffScanner')
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.IncrementalDiffScanner')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_stream_triggers_diff_catch_up_for_large_gap(
         self, MockManifestFileManager, MockManifestListManager,
         MockDiffScanner
@@ -488,8 +488,8 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
 class StreamingConsumerTest(unittest.TestCase):
     """Tests for consumer management integration in AsyncStreamingTableScan."""
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_consumer_restores_next_snapshot_id(
         self, MockManifestFileManager, MockManifestListManager
     ):
@@ -534,8 +534,8 @@ class StreamingConsumerTest(unittest.TestCase):
         # then advanced after scanning snapshot 8
         self.assertEqual(scan.next_snapshot_id, 9)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner')
     def test_consumer_saves_after_yield(
         self, MockFileScanner, MockManifestListManager
     ):
@@ -589,8 +589,8 @@ class StreamingConsumerTest(unittest.TestCase):
         self.assertEqual(call_args[0][0], "save-test")
         self.assertEqual(call_args[0][1].next_snapshot, 6)
 
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager')
     def test_no_consumer_when_consumer_id_not_set(
         self, MockManifestFileManager, MockManifestListManager
     ):
