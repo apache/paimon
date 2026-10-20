@@ -844,7 +844,8 @@ public class CompactProcedure extends BaseProcedure {
             boolean fullCompaction,
             DataSourceV2Relation relation) {
         IncrementalClusterManager incrementalClusterManager =
-                new IncrementalClusterManager(table, partitionPredicate);
+                new IncrementalClusterManager(
+                        table, partitionPredicate, table.snapshotManager().latestSnapshot());
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.createCompactUnits(fullCompaction);
         LOG.info(
