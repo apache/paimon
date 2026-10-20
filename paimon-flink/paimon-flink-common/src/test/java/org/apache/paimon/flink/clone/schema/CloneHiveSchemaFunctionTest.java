@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.clone.schema;
 
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.paimon.flink.clone.schema.CloneHiveSchemaFunction.checkSameFields;
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.flink.clone.schema.CloneHiveSchemaFunction.checkReadableFields;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -34,29 +36,57 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CloneHiveSchemaFunctionTest {
 
     @Test
-    public void testCheckSameFieldsForCopiedFiles() {
+    public void testCheckReadableFieldsForCopiedFiles() {
         List<DataField> source =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
-                        new DataField(1, "name", DataTypes.STRING()));
+                        new DataField(
+                                1,
+                                "s",
+                                DataTypes.ROW(DataTypes.FIELD(2, "a", DataTypes.STRING()))));
 
-        assertThatCode(() -> checkSameFields(source, source, "t")).doesNotThrowAnyException();
+        // the existing table assigned its own ids to nested fields
+        assertThatCode(
+                        () ->
+                                checkReadableFields(
+                                        singletonList(new DataField(0, "tags", arrayOfRow(5))),
+                                        singletonList(new DataField(0, "tags", arrayOfRow(9))),
+                                        "t"))
+                .doesNotThrowAnyException();
 
-        // a wider target would read the copied files with columns they do not have
-        List<DataField> wider =
+        assertCanNotRead(
+                source,
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
-                        new DataField(1, "name", DataTypes.STRING()),
-                        new DataField(2, "age", DataTypes.INT()));
-        assertThatThrownBy(() -> checkSameFields(source, wider, "t"))
-                .isInstanceOf(IllegalStateException.class);
-
-        // Hive columns are nullable, so the copied files may hold nulls
-        List<DataField> notNull =
+                        new DataField(
+                                1, "s", DataTypes.ROW(DataTypes.FIELD(4, "b", DataTypes.INT())))));
+        assertCanNotRead(
+                source,
                 Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT().notNull()),
-                        new DataField(1, "name", DataTypes.STRING()));
-        assertThatThrownBy(() -> checkSameFields(source, notNull, "t"))
+                        new DataField(0, "id", DataTypes.BIGINT()),
+                        new DataField(
+                                1,
+                                "s",
+                                DataTypes.ROW(DataTypes.FIELD(2, "a", DataTypes.STRING())))));
+        // Hive columns are nullable, and an extra field is read as null
+        assertCanNotRead(
+                source,
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "s",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "a", DataTypes.STRING()),
+                                        DataTypes.FIELD(4, "b", DataTypes.INT().notNull())))));
+    }
+
+    private static DataType arrayOfRow(int nestedFieldId) {
+        return DataTypes.ARRAY(DataTypes.ROW(DataTypes.FIELD(nestedFieldId, "x", DataTypes.INT())));
+    }
+
+    private static void assertCanNotRead(List<DataField> source, List<DataField> existed) {
+        assertThatThrownBy(() -> checkReadableFields(source, existed, "t"))
                 .isInstanceOf(IllegalStateException.class);
     }
 }

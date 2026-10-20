@@ -62,11 +62,12 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testCopyFilesWithRecursiveListing() throws Exception {
+    public void testCopyNestedFilesIntoTargetWithMoreFields() throws Exception {
         String dbName = "hivedb" + StringUtils.randomNumericString(10);
         TableEnvironment tEnv = hiveTableEnvironment(dbName);
-        sql(tEnv, "CREATE TABLE %s.t (id STRING, id2 INT, id3 INT) STORED AS orc", dbName);
-        sql(tEnv, "INSERT INTO %s.t VALUES ('a', 1, 10), ('b', 2, 20), ('c', 3, 30)", dbName);
+        sql(tEnv, "CREATE TABLE %s.t (id STRING, s STRUCT<a:INT>) STORED AS orc", dbName);
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        sql(tEnv, "INSERT INTO %s.t VALUES ('a', ROW(1)), ('b', ROW(2))", dbName);
 
         Path root = hiveTableDir(dbName, "t");
         Path nested = Files.createDirectories(root.resolve("sub/deep"));
@@ -74,11 +75,16 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
             Files.move(file, nested.resolve(file.getFileName()));
         }
 
-        cloneWithCopyFiles(tEnv, dbName, "t");
+        usePaimonCatalog(tEnv);
+        sql(
+                tEnv,
+                "CREATE TABLE test.t (extra INT, id STRING, s ROW<b INT, a INT>) "
+                        + "WITH ('bucket' = '-1', 'file.format' = 'orc')");
+        cloneWithCopyFiles(dbName, "t");
 
         assertThat(sql(tEnv, "SELECT * FROM test.t"))
                 .containsExactlyInAnyOrder(
-                        Row.of("a", 1, 10), Row.of("b", 2, 20), Row.of("c", 3, 30));
+                        Row.of(null, "a", Row.of(null, 1)), Row.of(null, "b", Row.of(null, 2)));
     }
 
     @Test
@@ -98,7 +104,8 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
             Files.copy(file, partitionDir.resolve(file.getFileName()));
         }
 
-        cloneWithCopyFiles(tEnv, dbName, "part");
+        usePaimonCatalog(tEnv);
+        cloneWithCopyFiles(dbName, "part");
 
         assertThat(sql(tEnv, "SELECT * FROM test.part")).isEmpty();
     }
@@ -117,13 +124,14 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
         return tEnv;
     }
 
-    private void cloneWithCopyFiles(TableEnvironment tEnv, String dbName, String tableName)
-            throws Exception {
+    private void usePaimonCatalog(TableEnvironment tEnv) throws Exception {
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         sql(tEnv, "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '%s')", warehouse);
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql("CREATE DATABASE test");
+    }
 
+    private void cloneWithCopyFiles(String dbName, String tableName) throws Exception {
         createAction(
                         CloneAction.class,
                         "clone",

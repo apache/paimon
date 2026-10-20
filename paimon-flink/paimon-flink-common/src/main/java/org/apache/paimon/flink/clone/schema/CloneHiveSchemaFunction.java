@@ -30,6 +30,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.OpenContext;
@@ -42,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -160,7 +163,7 @@ public class CloneHiveSchemaFunction
                             tuple.f1, existedTable.getClass().getName()));
             checkCompatible(schema, (FileStoreTable) existedTable);
             if (copyFiles) {
-                checkSameFields(
+                checkReadableFields(
                         schema.fields(),
                         ((FileStoreTable) existedTable).schema().fields(),
                         existedTable.fullName());
@@ -179,28 +182,46 @@ public class CloneHiveSchemaFunction
 
     /**
      * Copied files keep the columns they were written with, but are read with the latest schema of
-     * the target. So the target must have exactly the columns of the source, all nullable as Hive
-     * columns are.
+     * the target, which matches columns and nested fields by name and reads missing ones as null.
+     * So the target must have every source field with the same type, and all its fields, nested
+     * ones included, must be nullable as Hive columns are.
      */
     @VisibleForTesting
-    static void checkSameFields(
+    static void checkReadableFields(
             List<DataField> sourceFields, List<DataField> existedFields, String existedTableName) {
-        boolean same = sourceFields.size() == existedFields.size();
-        for (int i = 0; same && i < sourceFields.size(); i++) {
-            DataField source = sourceFields.get(i);
-            DataField existed = existedFields.get(i);
-            same =
-                    source.name().equals(existed.name())
-                            && existed.type().isNullable()
-                            && source.type().copy(true).equals(existed.type());
-        }
         checkState(
-                same,
-                "Can not copy data files to existed paimon table %s because its fields differ from "
-                        + "the source table. Source fields are %s, existed fields are %s.",
+                canReadFields(sourceFields, existedFields),
+                "Can not copy data files to existed paimon table %s because it does not have all "
+                        + "the fields of the source table with the same types, or has a NOT NULL "
+                        + "field. Source fields are %s, existed fields are %s.",
                 existedTableName,
                 sourceFields,
                 existedFields);
+    }
+
+    private static boolean canReadFields(
+            List<DataField> sourceFields, List<DataField> existedFields) {
+        Map<String, DataType> existedTypes = new HashMap<>();
+        for (DataField existed : existedFields) {
+            if (!existed.type().isNullable()) {
+                return false;
+            }
+            existedTypes.put(existed.name(), existed.type());
+        }
+        for (DataField source : sourceFields) {
+            DataType existed = existedTypes.get(source.name());
+            if (existed == null || !canRead(source.type(), existed)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean canRead(DataType source, DataType existed) {
+        if (source instanceof RowType && existed instanceof RowType) {
+            return canReadFields(((RowType) source).getFields(), ((RowType) existed).getFields());
+        }
+        return source.copy(true).equalsIgnoreFieldId(existed);
     }
 
     private void checkCompatible(Schema sourceSchema, FileStoreTable existedTable) {
