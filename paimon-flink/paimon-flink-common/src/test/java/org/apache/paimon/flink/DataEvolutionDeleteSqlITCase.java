@@ -273,6 +273,83 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
+    @CsvSource({"btree,global-sort", "bitmap,local-sort"})
+    public void testIncrementalClusteringSkipsNonClusteringColumnUpdates(
+            String indexType, String mode) throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql(
+                "ALTER TABLE T SET ("
+                        + "'write-only' = 'true', "
+                        + "'global-index.column-update-action' = 'ignore', "
+                        + "'clustering.incremental' = 'true', "
+                        + "'clustering.strategy' = 'order', "
+                        + "'clustering.columns' = 'id', "
+                        + "'clustering.incremental.mode' = '"
+                        + mode
+                        + "', 'scan.parallelism' = '1', 'sink.parallelism' = '1')");
+        sql("INSERT INTO T VALUES (3, 'three', 'A'), (1, 'one', 'A'), (2, 'two', 'A')");
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "index_column => 'id', index_type => '"
+                        + indexType
+                        + "')");
+        FileStoreTable table = paimonTable("T");
+        List<String> indexes = scalarIndexFiles(table, indexType, "A");
+        assertThat(indexes).isNotEmpty();
+        List<String> clusteredFiles = plannedFiles(table);
+        assertThat(clusteredFiles).hasSize(1);
+        long firstRowId = table.store().newScan().plan().files().get(0).file().nonNullFirstRowId();
+        List<Row> originalIds = sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id");
+
+        writePartialGroup(table, "name", firstRowId, "updated-one", "updated-two", "updated-three");
+        Snapshot payloadSnapshot = table.latestSnapshot().get();
+        List<String> payloadFiles = plannedFiles(table);
+        assertThat(payloadFiles).hasSize(2);
+        assertThat(payloadSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(payloadSnapshot.id());
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(payloadSnapshot.nextRowId());
+        assertThat(plannedFiles(table)).isEqualTo(payloadFiles);
+        assertThat(scalarIndexFiles(table, indexType, "A")).isEqualTo(indexes);
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id"))
+                .containsExactlyElementsOf(originalIds);
+        // The unchanged id index must still find rows whose other columns have newer versions.
+        sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')");
+        assertThat(sql("SELECT id, name FROM T WHERE id IN (1, 3) ORDER BY id"))
+                .containsExactly(Row.of(1, "updated-one"), Row.of(3, "updated-three"));
+
+        writePartialGroup(table, "id", firstRowId, 30, 10, 20);
+        Snapshot sortKeySnapshot = table.latestSnapshot().get();
+        List<String> beforeRewrite = plannedFiles(table);
+        assertThat(beforeRewrite).hasSize(3);
+        long nextRowId = sortKeySnapshot.nextRowId();
+
+        sql("CALL sys.compact(`table` => 'default.T', compact_strategy => 'full')");
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(sortKeySnapshot.id() + 1);
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(nextRowId + 3);
+        assertThat(plannedFiles(table)).doesNotContainAnyElementsOf(beforeRewrite);
+        assertThat(sql("SELECT id, name, dt FROM T ORDER BY id"))
+                .containsExactly(
+                        Row.of(10, "updated-two", "A"),
+                        Row.of(20, "updated-three", "A"),
+                        Row.of(30, "updated-one", "A"));
+        assertThat(sql("SELECT id, _ROW_ID FROM T$row_tracking ORDER BY id"))
+                .containsExactly(
+                        Row.of(10, nextRowId),
+                        Row.of(20, nextRowId + 1),
+                        Row.of(30, nextRowId + 2));
+        // The sort-key update also changed indexed values, so old keys cannot be reused.
+        assertThat(scalarIndexFiles(table, indexType, "A")).isEmpty();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"global-sort", "local-sort"})
     public void testIncrementalClusteringPreservesInlineBlobViews(String mode) throws Exception {
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
@@ -583,24 +660,36 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT id, name, dt FROM T")).containsExactly(Row.of(1, "old", "A"));
     }
 
-    @SuppressWarnings("unchecked")
     private static void updateFirstGroupNames(FileStoreTable table) throws Exception {
+        List<String> names = new ArrayList<>();
+        for (int id = 39; id >= 1; id -= 2) {
+            names.add("updated-" + id);
+        }
+        writePartialGroup(table, "name", 0L, names.toArray());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void writePartialGroup(
+            FileStoreTable table, String column, long firstRowId, Object... values)
+            throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         BinaryRow partition = ((DataSplit) table.newScan().plan().splits().get(0)).partition();
         try (BatchTableWrite write =
                         builder.newWrite()
                                 .withWriteType(
-                                        table.rowType().project(Arrays.asList("name", "dt")));
+                                        table.rowType().project(Arrays.asList(column, "dt")));
                 BatchTableCommit commit = builder.newCommit()) {
             // Partial rows do not contain the partition field at its full-schema position.
             FileStoreWrite<InternalRow> fileStoreWrite =
                     ((TableWriteImpl<InternalRow>) write).getWrite();
-            for (int id = 39; id >= 1; id -= 2) {
+            for (Object value : values) {
                 fileStoreWrite.write(
                         partition,
                         0,
                         GenericRow.of(
-                                BinaryString.fromString("updated-" + id),
+                                value instanceof String
+                                        ? BinaryString.fromString((String) value)
+                                        : value,
                                 BinaryString.fromString("A")));
             }
             List<CommitMessage> messages = write.prepareCommit();
@@ -609,7 +698,7 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                         ((CommitMessageImpl) message).newFilesIncrement().newFiles();
                 List<DataFileMeta> assigned =
                         files.stream()
-                                .map(file -> file.assignFirstRowId(0L))
+                                .map(file -> file.assignFirstRowId(firstRowId))
                                 .collect(Collectors.toList());
                 files.clear();
                 files.addAll(assigned);

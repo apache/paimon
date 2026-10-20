@@ -227,6 +227,76 @@ class DataEvolutionClusterTest extends TableTestBase {
     }
 
     @Test
+    void testNonClusteringUpdatesDoNotDirtyClusteredGroups() throws Exception {
+        FileStoreTable table = createTable(false);
+        append(table, "a", 60, 10, 50, 30, 20, 40);
+        table = table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_ROW_NUM.key(), "3"));
+        Snapshot initial = table.latestSnapshot().get();
+        commitCluster(table, initial, prepareMappedCluster(table, initial, true));
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        List<String> indexes = globalIndexNames(table);
+        assertThat(indexes).isNotEmpty();
+
+        updatePayload(table, "a", 6L, 10, 20, 30);
+        updatePayload(table, "a", 9L, 40, 50, 60);
+        Snapshot updated = table.latestSnapshot().get();
+        List<String> files = fileNames(table, "a");
+        assertThat(files).hasSize(4);
+        List<String> latestRows =
+                Arrays.asList(
+                        "a|10|updated-10|6",
+                        "a|20|updated-20|7",
+                        "a|30|updated-30|8",
+                        "a|40|updated-40|9",
+                        "a|50|updated-50|10",
+                        "a|60|updated-60|11");
+        for (boolean fullCompaction : new boolean[] {false, true}) {
+            List<CommitMessage> messages = prepareMappedCluster(table, updated, fullCompaction);
+            assertThat(messages).isEmpty();
+            commitCluster(table, updated, messages);
+            assertThat(table.latestSnapshot().get().id()).isEqualTo(updated.id());
+            assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(12L);
+            assertThat(fileNames(table, "a")).isEqualTo(files);
+            assertThat(globalIndexNames(table)).isEqualTo(indexes);
+            assertThat(readRows(table)).containsExactlyElementsOf(latestRows);
+        }
+        assertIndexRows(
+                table,
+                new PredicateBuilder(table.rowType())
+                        .equal(table.rowType().getFieldIndex("id"), 20),
+                new Range(7, 7));
+
+        append(table, "a", 90, 70, 80);
+        Snapshot appended = table.latestSnapshot().get();
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, appended);
+        Map<BinaryRow, CompactUnit> units = manager.createCompactUnits(true);
+        assertThat(units).containsOnlyKeys(partition(table, "a"));
+        assertThat(units.get(partition(table, "a")).files())
+                .hasSize(5)
+                .extracting(DataFileMeta::fileName)
+                .containsAll(files);
+        commitCluster(table, appended, rewriteClusterUnits(table, manager, units, true));
+
+        assertThat(readRows(table))
+                .containsExactly(
+                        "a|10|updated-10|15",
+                        "a|20|updated-20|16",
+                        "a|30|updated-30|17",
+                        "a|40|updated-40|18",
+                        "a|50|updated-50|19",
+                        "a|60|updated-60|20",
+                        "a|70|base-70|21",
+                        "a|80|base-80|22",
+                        "a|90|base-90|23");
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(24L);
+        assertIndexRows(
+                table,
+                new PredicateBuilder(table.rowType())
+                        .equal(table.rowType().getFieldIndex("id"), 20),
+                new Range(16, 16));
+    }
+
+    @Test
     void testIncrementalClusterWaitsForCompactionThreshold() throws Exception {
         FileStoreTable table = createTable(false);
         append(table, "a", 30, 10, 20);
@@ -292,6 +362,7 @@ class DataEvolutionClusterTest extends TableTestBase {
         List<String> expected = new ArrayList<>(readRows(table).subList(3, 6));
 
         updatePayload(table, "a", 6L, 10, 20, 30);
+        updateSortKeys(table, "a", 6L, 10, 20, 30);
         append(table, "a", 90, 70, 80);
         Snapshot snapshot = table.latestSnapshot().get();
         IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
@@ -304,7 +375,7 @@ class DataEvolutionClusterTest extends TableTestBase {
                 .doesNotContain(untouchedBase.fileName());
         assertThat(unit.files())
                 .filteredOn(file -> file.nonNullRowIdRange().equals(new Range(6, 8)))
-                .hasSize(2);
+                .hasSize(3);
         commitCluster(table, snapshot, rewriteClusterUnits(table, manager, units));
 
         expected.addAll(
@@ -1324,6 +1395,8 @@ class DataEvolutionClusterTest extends TableTestBase {
 
         updatePayload(table, "a", 9L, 10, 20, 30);
         updatePayload(table, "a", 15L, 70, 80, 90);
+        updateSortKeys(table, "a", 9L, 10, 20, 30);
+        updateSortKeys(table, "a", 15L, 70, 80, 90);
         append(table, "a", 120, 100, 110);
         if (deletionVectors) {
             delete(table, "a", new Range(9, 11), 9L);
@@ -1342,6 +1415,8 @@ class DataEvolutionClusterTest extends TableTestBase {
                 .containsExactlyInAnyOrder(
                         new Range(9, 11),
                         new Range(9, 11),
+                        new Range(9, 11),
+                        new Range(15, 17),
                         new Range(15, 17),
                         new Range(15, 17),
                         new Range(18, 20));
@@ -1414,6 +1489,21 @@ class DataEvolutionClusterTest extends TableTestBase {
             FileStoreTable table, String partition, long firstRowId, int... values)
             throws Exception {
         commit(table, preparePayloadUpdate(table, partition, firstRowId, values));
+    }
+
+    private void updateSortKeys(
+            FileStoreTable table, String partition, long firstRowId, int... values)
+            throws Exception {
+        RowType writeType = table.rowType().project(Arrays.asList("pt", "id"));
+        try (BatchTableWrite write =
+                table.newBatchWriteBuilder().newWrite().withWriteType(writeType)) {
+            for (int value : values) {
+                write.write(GenericRow.of(BinaryString.fromString(partition), value));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, firstRowId);
+            commit(table, messages);
+        }
     }
 
     private List<CommitMessage> preparePayloadUpdate(
