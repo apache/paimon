@@ -123,3 +123,17 @@ def normalize_arrow_strings(data):
         raise ValueError(
             "Cannot convert large_string input to string with PyArrow %s: %s"
             % (pa.__version__, error)) from error
+
+
+def project_arrow_batch(data, column_names):
+    """Project batch fields in order while retaining field/schema metadata."""
+    indices = [data.schema.get_field_index(name) for name in column_names]
+    missing = [name for name, index in zip(column_names, indices) if index < 0]
+    if missing:
+        raise KeyError('Columns not found in record batch: %s' % missing)
+    if not indices:
+        # With no child arrays, from_arrays cannot infer the batch row count.
+        rows = pa.StructArray.from_buffers(pa.struct([]), data.num_rows, [None])
+        return pa.RecordBatch.from_struct_array(rows).replace_schema_metadata(data.schema.metadata)
+    schema = pa.schema([data.schema.field(index) for index in indices], metadata=data.schema.metadata)
+    return pa.RecordBatch.from_arrays([data.column(index) for index in indices], schema=schema)

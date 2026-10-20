@@ -33,6 +33,7 @@ from parameterized import parameterized
 from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.write.table_write import TableWrite
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
@@ -229,7 +230,9 @@ class TableWriteTest(unittest.TestCase):
     @staticmethod
     def _mock_table_write(partitions, buckets, schema):
         table_write = object.__new__(TableWrite)
-        table_write.table = Mock(is_primary_key_table=False)
+        table_write.table = Mock(
+            is_primary_key_table=False, options=CoreOptions(Options({})),
+            fields=Schema.from_pyarrow_schema(schema).fields)
         table_write.table_pyarrow_schema = schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
@@ -305,7 +308,9 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
-        table_write.table = Mock(is_primary_key_table=False)
+        table_write.table = Mock(
+            is_primary_key_table=False, options=CoreOptions(Options({})),
+            fields=Schema.from_pyarrow_schema(data.schema).fields)
         table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock(write_cols=None)
@@ -331,7 +336,9 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
-        table_write.table = Mock(is_primary_key_table=False)
+        table_write.table = Mock(
+            is_primary_key_table=False, options=CoreOptions(Options({})),
+            fields=Schema.from_pyarrow_schema(data.schema).fields)
         table_write.table_pyarrow_schema = data.schema
         table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock(write_cols=None)

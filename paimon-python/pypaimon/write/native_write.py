@@ -230,9 +230,8 @@ class NativeTableWrite:
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
             return self._python_writer.write_pandas(dataframe)
-        from pypaimon.write.table_write import _pandas_write_schema
-        transport = _pandas_write_schema(self.table, self._schema)
-        self.write_arrow_batch(pa.RecordBatch.from_pandas(dataframe, schema=transport))
+        from pypaimon.write.table_write import _pandas_write_batch
+        self.write_arrow_batch(_pandas_write_batch(self.table, dataframe, self._schema, self._table_schema))
 
     def write_ray(self, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
                   hash_fixed_precluster='auto', static_partition=None):
@@ -262,13 +261,16 @@ class NativeTableWrite:
         require_columns(values, names, 'write_row')
         require_columns(values, self.table.partition_keys, 'write_row')
         from pypaimon.write.row_kind import skip_write_row, with_row_kind
-        if skip_write_row(self.table, values, row.get_row_kind()):
+        if skip_write_row(self.table, values, row.get_row_kind(), self._write_cols):
             return
         if self._write_cols is not None:
             routing = list(self.table.partition_keys)
             if ((self.table.bucket_mode() == BucketMode.HASH_FIXED and self.table.options.bucket() > 1)
                     or isinstance(self, NativePostponeFixedBucketTableWrite)):
                 routing.extend(self.table.table_schema.bucket_keys)
+            row_kind_field = self.table.options.options.to_map().get('rowkind.field')
+            if row_kind_field is not None:
+                routing.append(row_kind_field)
             require_columns(values, routing, 'write_row')
             if not set(routing).issubset(names):
                 retained = set(names) | set(routing)

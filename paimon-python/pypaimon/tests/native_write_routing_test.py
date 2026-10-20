@@ -174,9 +174,10 @@ def test_append_write_type_preserves_input_routing_columns_for_core(tmp_path, fu
     assert writer._python_writer is None
 
 
-def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog):
+@pytest.mark.parametrize('query_auth', ['true', 'on'])
+def test_standard_rest_query_auth_write_table_keeps_native_publication(rest_catalog, query_auth):
     catalog, _ = rest_catalog
-    table = _table(None, catalog=catalog, guarded=True)
+    table = _table(None, catalog=catalog, guarded=True).copy({'query-auth.enabled': query_auth})
     module = ModuleType('pypaimon_rust.datafusion')
     module.Table = Mock()
     module.PaimonCatalog = Mock()
