@@ -201,10 +201,22 @@ in batch mode. Explicit compact jobs use clustering while this option is enabled
 To consolidate column versions while preserving row IDs, disable clustering for
 the compact invocation with `options => 'clustering.incremental=false'`.
 
-Clustering removes the applied deletion vectors and drops global indexes in
-affected partitions because their row IDs no longer identify the same rows.
-Rebuild those indexes after clustering, or use `scalar-index.search-mode = full`
-for complete scalar query results while only part of the table remains indexed.
+Clustering removes the applied deletion vectors. Flink clustering also rewrites
+B-tree and bitmap index files with the new row IDs, reusing their stored keys.
+Indexes outside the rewritten row-ID ranges are preserved, including those in
+the same partition. Partially indexed data retains its exact coverage after sorting.
+The current contiguous-range index protocol limits rewriting to 64 new coverage
+fragments per index definition, and 64 retained plus new fragments per source file.
+If sorting would exceed either bound, clustering fails before committing; rebuild
+complete indexes with smaller shards first.
+The job records the old row IDs alongside each output file so that concurrent
+index creation and optimistic commit retries use the final assigned row IDs.
+
+Indexes with stale keys after indexed-column updates, and affected index types
+without RowID rewrite support, are dropped. Spark clustering currently drops
+global indexes in the affected partitions. Rebuild dropped indexes, or use
+`scalar-index.search-mode = full` for complete scalar query results while part
+of the table remains unindexed.
 Concurrent updates or deletes that overlap the selected row-ID groups cause
 commit to fail, preventing stale rewrites from replacing newer values.
 Historical snapshots and tags retain

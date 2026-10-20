@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.append.dataevolution.ClusteringIndexRewriter;
+import org.apache.paimon.append.dataevolution.ClusteringRowIdMapping;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -888,8 +890,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             .collect(Collectors.toList());
 
             // This provider is invoked again after every optimistic-commit conflict. Scanning the
-            // latest snapshot here guarantees that an index committed concurrently is either
-            // deleted by this attempt or makes this attempt retry and is deleted by the next one.
+            // latest snapshot includes concurrently created indexes in this attempt's changes.
+            // Clustering can then remap their postings after the final row IDs have been assigned.
             if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
                 for (IndexManifestEntry entry :
                         indexManifestFile.read(latestSnapshot.indexManifest())) {
@@ -1153,6 +1155,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> deltaFiles = changes.tableFiles;
         List<ManifestEntry> changelogFiles = changes.changelogFiles;
         List<IndexManifestEntry> indexFiles = changes.indexFiles;
+        // Side files remain attached to committed data. Only outputs awaiting their first row-ID
+        // assignment carry a permutation for this commit; later metadata rewrites must ignore it.
+        Set<String> mappedClusteringOutputs =
+                commitKind == CommitKind.COMPACT && options.dataEvolutionEnabled()
+                        ? deltaFiles.stream()
+                                .filter(entry -> entry.kind() == FileKind.ADD)
+                                .filter(entry -> entry.file().firstRowId() == null)
+                                .filter(
+                                        entry ->
+                                                entry.file()
+                                                        .extraFiles()
+                                                        .contains(
+                                                                ClusteringRowIdMapping.fileName(
+                                                                        entry.file().fileName())))
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toSet())
+                        : Collections.emptySet();
         Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
@@ -1261,6 +1280,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
         boolean skipManifestMerge = false;
         long nextRowIdStart = firstRowIdStart;
+        List<Path> clusteringIndexOutputs = new ArrayList<>();
         try {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
@@ -1324,6 +1344,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
                 nextRowIdStart = assigned.nextRowIdStart;
                 deltaFiles = assigned.assignedEntries;
+            }
+
+            if (commitKind == CommitKind.COMPACT
+                    && options.dataEvolutionEnabled()
+                    && deltaFiles.stream().anyMatch(entry -> entry.kind() == FileKind.DELETE)) {
+                indexFiles =
+                        ClusteringIndexRewriter.rewrite(
+                                fileIO,
+                                pathFactory,
+                                schemaManager,
+                                options,
+                                ioManager,
+                                deltaFiles,
+                                indexFiles,
+                                mappedClusteringOutputs,
+                                newSnapshotId,
+                                clusteringIndexOutputs);
             }
 
             if (options.snapshotSequenceOrdering()) {
@@ -1406,6 +1443,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             operation);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
+            clusteringIndexOutputs.forEach(fileIO::deleteQuietly);
             commitCleaner.cleanUpReuseTmpManifests(
                     deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
             commitCleaner.cleanUpNoReuseTmpManifests(
@@ -1421,13 +1459,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean success;
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
-        commitPreCallbacks.forEach(
-                callback ->
-                        callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+        final List<IndexManifestEntry> finalIndexFiles = indexFiles;
+        try {
+            commitPreCallbacks.forEach(
+                    callback ->
+                            callback.call(
+                                    finalBaseFiles, finalDeltaFiles, finalIndexFiles, newSnapshot));
+        } catch (RuntimeException | Error failure) {
+            // No snapshot publication has been attempted, so these new payloads are unreferenced.
+            clusteringIndexOutputs.forEach(fileIO::deleteQuietly);
+            throw failure;
+        }
         try {
             success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
+            // This also retains index payloads generated for this possibly published candidate.
             LOG.warn(
                     "Retry commit for exception when committing snapshot #{} for table {} by user {}.",
                     newSnapshotId,
@@ -1438,6 +1485,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (!success) {
+            // Some committers can publish the snapshot and still report false. Retain the index
+            // payloads together with the manifests until the next attempt reconciles publication.
             long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
             LOG.warn(
                     "Atomic commit failed for snapshot #{} for table {} by user {} "
