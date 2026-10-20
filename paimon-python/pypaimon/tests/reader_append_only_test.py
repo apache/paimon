@@ -29,10 +29,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_commit import CommitFailRetryResult
+from pypaimon.write.file_store_commit import CommitDedup
 
 
 class AoReaderTest(unittest.TestCase):
@@ -690,27 +687,15 @@ class AoReaderTest(unittest.TestCase):
 
         snapshot_manager = table.snapshot_manager()
         latest_snapshot = snapshot_manager.get_latest_snapshot()
-        commit_entries = []
-        for msg in messages:
-            partition = GenericRow(list(msg.partition), table.partition_keys_fields)
-            for file in msg.new_files:
-                commit_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=table.total_buckets,
-                    file=file
-                ))
-        # mock retry
-        success = table_commit.file_store_commit._try_commit_once(
-            CommitFailRetryResult(None),
-            "APPEND",
-            commit_entries,
-            [],
-            BATCH_COMMIT_IDENTIFIER,
-            latest_snapshot)
-        self.assertTrue(success.is_success())
         table_commit.close()
+        retry_builder = table.new_batch_write_builder()
+        retry_builder.commit_user = write_builder.commit_user
+        retry_commit = retry_builder.new_commit(dedup=CommitDedup(on_first_attempt=True))
+        try:
+            retry_commit.commit(messages)
+        finally:
+            retry_commit.close()
+        self.assertEqual(snapshot_manager.get_latest_snapshot().id, latest_snapshot.id)
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
