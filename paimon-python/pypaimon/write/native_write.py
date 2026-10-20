@@ -138,8 +138,6 @@ class NativeTableWrite:
     def with_write_type(self, write_cols):
         if self._python_writer is not None:
             return self._python_writer.with_write_type(write_cols)
-        if self._written:
-            raise RuntimeError('with_write_type must be called before writing; after native data it cannot change')
         names = list(write_cols)
         if self.table.is_primary_key_table:
             if len(names) == len(self._table_schema.names) and set(names) == set(self._table_schema.names):
@@ -157,8 +155,6 @@ class NativeTableWrite:
     def with_blob_consumer(self, blob_consumer):
         if self._python_writer is not None:
             return self._python_writer.with_blob_consumer(blob_consumer)
-        if self._written:
-            raise RuntimeError('with_blob_consumer must be called before any write operation.')
         if blob_consumer is None:
             self._native_writer.with_blob_consumer(None)
             self._blob_consumer = None
@@ -178,11 +174,13 @@ class NativeTableWrite:
     def with_blob_uri_reader_factory(self, uri_reader_factory):
         if self._python_writer is not None:
             return self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
-        if self._written:
-            raise RuntimeError('with_blob_uri_reader_factory must be called before any write operation.')
         if self._blob_rows is not None:
             if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
                 raise TypeError('URI reader factory must provide callable create')
+            # Only core knows whether RowKind filtering accepted any rows or a
+            # postpone writer buffered data. Validate before changing the live
+            # bridge's fallback, including when clearing the application factory.
+            self._native_writer.with_blob_uri_reader_factory(self._blob_rows)
             self._blob_rows.fallback = uri_reader_factory
         else:
             self._native_writer.with_blob_uri_reader_factory(uri_reader_factory)
