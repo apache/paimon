@@ -1180,6 +1180,420 @@ class DataEvolutionClusterTest extends TableTestBase {
     }
 
     @ParameterizedTest
+    @CsvSource({"btree,false", "btree,true", "bitmap,false", "bitmap,true"})
+    void testMixedClusteringAndCompactionPreservesUnchangedIndexSegments(
+            String indexType, boolean deletionVectors) throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(deletionVectors);
+        commit(table, prepareMixedIndexes(table, table.latestSnapshot().get(), "id", indexType));
+        List<String> retainedIndexes = globalIndexNames(table, new Range(3, 5));
+        List<String> remappedIndexes = globalIndexNames(table, new Range(6, 8));
+        assertThat(retainedIndexes).isNotEmpty();
+        assertThat(remappedIndexes).isNotEmpty();
+        if (deletionVectors) {
+            delete(table, "a", new Range(3, 5), 4L);
+            delete(table, "a", new Range(6, 8), 7L);
+        }
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMixedMaintenance(table, snapshot);
+        commitCluster(table, snapshot, messages);
+
+        assertThat(globalIndexNames(table))
+                .containsAll(retainedIndexes)
+                .doesNotContainAnyElementsOf(remappedIndexes);
+        assertThat(globalIndexNames(table, new Range(3, 5))).isEqualTo(retainedIndexes);
+        assertThat(filesInRange(table, new Range(3, 5))).hasSize(1);
+        assertThat(readRows(table))
+                .containsExactlyElementsOf(
+                        deletionVectors
+                                ? Arrays.asList(
+                                        "a|40|updated-40|3",
+                                        "a|60|updated-60|5",
+                                        "a|20|base-20|9",
+                                        "a|30|base-30|10")
+                                : Arrays.asList(
+                                        "a|40|updated-40|3",
+                                        "a|50|updated-50|4",
+                                        "a|60|updated-60|5",
+                                        "a|10|base-10|9",
+                                        "a|20|base-20|10",
+                                        "a|30|base-30|11"));
+        int id = table.rowType().getFieldIndex("id");
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        assertIndexRows(table, predicates.equal(id, 40), new Range(3, 3));
+        assertIndexRows(
+                table,
+                predicates.equal(id, 20),
+                new Range(deletionVectors ? 9 : 10, deletionVectors ? 9 : 10));
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(deletionVectors ? 11L : 12L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    void testFullyDeletedClusteringAndCompactionRetainsOtherIndexSegments(String indexType)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(true);
+        commit(table, prepareMixedIndexes(table, table.latestSnapshot().get(), "id", indexType));
+        List<String> retainedIndexes = globalIndexNames(table, new Range(3, 5));
+        delete(table, "a", new Range(3, 5), 4L);
+        delete(table, "a", new Range(6, 8), 6L, 7L, 8L);
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMixedMaintenance(table, snapshot));
+
+        assertThat(globalIndexNames(table)).isEqualTo(retainedIndexes);
+        assertThat(readRows(table)).containsExactly("a|40|updated-40|3", "a|60|updated-60|5");
+        assertThat(filesInRange(table, new Range(3, 5))).hasSize(1);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(9L);
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        assertIndexRows(
+                table, predicates.equal(table.rowType().getFieldIndex("id"), 40), new Range(3, 3));
+        assertIndexRows(table, predicates.equal(table.rowType().getFieldIndex("id"), 20));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testNormalCompactionDoesNotInvalidateIndexes(boolean deletionVectors) throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(deletionVectors);
+        if (deletionVectors) {
+            delete(table, "a", new Range(3, 5), 4L);
+        }
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        List<String> indexes = globalIndexNames(table);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<String> rows = readRows(table);
+        commitCluster(
+                table,
+                snapshot,
+                Collections.singletonList(prepareNormalCompaction(table, new Range(3, 5))));
+
+        assertThat(globalIndexNames(table)).isEqualTo(indexes);
+        assertThat(readRows(table)).isEqualTo(rows);
+        assertThat(filesInRange(table, new Range(3, 5))).hasSize(1);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(9L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    void testMixedMaintenanceSplitsIndexSpanningRetainedAndReassignedRows(String indexType)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(false);
+        commit(
+                table,
+                prepareGlobalIndex(table, table.latestSnapshot().get(), "id", indexType, null));
+        assertThat(globalIndexNames(table, new Range(3, 8))).isNotEmpty();
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMixedMaintenance(table, snapshot));
+
+        assertThat(
+                        table.store().newIndexFileHandler().scanEntries().stream()
+                                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                                .map(entry -> entry.indexFile().globalIndexMeta().rowRange()))
+                .containsExactlyInAnyOrder(new Range(3, 5), new Range(9, 11));
+        PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+        int id = table.rowType().getFieldIndex("id");
+        assertIndexRows(table, predicates.equal(id, 40), new Range(3, 3));
+        assertIndexRows(table, predicates.equal(id, 20), new Range(10, 10));
+        assertIndexRows(table, predicates.notEqual(id, 40), new Range(4, 5), new Range(9, 11));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"btree,false", "btree,true", "bitmap,false", "bitmap,true"})
+    void testMixedMaintenanceRetryRemapsConcurrentIndexAfterAppend(
+            String indexType, boolean deletionVectors) throws Exception {
+        Map<String, String> retryOptions = new HashMap<>();
+        retryOptions.put(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "0ms");
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "0ms");
+        FileStoreTable original = createMixedMaintenanceTable(deletionVectors).copy(retryOptions);
+        if (deletionVectors) {
+            delete(original, "a", new Range(3, 5), 4L);
+            delete(original, "a", new Range(6, 8), 7L);
+        }
+        commit(
+                original,
+                prepareMixedIndexes(original, original.latestSnapshot().get(), "id", indexType));
+        Snapshot scanSnapshot = original.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMixedMaintenance(original, scanSnapshot);
+        List<String> retainedIndexes = new ArrayList<>(globalIndexNames(original, new Range(3, 5)));
+        AtomicInteger attempts = new AtomicInteger();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public SnapshotCommit snapshotCommit(
+                            SnapshotManager manager, CoreOptions options, String commitUser) {
+                        SnapshotCommit delegate = new RenamingSnapshotCommit(manager, Lock.empty());
+                        return new SnapshotCommit(Lock.empty()) {
+                            @Override
+                            protected boolean commitImpl(
+                                    String baseUuid,
+                                    Snapshot snapshot,
+                                    String branch,
+                                    List<PartitionStatistics> statistics)
+                                    throws Exception {
+                                int attempt = attempts.incrementAndGet();
+                                if (attempt == 1) {
+                                    DataEvolutionClusterTest.this.commit(
+                                            original,
+                                            prepareMixedIndexes(
+                                                    original, scanSnapshot, "payload", indexType));
+                                    retainedIndexes.clear();
+                                    retainedIndexes.addAll(
+                                            globalIndexNames(original, new Range(3, 5)));
+                                    append(original, "a", 90, 70, 80);
+                                }
+                                boolean committed =
+                                        delegate.commit(baseUuid, snapshot, branch, statistics);
+                                assertThat(committed).isEqualTo(attempt == 2);
+                                return committed;
+                            }
+
+                            @Override
+                            protected void closeImpl() throws Exception {
+                                delegate.close();
+                            }
+                        };
+                    }
+                };
+        FileStoreTable committingTable =
+                FileStoreTableFactory.create(
+                        original.fileIO(), original.location(), original.schema(), environment);
+        commitCluster(committingTable, scanSnapshot, messages);
+
+        assertThat(attempts).hasValue(2);
+        assertThat(original.latestSnapshot().get().id()).isEqualTo(scanSnapshot.id() + 3);
+        assertThat(globalIndexNames(original, new Range(3, 5))).isEqualTo(retainedIndexes);
+        assertThat(original.latestSnapshot().get().nextRowId())
+                .isEqualTo(deletionVectors ? 14L : 15L);
+        PredicateBuilder predicates = new PredicateBuilder(original.rowType());
+        int id = original.rowType().getFieldIndex("id");
+        assertIndexRows(original, predicates.equal(id, 40), new Range(3, 3));
+        assertIndexRows(
+                original,
+                predicates.equal(id, 20),
+                new Range(deletionVectors ? 12 : 13, deletionVectors ? 12 : 13));
+        assertIndexRows(
+                original,
+                predicates.equal(
+                        original.rowType().getFieldIndex("payload"),
+                        BinaryString.fromString("updated-40")),
+                new Range(3, 3));
+        assertIndexRows(
+                original,
+                predicates.equal(
+                        original.rowType().getFieldIndex("payload"),
+                        BinaryString.fromString("base-20")),
+                new Range(deletionVectors ? 12 : 13, deletionVectors ? 12 : 13));
+        assertThat(readRows(original))
+                .contains("a|90|base-90|9", "a|70|base-70|10", "a|80|base-80|11");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMixedMaintenanceAllowsConcurrentPartialUpdateOfRetainedRows(boolean deletionVectors)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(deletionVectors);
+        commit(table, prepareGlobalIndex(table, table.latestSnapshot().get(), "id"));
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMixedMaintenance(table, snapshot);
+        updatePayload(table, "a", 3L, 400, 500, 600);
+        commitCluster(table, snapshot, messages);
+
+        assertThat(readRows(table))
+                .containsExactly(
+                        "a|40|updated-400|3",
+                        "a|50|updated-500|4",
+                        "a|60|updated-600|5",
+                        "a|10|base-10|9",
+                        "a|20|base-20|10",
+                        "a|30|base-30|11");
+        assertThat(filesInRange(table, new Range(3, 5))).hasSize(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMixedMaintenanceRejectsConcurrentPartialUpdateOfReassignedRows(boolean deletionVectors)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(deletionVectors);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMixedMaintenance(table, snapshot);
+        updatePayload(table, "a", 6L, 300, 100, 200);
+        long updatedSnapshot = table.latestSnapshot().get().id();
+        assertThatThrownBy(() -> commitCluster(table, snapshot, messages))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(updatedSnapshot);
+        assertThat(readRows(table))
+                .contains("a|30|updated-300|6", "a|10|updated-100|7", "a|20|updated-200|8");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMixedMaintenanceAllowsOldIndexOnlyForRetainedRows(boolean deletionVectors)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(deletionVectors);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> retainedIndex =
+                prepareGlobalIndex(table, snapshot, "id", "bitmap", new Range(3, 5));
+        List<CommitMessage> reassignedIndex =
+                prepareGlobalIndex(table, snapshot, "id", "bitmap", new Range(6, 8));
+        commitCluster(table, snapshot, prepareMixedMaintenance(table, snapshot));
+        commit(table, retainedIndex);
+        List<String> indexes = globalIndexNames(table);
+        long committedSnapshot = table.latestSnapshot().get().id();
+        assertThatThrownBy(() -> commit(table, reassignedIndex))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Global index row ID existence conflict");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(committedSnapshot);
+        assertThat(globalIndexNames(table)).isEqualTo(indexes);
+        assertIndexRows(
+                table,
+                new PredicateBuilder(table.rowType())
+                        .equal(table.rowType().getFieldIndex("id"), 40),
+                new Range(3, 3));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {3L, 6L})
+    void testMixedMaintenanceRejectsConcurrentDeletionVectorChange(long firstRowId)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(true);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> messages = prepareMixedMaintenance(table, snapshot);
+        delete(table, "a", new Range(firstRowId, firstRowId + 2), firstRowId + 1);
+        List<String> deletedRows = readRows(table);
+        long deletedSnapshot = table.latestSnapshot().get().id();
+        assertThatThrownBy(() -> commitCluster(table, snapshot, messages))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("File deletion conflicts detected!");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(deletedSnapshot);
+        assertThat(readRows(table)).isEqualTo(deletedRows);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testMixedMaintenanceAllowsPreviouslyPreparedUpdateOnlyForRetainedRows(
+            boolean deletionVectors) throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(deletionVectors);
+        Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> retainedUpdate =
+                preparePayloadUpdate(table, "a", 3L, 400, 500, 600).stream()
+                        .map(
+                                message ->
+                                        ((CommitMessageImpl) message)
+                                                .withCheckFromSnapshot(snapshot.id()))
+                        .collect(Collectors.toList());
+        List<CommitMessage> reassignedUpdate =
+                preparePayloadUpdate(table, "a", 6L, 300, 100, 200).stream()
+                        .map(
+                                message ->
+                                        ((CommitMessageImpl) message)
+                                                .withCheckFromSnapshot(snapshot.id()))
+                        .collect(Collectors.toList());
+        commitCluster(table, snapshot, prepareMixedMaintenance(table, snapshot));
+        commit(table, retainedUpdate);
+        long committedSnapshot = table.latestSnapshot().get().id();
+        assertThatThrownBy(() -> commit(table, reassignedUpdate))
+                .isInstanceOf(RowIdExistenceConflictException.class)
+                .hasMessageContaining("Row ID existence conflict");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(committedSnapshot);
+        assertThat(readRows(table))
+                .contains("a|40|updated-400|3", "a|50|updated-500|4", "a|60|updated-600|5");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"btree", "bitmap"})
+    void testMixedMaintenanceWithoutMappingOnlyInvalidatesReassignedIndexRange(String indexType)
+            throws Exception {
+        FileStoreTable table = createMixedMaintenanceTable(false);
+        commit(table, prepareMixedIndexes(table, table.latestSnapshot().get(), "id", indexType));
+        List<String> retainedIndexes = globalIndexNames(table, new Range(3, 5));
+        Snapshot snapshot = table.latestSnapshot().get();
+        commitCluster(table, snapshot, prepareMixedMaintenance(table, snapshot, false));
+
+        assertThat(globalIndexNames(table)).isEqualTo(retainedIndexes);
+        assertThat(readRows(table))
+                .containsExactly(
+                        "a|40|updated-40|3",
+                        "a|50|updated-50|4",
+                        "a|60|updated-60|5",
+                        "a|10|base-10|9",
+                        "a|20|base-20|10",
+                        "a|30|base-30|11");
+        assertIndexRows(
+                table,
+                new PredicateBuilder(table.rowType())
+                        .equal(table.rowType().getFieldIndex("id"), 40),
+                new Range(3, 3));
+    }
+
+    private FileStoreTable createMixedMaintenanceTable(boolean deletionVectors) throws Exception {
+        FileStoreTable table = createTable(deletionVectors);
+        append(table, "a", 60, 40, 50);
+        Snapshot initial = table.latestSnapshot().get();
+        commitCluster(table, initial, prepareMappedCluster(table, initial, true));
+        for (int i = 0; i < 4; i++) {
+            updatePayload(table, "a", 3L, 40, 50, 60);
+        }
+        append(table, "a", 30, 10, 20);
+        assertThat(filesInRange(table, new Range(3, 5))).hasSize(5);
+        return table;
+    }
+
+    private List<CommitMessage> prepareMixedMaintenance(FileStoreTable table, Snapshot snapshot)
+            throws Exception {
+        return prepareMixedMaintenance(table, snapshot, true);
+    }
+
+    private List<CommitMessage> prepareMixedMaintenance(
+            FileStoreTable table, Snapshot snapshot, boolean preserveIndexes) throws Exception {
+        List<DataFileMeta> selected =
+                table.store().newScan().withSnapshot(snapshot).plan().files().stream()
+                        .map(entry -> entry.file())
+                        .filter(file -> file.nonNullRowIdRange().equals(new Range(6, 8)))
+                        .collect(Collectors.toList());
+        assertThat(selected).isNotEmpty();
+        IncrementalClusterManager manager = new IncrementalClusterManager(table, null, snapshot);
+        List<CommitMessage> messages =
+                rewriteClusterUnits(
+                        table,
+                        manager,
+                        Collections.singletonMap(
+                                partition(table, "a"), CompactUnit.fromFiles(3, selected, true)),
+                        preserveIndexes);
+        messages.add(prepareNormalCompaction(table, new Range(3, 5)));
+        return messages;
+    }
+
+    private CommitMessage prepareNormalCompaction(FileStoreTable table, Range range)
+            throws Exception {
+        List<DataFileMeta> files =
+                table.store().newScan().withSnapshot(table.latestSnapshot().get()).plan().files()
+                        .stream()
+                        .map(entry -> entry.file())
+                        .filter(file -> file.nonNullRowIdRange().equals(range))
+                        .collect(Collectors.toList());
+        return new DataEvolutionNormalCompactTask(partition(table, "a"), files)
+                .doCompact(table, "test-normal-compact");
+    }
+
+    private List<String> globalIndexNames(FileStoreTable table, Range range) {
+        return table.store().newIndexFileHandler().scanEntries().stream()
+                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                .filter(entry -> entry.indexFile().globalIndexMeta().rowRange().equals(range))
+                .map(entry -> entry.indexFile().fileName())
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    private List<CommitMessage> prepareMixedIndexes(
+            FileStoreTable table, Snapshot snapshot, String column, String indexType)
+            throws Exception {
+        List<CommitMessage> indexes =
+                new ArrayList<>(
+                        prepareGlobalIndex(table, snapshot, column, indexType, new Range(3, 5)));
+        indexes.addAll(prepareGlobalIndex(table, snapshot, column, indexType, new Range(6, 8)));
+        return indexes;
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testClusterRetryDropsIndexCommittedBeforeSnapshotPublication(boolean deletionVectors)
             throws Exception {

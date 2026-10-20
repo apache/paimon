@@ -111,7 +111,6 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
@@ -119,7 +118,7 @@ import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPar
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
-import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.materializedRowIdRanges;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -845,16 +844,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Set<Pair<BinaryRow, Integer>> result = new HashSet<>();
         for (CommitMessage message : commitMessages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
-            if (commitMessage.compactIncrement().compactBefore().stream()
-                            .noneMatch(
-                                    file ->
-                                            !isBlobFile(file.fileName())
-                                                    && !isVectorStoreFile(file.fileName()))
-                    || commitMessage.compactIncrement().compactAfter().stream()
-                            .anyMatch(file -> file.firstRowId() != null)) {
-                continue;
+            if (!materializedRowIdRanges(
+                            commitMessage.compactIncrement().compactBefore(),
+                            commitMessage.compactIncrement().compactAfter())
+                    .isEmpty()) {
+                result.add(Pair.of(commitMessage.partition(), commitMessage.bucket()));
             }
-            result.add(Pair.of(commitMessage.partition(), commitMessage.bucket()));
         }
         return result;
     }
@@ -1172,6 +1167,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .map(entry -> entry.file().fileName())
                                 .collect(Collectors.toSet())
                         : Collections.emptySet();
+        Set<String> rowIdPreservingOutputs =
+                commitKind == CommitKind.COMPACT && options.dataEvolutionEnabled()
+                        ? deltaFiles.stream()
+                                .filter(entry -> entry.kind() == FileKind.ADD)
+                                .filter(entry -> entry.file().firstRowId() != null)
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toSet())
+                        : Collections.emptySet();
         Set<Long> rebasedReassignments = changesProvider.rebasedReassignments();
 
         long newSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
@@ -1359,6 +1362,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 deltaFiles,
                                 indexFiles,
                                 mappedClusteringOutputs,
+                                rowIdPreservingOutputs,
                                 newSnapshotId,
                                 clusteringIndexOutputs);
             }

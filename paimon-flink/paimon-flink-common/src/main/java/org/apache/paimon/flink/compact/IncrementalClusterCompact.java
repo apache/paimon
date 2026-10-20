@@ -20,7 +20,9 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.cluster.DataEvolutionClusterCompaction;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
@@ -34,6 +36,8 @@ import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOpera
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.DataEvolutionCommitPreparationOperator;
+import org.apache.paimon.flink.sink.DataEvolutionCompactionTaskTypeInfo;
+import org.apache.paimon.flink.sink.DataEvolutionCompactionWorkerOperator;
 import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.RowAppendTableSink;
@@ -64,6 +68,7 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,6 +80,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
@@ -91,6 +97,7 @@ public class IncrementalClusterCompact {
     protected final int localSampleMagnification;
     protected final Map<BinaryRow, CompactUnit> compactUnits;
     protected final Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> compactSplits;
+    private final List<DataEvolutionCompactTask> normalCompactTasks;
 
     public IncrementalClusterCompact(
             StreamExecutionEnvironment env,
@@ -126,11 +133,16 @@ public class IncrementalClusterCompact {
         // non-full strategy as default for incremental clustering
         this.compactUnits =
                 clusterManager.createCompactUnits(fullCompaction != null && fullCompaction);
+        this.normalCompactTasks =
+                clusterManager.snapshot() == null
+                        ? Collections.emptyList()
+                        : DataEvolutionClusterCompaction.plan(
+                                table, clusterManager.snapshot(), partitionPredicate, compactUnits);
         this.compactSplits = clusterManager.toSplitsAndRewriteDvFiles(compactUnits);
     }
 
     public void build() throws Exception {
-        if (compactUnits.isEmpty()) {
+        if (compactUnits.isEmpty() && normalCompactTasks.isEmpty()) {
             env.fromSequence(0, 0).name("Nothing to Cluster Source").sinkTo(new DiscardingSink<>());
             return;
         }
@@ -144,6 +156,24 @@ public class IncrementalClusterCompact {
                             entry.getValue().getKey(),
                             entry.getValue().getRight(),
                             parallelism));
+        }
+        if (!normalCompactTasks.isEmpty()) {
+            Integer workerParallelism =
+                    Options.fromMap(table.options()).get(UNAWARE_BUCKET_COMPACTION_PARALLELISM);
+            dataStreams.add(
+                    env.fromCollection(
+                                    normalCompactTasks, new DataEvolutionCompactionTaskTypeInfo())
+                            .name("Data Evolution Cluster Compaction Tasks")
+                            .rebalance()
+                            .transform(
+                                    "Compact data evolution column versions",
+                                    new CommittableTypeInfo(),
+                                    new DataEvolutionCompactionWorkerOperator.Factory(
+                                            table, commitUser))
+                            .setParallelism(
+                                    workerParallelism == null
+                                            ? env.getParallelism()
+                                            : workerParallelism));
         }
 
         buildCommitOperator(dataStreams);

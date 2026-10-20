@@ -19,6 +19,7 @@
 package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import java.util.List;
@@ -29,17 +30,20 @@ public class RowIdRangeConflictChecker implements RowIdConflictChecker {
 
     private final RowRangeIndex rowRangeIndex;
 
-    private RowIdRangeConflictChecker(List<DataFileMeta> deltaFiles) {
-        this.rowRangeIndex =
-                RowRangeIndex.create(
-                        deltaFiles.stream()
-                                .filter(file -> file.firstRowId() != null)
-                                .map(DataFileMeta::nonNullRowIdRange)
-                                .collect(Collectors.toList()));
+    private RowIdRangeConflictChecker(List<Range> ranges) {
+        this.rowRangeIndex = RowRangeIndex.create(ranges);
     }
 
     public static RowIdRangeConflictChecker fromDataFiles(List<DataFileMeta> deltaFiles) {
-        return new RowIdRangeConflictChecker(deltaFiles);
+        return fromRanges(
+                deltaFiles.stream()
+                        .filter(file -> file.firstRowId() != null)
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .collect(Collectors.toList()));
+    }
+
+    public static RowIdRangeConflictChecker fromRanges(List<Range> ranges) {
+        return new RowIdRangeConflictChecker(ranges);
     }
 
     @Override

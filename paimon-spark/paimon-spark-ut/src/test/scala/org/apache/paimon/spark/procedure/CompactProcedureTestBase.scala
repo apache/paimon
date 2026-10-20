@@ -2724,6 +2724,78 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  Seq("local-sort", "global-sort").foreach {
+    mode =>
+      test(s"Paimon Procedure: data evolution clustering compacts column versions with $mode") {
+        withTable("T") {
+          sql(s"""
+                 |CREATE TABLE T (id INT, value INT, pt STRING)
+                 |PARTITIONED BY (pt)
+                 |TBLPROPERTIES (
+                 |  'bucket' = '-1',
+                 |  'write-only' = 'true',
+                 |  'row-tracking.enabled' = 'true',
+                 |  'data-evolution.enabled' = 'true',
+                 |  'deletion-vectors.enabled' = 'true',
+                 |  'clustering.incremental' = 'true',
+                 |  'clustering.incremental.mode' = '$mode',
+                 |  'clustering.columns' = 'id')
+                 |""".stripMargin)
+          sql(
+            "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
+              "(3, 30, 'a'), (1, 10, 'a'), (2, 20, 'a')")
+          sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
+          val table = loadTable("T")
+          val maxLevel = table.coreOptions().numLevels() - 1
+          val originalIds = sql("SELECT id, _ROW_ID FROM T ORDER BY id").collect().toSeq
+          (1 to 3).foreach(i => sql(s"UPDATE T SET value = ${100 + i} WHERE pt = 'a'"))
+          val belowThreshold = lastSnapshotId(table)
+          sql("CALL sys.compact(table => 'T')")
+          assert(lastSnapshotId(table) == belowThreshold)
+          assert(normalDataFiles(table).size == 4)
+
+          sql("UPDATE T SET value = 104 WHERE pt = 'a'")
+          sql("DELETE FROM T WHERE id = 2")
+          val before = table.latestSnapshot().get()
+          assert(normalDataFiles(table).size == 5)
+          sql(
+            "CALL sys.compact(table => 'T', compact_strategy => 'full', " +
+              "partitions => 'pt=a', partition_idle_time => '0 s')")
+
+          assert(lastSnapshotId(table) == before.id() + 1)
+          assert(table.latestSnapshot().get().nextRowId() == before.nextRowId())
+          assert(normalDataFiles(table).size == 1)
+          assert(normalDataFiles(table).head.level() == maxLevel)
+          assert(normalDataFiles(table).head.rowCount() == 3)
+          assert(deletionVectorCardinality(table) == 1)
+          checkAnswer(sql("SELECT id, value FROM T"), Seq(Row(1, 104), Row(3, 104)))
+          checkAnswer(sql("SELECT id, _ROW_ID FROM T"), originalIds.filter(_.getInt(0) != 2))
+          val compactedSnapshot = lastSnapshotId(table)
+          sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
+          assert(lastSnapshotId(table) == compactedSnapshot)
+
+          // The same invocation also clusters another partition, with one shared commit.
+          (1 to 4).foreach(i => sql(s"UPDATE T SET value = ${200 + i} WHERE pt = 'a'"))
+          sql(
+            "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES " +
+              "(8, 80, 'b'), (6, 60, 'b')")
+          val mixed = table.latestSnapshot().get()
+          sql("CALL sys.compact(table => 'T', compact_strategy => 'full')")
+          assert(lastSnapshotId(table) == mixed.id() + 1)
+          assert(table.latestSnapshot().get().nextRowId() == mixed.nextRowId() + 2)
+          assert(normalDataFiles(table).size == 2)
+          assert(normalDataFiles(table).forall(_.level() == maxLevel))
+          assert(deletionVectorCardinality(table) == 1)
+          checkAnswer(
+            sql("SELECT id, _ROW_ID FROM T WHERE pt = 'a'"),
+            originalIds.filter(_.getInt(0) != 2))
+          checkAnswer(
+            sql("SELECT id, value FROM T"),
+            Seq(Row(1, 204), Row(3, 204), Row(6, 60), Row(8, 80)))
+        }
+      }
+  }
+
   test("Paimon Procedure: data evolution clustering preserves inline blob descriptors") {
     withTable("cluster_descriptor") {
       val blobData = "descriptor content".getBytes("UTF-8")

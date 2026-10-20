@@ -68,6 +68,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.DataEvolutionUtils.materializedRowIdRanges;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Rewrites scalar index postings after clustering output files receive their final row IDs. */
@@ -88,6 +89,7 @@ public final class ClusteringIndexRewriter {
             List<ManifestEntry> dataFiles,
             List<IndexManifestEntry> indexFiles,
             Set<String> mappedClusteringOutputs,
+            Set<String> rowIdPreservingOutputs,
             long newSnapshotId,
             List<Path> createdFiles)
             throws IOException {
@@ -121,13 +123,6 @@ public final class ClusteringIndexRewriter {
                             .filter(e -> e.kind() == FileKind.ADD)
                             .map(ManifestEntry::file)
                             .collect(Collectors.toList());
-            // Other materialization callers do not supply a permutation and retain their existing
-            // invalidation behavior. A mixed mapping must never silently retain a stale posting.
-            if (after.stream()
-                    .anyMatch(file -> !mappedClusteringOutputs.contains(file.fileName()))) {
-                result.addAll(group.getValue());
-                continue;
-            }
             List<ManifestEntry> before =
                     files.stream()
                             .filter(e -> e.kind() == FileKind.DELETE)
@@ -144,16 +139,41 @@ public final class ClusteringIndexRewriter {
                 result.addAll(group.getValue());
                 continue;
             }
+            List<Range> removed =
+                    materializedRowIdRanges(
+                            before.stream().map(ManifestEntry::file).collect(Collectors.toList()),
+                            after.stream()
+                                    .filter(
+                                            file ->
+                                                    rowIdPreservingOutputs.contains(
+                                                            file.fileName()))
+                                    .collect(Collectors.toList()));
+            if (removed.isEmpty()) {
+                // Preserve explicitly requested index deletions for ordinary compaction callers.
+                result.addAll(group.getValue());
+                continue;
+            }
+            after.removeIf(file -> rowIdPreservingOutputs.contains(file.fileName()));
+            // Engines without a permutation still invalidate affected indexes. Independently
+            // compacted ranges in the same partition retain their original index files.
+            if (after.stream()
+                    .anyMatch(file -> !mappedClusteringOutputs.contains(file.fileName()))) {
+                group.getValue().stream()
+                        .filter(
+                                entry ->
+                                        !Range.and(
+                                                        Collections.singletonList(
+                                                                entry.indexFile()
+                                                                        .globalIndexMeta()
+                                                                        .rowRange()),
+                                                        removed)
+                                                .isEmpty())
+                        .forEach(result::add);
+                continue;
+            }
             after.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
             long firstAssignedRowId =
                     after.isEmpty() ? Long.MAX_VALUE : after.get(0).nonNullFirstRowId();
-            List<Range> removed =
-                    Range.sortAndMergeOverlap(
-                            before.stream()
-                                    .map(ManifestEntry::file)
-                                    .map(DataFileMeta::nonNullRowIdRange)
-                                    .collect(Collectors.toList()),
-                            true);
             DataFilePathFactory dataPath =
                     pathFactory.createDataFilePathFactory(
                             group.getKey().getLeft(), group.getKey().getRight());

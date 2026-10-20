@@ -331,6 +331,72 @@ public class DataEvolutionUtils {
         return anchor;
     }
 
+    /** Returns normal-file row ranges removed without row-ID-preserving replacement files. */
+    public static List<Range> materializedRowIdRanges(
+            List<DataFileMeta> before, List<DataFileMeta> after) {
+        List<Range> retained =
+                Range.sortAndMergeOverlap(
+                        after.stream()
+                                .filter(file -> file.firstRowId() != null)
+                                .filter(
+                                        file ->
+                                                !isBlobFile(file.fileName())
+                                                        && !isVectorStoreFile(file.fileName()))
+                                .map(DataFileMeta::nonNullRowIdRange)
+                                .collect(Collectors.toList()));
+        List<Range> removed =
+                Range.sortAndMergeOverlap(
+                        before.stream()
+                                .filter(file -> file.firstRowId() != null)
+                                .filter(
+                                        file ->
+                                                !isBlobFile(file.fileName())
+                                                        && !isVectorStoreFile(file.fileName()))
+                                .map(DataFileMeta::nonNullRowIdRange)
+                                .collect(Collectors.toList()));
+        List<Range> result = new ArrayList<>();
+        int retainedIndex = 0;
+        for (Range range : removed) {
+            long cursor = range.from;
+            boolean fullyRetained = false;
+            while (retainedIndex < retained.size()) {
+                Range output = retained.get(retainedIndex);
+                if (output.to < cursor) {
+                    retainedIndex++;
+                    continue;
+                }
+                if (output.from > range.to) {
+                    break;
+                }
+                if (output.from > cursor) {
+                    addMaterializedRange(result, cursor, output.from - 1);
+                }
+                if (output.to >= range.to) {
+                    fullyRetained = true;
+                    break;
+                }
+                // The preceding comparison guarantees this cannot overflow at Long.MAX_VALUE.
+                cursor = output.to + 1;
+                retainedIndex++;
+            }
+            if (!fullyRetained) {
+                addMaterializedRange(result, cursor, range.to);
+            }
+        }
+        return result;
+    }
+
+    private static void addMaterializedRange(List<Range> ranges, long from, long to) {
+        if (!ranges.isEmpty()) {
+            Range previous = ranges.get(ranges.size() - 1);
+            if (previous.to != Long.MAX_VALUE && previous.to + 1 == from) {
+                ranges.set(ranges.size() - 1, new Range(previous.from, to));
+                return;
+            }
+        }
+        ranges.add(new Range(from, to));
+    }
+
     /** Check files row ranges. */
     public static Range checkContiguousRowRange(List<DataFileMeta> files) {
         checkArgument(!files.isEmpty(), "%s should not be empty.", "Data evolution compact files");
