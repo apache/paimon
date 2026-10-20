@@ -18,6 +18,7 @@
 """Optional native row-ID updates for batch data-evolution tables."""
 
 import json
+from datetime import date, datetime, time
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -253,6 +254,37 @@ def _native_update_columns_supported(table, columns):
     return not names.intersection(table.options.video_frame_fields())
 
 
+def _temporal_row_key_supported(value, data_type):
+    """Qualify row constructors without changing temporal matching semantics."""
+    if value is None:
+        return True
+    if pa.types.is_date(data_type):
+        # A datetime is distinct from a date even at midnight. Arrow's DATE
+        # constructor would discard this distinction before key matching.
+        return isinstance(value, date) and not isinstance(value, datetime)
+    if pa.types.is_timestamp(data_type):
+        if not isinstance(value, datetime):
+            return False
+        offset = value.utcoffset()
+        if (offset is not None) != (data_type.tz is not None):
+            return False
+        nanos = value.microsecond * 1000 + getattr(value, 'nanosecond', 0)
+        if offset is not None:
+            nanos -= offset.microseconds * 1000
+    elif pa.types.is_time(data_type):
+        if not isinstance(value, time):
+            return False
+        if value.utcoffset() is not None:
+            return False
+        nanos = value.microsecond * 1000
+    else:
+        return True
+    # Compare precision, not datetime objects: equivalent instants expressed
+    # with different timezones or DST folds must keep the existing core path.
+    resolution = {'s': 1000000000, 'ms': 1000000, 'us': 1000, 'ns': 1}[data_type.unit]
+    return nanos % resolution == 0
+
+
 def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None, key_names=()):
     """Encode consecutive row shapes without padding absent fields with NULL.
 
@@ -262,11 +294,15 @@ def _upsert_row_batches(rows, fields, schema, table=None, blob_rows=None, key_na
     encoded_keys = {}
     for name in key_names:
         key_type = schema.field(name).type
-        if not (pa.types.is_integer(key_type) or pa.types.is_floating(key_type)
-                or pa.types.is_decimal(key_type)):
+        if any(not _temporal_row_key_supported(row[name], key_type) for row in rows):
+            return None
+        if not any(check(key_type) for check in (
+                pa.types.is_integer, pa.types.is_floating, pa.types.is_decimal,
+                pa.types.is_boolean, pa.types.is_string, pa.types.is_large_string,
+                pa.types.is_binary, pa.types.is_large_binary, pa.types.is_fixed_size_binary)):
             continue
         encoded = pa.array([row[name] for row in rows], type=key_type)
-        # Row constructors can narrow numbers before core sees a match key.
+        # Row constructors can change scalar identity before core sees a key.
         # Qualify all keys before encoding any payload: a later unsafe row
         # must not fall back after an earlier Blob input has been consumed.
         if any(row[name] != encoded[index].as_py() for index, row in enumerate(rows)):
@@ -377,8 +413,10 @@ def native_predicate_row_ids(scan_table, predicate, splits):
         scan_table, predicate=predicate, projection=['_ROW_ID']
     )
     row_ids = []
+    ranges_use_row_ids = scan_table.options.row_tracking_enabled() or scan_table.options.data_evolution_enabled()
     for split in splits:
-        for batch in reader([native_split_from_python(split)]):
+        for batch in reader([native_split_from_python(
+                split, ranges_use_row_ids=ranges_use_row_ids)]):
             row_ids.extend(batch.column('_ROW_ID').to_pylist())
     return row_ids
 

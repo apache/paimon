@@ -625,7 +625,8 @@ class TableRead:
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
                 try:
-                    rust_split = native_split_from_python(split)
+                    rust_split = native_split_from_python(split, ranges_use_row_ids=(
+                        self.table.options.row_tracking_enabled() or self.table.options.data_evolution_enabled()))
                 except Exception as e:
                     return self._native_fallback(
                         "native split conversion failed: %s" % e,

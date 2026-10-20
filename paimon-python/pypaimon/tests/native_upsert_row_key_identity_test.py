@@ -155,8 +155,19 @@ def test_large_integer_row_keys_retain_the_existing_constructor_fallback(native_
     (pa.int32(), [42.0, None], True),
     (pa.float64(), [2 ** 53 - 1, 42.0], True),
     (pa.float64(), [2 ** 53 + 2], False),
+    (pa.bool_(), [True, None], True),
+    (pa.string(), ['a', None], True),
+    (pa.binary(), [b'a', None], True),
+    (pa.large_binary(), [b'a'], True),
+    (pa.string(), [b'a'], False),
+    (pa.large_string(), [b'a'], False),
+    (pa.binary(), ['a'], False),
+    (pa.large_binary(), ['a'], False),
+    (pa.binary(1), ['a'], False),
 ], ids=['fractional', 'mixed-large-integer', 'float32', 'exact-and-null',
-        'mixed-exact', 'exact-large-integer-constructor'])
+        'mixed-exact', 'exact-large-integer-constructor', 'boolean', 'string', 'binary', 'large-binary',
+        'bytes-to-string', 'bytes-to-large-string', 'string-to-binary', 'string-to-large-binary',
+        'string-to-fixed-binary'])
 def test_row_transport_qualifies_keys_before_constructing_a_core_updater(
         native_rest_catalog, key_type, keys, accepted):
     _, target = _tables(native_rest_catalog, key_type, None, True, False)
@@ -174,6 +185,28 @@ def test_row_transport_qualifies_keys_before_constructing_a_core_updater(
     else:
         assert writer is None
         native_table.new_batch_write_builder.assert_not_called()
+
+
+@pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
+@pytest.mark.parametrize('key_type,initial,source_type,key', [
+    (pa.string(), 'a', pa.binary(), b'a'),
+    (pa.binary(), b'a', pa.string(), 'a'),
+], ids=['bytes-to-string', 'string-to-binary'])
+def test_text_binary_row_key_constructors_cannot_change_match_identity(
+        native_rest_catalog, native, key_type, initial, source_type, key):
+    latest, target = _tables(native_rest_catalog, key_type, initial, native, False)
+    fields = Schema.from_pyarrow_schema(pa.schema([('key', source_type), ('value', pa.int32())])).fields
+    original = TableUpsertByKey._upsert_row_partition
+    with patch.object(TableUpsertByKey, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
+        messages = target.new_batch_write_builder().new_update().with_update_type(['value']).upsert_by_key(
+            [GenericRow([key, 99], fields)], ['key'])
+        fallback.assert_called_once()
+    assert messages and all(message.check_from_snapshot is None for message in messages)
+    latest.new_batch_write_builder().new_commit().commit(messages)
+    assert _rows(latest) == [
+        {'key': initial, 'value': 10, '_ROW_ID': 0},
+        {'key': initial, 'value': 99, '_ROW_ID': 1},
+    ]
 
 
 def test_row_transport_checks_partition_keys_even_when_they_are_not_upsert_keys(native_rest_catalog):
