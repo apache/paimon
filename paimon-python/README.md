@@ -425,6 +425,9 @@ argument defaults to `False`. PyPaimon requests `ordered=True` for materialized
 reads, emitting groups in supplied split order; streaming reads use
 `ordered=False` and emit batches as groups become ready. Both modes retain each
 split reader's row order.
+Ordered parallel reads disable background Parquet row-group prefetch to prevent
+later groups from holding scheduling permits needed by earlier groups; split
+workers still read concurrently.
 An unfiltered row limit also caps reader fan-out to avoid speculative work.
 The split scheduler buffers at most one batch per worker, and closing the batch
 reader interrupts native reads that are still in flight. Limited BLOB reads visit
