@@ -28,11 +28,13 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.EOFException;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -51,7 +53,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests {@link CoreOptions#SCAN_IGNORE_CORRUPT_FILE} for Format Table files that only fail in the
- * middle of reading, such as truncated compressed text files.
+ * middle of reading, such as truncated compressed text files, or already while the reader is
+ * created.
  */
 class FormatTableIgnoreCorruptFilesTest {
 
@@ -97,6 +100,62 @@ class FormatTableIgnoreCorruptFilesTest {
         for (int i = 0; i < truncatedIds.size(); i++) {
             assertThat(truncatedIds.get(i)).isEqualTo(i);
         }
+    }
+
+    @ParameterizedTest(name = "format = {0}")
+    @ValueSource(strings = {"csv", "json"})
+    void testCompressedFileCorruptAtOpen(String format) throws Exception {
+        // Text readers fill their first buffer while being constructed, so these files already
+        // fail while the reader is created: an empty gzip file and one cut inside its header.
+        Files.write(tempDir.resolve("empty." + format + ".gz"), new byte[0]);
+        writeGzip(tempDir.resolve("header." + format + ".gz"), format, 0, 1_000);
+        byte[] bytes = Files.readAllBytes(tempDir.resolve("header." + format + ".gz"));
+        byte[] header = new byte[5];
+        System.arraycopy(bytes, 0, header, 0, header.length);
+        Files.write(tempDir.resolve("header." + format + ".gz"), header);
+        writeGzip(
+                tempDir.resolve("intact." + format + ".gz"),
+                format,
+                INTACT_FILE_FIRST_ID,
+                INTACT_FILE_ROWS);
+
+        FormatTable table = createTable(format);
+
+        assertThatThrownBy(() -> readIds(table))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Failed to read file");
+
+        List<Integer> ids =
+                readIds(
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "true")));
+        assertThat(ids)
+                .containsExactly(
+                        INTACT_FILE_FIRST_ID, INTACT_FILE_FIRST_ID + 1, INTACT_FILE_FIRST_ID + 2);
+    }
+
+    @Test
+    void testLostFileIsNotTreatedAsCorrupt() throws Exception {
+        writeGzip(tempDir.resolve("lost.csv.gz"), "csv", 0, INTACT_FILE_ROWS);
+        FormatTable table =
+                createTable("csv")
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "true"));
+        TableScan.Plan plan = table.newReadBuilder().newScan().plan();
+        // Plans list files lazily: materialize the splits before the file disappears.
+        assertThat(plan.splits()).isNotEmpty();
+        Files.delete(tempDir.resolve("lost.csv.gz"));
+
+        assertThatThrownBy(
+                        () -> {
+                            try (RecordReader<InternalRow> reader =
+                                    table.newReadBuilder().newRead().createReader(plan)) {
+                                reader.forEachRemaining(row -> {});
+                            }
+                        })
+                .isInstanceOf(FileNotFoundException.class);
     }
 
     private FormatTable createTable(String format) {
