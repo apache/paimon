@@ -279,6 +279,11 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()
         )
+        self._video_decoders_per_payload = (
+            table_options.read_video_decoders_per_payload()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD.default_value()
+        )
         self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
@@ -455,6 +460,9 @@ class PaimonDatasetReader(ABC):
             plans, rows, getattr(self, "_video_collators", ()),
             self._features, self.return_uint8,
             return_batch=return_batch, share_memory=share_memory,
+            decoders_per_payload=getattr(
+                self, "_video_decoders_per_payload",
+                CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD.default_value()),
             decode_pool=getattr(self, "_video_decode_pool", None),
             decode_parallelism=getattr(
                 self, "_video_decode_parallelism",
@@ -1439,21 +1447,56 @@ def _attach_task_labels(rows, task_names, subtask_names):
 
 def _decode_video_windows(
         plans, rows, collators, features, return_uint8, *,
-        return_batch=False, share_memory=False, decode_parallelism=1, decode_pool=None):
+        return_batch=False, share_memory=False, decode_parallelism=1, decode_pool=None,
+        decoders_per_payload=1):
     pool = decode_pool if decode_pool is not None else _VideoDecodePool()
     try:
         return _decode_video_windows_with_pool(
             plans, rows, collators, features, return_uint8,
             return_batch=return_batch, share_memory=share_memory,
-            decode_parallelism=decode_parallelism, executor=pool.get(decode_parallelism))
+            decode_parallelism=decode_parallelism, executor=pool.get(decode_parallelism),
+            decoders_per_payload=decoders_per_payload)
     finally:
         if decode_pool is None:
             pool.close()
 
 
+def _partition_video_windows(windows, count):
+    """Split windows while bounding duplicate frame requests across decoders."""
+    grouped = {}
+    for window in windows:
+        # Windows with the same requested frames should always share a decoder,
+        # even when their output order differs.
+        grouped.setdefault(tuple(sorted(set(window[1]))), []).append(window)
+    ordered = sorted(grouped.values(), key=lambda group: min(group[0][1]))
+    count = min(count, len(ordered))
+    serial_frames = len({
+        index for _, window in windows for index in window
+    })
+    while count > 1:
+        partitions = [
+            [
+                window
+                for group in ordered[len(ordered) * replica // count:
+                                     len(ordered) * (replica + 1) // count]
+                for window in group
+            ]
+            for replica in range(count)
+        ]
+        parallel_frames = sum(len({
+            index for _, window in partition for index in window
+        }) for partition in partitions)
+        # Bound additional frame requests to 50%. This retains parallelism for
+        # mostly independent windows without multiplying highly overlapping IO.
+        if 2 * parallel_frames <= 3 * serial_frames:
+            return partitions
+        count -= 1
+    return [windows]
+
+
 def _decode_video_windows_with_pool(
         plans, rows, collators, features, return_uint8, *,
-        return_batch, share_memory, decode_parallelism, executor):
+        return_batch, share_memory, decode_parallelism, executor, decoders_per_payload):
     import torch
 
     tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
@@ -1486,6 +1529,18 @@ def _decode_video_windows_with_pool(
                 )
             requests.setdefault((payload, keyframe_index), []).append((
                 offset, [d.frame_index for d in window]))
+
+        if len(requests) == 1 and executor is not None:
+            request_key, windows = next(iter(requests.items()))
+            count = min(decoders_per_payload, decode_parallelism,
+                        collator.max_open_videos, len(windows))
+            if count > 1:
+                partitions = _partition_video_windows(windows, count)
+                if len(partitions) > 1:
+                    requests = {
+                        request_key + (replica,): partition
+                        for replica, partition in enumerate(partitions)
+                    }
 
         def read_frames(decoder, windows):
             get_frames = getattr(decoder, "get_frames_at", None)

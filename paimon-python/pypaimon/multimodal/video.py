@@ -366,8 +366,8 @@ class VideoFrameCollator:
             )
         return output, descriptor
 
-    def _decoder(self, descriptor, keyframe_index_descriptor=None):
-        cache_key = (descriptor, keyframe_index_descriptor)
+    def _decoder(self, descriptor, keyframe_index_descriptor=None, replica=0):
+        cache_key = (descriptor, keyframe_index_descriptor, replica)
         resource = self._decoders.pop(cache_key, None)
         if resource is not None:
             self._decoders[cache_key] = resource

@@ -1181,6 +1181,15 @@ class CoreOptions:
             "PyPaimon LeRobot Dataset worker.")
     )
 
+    READ_VIDEO_DECODERS_PER_PAYLOAD: ConfigOption[int] = (
+        ConfigOptions.key("read.video.decoders-per-payload")
+        .int_type()
+        .default_value(4)
+        .with_description(
+            "Maximum independent decoders for single-payload LeRobot video windows, "
+            "bounded by read.video.decode-parallelism and read.video.max-open-decoders.")
+    )
+
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("parquet.filter.columnindex.enabled")
         .boolean_type()
@@ -1950,6 +1959,9 @@ class CoreOptions:
 
     def read_video_decode_parallelism(self) -> int:
         return self._positive_video_option(CoreOptions.READ_VIDEO_DECODE_PARALLELISM)
+
+    def read_video_decoders_per_payload(self) -> int:
+        return self._positive_video_option(CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD)
 
     def _positive_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())
