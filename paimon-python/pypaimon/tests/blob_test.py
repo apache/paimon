@@ -5520,7 +5520,7 @@ class BlobEndToEndTest(unittest.TestCase):
                     next(iterator)
 
     def test_map_blob_key_types_and_rejections(self):
-        from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
+        from pypaimon.execution.python.map_blob_key_serializer import create_map_blob_key_serializer
         from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))

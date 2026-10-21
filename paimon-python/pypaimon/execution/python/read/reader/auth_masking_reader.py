@@ -21,10 +21,8 @@ from typing import Callable, Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.common.predicate_json_parser import (
-    _apply_predicate_transform,
-    _collect_all_field_refs_from_transform,
-)
+from pypaimon.common.predicate_json_parser import _collect_all_field_refs_from_transform
+from pypaimon.execution.python.read.predicate_json_parser import _apply_predicate_transform
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader

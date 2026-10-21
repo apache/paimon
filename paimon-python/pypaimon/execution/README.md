@@ -65,14 +65,17 @@ pypaimon/
   execution/
     python/
       casting/                  Old-file array casts and executable-cast probes
+      map_blob_key_serializer.py Physical MAP BLOB key encoding for readers/writers
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
         blob_view_lookup.py     Upstream Blob descriptor planning, loading and resolution
         interval_partition.py   Primary-key sorted-run grouping
+        predicate_json_parser.py Authorization row-filter and masking execution
         map_shared_shredding.py Physical MAP decoding and selected-column pruning
         variant_shredding.py    Physical VARIANT reconstruction and shredding
       deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
       write/                    File writers, committers and update execution
+        external_path_provider.py Per-writer external file placement strategies
       globalindex/              Index file codecs, readers, writers and build algorithms
       merge_engine_dispatch.py  Python merge-function selection
     native/
@@ -120,6 +123,19 @@ to the Python writer. The shared input bucket assigner remains in `index`:
 distributed producers use it to route inputs before either backend writes.
 `input_routing` and `bucket_planning` similarly serve both backends' input
 protocols without retaining a file writer or publishing data.
+
+External-path round-robin, weighted selection and entropy directories belong
+to Python write execution. Shared path factories retain configuration and
+existing-file resolution, loading a provider only when Python allocates a new
+file. MAP BLOB key serializers implement the physical file format and are
+shared within the Python backend. Generic URI/FileIO contracts, resource
+caches and integer codecs stay in `common`; Native Blob inputs also use the
+URI reader contract.
+
+Authorization row-filter and column-mask evaluation belongs to Python read
+execution. JSON field-reference extraction and rule/schema validation remain
+shared. The public authorization result creates a Python filter lazily when
+explicitly requested; Native reads pass the original rules to Rust.
 
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.

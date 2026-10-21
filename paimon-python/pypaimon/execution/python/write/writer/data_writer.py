@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
-from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.execution.python.write.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats

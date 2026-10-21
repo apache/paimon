@@ -61,6 +61,8 @@ modules = [
     'pypaimon.schema.arrow_schema', 'pypaimon.schema.data_type_casts',
     'pypaimon.schema.schema_manager', 'pypaimon.utils.file_store_path_factory',
     'pypaimon.table.system.files_table', 'pypaimon.common.predicate_json_parser',
+    'pypaimon.common.uri_reader', 'pypaimon.common.blob_index_cache',
+    'pypaimon.common.delta_varint_compressor', 'pypaimon.common.file_io',
 ]
 for name in modules:
     importlib.import_module(name)

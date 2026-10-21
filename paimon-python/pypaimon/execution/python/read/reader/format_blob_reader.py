@@ -25,7 +25,7 @@ from pyarrow import RecordBatch
 from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
+from pypaimon.execution.python.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.execution.python.read.reader.video_format_reader import (

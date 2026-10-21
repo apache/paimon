@@ -24,7 +24,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog import Identifier
-from pypaimon.common.external_path_provider import (
+from pypaimon.execution.python.write.external_path_provider import (
     EntropyInjectExternalPathProvider, ExternalPathProvider,
     RoundRobinExternalPathProvider, WeightedExternalPathProvider, _murmur3_32)
 from pypaimon.common.options.core_options import (CoreOptions,

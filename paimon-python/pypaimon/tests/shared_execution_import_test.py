@@ -150,11 +150,17 @@ assert pa.array([{'values': [1, None]}, None], type=schema.field('nested').type)
 
 factory = FileStorePathFactory(
     '/warehouse', ['amount', 'created'], '__DEFAULT_PARTITION__', 'parquet', 'data-', 'changelog-',
-    False, False, 'zstd', partition_types=[AtomicType('DECIMAL(10,2)'), AtomicType('TIMESTAMP(6)')])
+    False, False, 'zstd', external_paths=['file:///external/a', 'file:///external/b'],
+    external_path_strategy='entropy-inject', index_file_in_data_file_dir=True,
+    partition_types=[AtomicType('DECIMAL(10,2)'), AtomicType('TIMESTAMP(6)')])
 table = SimpleNamespace(path_factory=lambda: factory)
 partition = (Decimal('2.30'), datetime(2024, 1, 2, 3, 4, 5, 123456))
 path = canonical_data_file_path(table, partition, 0, 'data.parquet')
 assert '/amount=2.30/created=2024-01-02 03%3A04%3A05.123456/bucket-0/' in path
+index = SimpleNamespace(file_name='index-1', external_path=None)
+assert factory.bucket_index_path(partition, 0, index) == path.rsplit('/', 1)[0] + '/index-1'
+index.external_path = '/previous-external-root/index-1'
+assert factory.bucket_index_path(partition, 0, index) == index.external_path
 file = SimpleNamespace(external_path=None, file_path=path, file_name='data.parquet')
 message = SimpleNamespace(partition=partition, bucket=0, new_files=[file], changelog_files=[],
                           compact_before=[], compact_after=[], compact_changelog_files=[],

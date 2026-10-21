@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Physical MAP BLOB key encoding shared by Python readers and writers."""
+
 import datetime
 import struct
 from decimal import Decimal as BigDecimal

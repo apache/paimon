@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Python writer strategies for selecting the next external file location."""
+
 import bisect
 import ctypes
 import random

@@ -122,6 +122,9 @@ class PackagingTest(unittest.TestCase):
         for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
             self.assertIn(name, names)
         execution_files = (
+            "pypaimon/execution/python/map_blob_key_serializer.py",
+            "pypaimon/execution/python/write/external_path_provider.py",
+            "pypaimon/execution/python/read/predicate_json_parser.py",
             "pypaimon/execution/python/read/blob_view_lookup.py",
             "pypaimon/execution/python/read/interval_partition.py",
             "pypaimon/execution/python/read/map_shared_shredding.py",
@@ -208,6 +211,8 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
+            "pypaimon/common/external_path_provider.py",
+            "pypaimon/common/map_blob_key_serializer.py",
             "pypaimon/utils/blob_view_lookup.py",
             "pypaimon/read/interval_partition.py",
             "pypaimon/casting/__init__.py",
