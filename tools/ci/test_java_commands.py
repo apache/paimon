@@ -81,6 +81,20 @@ class MavenCommandsTest(unittest.TestCase):
                          {'org.apache.paimon:paimon-flink-' + version
                           for version in ('common', '2.0', '2.1', '2.2')})
 
+    def test_flink_connector_jvms_do_not_exceed_runner_cpus(self):
+        test = self.commands('flink1-connectors')[1]
+        reactor = test[test.index('-T') + 1]
+        forks = next((arg.split('=', 1)[1] for arg in test
+                      if arg.startswith('-Dflink.forkCount=')), '1C')
+
+        def count(value, cpus):
+            return max(1, int(float(value[:-1]) * cpus)) if value.endswith('C') else int(value)
+
+        for cpus in (1, 2, 4, 8):
+            with self.subTest(cpus=cpus):
+                workers = min(len(self.modules(test)), count(reactor, cpus))
+                self.assertLessEqual(workers * count(forks, cpus), cpus)
+
     def test_e2e_uses_the_same_version_when_building_and_testing(self):
         for suite, java, version in [('e2e-flink1', 8, '1.20'), ('e2e-flink2', 11, '2.2')]:
             build, test = self.commands(suite, java=java)

@@ -43,6 +43,9 @@ case "$suite" in
         modules=(paimon-flink/paimon-flink-common)
         ;;
     flink1-connectors)
+        # Each test JVM can start a MiniCluster; scale only the reactor, not both layers.
+        threads=1C
+        test_options+=(-Dflink.forkCount=1)
         for version in cdc 1.16 1.17 1.18 1.19 1.20; do
             modules+=("org.apache.paimon:paimon-flink-${version}")
         done
