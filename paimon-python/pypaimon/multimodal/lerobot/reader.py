@@ -52,8 +52,11 @@ class _PaimonTableFrameReader:
             if native_runtime_available():
                 # Keep lookup predicates in the native plan and residual read.
                 builder.with_filter(_index_predicate(self._table, indices))
-                plan = builder.new_scan().plan()
-                return builder.new_read().to_arrow(plan.splits())
+                scan = builder.new_scan()
+                if scan._native_plan_supported():
+                    plan = scan.plan()
+                    return builder.new_read().to_arrow(plan.splits())
+                builder = self._table.new_read_builder().with_projection(columns)
         splits, needs_filter = self._locator.locate(indices)
         if needs_filter:
             builder = builder.with_filter(

@@ -181,3 +181,29 @@ def test_auto_native_uses_private_table_copy(frames, available):
                 locate.assert_called_once_with([30])
     finally:
         current.close()
+
+
+def test_unsupported_native_plan_reuses_python_index_scanner(frames):
+    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    frames.add(pa.table({"index": [40], "value": [4]}))
+    with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True):
+        current = reader(frames)
+    try:
+        assert current._table.options.native_read_enabled()
+        with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True), \
+                patch("pypaimon.execution.native.read.plan.NativeTableScanMixin._native_plan_supported",
+                      return_value=False), \
+                patch("pypaimon.execution.native.read.plan.native_plan",
+                      side_effect=AssertionError("unsupported native plan")), \
+                patch.object(DataEvolutionGlobalIndexScanner, "create",
+                             wraps=DataEvolutionGlobalIndexScanner.create) as create:
+            for indices, expected in [([20], [2]), ([40], [4]), ([10, 99], [1])]:
+                result = current.read_indices(indices, ["value"])
+                assert result["value"].to_pylist() == expected
+            assert create.call_count == 1
+            scanner = current._locator._scanner
+            with patch.object(scanner, "close", wraps=scanner.close) as close:
+                current.close()
+                close.assert_called_once()
+    finally:
+        current.close()
