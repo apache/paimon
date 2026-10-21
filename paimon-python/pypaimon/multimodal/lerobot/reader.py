@@ -54,8 +54,12 @@ class _PaimonTableFrameReader:
                 builder.with_filter(_index_predicate(self._table, indices))
                 scan = builder.new_scan()
                 if scan._native_plan_supported():
-                    plan = scan.plan()
-                    return builder.new_read().to_arrow(plan.splits())
+                    # Authorized scans must retain the complete planning path.
+                    if scan._query_auth_fn is not None or self._table.options.query_auth_enabled:
+                        return builder.new_read().to_arrow(scan.plan().splits())
+                    plan = scan._try_native_plan()
+                    if plan is not None:
+                        return builder.new_read().to_arrow(plan.splits())
                 builder = self._table.new_read_builder().with_projection(columns)
         splits, needs_filter = self._locator.locate(indices)
         if needs_filter:

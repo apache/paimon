@@ -139,11 +139,26 @@ def test_missing_native_runtime_keeps_cached_python_lookup(frames):
 
 
 @pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
-def test_native_plan_failure_keeps_predicate(frames):
-    current = reader(frames)
+def test_native_plan_failure_reuses_scanner_and_keeps_predicate(frames):
+    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    frames.add(pa.table({"index": [40, 50], "value": [4, 5]}))
+    current = reader(frames, **{
+        "scan.native-plan.enabled": "true", "read.native.enabled": "false",
+    })
     try:
-        with patch("pypaimon.execution.native.read.plan.native_plan", side_effect=RuntimeError("unavailable")):
-            assert current.read_indices([20], ["value"])["value"].to_pylist() == [2]
+        with patch("pypaimon.execution.native.read.plan.native_plan",
+                   side_effect=RuntimeError("unavailable")), \
+                patch.object(current._locator, "locate", wraps=current._locator.locate) as locate, \
+                patch.object(DataEvolutionGlobalIndexScanner, "create",
+                             wraps=DataEvolutionGlobalIndexScanner.create) as create:
+            for indices, expected in [([20], [2]), ([40], [4]), ([10, 99], [1])]:
+                assert current.read_indices(indices, ["value"])["value"].to_pylist() == expected
+            assert locate.call_count == 3
+            assert create.call_count == 1
+            scanner = current._locator._scanner
+            with patch.object(scanner, "close", wraps=scanner.close) as close:
+                current.close()
+                close.assert_called_once()
     finally:
         current.close()
 
@@ -205,5 +220,39 @@ def test_unsupported_native_plan_reuses_python_index_scanner(frames):
             with patch.object(scanner, "close", wraps=scanner.close) as close:
                 current.close()
                 close.assert_called_once()
+    finally:
+        current.close()
+
+
+@pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
+@pytest.mark.parametrize("denied", [False, True])
+def test_native_lookup_preserves_query_authorization(frames, denied):
+    from pypaimon.read.table_scan import TableScan
+    current = reader(frames)
+    calls = []
+
+    def authorize(*args, **kwargs):
+        calls.append(True)
+        if denied:
+            raise PermissionError("denied")
+        return None
+
+    original_init = TableScan.__init__
+
+    def init_with_auth(scan, *args, **kwargs):
+        original_init(scan, *args, **kwargs)
+        scan._query_auth_fn = authorize
+
+    try:
+        with patch.object(TableScan, "__init__", init_with_auth), \
+                patch.object(current._locator, "locate", side_effect=AssertionError("authorization bypass")), \
+                patch("pypaimon.execution.native.read.plan.native_plan",
+                      side_effect=RuntimeError("unavailable")):
+            if denied:
+                with pytest.raises(PermissionError, match="denied"):
+                    current.read_indices([20], ["value"])
+            else:
+                assert current.read_indices([20], ["value"])["value"].to_pylist() == [2]
+            assert calls
     finally:
         current.close()
