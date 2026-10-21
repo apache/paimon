@@ -1581,7 +1581,7 @@ def _decode_video_windows_with_pool(
                              + tuple(frames.shape[1:]))
                     if output is None:
                         if share_memory and frames.device.type == "cpu":
-                            empty = torch.empty(0, dtype=output_dtype)
+                            empty = frames.new_empty(0, dtype=output_dtype)
                             numel = 1
                             for size in shape:
                                 numel *= size
