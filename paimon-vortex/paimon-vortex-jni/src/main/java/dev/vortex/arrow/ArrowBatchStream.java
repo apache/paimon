@@ -228,43 +228,62 @@ public final class ArrowBatchStream implements AutoCloseable {
         long offset = snapshot.offset;
         long[] buffers = NativeUtil.toJavaArray(snapshot.buffers, (int) snapshot.n_buffers);
         long validity = buffers[0];
-        long views = buffers[1];
+        long views = buffers[1] + VIEW_SIZE * offset;
 
         long totalBytes = 0;
         for (int i = 0; i < length; i++) {
             if (isValid(validity, offset + i)) {
-                totalBytes += MemoryUtil.UNSAFE.getInt(views + VIEW_SIZE * (offset + i));
+                totalBytes += MemoryUtil.UNSAFE.getInt(views + VIEW_SIZE * i);
             }
         }
 
-        vector.allocateNew(totalBytes, length);
-        ArrowBuf offsets = vector.getOffsetBuffer();
-        ArrowBuf validityOut = vector.getValidityBuffer();
-        long data = vector.getDataBuffer().memoryAddress();
+        // Inline values are copied as one 8-byte and one 4-byte store, which can write up to
+        // MAX_INLINE_VIEW_LENGTH bytes past the value. The next value overwrites them, and the
+        // slack keeps the last value inside the buffer.
+        vector.allocateNew(totalBytes + MAX_INLINE_VIEW_LENGTH, length);
+        copyValidity(validity, offset, length, vector.getValidityBuffer());
 
+        long offsets = vector.getOffsetBuffer().memoryAddress();
+        long data = vector.getDataBuffer().memoryAddress();
         long position = 0;
-        offsets.setInt(0, 0);
+        MemoryUtil.UNSAFE.putInt(offsets, 0);
         for (int i = 0; i < length; i++) {
-            long view = views + VIEW_SIZE * (offset + i);
+            long view = views + VIEW_SIZE * i;
             if (isValid(validity, offset + i)) {
                 int size = MemoryUtil.UNSAFE.getInt(view);
-                long source;
                 if (size <= MAX_INLINE_VIEW_LENGTH) {
-                    source = view + 4;
+                    MemoryUtil.UNSAFE.putLong(data + position, MemoryUtil.UNSAFE.getLong(view + 4));
+                    MemoryUtil.UNSAFE.putInt(
+                            data + position + 8, MemoryUtil.UNSAFE.getInt(view + 12));
                 } else {
                     int bufferIndex = MemoryUtil.UNSAFE.getInt(view + 8);
                     int bufferOffset = MemoryUtil.UNSAFE.getInt(view + 12);
-                    source = buffers[2 + bufferIndex] + bufferOffset;
+                    MemoryUtil.UNSAFE.copyMemory(
+                            buffers[2 + bufferIndex] + bufferOffset, data + position, size);
                 }
-                MemoryUtil.UNSAFE.copyMemory(source, data + position, size);
                 position += size;
-                BitVectorHelper.setBit(validityOut, i);
             }
-            offsets.setInt(4L * (i + 1), (int) position);
+            MemoryUtil.UNSAFE.putInt(offsets + 4L * (i + 1), (int) position);
         }
 
         vector.setLastSet(length - 1);
         vector.setValueCount(length);
+    }
+
+    /** Copies the validity bits, in bulk when they start on a byte boundary. */
+    private static void copyValidity(long validity, long offset, int length, ArrowBuf out) {
+        int bytes = (length + 7) / 8;
+        if (validity == 0) {
+            out.setOne(0L, (long) bytes);
+        } else if (offset % 8 == 0) {
+            MemoryUtil.UNSAFE.copyMemory(validity + offset / 8, out.memoryAddress(), bytes);
+        } else {
+            for (int i = 0; i < length; i++) {
+                if (isValid(validity, offset + i)) {
+                    BitVectorHelper.setBit(out, i);
+                }
+            }
+        }
     }
 
     private static long buffer(ArrowArray.Snapshot snapshot, int index) {
