@@ -143,7 +143,10 @@ class _FrameLocator:
             return
         self._scanner = None
         self._scanner_initialized = False
-        self._set_splits(self._splits)
+        splits = self._splits
+        if splits is None:
+            splits = self._table.new_read_builder().new_scan().plan().splits()
+        self._set_splits(splits)
         self._process_id = process_id
 
     def _index_scanner(self, predicate):
@@ -171,6 +174,10 @@ class _FrameLocator:
         state["_process_id"] = None
         state["_split_ranges"] = None
         state["_split_range_index"] = None
+        if (self._table.options.native_read_enabled()
+                or self._table.options.native_plan_enabled()):
+            # Native reads do not need fallback splits in the worker payload.
+            state["_splits"] = None
         return state
 
     def __del__(self):

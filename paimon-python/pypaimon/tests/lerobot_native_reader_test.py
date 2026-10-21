@@ -256,3 +256,28 @@ def test_native_lookup_preserves_query_authorization(frames, denied):
             assert calls
     finally:
         current.close()
+
+
+def test_pickled_native_locator_rebuilds_pinned_fallback_once(frames):
+    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    frames.add(pa.table({"index": [40], "value": [4]}))
+    current = reader(frames, **{
+        "scan.native-plan.enabled": "true", "read.native.enabled": "false"})
+    restored = pickle.loads(pickle.dumps(current))
+    assert restored._locator._splits is None
+    frames.add(pa.table({"index": [60], "value": [6]}))
+    try:
+        with patch("pypaimon.execution.native.read.plan.native_plan",
+                   side_effect=RuntimeError("native unavailable")), \
+                patch.object(DataEvolutionGlobalIndexScanner, "create",
+                             wraps=DataEvolutionGlobalIndexScanner.create) as create:
+            for unused in range(3):
+                result = restored.read_indices([10, 40, 60], ["value", "index"])
+                assert result.column_names == ["value", "index"]
+                assert sorted(result["index"].to_pylist()) == [10, 40]
+                assert sorted(result["value"].to_pylist()) == [1, 4]
+            assert create.call_count == 1
+            assert restored._locator._splits is not None
+    finally:
+        current.close()
+        restored.close()
