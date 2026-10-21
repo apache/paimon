@@ -60,7 +60,7 @@ def _factories(builder, family):
 
 
 def _native_builder(family):
-    plan = SimpleNamespace(metadata=lambda: '{"snapshot":null,"snapshot_id":null,"splits":[]}')
+    plan = SimpleNamespace(snapshot=lambda: None, splits=lambda: [])
     result = SimpleNamespace(row_ids=lambda: {7: 0.5})
     reader = SimpleNamespace(read_plan=Mock(return_value=result), read_batch_plan=Mock(return_value=[result, result]))
     scan = SimpleNamespace(scan=Mock(return_value=plan))
@@ -288,6 +288,150 @@ def test_single_reader_freezes_query_values_before_transport(search_table):
     assert transported._python_executor is None
 
 
+def _typed_native_sdk():
+    """Strict SDK shapes exercise object transport without loading an extension."""
+    class NativeSnapshot:
+        @classmethod
+        def _from_json(cls, value):
+            assert isinstance(value, str)
+            result = cls()
+            result.value = json.loads(value)
+            return result
+
+        def _to_json(self):
+            return json.dumps(self.value)
+
+        def id(self):
+            return self.value['id']
+
+    class NativeIndexFileMeta:
+        @classmethod
+        def _deserialize(cls, value):
+            assert isinstance(value, bytes)
+            result = cls()
+            result.value = value
+            return result
+
+        def _serialize(self):
+            return self.value
+
+    class NativeSplit:
+        @classmethod
+        def deserialize(cls, value):
+            assert isinstance(value, bytes)
+            result = cls()
+            result.value = value
+            return result
+
+        def serialize(self):
+            return self.value
+
+    class IndexSplit:
+        def __init__(self, start, end, files, scalar=()):
+            assert all(isinstance(file, NativeIndexFileMeta) for file in list(files) + list(scalar))
+            self.values = start, end, list(files), list(scalar)
+
+        def row_range_start(self):
+            return self.values[0]
+
+        def row_range_end(self):
+            return self.values[1]
+
+        def scalar_index_files(self):
+            return self.values[3]
+
+    class IndexVectorSplit(IndexSplit):
+        def vector_index_files(self):
+            return self.values[2]
+
+    class IndexTextSplit(IndexSplit):
+        def __init__(self, column, start, end, files, scalar=()):
+            super().__init__(start, end, files, scalar)
+            self.column = column
+
+        def column_name(self):
+            return self.column
+
+        def full_text_index_files(self):
+            return self.values[2]
+
+    class RawVectorSplit:
+        def __init__(self, ranges, scalar=(), index_type=None):
+            assert all(isinstance(value, tuple) and len(value) == 2 for value in ranges)
+            self.values = list(ranges), list(scalar), index_type
+
+        def row_ranges(self):
+            return self.values[0]
+
+        def scalar_index_files(self):
+            return self.values[1]
+
+        def index_type(self):
+            return self.values[2]
+
+    class RawTextSplit:
+        def __init__(self, ranges):
+            assert all(isinstance(value, tuple) and len(value) == 2 for value in ranges)
+            self.ranges = list(ranges)
+
+        def row_ranges(self):
+            return self.ranges
+
+    class PrimaryKeySplit:
+        def __init__(self, split, payloads, uncovered, ranges):
+            assert isinstance(split, NativeSplit)
+            assert all(isinstance(file, NativeIndexFileMeta) for file in payloads)
+            self.values = split, list(payloads), list(uncovered), dict(ranges)
+
+        def data_split(self):
+            return self.values[0]
+
+        def payloads(self):
+            return self.values[1]
+
+        def uncovered_data_files(self):
+            return self.values[2]
+
+        def row_ranges_by_file(self):
+            return self.values[3]
+
+    class PrimaryKeyVectorSplit(PrimaryKeySplit):
+        pass
+
+    class PrimaryKeyTextSplit(PrimaryKeySplit):
+        pass
+
+    class Plan:
+        def __init__(self, splits, snapshot=None):
+            assert isinstance(splits, (list, tuple))
+            assert snapshot is None or isinstance(snapshot, NativeSnapshot)
+            assert all(type(split) in self.split_types for split in splits)
+            self.sources, self.captured = list(splits), snapshot
+
+        def splits(self):
+            return self.sources
+
+        def snapshot(self):
+            return self.captured
+
+    class VectorPlan(Plan):
+        split_types = IndexVectorSplit, RawVectorSplit, PrimaryKeyVectorSplit
+
+    class TextPlan(Plan):
+        split_types = IndexTextSplit, RawTextSplit, PrimaryKeyTextSplit
+
+    sdk, datafusion = ModuleType('pypaimon_rust'), ModuleType('pypaimon_rust.datafusion')
+    for name, cls in [('Snapshot', NativeSnapshot), ('IndexFileMeta', NativeIndexFileMeta), ('Split', NativeSplit),
+                      ('VectorScanPlan', VectorPlan), ('FullTextScanPlan', TextPlan),
+                      ('IndexVectorSearchSplit', IndexVectorSplit), ('RawVectorSearchSplit', RawVectorSplit),
+                      ('PrimaryKeyVectorSearchSplit', PrimaryKeyVectorSplit),
+                      ('IndexFullTextSearchSplit', IndexTextSplit), ('RawFullTextSearchSplit', RawTextSplit),
+                      ('PrimaryKeyFullTextSearchSplit', PrimaryKeyTextSplit)]:
+        setattr(datafusion, name, cls)
+    sdk.datafusion = datafusion
+    return sdk, datafusion
+
+
 @pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
 def test_python_source_metadata_round_trips_through_public_native_plan_constructor(search_table, family):
     from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
@@ -297,20 +441,7 @@ def test_python_source_metadata_round_trips_through_public_native_plan_construct
     from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
     from pypaimon.utils.range import Range
 
-    class Plan:
-        def __init__(self, snapshot_json, splits_json):
-            self.snapshot_json = snapshot_json
-            self.splits_json = splits_json
-
-        def metadata(self):
-            snapshot = None if self.snapshot_json is None else json.loads(self.snapshot_json)
-            return json.dumps({'snapshot': snapshot, 'snapshot_id': None if snapshot is None else snapshot['id'],
-                               'splits': json.loads(self.splits_json)})
-
-    sdk, datafusion = ModuleType('pypaimon_rust'), ModuleType('pypaimon_rust.datafusion')
-    datafusion.VectorScanPlan = Plan
-    datafusion.FullTextScanPlan = Plan
-    sdk.datafusion = datafusion
+    sdk, datafusion = _typed_native_sdk()
     full_text = family == 'text'
     snapshot = Snapshot(3, 7, 2, 'base', 'delta', 10, 10, 'writer', 1, 'APPEND', 0, next_row_id=10)
     index = IndexFileMeta('full-text' if full_text else 'ivf-flat', 'index-1', 1024, 4,
@@ -321,19 +452,24 @@ def test_python_source_metadata_round_trips_through_public_native_plan_construct
                                  RawVectorSearchSplit([Range(4, 9)], [scalar], 'ivf-flat')])
     source = (FullTextScanPlan if full_text else VectorSearchScanPlan)(splits, snapshot)
     with patch.dict('sys.modules', {'pypaimon_rust': sdk, 'pypaimon_rust.datafusion': datafusion}):
-        native = _plan_to_native(source, full_text, 'embedding')
+        native = _plan_to_native(source, full_text)
         restored = _plan_from_native(search_table, native, full_text, False)
-        copied = _plan_to_native(pickle.loads(pickle.dumps(restored)), full_text, 'embedding')
-        empty = _plan_to_native(_ordinary_plan(family), full_text, 'embedding')
-    assert json.loads(native.snapshot_json)['schemaId'] == 2
-    assert json.loads(native.splits_json)[0]['column'] == ('body' if full_text else 'embedding')
-    assert copied.metadata() == native.metadata()
+        copied = _plan_to_native(pickle.loads(pickle.dumps(restored)), full_text)
+        empty = _plan_to_native(_ordinary_plan(family), full_text)
+    assert json.loads(native.snapshot()._to_json())['schemaId'] == 2
+    assert isinstance(native.snapshot(), datafusion.Snapshot)
+    assert isinstance(native.splits()[0], datafusion.IndexFullTextSearchSplit if full_text else
+                      datafusion.IndexVectorSearchSplit)
+    assert copied.snapshot()._to_json() == native.snapshot()._to_json()
+    assert type(copied.splits()[0]) is type(native.splits()[0])
     assert restored.snapshot() == snapshot
     restored_index = restored.splits()[0]
     restored_files = restored_index.full_text_index_files if full_text else restored_index.vector_index_files
     assert restored_files[0].external_path == index.external_path
     assert restored_index.scalar_index_files == [scalar]
-    assert json.loads(empty.metadata()) == {'snapshot': None, 'snapshot_id': None, 'splits': []}
+    assert restored.splits() == source.splits()
+    assert empty.snapshot() is None and empty.splits() == []
+    assert not hasattr(native, 'metadata') and not hasattr(native, 'snapshot_id')
     assert not hasattr(restored, '_native_plan')
 
 
@@ -387,3 +523,96 @@ def test_missing_primary_key_plan_snapshot_does_not_fall_back_to_latest(full_tex
     manager.get_latest_snapshot.assert_not_called()
     core.read_plan.assert_not_called()
     convert.assert_not_called()
+
+
+@pytest.mark.parametrize('full_text', [False, True])
+def test_primary_key_sources_round_trip_as_typed_splits(search_table, full_text):
+    from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
+    from pypaimon.index.index_file_meta import IndexFileMeta
+    from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+    from pypaimon.manifest.schema.simple_stats import SimpleStats
+    from pypaimon.read.split import DataSplit
+    from pypaimon.read.split_serializer import serialize_split_v1
+    from pypaimon.snapshot.snapshot import Snapshot
+    from pypaimon.table.row.generic_row import GenericRow
+    from pypaimon.table.source.deletion_file import DeletionFile
+    from pypaimon.table.source.search_types import (
+        PrimaryKeyFullTextScanPlan, PrimaryKeyFullTextSearchSplit,
+        PrimaryKeyVectorScanPlan, PrimaryKeyVectorSearchSplit)
+    from pypaimon.utils.range import Range
+
+    sdk, datafusion = _typed_native_sdk()
+    snapshot = Snapshot(3, 7, 2, 'base', 'delta', 10, 10, 'writer', 1, 'APPEND', 0, next_row_id=10)
+    empty = GenericRow([], [])
+    file = DataFileMeta.create('tail.parquet', 256, 5, empty, empty,
+                               SimpleStats.empty_stats(), SimpleStats.empty_stats(), 0, 4, 2, 1, [])
+    data = DataSplit([file], empty, 0, data_deletion_files=[DeletionFile('dv/one', 2, 10, 3)],
+                     snapshot_id=7, bucket_path='bucket-0', total_buckets=1)
+    payload = IndexFileMeta('full-text' if full_text else 'ivf-flat', 'payload', 1024, 4,
+                            external_path='s3://bucket/payload')
+    split_class = PrimaryKeyFullTextSearchSplit if full_text else PrimaryKeyVectorSearchSplit
+    source_class = PrimaryKeyFullTextScanPlan if full_text else PrimaryKeyVectorScanPlan
+    source_split = split_class(
+        data, (payload,), ('tail.parquet',), {'tail.parquet': (Range(1, 2), Range(4, 4))})
+    source = source_class(7, [source_split], snapshot)
+    with patch.dict('sys.modules', {'pypaimon_rust': sdk, 'pypaimon_rust.datafusion': datafusion}):
+        native = _plan_to_native(pickle.loads(pickle.dumps(source)), full_text)
+        restored = _plan_from_native(search_table, native, full_text, True)
+    expected_type = datafusion.PrimaryKeyFullTextSearchSplit if full_text else datafusion.PrimaryKeyVectorSearchSplit
+    assert type(native.splits()[0]) is expected_type
+    assert type(native.splits()[0].data_split()) is datafusion.Split
+    assert serialize_split_v1(restored.splits()[0].data_split) == serialize_split_v1(data)
+    assert restored.snapshot() == snapshot and restored.snapshot_id == 7
+    assert restored.splits()[0].payloads == (payload,)
+    assert restored.splits()[0].uncovered_data_files == ('tail.parquet',)
+    assert restored.splits()[0].row_ranges_by_file == source.splits()[0].row_ranges_by_file
+
+
+@pytest.mark.parametrize('full_text', [False, True])
+@pytest.mark.parametrize('indexed', [False, True])
+def test_search_plan_conversion_rejects_splits_from_the_other_search_family(search_table, full_text, indexed):
+    from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
+    from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
+    from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
+    from pypaimon.utils.range import Range
+
+    sdk, datafusion = _typed_native_sdk()
+    if full_text:
+        wrong = IndexVectorSearchSplit(0, 1, []) if indexed else RawVectorSearchSplit([Range(0, 1)])
+        wrong_native = (datafusion.IndexVectorSearchSplit(0, 1, []) if indexed else
+                        datafusion.RawVectorSearchSplit([(0, 1)]))
+    else:
+        wrong = IndexFullTextSearchSplit('body', 0, 1, []) if indexed else RawFullTextSearchSplit([Range(0, 1)])
+        wrong_native = (datafusion.IndexFullTextSearchSplit('body', 0, 1, []) if indexed else
+                        datafusion.RawFullTextSearchSplit([(0, 1)]))
+    source = (FullTextScanPlan if full_text else VectorSearchScanPlan)([wrong], None)
+    native = SimpleNamespace(snapshot=lambda: None, splits=lambda: [wrong_native])
+    with patch.dict('sys.modules', {'pypaimon_rust': sdk, 'pypaimon_rust.datafusion': datafusion}):
+        with pytest.raises(TypeError, match='search split'):
+            _plan_to_native(source, full_text)
+        with pytest.raises(TypeError, match='search split'):
+            _plan_from_native(search_table, native, full_text, False)
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
+def test_selected_native_reader_does_not_probe_or_replay_an_older_sdk(search_table, family):
+    class OlderSdk(ModuleType):
+        def __getattr__(self, name):
+            if name in ('VectorScanPlan', 'FullTextScanPlan'):
+                raise AttributeError('required typed search plan API is missing')
+            raise AssertionError('Unexpected Native SDK capability probe: ' + name)
+
+    sdk, datafusion = ModuleType('pypaimon_rust'), OlderSdk('pypaimon_rust.datafusion')
+    sdk.datafusion = datafusion
+    native, _, core_read = _native_builder(family)
+    builder = _builder(search_table, family)
+    _, read_factory = _factories(builder, family)
+    with patch.dict('sys.modules', {'pypaimon_rust': sdk, 'pypaimon_rust.datafusion': datafusion}), \
+            _forbid_python_execution(), patch(_native_factory(family), return_value=native):
+        reader = read_factory()
+        with pytest.raises(AttributeError, match='required typed search plan API'):
+            (reader.read_batch_plan(_ordinary_plan(family)) if family == 'batch' else
+             reader.read_plan(_ordinary_plan(family)))
+    assert reader._python_executor is None
+    core_read.read_plan.assert_not_called()
+    core_read.read_batch_plan.assert_not_called()

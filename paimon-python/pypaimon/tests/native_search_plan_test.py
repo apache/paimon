@@ -437,3 +437,28 @@ def test_pk_plan_retains_snapshot_and_sources_after_primary_key_update(source, p
     _assert_results(transported, expected)
     assert vectors._rows(table, actual[0]).to_pylist() == expected_rows
     assert vectors._rows(table, transported[0]).to_pylist() == expected_rows
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
+def test_public_sdk_plan_constructs_from_typed_sources_and_snapshot(table, family):
+    from pypaimon_rust import datafusion as sdk
+    from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
+
+    builder = _builder(table, family, native=True)
+    with _native_only():
+        source = _scan(builder, family).scan()
+        reader = _reader(builder, family)
+        expected = _read(reader, family, source)
+        full_text = family == 'full-text'
+        native = _plan_to_native(pickle.loads(pickle.dumps(source)), full_text)
+        cls = sdk.FullTextScanPlan if full_text else sdk.VectorScanPlan
+        reconstructed = cls(native.splits(), native.snapshot())
+        assert reconstructed.snapshot().id() == source.snapshot().id
+        assert all(isinstance(split, (sdk.IndexFullTextSearchSplit, sdk.RawFullTextSearchSplit))
+                   if full_text else isinstance(split, (sdk.IndexVectorSearchSplit, sdk.RawVectorSearchSplit))
+                   for split in reconstructed.splits())
+        assert not hasattr(reconstructed, 'metadata') and not hasattr(reconstructed, 'snapshot_id')
+        transported = _plan_from_native(table, reconstructed, full_text, False)
+        actual = _read(pickle.loads(pickle.dumps(reader)), family, pickle.loads(pickle.dumps(transported)))
+    assert pickle.dumps(transported.splits()) == pickle.dumps(source.splits())
+    _assert_results(actual, expected)

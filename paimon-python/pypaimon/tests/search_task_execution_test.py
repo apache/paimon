@@ -37,7 +37,7 @@ def _native_plan_conversion():
     # These tests exercise callback ownership and cancellation. Source codec
     # construction has dedicated tests and must not require an installed SDK.
     with patch('pypaimon.execution.native.read.native_search_plan._plan_to_native',
-               side_effect=lambda plan, full_text=False, column=None: plan):
+               side_effect=lambda plan, full_text=False: plan):
         yield
 
 

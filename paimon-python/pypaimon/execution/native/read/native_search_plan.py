@@ -17,7 +17,6 @@
 
 """Translate ordinary snapshot-and-split plans to and from Rust Core."""
 
-import json
 from copy import copy, deepcopy
 
 from pypaimon.common.json_util import JSON
@@ -36,47 +35,53 @@ from pypaimon.write.commit_message_serializer import _index_from_row, _index_row
 
 
 def _range(value):
-    return Range(value['from'], value['to'])
+    return Range(*value)
 
 
 def _files(values):
-    return [_index_from_row(bytes(value)) for value in values]
+    return [_index_from_row(bytes(value._serialize())) for value in values]
 
 
-def _plan_from_native(table, native, full_text, primary_key):
+def _split_from_native(table, split, full_text):
+    from pypaimon_rust import datafusion as sdk
     from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
     from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
 
-    metadata = json.loads(native.metadata())
-    snapshot = JSON.from_json(json.dumps(metadata['snapshot']), Snapshot) if metadata['snapshot'] is not None else None
-    splits = []
-    for value in metadata['splits']:
-        if value['kind'] == 'primary-key':
-            split = deserialize_split_v1(bytes(value['data_split']), _partition_fields(table),
-                                         table.trimmed_primary_keys_fields)
-            ranges = {name: tuple(_range(range_) for range_ in ranges)
-                      for name, ranges in value['row_ranges_by_file'].items()}
-            cls = PrimaryKeyFullTextSearchSplit if full_text else PrimaryKeyVectorSearchSplit
-            splits.append(cls(split, tuple(_files(value['payloads'])), tuple(value['uncovered_data_files']), ranges))
-        elif value['kind'] == 'index':
-            row_range = _range(value['row_range'])
-            args = (row_range.from_, row_range.to, _files(value['index_files']), _files(value['scalar_index_files']))
-            splits.append(IndexFullTextSearchSplit(value['column'], *args)
-                          if full_text else IndexVectorSearchSplit(*args))
-        else:
-            ranges = [_range(range_) for range_ in value['row_ranges']]
-            splits.append(RawFullTextSearchSplit(ranges) if full_text else RawVectorSearchSplit(
-                ranges, _files(value['scalar_index_files']), value['index_type']))
+    native_pk = sdk.PrimaryKeyFullTextSearchSplit if full_text else sdk.PrimaryKeyVectorSearchSplit
+    native_index = sdk.IndexFullTextSearchSplit if full_text else sdk.IndexVectorSearchSplit
+    native_raw = sdk.RawFullTextSearchSplit if full_text else sdk.RawVectorSearchSplit
+    if isinstance(split, native_pk):
+        data_split = deserialize_split_v1(bytes(split.data_split().serialize()), _partition_fields(table),
+                                          table.trimmed_primary_keys_fields)
+        ranges = {name: tuple(_range(value) for value in values)
+                  for name, values in split.row_ranges_by_file().items()}
+        cls = PrimaryKeyFullTextSearchSplit if full_text else PrimaryKeyVectorSearchSplit
+        return cls(data_split, tuple(_files(split.payloads())), tuple(split.uncovered_data_files()), ranges)
+    if isinstance(split, native_index):
+        args = (split.row_range_start(), split.row_range_end(),
+                _files(split.full_text_index_files() if full_text else split.vector_index_files()),
+                _files(split.scalar_index_files()))
+        return IndexFullTextSearchSplit(split.column_name(), *args) if full_text else IndexVectorSearchSplit(*args)
+    if isinstance(split, native_raw):
+        ranges = [_range(value) for value in split.row_ranges()]
+        return RawFullTextSearchSplit(ranges) if full_text else RawVectorSearchSplit(
+            ranges, _files(split.scalar_index_files()), split.index_type())
+    raise TypeError('Unsupported Native %s search split: %s' % (
+        'full-text' if full_text else 'vector', type(split).__name__))
+
+
+def _plan_from_native(table, native, full_text, primary_key):
+    captured = native.snapshot()
+    snapshot = None if captured is None else JSON.from_json(captured._to_json(), Snapshot)
+    splits = [_split_from_native(table, split, full_text) for split in native.splits()]
     if primary_key:
         cls = PrimaryKeyFullTextScanPlan if full_text else PrimaryKeyVectorScanPlan
-        plan = cls(metadata['snapshot_id'] or 0, splits, snapshot)
-    else:
-        cls = FullTextScanPlan if full_text else VectorSearchScanPlan
-        plan = cls(splits, snapshot)
-    return plan
+        return cls(0 if snapshot is None else snapshot.id, splits, snapshot)
+    return (FullTextScanPlan if full_text else VectorSearchScanPlan)(splits, snapshot)
 
 
-def _split_metadata(split, full_text, column):
+def _split_to_native(split, full_text):
+    from pypaimon_rust import datafusion as sdk
     from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
     from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
 
@@ -87,37 +92,34 @@ def _split_metadata(split, full_text, column):
             'full-text' if full_text else 'vector', type(split).__name__))
 
     def files(values):
-        return [list(_index_row(value)) for value in values]
+        return [sdk.IndexFileMeta._deserialize(_index_row(value)) for value in values]
 
-    def range_(value):
-        return {'from': value.from_, 'to': value.to}
+    def ranges(values):
+        return [(value.from_, value.to) for value in values]
 
     if isinstance(split, (PrimaryKeyVectorSearchSplit, PrimaryKeyFullTextSearchSplit)):
-        return {'kind': 'primary-key', 'data_split': list(serialize_split_v1(split.data_split)),
-                'payloads': files(split.payloads), 'uncovered_data_files': list(split.uncovered_data_files),
-                'row_ranges_by_file': {name: [range_(value) for value in values]
-                                       for name, values in split.row_ranges_by_file.items()}}
-    if isinstance(split, (IndexVectorSearchSplit, IndexFullTextSearchSplit)):
-        return {'kind': 'index', 'column': split.column_name if full_text else column,
-                'row_range': {'from': split.row_range_start, 'to': split.row_range_end},
-                'index_files': files(split.full_text_index_files if full_text else split.vector_index_files),
-                'scalar_index_files': files(split.scalar_index_files)}
+        cls = sdk.PrimaryKeyFullTextSearchSplit if full_text else sdk.PrimaryKeyVectorSearchSplit
+        return cls(sdk.Split.deserialize(serialize_split_v1(split.data_split)), files(split.payloads),
+                   list(split.uncovered_data_files),
+                   {name: ranges(values) for name, values in split.row_ranges_by_file.items()})
+    if isinstance(split, IndexFullTextSearchSplit):
+        return sdk.IndexFullTextSearchSplit(split.column_name, split.row_range_start, split.row_range_end,
+                                            files(split.full_text_index_files), files(split.scalar_index_files))
+    if isinstance(split, IndexVectorSearchSplit):
+        return sdk.IndexVectorSearchSplit(split.row_range_start, split.row_range_end,
+                                          files(split.vector_index_files), files(split.scalar_index_files))
     if isinstance(split, RawVectorSearchSplit):
-        return {'kind': 'raw', 'row_ranges': [range_(value) for value in split.row_ranges],
-                'scalar_index_files': files(split.scalar_index_files), 'index_type': split.index_type}
-    if isinstance(split, RawFullTextSearchSplit):
-        return {'kind': 'raw', 'row_ranges': [range_(value) for value in split.row_ranges],
-                'scalar_index_files': [], 'index_type': None}
-    raise TypeError('Unsupported search split: %s' % type(split).__name__)
+        return sdk.RawVectorSearchSplit(ranges(split.row_ranges), files(split.scalar_index_files), split.index_type)
+    return sdk.RawFullTextSearchSplit(ranges(split.row_ranges))
 
 
-def _plan_to_native(plan, full_text, column=None):
-    from pypaimon_rust.datafusion import FullTextScanPlan as NativeFullTextPlan, VectorScanPlan as NativeVectorPlan
+def _plan_to_native(plan, full_text):
+    from pypaimon_rust import datafusion as sdk
 
-    snapshot = plan.snapshot()
-    return (NativeFullTextPlan if full_text else NativeVectorPlan)(
-        None if snapshot is None else JSON.to_json(snapshot),
-        json.dumps([_split_metadata(split, full_text, column) for split in plan.splits()]))
+    captured = plan.snapshot()
+    snapshot = None if captured is None else sdk.Snapshot._from_json(JSON.to_json(captured))
+    cls = sdk.FullTextScanPlan if full_text else sdk.VectorScanPlan
+    return cls([_split_to_native(split, full_text) for split in plan.splits()], snapshot)
 
 
 def _capture_builder(builder):
@@ -192,8 +194,7 @@ class NativeSearchRead:
                 raise ValueError('Captured search snapshot %s is unavailable' % plan.snapshot_id)
             plan = copy(plan)
             plan._snapshot = snapshot
-        column = None if self._builder is None or self._full_text else self._builder._vector_column.name
-        return _plan_to_native(plan, self._full_text, column)
+        return _plan_to_native(plan, self._full_text)
 
     def read_plan(self, plan, executor=None):
         native = self._get_native_reader()

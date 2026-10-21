@@ -359,9 +359,11 @@ results = builder.new_batch_vector_search_read().read_batch_plan(
     plan, executor=RaySearchTaskExecutor(concurrency=4))
 ```
 
-Plans contain ordinary snapshot and split metadata. A copied, pickled, or
-Python-constructed plan can be passed to a Native reader without choosing the
-Python backend. For example, to execute an explicitly selected set of sources:
+Plans contain ordinary snapshot and typed split metadata. A copied, pickled,
+or Python-constructed plan can be passed to a Native reader without choosing
+the Python backend. The Native SDK also accepts snapshot and split objects
+through its plan constructors. For example, to execute an explicitly selected
+set of sources:
 
 ```python
 from pypaimon.table.source.search_types import VectorSearchScanPlan
@@ -371,9 +373,11 @@ results = builder.new_batch_vector_search_read().read_batch_plan(selected)
 ```
 
 The supplied splits are authoritative: readers do not add uncovered raw ranges
-or rediscover other search indexes. Query vectors, limits and filters belong to
-the reader. Rust Core coordinates global candidate selection and refinement;
-its internal shard protocol is separate from the public source plan.
+or rediscover other search indexes. A plan with no captured snapshot stays
+empty rather than selecting the latest snapshot. Query vectors, limits and
+filters belong to the reader. Rust Core coordinates global candidate selection
+and refinement; its internal shard protocol is separate from the public source
+plan.
 
 Hybrid builders expose `execute(executor=...)` for the same scheduler.
 The existing `execute_local()` methods retain their local defaults.
