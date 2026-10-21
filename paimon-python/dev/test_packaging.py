@@ -122,6 +122,71 @@ class PackagingTest(unittest.TestCase):
         for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py",
                      "pypaimon/benchmark/act/default_experiment.json"):
             self.assertIn(name, names)
+        execution_files = (
+            "pypaimon/execution/dispatch.py",
+            "pypaimon/execution/vindex_input.py",
+            "pypaimon/execution/python/read/table_read.py",
+            "pypaimon/execution/python/read/table_scan.py",
+            "pypaimon/execution/python/read/auth_support.py",
+            "pypaimon/execution/python/read/scan_distribution.py",
+            "pypaimon/execution/python/read/format_table_read.py",
+            "pypaimon/execution/python/read/format_table_scan.py",
+            "pypaimon/execution/python/read/object_table_read.py",
+            "pypaimon/execution/python/read/object_table_scan.py",
+            "pypaimon/execution/python/read/system_table_read.py",
+            "pypaimon/execution/python/read/system_table_scan.py",
+            "pypaimon/execution/python/merge_engine_dispatch.py",
+            "pypaimon/execution/python/read/search/vector_search_read.py",
+            "pypaimon/execution/python/read/search/hybrid_search.py",
+            "pypaimon/execution/python/globalindex/btree/btree_index_reader.py",
+            "pypaimon/execution/python/globalindex/btree/block_handle.py",
+            "pypaimon/execution/python/globalindex/block_compression.py",
+            "pypaimon/execution/python/globalindex/key_serializer.py",
+            "pypaimon/execution/python/globalindex/vindex/vindex_vector_global_index_reader.py",
+            "pypaimon/execution/python/write/table_write.py",
+            "pypaimon/execution/python/write/table_commit.py",
+            "pypaimon/execution/python/write/format_table_write.py",
+            "pypaimon/execution/python/write/format_table_commit.py",
+            "pypaimon/execution/python/write/bucket_metadata.py",
+            "pypaimon/execution/native/read/table_read.py",
+            "pypaimon/execution/native/read/plan.py",
+            "pypaimon/execution/native/read/system_table.py",
+            "pypaimon/execution/native/read/vindex_reader.py",
+            "pypaimon/execution/native/write/native_write.py",
+            "pypaimon/execution/native/write/native_commit.py",
+            "pypaimon/execution/native/write/bucket_metadata.py",
+            "pypaimon/execution/native/write/postpone_bucket.py",
+            "pypaimon/read/blob_read_support.py",
+            "pypaimon/read/scan_request.py",
+            "pypaimon/table/source/search_types.py",
+            "pypaimon/globalindex/vindex_reader.py",
+            "pypaimon/write/bucket_planning.py",
+            "pypaimon/write/commit_options.py",
+            "pypaimon/write/input_routing.py",
+        )
+        for name in execution_files:
+            self.assertIn(name, names)
+        internal_aliases = (
+            "pypaimon/common/merge_engine_dispatch.py",
+            "pypaimon/read/native_plan.py",
+            "pypaimon/read/native_row_iterator.py",
+            "pypaimon/table/source/full_text_read.py",
+            "pypaimon/table/source/vector_search_scan.py",
+            "pypaimon/table/source/native_search_plan.py",
+            "pypaimon/table/system/native_system_table.py",
+            "pypaimon/globalindex/bitmap/__init__.py",
+            "pypaimon/globalindex/btree/__init__.py",
+            "pypaimon/globalindex/full_text/__init__.py",
+            "pypaimon/globalindex/lumina/__init__.py",
+            "pypaimon/globalindex/vindex/__init__.py",
+            "pypaimon/globalindex/btree/block_reader.py",
+            "pypaimon/globalindex/btree_format/block_handle.py",
+            "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
+            "pypaimon/globalindex/block_compression.py",
+            "pypaimon/globalindex/vindex_input.py",
+        )
+        for name in internal_aliases:
+            self.assertNotIn(name, names)
         for suffix in ("/LICENSE", "/NOTICE"):
             self.assertTrue(any(".dist-info/" in name and name.endswith(suffix)
                                 for name in names))
@@ -130,6 +195,10 @@ class PackagingTest(unittest.TestCase):
             prefix = "pypaimon-{}/".format(self.version)
             for name in ("pyproject.toml", "setup.py", "LICENSE", "NOTICE", "README.md"):
                 self.assertIn(prefix + name, names)
+            for name in execution_files:
+                self.assertIn(prefix + name, names)
+            for name in internal_aliases:
+                self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
                                  or name.startswith((prefix + "pypaimon/tests/",
                                                      prefix + "pypaimon/acceptance/"))

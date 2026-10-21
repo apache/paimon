@@ -31,7 +31,7 @@ from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
-from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
+from pypaimon.execution.python.write.commit.conflict_detection import RowIdExistenceConflict
 from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)

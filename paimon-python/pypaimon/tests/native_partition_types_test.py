@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 _PARTITIONS = [
@@ -217,7 +217,7 @@ def test_binary_partition_string_conversion_matches_java(tmp_path, value, expect
 def test_python_partition_statistics_keep_java_values_and_typed_identity(tmp_path):
     from pypaimon.manifest.schema.manifest_entry import ManifestEntry
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.file_store_commit import FileStoreCommit
+    from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
     table, _ = _table(tmp_path, pa.binary(), native=False)
     commit = FileStoreCommit.__new__(FileStoreCommit)
@@ -244,7 +244,7 @@ def test_python_partition_statistics_keep_java_values_and_typed_identity(tmp_pat
 def test_python_partition_statistics_group_by_schema_encoded_values(tmp_path, partition_type, values, counts):
     from pypaimon.manifest.schema.manifest_entry import ManifestEntry
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.file_store_commit import FileStoreCommit
+    from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
     table, _ = _table(tmp_path, partition_type, native=False)
     commit = FileStoreCommit.__new__(FileStoreCommit)
@@ -259,13 +259,13 @@ def test_python_partition_statistics_group_by_schema_encoded_values(tmp_path, pa
 
 @pytest.mark.parametrize('legacy', [False, True])
 def test_native_commit_binary_partition_capability_precedes_execution(tmp_path, legacy):
-    from pypaimon.write.native_commit import create_native_commit
+    from pypaimon.execution.native.write.native_commit import create_native_commit
 
     table, _ = _table(tmp_path, pa.binary(), native=False,
                       extra_options={'partition.legacy-name': str(legacy).lower()})
-    with patch('pypaimon.write.native_commit._rest_catalog_supported', return_value=True), \
-            patch('pypaimon.write.native_commit.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_commit.create_native_write_table') as native:
+    with patch('pypaimon.execution.native.write.native_commit._rest_catalog_supported', return_value=True), \
+            patch('pypaimon.execution.native.write.native_commit.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_commit.create_native_write_table') as native:
         committer = create_native_commit(table, 'user')
         assert committer is not None
         native.assert_called_once_with(table)

@@ -27,7 +27,7 @@ import pytest
 from pypaimon import Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.consumer.consumer import Consumer
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
 from pypaimon.tests import native_plan_rest_test
 
@@ -95,9 +95,9 @@ def _read_and_acknowledge(table, native):
 
     with ExitStack() as guards:
         if native:
-            guards.enter_context(patch('pypaimon.read.streaming_table_scan.FileScanner',
+            guards.enter_context(patch('pypaimon.execution.python.read.streaming_table_scan.FileScanner',
                                        side_effect=AssertionError('Python initial plan fallback')))
-            guards.enter_context(patch('pypaimon.read.streaming_table_scan.ManifestFileManager',
+            guards.enter_context(patch('pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
                                        side_effect=AssertionError('Python incremental plan fallback')))
         return asyncio.run(consume())
 

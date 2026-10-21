@@ -25,7 +25,7 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_read as read_native_splits
+from pypaimon.execution.native.read.table_read import (native_read as read_native_splits)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.write.table_update import TableUpdate
@@ -80,7 +80,7 @@ def _native_only(native):
                               (TableUpsertByKey, '_upsert_partition'),
                               (TableUpdate, '_build_predicate_update_table')]:
             stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
-        stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+        stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                   side_effect=AssertionError('Python merge fallback')))
     return stack
 
@@ -174,7 +174,7 @@ def test_shard_normal_updates_preserve_parquet_vector_and_blob_sidecars(tmp_path
 
     with ExitStack() as stack:
         native_calls = stack.enter_context(patch(
-            'pypaimon.read.native_plan.native_read', wraps=read_native_splits))
+            'pypaimon.execution.native.read.table_read.native_read', wraps=read_native_splits))
         if native:
             stack.enter_context(patch('pypaimon.write.table_update.ShardTableUpdator.__init__',
                                       side_effect=AssertionError('Python shard fallback')))

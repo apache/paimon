@@ -28,8 +28,8 @@ import pytest
 from pypaimon import Schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
-from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
+from pypaimon.execution.python.read.reader.filter_record_batch_reader import (FilterRecordBatchReader)
 
 
 COMPARISONS = [

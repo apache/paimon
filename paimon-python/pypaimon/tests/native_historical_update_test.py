@@ -24,12 +24,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_update import NativeShardTableUpdator
+from pypaimon.execution.native.write.native_update import NativeShardTableUpdator
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
@@ -184,7 +184,7 @@ def _append_mutation(table, native, operation, only_matched=False, stream=False)
         if native:
             for method in ('pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_partition',
                            'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_row_partition',
-                           'pypaimon.table.data_evolution_merge_into._build_tables'):
+                           'pypaimon.execution.python.write.merge_into._build_tables'):
                 stack.enter_context(patch(method, side_effect=AssertionError('Python historical mutation fallback')))
         if operation == 'upsert':
             return update.upsert_by_arrow_with_key(data, ['id'], **kwargs)
@@ -356,7 +356,7 @@ def test_row_id_merge_respects_independent_source_read_view(native_rest_catalog,
     else:
         source = latest
     assignment = Mock(side_effect=lambda batch: batch['s.value'])
-    guard = patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    guard = patch('pypaimon.execution.python.write.merge_into._build_tables',
                   side_effect=AssertionError('Python MERGE fallback')) if native else ExitStack()
     with guard:
         messages = target.new_batch_write_builder().new_update().merge_into(

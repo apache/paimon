@@ -24,7 +24,9 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
+from pypaimon.globalindex.vindex_options import (
+    VINDEX_IDENTIFIERS,
+)
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.tests.global_index_build_test import _FakeVectorIndexTrainer, _FakeVectorIndexWriter
 

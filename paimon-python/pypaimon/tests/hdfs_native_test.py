@@ -102,9 +102,9 @@ class HdfsNativeFileIORoutingTest(unittest.TestCase):
         self.assertEqual(type(fio).__name__, "PyArrowFileIO")
 
     def test_native_init_failure_falls_back_to_pyarrow(self):
-        # hdfs_native not installed; default fallback enabled.
+        # Simulate the missing optional SDK even when it is installed locally.
         _uninstall_fake_hdfs_native()
-        with patch(
+        with patch.dict(sys.modules, {"hdfs_native": None}), patch(
             "pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO.__init__",
             return_value=None,
         ):
@@ -113,7 +113,7 @@ class HdfsNativeFileIORoutingTest(unittest.TestCase):
 
     def test_native_init_failure_no_fallback_raises(self):
         _uninstall_fake_hdfs_native()
-        with self.assertRaises(ImportError):
+        with patch.dict(sys.modules, {"hdfs_native": None}), self.assertRaises(ImportError):
             FileIO.get(
                 "hdfs://ns/foo",
                 Options({"hdfs.client.fallback-to-pyarrow": "false"}),
@@ -891,7 +891,7 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
         fake_lance.file = types.SimpleNamespace(
             LanceFileWriter=MagicMock(return_value=writer))
         with patch.dict(sys.modules, {"lance": fake_lance}), \
-                patch("pypaimon.read.reader.lance_utils.to_lance_specified",
+                patch("pypaimon.execution.python.read.reader.lance_utils.to_lance_specified",
                       return_value=("hdfs://ns/x.lance", {"opt": "v"})) as spec:
             self.fio.write_lance("hdfs://ns/x.lance", table)
         spec.assert_called_once()
@@ -915,7 +915,7 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
             "vortex._lib.io": fake_io,
         }
         with patch.dict(sys.modules, fake_modules), \
-                patch("pypaimon.read.reader.vortex_utils.to_vortex_specified",
+                patch("pypaimon.execution.python.read.reader.vortex_utils.to_vortex_specified",
                       return_value=("hdfs://ns/x.vortex", None)):
             self.fio.write_vortex("hdfs://ns/x.vortex", table)
         fake_io.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")

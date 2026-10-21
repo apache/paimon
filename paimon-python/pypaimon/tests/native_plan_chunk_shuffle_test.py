@@ -24,7 +24,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 

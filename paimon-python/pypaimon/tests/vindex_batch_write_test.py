@@ -23,7 +23,7 @@ import numpy as np
 import pyarrow as pa
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder, _write_vector_batch
-from pypaimon.globalindex.vindex.vindex_vector_index_writer import VindexVectorIndexWriter
+from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import VindexVectorIndexWriter
 from pypaimon.schema.data_types import ArrayType, AtomicType
 from pypaimon.utils.range import Range
 
@@ -185,7 +185,7 @@ class VindexBatchWriteTest(unittest.TestCase):
         batches = iter(table.to_batches())
         read._new_arrow_batch_reader.return_value = (
             pa.RecordBatchReader.from_batches(table.schema, batches), batches)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=[
             (Mock(), Range(0, 9)),
         ]), patch(module + '.ADD_BATCH_SIZE', 1):

@@ -540,8 +540,7 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
     def test_align_handles_sliced_arrays(self):
         # The list/map rebuilds read offsets/raw buffers; a sliced input
         # must be re-materialized, not read through stale parent offsets.
-        from pypaimon.read.reader.data_file_batch_reader import \
-            DataFileBatchReader
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (DataFileBatchReader)
         reader = DataFileBatchReader.__new__(DataFileBatchReader)
         sliced_list = pa.array(
             [[1, 2], [3], [4, 5, 6], None], type=pa.list_(pa.int32())).slice(1, 3)
@@ -562,8 +561,7 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
         self.assertEqual(out.to_pylist(), [[('b', 2)], None])
 
     def test_nested_decimal_scale_down_rounds_and_nulls_overflow(self):
-        from pypaimon.read.reader.data_file_batch_reader import \
-            DataFileBatchReader
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (DataFileBatchReader)
         reader = DataFileBatchReader.__new__(DataFileBatchReader)
         source_type = RowType(True, [
             DataField(1, 'price', AtomicType('DECIMAL(6, 3)'))])
@@ -586,8 +584,7 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
         ])
 
     def test_decimal_scale_down_preserves_max_precision_values(self):
-        from pypaimon.read.reader.data_file_batch_reader import \
-            cast_array_for_schema_evolution
+        from pypaimon.execution.python.read.reader.data_file_batch_reader import (cast_array_for_schema_evolution)
         value = decimal.Decimal('12345678901234567890123456789012345.678')
         source = pa.array([value], type=pa.decimal128(38, 3))
 
@@ -774,22 +771,13 @@ class SupportsCastTest(unittest.TestCase):
             self.assertFalse(can_execute_cast(AtomicType(source), AtomicType('TIMESTAMP(6)')))
 
     def test_can_execute_cast_decimal_precision(self):
-        # A numeric -> decimal cast has a PyArrow kernel but is only executable
-        # when the target precision can hold the source's range at the target
-        # scale (INT needs >= 12 at scale 2, BIGINT >= 21). An empty-array probe
-        # misses this. The Python fallback must reject those targets; the core
-        # executor supports them and returns NULL for per-value Java overflow.
-        try:
-            from pypaimon_rust.data import cast_array_for_schema_evolution
-        except ImportError:
-            native = False
-        else:
-            native = callable(cast_array_for_schema_evolution)
-        for src, dst in [('INT', 'DECIMAL(10, 2)'), ('BIGINT', 'DECIMAL(10, 2)'),
-                         ('BIGINT', 'DECIMAL(20, 2)')]:
-            self.assertEqual(can_execute_cast(AtomicType(src), AtomicType(dst)), native,
-                             '{} -> {}'.format(src, dst))
-        for src, dst in [('INT', 'DECIMAL(12, 2)'), ('BIGINT', 'DECIMAL(21, 2)'),
+        # Java checks the precision of each converted value, not the source
+        # type's full range. Python must support the same casts independently
+        # of whether the Native extension is installed.
+        for src, dst in [('TINYINT', 'DECIMAL(4, 2)'), ('SMALLINT', 'DECIMAL(4, 2)'),
+                         ('INT', 'DECIMAL(4, 2)'), ('INT', 'DECIMAL(10, 2)'),
+                         ('BIGINT', 'DECIMAL(10, 2)'), ('BIGINT', 'DECIMAL(20, 2)'),
+                         ('INT', 'DECIMAL(12, 2)'), ('BIGINT', 'DECIMAL(21, 2)'),
                          ('INT', 'BIGINT'), ('DOUBLE', 'INT'), ('INT', 'STRING')]:
             self.assertTrue(can_execute_cast(AtomicType(src), AtomicType(dst)),
                             '{} -> {}'.format(src, dst))

@@ -23,9 +23,9 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
-from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead, BatchVectorSearchReadImpl
 from pypaimon.tests import native_hybrid_search_test as hybrid, native_vector_search_test as vectors
 from pypaimon.tests.native_full_text_search_test import _scores
 from pypaimon.tests.vector_search_filter_test import match_query
@@ -222,7 +222,7 @@ def test_missing_index_preserves_native_error_without_retry(rest_catalog, family
 
 
 def test_snapshot_json_binding_requires_java_snapshot_metadata(rest_catalog):
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import (_native_table)
     catalog, _ = rest_catalog
     table = hybrid._table(catalog)
     with pytest.raises(ValueError, match='Invalid snapshot JSON'):
@@ -234,7 +234,7 @@ def test_snapshot_json_binding_requires_java_snapshot_metadata(rest_catalog):
 
 @pytest.mark.parametrize('view', ['empty', 'tag'])
 def test_primary_key_vector_search_uses_captured_metadata(pk_vector_table, view):
-    from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
+    from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
     table = pk_vector_table
     snapshot = table.snapshot_manager().get_latest_snapshot()
     if view == 'tag':

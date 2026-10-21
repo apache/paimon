@@ -28,12 +28,14 @@ import pytest
 from pypaimon import Schema
 from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_commit import from_native_commit_messages
+from pypaimon.execution.native.write.native_commit import from_native_commit_messages
 from pypaimon.write.table_commit import BatchTableCommit
 
 rest_catalog = native_plan_rest_test.rest_catalog
@@ -481,7 +483,7 @@ def test_query_authorization_remains_on_python_build_path(rest_catalog, restrict
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
         column_masking={'name': '{"name":"NULL"}'} if restricted else None)
     original = GlobalIndexBuilder._build_sorted_index
-    with patch('pypaimon.globalindex.native_index_build._native_table',
+    with patch('pypaimon.execution.native.write.native_index_build._native_table',
                side_effect=AssertionError('native auth build')), \
             patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         if restricted:

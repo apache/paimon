@@ -25,7 +25,9 @@ import pytest
 
 from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.multimodal.table import MultimodalTable, text_route, vector_route
-from pypaimon.read.native_plan import _native_table, native_runtime_available, _predicate_to_native
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
@@ -332,7 +334,7 @@ def test_query_auth_rejects_hybrid_before_native_table_access(rest_catalog, nati
     catalog, _ = rest_catalog
     table = _table(catalog)
     table = table.copy({'query-auth.enabled': 'true', 'read.native.enabled': str(native).lower()})
-    with patch('pypaimon.table.source.native_hybrid_search._native_table',
+    with patch('pypaimon.execution.native.read.native_hybrid_search._native_table',
                side_effect=AssertionError('Native table access before authorization')):
         with pytest.raises(Exception, match='query-auth'):
             _builder(table).execute_local()

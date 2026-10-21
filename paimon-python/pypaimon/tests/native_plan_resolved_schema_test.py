@@ -23,7 +23,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable

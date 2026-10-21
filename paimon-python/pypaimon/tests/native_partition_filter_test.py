@@ -27,7 +27,9 @@ import pytest
 from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _native_table, native_plan, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.plan import (native_plan)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_plan_rest_test
 

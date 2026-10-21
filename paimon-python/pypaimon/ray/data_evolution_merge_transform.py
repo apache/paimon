@@ -16,86 +16,30 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
-SetSpec = Union[str, Mapping[str, Any]]
-OnSpec = Union[Sequence[str], Mapping[str, str]]
+from pypaimon.write.merge_types import (
+    LiteralValue as LiteralValue,
+    OnSpec as OnSpec,
+    SetSpec as SetSpec,
+    SourceColumnRef as SourceColumnRef,
+    TargetColumnRef as TargetColumnRef,
+    WhenMatched as WhenMatched,
+    WhenNotMatched as WhenNotMatched,
+    _NormalizedClause as _NormalizedClause,
+    lit as lit,
+    source_col as source_col,
+    target_col as target_col,
+)
 
 
-@dataclass(frozen=True)
-class SourceColumnRef:
-    column: str
-
-
-@dataclass(frozen=True)
-class TargetColumnRef:
-    column: str
-
-
-@dataclass(frozen=True)
-class LiteralValue:
-    value: Any
-
-
-def source_col(name: str) -> SourceColumnRef:
-    return SourceColumnRef(name)
-
-
-def target_col(name: str) -> TargetColumnRef:
-    return TargetColumnRef(name)
-
-
-def lit(value: Any) -> LiteralValue:
-    return LiteralValue(value)
-
-
-class WhenMatched:
-    """Matched UPDATE/DELETE clause; callable SET values consume t./s. Arrow columns."""
-
-    def __init__(
-            self,
-            action: str,
-            *,
-            update: Optional[SetSpec] = None,
-            condition: Optional[str] = None):
-        if action not in ("update", "delete"):
-            raise ValueError("WhenMatched action must be 'update' or 'delete'.")
-        if action == "update" and update is None:
-            raise ValueError("WhenMatched.update requires an update spec.")
-        if action == "delete" and update is not None:
-            raise ValueError("WhenMatched.delete must not specify update.")
-        self.update = update
-        self.condition = condition
-        self.delete = action == "delete"
-
-    @classmethod
-    def update(
-            cls,
-            update: SetSpec = "*",
-            condition: Optional[str] = None):
-        return cls("update", update=update, condition=condition)
-
-    @classmethod
-    def delete(cls, condition: Optional[str] = None):
-        return cls("delete", condition=condition)
-
-
-@dataclass
-class WhenNotMatched:
-    """INSERT clause; callable values consume s. Arrow columns and return Arrow arrays."""
-
-    insert: SetSpec
-    condition: Optional[str] = None
-
-
-@dataclass
-class _NormalizedClause:
-    spec: Dict[str, Any]
-    condition: Optional[str] = None
-    delete: bool = False
+__all__ = [
+    'LiteralValue', 'OnSpec', 'SetSpec', 'SourceColumnRef', 'TargetColumnRef',
+    'WhenMatched', 'WhenNotMatched', '_NormalizedClause', 'lit', 'source_col', 'target_col',
+    'vectorized_matched_transform', 'vectorized_delete_transform', 'vectorized_insert_transform',
+]
 
 
 def vectorized_matched_transform(

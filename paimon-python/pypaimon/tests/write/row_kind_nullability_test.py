@@ -24,10 +24,10 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 from pypaimon.write.row_kind import skip_write_row
 
 
@@ -239,9 +239,9 @@ def test_native_bridge_leaves_nested_value_validation_to_core(tmp_path):
     writer = NativeTableWrite.__new__(NativeTableWrite)
     writer._table_schema = writer._schema = declared
     writer._write_cols = None
-    with patch('pypaimon.write.native_write.normalize_arrow_write_nullability',
+    with patch('pypaimon.execution.native.write.native_write.normalize_arrow_write_nullability',
                side_effect=AssertionError('bridge inspected values before core filtering'), create=True), \
-            patch('pypaimon.write.native_write.normalize_arrow_strings',
+            patch('pypaimon.execution.native.write.native_write.normalize_arrow_strings',
                   side_effect=AssertionError('bridge cast values before core filtering'), create=True):
         assert writer._prepare_native_arrow_data(data) is data
 
@@ -278,7 +278,9 @@ def test_python_filters_before_nested_normalization(tmp_path):
         return selected.cast(expected)
 
     try:
-        with patch('pypaimon.write.table_write.normalize_arrow_write_nullability', side_effect=normalize):
+        with patch(
+                'pypaimon.execution.python.write.table_write.normalize_arrow_write_nullability',
+                side_effect=normalize):
             selected = TableWrite._prepare_arrow_data(writer, data)
         assert selected.to_pydict() == {'id': [2], 'op': ['+I'], 'seq': [2], 'value': [[42]]}
     finally:
@@ -295,7 +297,7 @@ def test_python_retained_nested_schema_stays_strict_without_native_extension(tmp
                            for field in writer.table_pyarrow_schema])
     data = pa.table({'id': [1], 'op': ['-D' if ignored else '+I'], 'seq': [1], 'value': [[None]]}, schema=transport)
     try:
-        with patch('pypaimon.read.native_plan.native_runtime_available', return_value=False):
+        with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
             if ignored:
                 assert writer._prepare_arrow_data(data).num_rows == 0
             else:

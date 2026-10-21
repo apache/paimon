@@ -18,13 +18,13 @@
 """Java cast rules shared by old-file readers."""
 
 import math
-import json
 
 import pyarrow as pa
 
 from pypaimon.casting.decimal_cast import cast_decimal
 from pypaimon.casting.temporal_cast import cast_temporal
 from pypaimon.casting.temporal_string import temporal_to_string
+from pypaimon.schema.data_types import ArrayType, MapType, PyarrowFieldParser, RowType
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 
@@ -122,31 +122,25 @@ def _integer_to_timestamp(array, target_type):
     return pa.array(values, type=pa.int64()).cast(target_type)
 
 
-def _native_schema_cast(array, target_type, source_paimon_type, target_paimon_type):
-    if source_paimon_type is None or target_paimon_type is None:
-        return None
-    from pypaimon.read.native_plan import native_runtime_available
-    if not native_runtime_available():
-        return None
-    from pypaimon_rust.data import cast_array_for_schema_evolution as native_cast
-    source = json.dumps(source_paimon_type.to_dict())
-    target = json.dumps(target_paimon_type.to_dict())
-    if isinstance(array, pa.ChunkedArray):
-        chunks = array.chunks or [pa.array([], type=array.type)]
-        # Runtime cast results may be NULL despite a logical NOT NULL child.
-        return pa.chunked_array([native_cast(chunk, source, target) for chunk in chunks])
-    return native_cast(array, source, target)
+def _read_arrow_type(data_type):
+    if isinstance(data_type, RowType):
+        return pa.struct([pa.field(field.name, _read_arrow_type(field.type)) for field in data_type.fields])
+    if isinstance(data_type, ArrayType):
+        return pa.list_(pa.field('element', _read_arrow_type(data_type.element)))
+    if isinstance(data_type, MapType):
+        return pa.map_(pa.field('key', _read_arrow_type(data_type.key), nullable=False),
+                       pa.field('value', _read_arrow_type(data_type.value)))
+    return PyarrowFieldParser.from_paimon_type(data_type)
 
 
 def read_arrow_schema(fields):
-    """Use core runtime nullability while retaining logical write constraints."""
-    from pypaimon.read.native_plan import native_runtime_available
-    if not native_runtime_available():
-        from pypaimon.schema.data_types import PyarrowFieldParser
-        return PyarrowFieldParser.from_paimon_schema(fields)
-    from pypaimon_rust.data import read_arrow_schema as native_schema
-    schema = native_schema(json.dumps([field.to_dict() for field in fields]))
-    return pa.schema([field.remove_metadata() for field in schema])
+    """Keep runtime NULLs representable without changing logical write constraints.
+
+    Old files can lack a requested field, and Java casts can produce NULL on
+    overflow. ROW fields, ARRAY elements and MAP values therefore stay nullable
+    in read results, including declared NOT NULL children.
+    """
+    return pa.schema([pa.field(field.name, _read_arrow_type(field.type)) for field in fields])
 
 
 def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None, target_paimon_type=None):
@@ -161,9 +155,6 @@ def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None,
     precision overflow after rounding.
     LTZ conversions use the process local zone, including Java gap/overlap rules.
     """
-    native = _native_schema_cast(array, target_type, source_paimon_type, target_paimon_type)
-    if native is not None:
-        return native
     if pa.types.is_string(target_type):
         strings = temporal_to_string(array, source_paimon_type, target_paimon_type)
         if strings is not None:

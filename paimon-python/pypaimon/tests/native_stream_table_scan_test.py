@@ -78,10 +78,10 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
         with ExitStack() as stack:
             if native:
                 stack.enter_context(patch(
-                    'pypaimon.read.streaming_table_scan.FileScanner',
+                    'pypaimon.execution.python.read.streaming_table_scan.FileScanner',
                     side_effect=AssertionError('Python initial planning')))
                 stack.enter_context(patch(
-                    'pypaimon.read.streaming_table_scan.ManifestFileManager',
+                    'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
                     side_effect=AssertionError('Python incremental planning')))
             if native:
                 if mode != 'initial':
@@ -343,7 +343,7 @@ def test_empty_follow_up_acknowledges_skipped_progress(tmp_path, producer):
     async def scenario():
         iterator = scan.stream()
         try:
-            with patch('pypaimon.read.streaming_table_scan.asyncio.sleep', new=stop_polling):
+            with patch('pypaimon.execution.native.read.streaming_table_scan.asyncio.sleep', new=stop_polling):
                 with pytest.raises(asyncio.CancelledError):
                     await iterator.__anext__()
         finally:
@@ -395,7 +395,7 @@ def test_failed_empty_poll_acknowledgement_is_retryable(tmp_path):
             await iterator.aclose()
         iterator = scan.stream()
         try:
-            with patch('pypaimon.read.streaming_table_scan.asyncio.sleep', new=stop_polling):
+            with patch('pypaimon.execution.native.read.streaming_table_scan.asyncio.sleep', new=stop_polling):
                 with pytest.raises(asyncio.CancelledError):
                     await iterator.__anext__()
         finally:

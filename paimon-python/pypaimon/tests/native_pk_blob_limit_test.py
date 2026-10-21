@@ -26,7 +26,7 @@ from pypaimon import CatalogFactory
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -263,7 +263,8 @@ def test_streaming_pk_blob_row_kinds_resolve_only_selected_payload(tmp_path, pay
 
 
 def test_pk_row_kind_limit_is_global_across_snapshot_and_delta_splits(tmp_path):
-    from pypaimon.read.native_plan import native_read, native_split_from_python
+    from pypaimon.execution.native.read.table_read import (native_read)
+    from pypaimon.execution.native.read.split_adapter import (native_split_from_python)
 
     table = _table(tmp_path, partitioned=True)
     payload = _descriptor(tmp_path, 'payload', b'selected')

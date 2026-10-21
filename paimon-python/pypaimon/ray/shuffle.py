@@ -134,7 +134,8 @@ def _group_by_partition_bucket(
 ):
     partition_keys = list(table.table_schema.partition_keys or [])
     if extractor is None:
-        extractor = table.create_row_key_extractor()
+        from pypaimon.write.input_routing import FixedBucketInputRouter
+        extractor = FixedBucketInputRouter(table.table_schema)
     col_names = set(f.name for f in table.table_schema.fields)
     bucket_col = _pick_bucket_col_name(col_names)
     bucket_udf = _make_bucket_udf(extractor, bucket_col)

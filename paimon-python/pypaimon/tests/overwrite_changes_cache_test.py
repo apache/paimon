@@ -38,7 +38,7 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesProvider
+from pypaimon.execution.python.write.commit.overwrite_changes_provider import OverwriteChangesProvider
 
 
 class OverwriteChangesCacheTest(unittest.TestCase):

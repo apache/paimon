@@ -27,7 +27,9 @@ import pytest
 from pypaimon.casting.schema_evolution import read_arrow_schema
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
+from pypaimon.execution.python.write.table_update_by_row_id import (
+    _RowIdUpdateFileWriter,
+)
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -747,7 +749,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         )
         self._compact_all_data_files(table)
 
-        from pypaimon.write.row_id_file_index import RowIdFileIndex
+        from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
         original_build = RowIdFileIndex.from_entries

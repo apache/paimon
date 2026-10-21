@@ -23,7 +23,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse, ErrorResponse, GetTableSnapshotResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.table.row.blob import BlobViewStruct
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
@@ -82,7 +82,7 @@ def test_catalog_snapshot_controls_native_plan(rest_source, response):
 
 @pytest.mark.parametrize('code', [403, 404, 500, 501, 503])
 def test_catalog_snapshot_failure_never_reads_disk(rest_source, code):
-    from pypaimon.read.native_plan import native_plan
+    from pypaimon.execution.native.read.plan import (native_plan)
     table, server, _ = rest_source
     reply = ErrorResponse('TABLE', 't', 'snapshot unavailable', code)
     with patch.object(server, '_table_snapshot_handle', return_value=server._mock_response(reply, code)):
@@ -112,7 +112,8 @@ def test_rest_branch_keeps_catalog_snapshot_and_schema(rest_source, rest_catalog
 
 @pytest.mark.parametrize('from_tag', [False, True], ids=['empty-branch', 'tagged-branch'])
 def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag):
-    from pypaimon.read.native_plan import _resolved_rest_table_response, native_plan
+    from pypaimon.execution.native.table import (_resolved_rest_table_response)
+    from pypaimon.execution.native.read.plan import (native_plan)
     table, _, _ = rest_source
     catalog, _ = rest_catalog
     if from_tag:
@@ -131,7 +132,7 @@ def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag)
 
 def test_resolved_rest_table_keeps_refreshable_file_io(rest_source, rest_catalog):
     from pypaimon.api.api_response import GetTableTokenResponse
-    from pypaimon.read.native_plan import _resolved_schema_json
+    from pypaimon.execution.native.table import (_resolved_schema_json)
     from pypaimon_rust.datafusion import PaimonCatalog
     table, server, _ = rest_source
     catalog, _ = rest_catalog
@@ -159,7 +160,7 @@ def test_native_rest_reuses_python_data_token(
     from pypaimon.catalog.rest.rest_token import RESTToken
     from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
     from pypaimon.filesystem.caching_file_io import CachingFileIO
-    from pypaimon.read.native_plan import _catalog_options, _resolved_rest_table_response
+    from pypaimon.execution.native.table import (_catalog_options, _resolved_rest_table_response)
     from pypaimon_rust.datafusion import Table as NativeTable
 
     source, server, _ = rest_source
@@ -298,7 +299,7 @@ def test_repeated_plans_reuse_remote_file_sizes(rest_source, tmp_path):
     from pypaimon.catalog.catalog_environment import CatalogEnvironment
     from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
     from pypaimon.common.options.options import Options
-    from pypaimon.read.native_plan import native_plan
+    from pypaimon.execution.native.read.plan import (native_plan)
 
     table, _, _ = rest_source
     root = Path(urlparse(table.table_path).path)
@@ -464,7 +465,7 @@ def test_rest_blob_view_merge_source_keeps_dependency_context(rest_blob_views, n
     guard, requests = _require_blob_view_read_via(server, root.identifier)
     with guard, ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python MERGE source materialization')))
         messages = builder.new_update().merge_into(root, on=['id'], when_not_matched=[WhenNotMatched('*')])
         builder.new_commit().commit(messages)

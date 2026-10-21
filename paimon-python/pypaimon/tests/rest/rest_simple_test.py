@@ -27,8 +27,11 @@ from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, Ta
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor, \
-    UnawareBucketRowKeyExtractor
+from pypaimon.execution.python.write.row_key_extractor import (
+    FixedBucketRowKeyExtractor,
+    DynamicBucketRowKeyExtractor,
+    UnawareBucketRowKeyExtractor,
+)
 
 if sys.version_info[:2] == (3, 6):
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by

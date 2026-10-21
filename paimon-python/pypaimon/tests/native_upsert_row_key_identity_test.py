@@ -24,12 +24,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_update import NativeTableUpsert, _upsert_row_batches, create_native_upsert
+from pypaimon.execution.native.write.native_update import NativeTableUpsert, _upsert_row_batches, create_native_upsert
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -173,8 +173,8 @@ def test_row_transport_qualifies_keys_before_constructing_a_core_updater(
     _, target = _tables(native_rest_catalog, key_type, None, True, False)
     native_table = Mock()
     rows = [{'key': key, 'value': 99} for key in keys]
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table', return_value=native_table):
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table', return_value=native_table):
         upsert = TableUpsertByKey(target, 'row-key-identity', BATCH_COMMIT_IDENTIFIER)
         writer = upsert._create_native_upsert(rows, ['key'], ['value'])
     if accepted:
@@ -217,8 +217,8 @@ def test_row_transport_checks_partition_keys_even_when_they_are_not_upsert_keys(
         }), False)
     table = native_rest_catalog.get_table('default.partition_key_identity')
     native_table = Mock()
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table', return_value=native_table):
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table', return_value=native_table):
         writer = create_native_upsert(table, 'row-partition-identity',
                                       [{'key': 1, 'p': 1.5, 'value': 99}], ['key'], ['value'])
     assert writer is None

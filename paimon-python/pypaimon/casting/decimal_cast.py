@@ -37,8 +37,9 @@ def cast_decimal(array, target):
     fails the conversion instead of silently becoming NULL.
     """
     floating = pa.types.is_floating(array.type)
+    integer = pa.types.is_signed_integer(array.type)
     text = pa.types.is_string(array.type)
-    if not pa.types.is_decimal(target) or not (floating or text or pa.types.is_decimal(array.type)):
+    if not pa.types.is_decimal(target) or not (integer or floating or text or pa.types.is_decimal(array.type)):
         return None
     values = []
     # The caller's rounding traps and exponent limits must not affect reads.
@@ -53,6 +54,8 @@ def cast_decimal(array, target):
                 continue
             if floating:
                 value = java_double_decimal_text(value)
+            if integer:
+                value = Decimal(value)
             if floating or text:
                 if _DECIMAL_TEXT.fullmatch(value) is None:
                     raise pa.ArrowInvalid('Invalid decimal schema-evolution value: %s' % value)

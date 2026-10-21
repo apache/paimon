@@ -32,6 +32,8 @@ from unittest.mock import MagicMock
 
 import pyarrow as pa
 
+from pypaimon.schema.schema import Schema
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 
 _SHUFFLE_PATH = (
@@ -227,11 +229,11 @@ class BucketModeDispatchTest(unittest.TestCase):
             .map_groups.return_value.drop_columns.return_value = "clustered"
         table = MagicMock()
         table.bucket_mode.return_value = BucketMode.HASH_FIXED
-        table.table_schema.partition_keys = []
-        table.table_schema.fields = [
-            type("F", (), {"name": "id"})(),
-            type("F", (), {"name": "value"})(),
-        ]
+        table.table_schema = TableSchema(
+            fields=Schema.from_pyarrow_schema(pa.schema([
+                ('id', pa.int64()), ('value', pa.string())])).fields,
+            options={'bucket': '2', 'bucket-key': 'id'},
+        )
 
         out = maybe_apply_repartition(dataset, table, "map_groups")
 
@@ -253,11 +255,11 @@ class BucketModeDispatchTest(unittest.TestCase):
         dataset = MagicMock(name="dataset")
         table = MagicMock()
         table.bucket_mode.return_value = BucketMode.HASH_FIXED
-        table.table_schema.partition_keys = ["dt"]
-        table.table_schema.fields = [
-            type("F", (), {"name": "id"})(),
-            type("F", (), {"name": "dt"})(),
-        ]
+        table.table_schema = TableSchema(
+            fields=Schema.from_pyarrow_schema(pa.schema([
+                ('id', pa.int64()), ('dt', pa.string())])).fields,
+            partition_keys=['dt'], options={'bucket': '2', 'bucket-key': 'id'},
+        )
 
         maybe_apply_repartition(dataset, table, "map_groups")
 

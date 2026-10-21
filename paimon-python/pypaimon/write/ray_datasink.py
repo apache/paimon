@@ -90,6 +90,7 @@ def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> p
               for i, f in enumerate(table.schema)]
     return pa.table(columns, schema=pa.schema(fields, metadata=table.schema.metadata))
 
+
 # Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
 try:
     _DatasinkBase = Datasink[List["CommitMessage"]]
@@ -325,17 +326,13 @@ def write_paimon_dataset(
             )
         )
     ):
-        from pypaimon.write.postpone_bucket import (
-            PostponeBucketPlanner,
-        )
-        from pypaimon.write.row_key_extractor import (
-            PostponeFixedBucketRowKeyExtractor,
-        )
+        from pypaimon.execution.dispatch import create_postpone_bucket_planner
+        from pypaimon.write.input_routing import PostponeFixedBucketInputRouter
 
         planner = (
             postpone_bucket_planner
             if postpone_bucket_planner is not None
-            else PostponeBucketPlanner(
+            else create_postpone_bucket_planner(
                 table, known_num_buckets={}
                 if overwrite or static_partition is not None else None)
         )
@@ -354,7 +351,7 @@ def write_paimon_dataset(
             static_partition=static_partition,
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
-            bucket_extractor=PostponeFixedBucketRowKeyExtractor(table, plan),
+            bucket_extractor=PostponeFixedBucketInputRouter(table, plan),
             postpone_bucket_plan=plan,
         )
 

@@ -21,7 +21,7 @@ import unittest
 
 import pyarrow as pa
 
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.tests.data_evolution_test_helpers import BatchModeMixin, DataEvolutionTestBase
 from pypaimon.utils.range import Range

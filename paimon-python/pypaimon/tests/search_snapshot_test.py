@@ -24,9 +24,9 @@ import pytest
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.full_text_scan import FullTextScanPlan
+from pypaimon.table.source.search_types import FullTextScanPlan
 from pypaimon.table.source.full_text_search_split import RawFullTextSearchSplit
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.utils.range import Range
 
 SCHEMA = pa.schema([

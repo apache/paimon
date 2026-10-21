@@ -23,7 +23,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, ArrayType, DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 from pypaimon.tests.native_blob_write_test import _read, _physical_files
 
 pytestmark = pytest.mark.native_plan
@@ -300,7 +300,7 @@ def test_native_collection_projection_keeps_selected_blob_keys(tmp_path, project
 
 def test_collection_partial_partition_prepare_keeps_cleanup_ownership(tmp_path):
     from unittest.mock import patch
-    from pypaimon.write.writer.composite_data_writer import CompositeDataWriter
+    from pypaimon.execution.python.write.writer.composite_data_writer import CompositeDataWriter
 
     table = _table(tmp_path, False, partitioned=True)
     writer = table.new_batch_write_builder().new_write()

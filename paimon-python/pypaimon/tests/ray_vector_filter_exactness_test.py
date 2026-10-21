@@ -22,7 +22,7 @@ import pytest
 pytest.importorskip("ray")
 
 from pypaimon.read.table_read import TableRead
-from pypaimon.table.source.vector_search_read import AbstractVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_read import AbstractVectorSearchReadImpl
 from pypaimon.tests import ray_vector_search_test as ray_fixtures
 from pypaimon.tests import vector_filter_exactness_test as fixtures
 from pypaimon.tests.vector_filter_exactness_test import query, scalar_index
@@ -39,7 +39,7 @@ def test_ray_applies_exact_row_filter_before_worker_top_k(table, ray_cluster, ba
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
     from pypaimon.ray import batch_vector_search, vector_search
-    from pypaimon.table.source import global_index_live_row_filter
+    from pypaimon.execution.python.read.search import global_index_live_row_filter
 
     module = batch_vector_search if batch else vector_search
     original_map = module._map_tasks
@@ -60,7 +60,8 @@ def test_ray_applies_exact_row_filter_before_worker_top_k(table, ray_cluster, ba
                 observed.append(list(candidates))
                 assert snapshot is not None
                 assert all(split.row_range_start <= row_id <= split.row_range_end for row_id in candidates)
-                from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+                from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+                    DataEvolutionGlobalIndexScanner)
                 with patch.object(TableRead, "_new_arrow_batch_reader", no_vectors), \
                         patch.object(DataEvolutionGlobalIndexScanner, "create",
                                      wraps=DataEvolutionGlobalIndexScanner.create) as scan:

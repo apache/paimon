@@ -28,7 +28,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, ArrayType, DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -186,7 +186,7 @@ def test_blob_row_subset_uses_named_fields_without_opening_omitted_blobs(tmp_pat
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('blob_object', [False, True])
 def test_blob_row_map_preserves_java_null_keys(tmp_path, stream, blob_object):
-    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
     table = _table(tmp_path, 'map', extra={'blob.target-file-size': '1 MB'})
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     writer = builder.new_write()
@@ -362,7 +362,7 @@ def test_blob_map_rows_reject_non_pair_entries(tmp_path, operation, entry):
 ])
 def test_blob_map_row_decimal_keys_round_in_core(tmp_path, operation, type_name, key, expected):
     from pypaimon.tests.native_blob_update_test import _native_only
-    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
     table = _table(tmp_path, 'map', payload_type=MapType(True, AtomicType(type_name), AtomicType('BLOB')))
     builder = table.new_batch_write_builder()
     row = GenericRow([0, 'a', [(Decimal(key), StreamBlob(b'value'))]], table.fields)

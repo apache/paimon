@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon.api.api_response import GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.read.native_plan import _native_table
+from pypaimon.execution.native.table import (_native_table)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.tests import native_generic_index_build_test as generic
 from pypaimon.tests import native_sorted_index_build_test as indexes
@@ -139,7 +139,7 @@ def test_typed_build_parallelism_uses_existing_option_conversion(rest_catalog, k
     # Observe the control passed over FFI while retaining the real Rust builder.
     native = Mock(wraps=_native_table(table).new_global_index_build_builder())
     proxy = SimpleNamespace(new_global_index_build_builder=lambda: native)
-    with patch('pypaimon.globalindex.native_index_build._native_table', return_value=proxy):
+    with patch('pypaimon.execution.native.write.native_index_build._native_table', return_value=proxy):
         messages = _build(table, kind, {PARALLELISM: value})
     assert native.with_options.call_args[0][0][PARALLELISM] == expected
     assert len(indexes._message_files(messages)) == (5 if kind == 'full-text' else 4)

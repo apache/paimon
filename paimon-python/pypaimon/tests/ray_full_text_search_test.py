@@ -97,8 +97,8 @@ def _fail_index(reader, item, scalar_filter=None):
 
 @pytest.mark.parametrize("scalar_index", [None, "btree", "bitmap"])
 def test_prefilter_and_deletion_vector_reads_stay_off_driver(docs, ray_cluster, scalar_index):
-    from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
-    from pypaimon.table.source import global_index_live_row_filter
+    from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+    from pypaimon.execution.python.read.search import global_index_live_row_filter
 
     if scalar_index:
         docs.raw_table.copy({"deletion-vectors.enabled": "false"}).create_global_index("label", scalar_index)

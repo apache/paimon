@@ -20,7 +20,7 @@ import unittest
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
+from pypaimon.execution.python.read.reader.sort_merge_reader import (SortMergeReaderWithMinHeap)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.key_value import KeyValue

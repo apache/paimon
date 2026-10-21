@@ -36,6 +36,36 @@ MAX_DYNAMIC_BUCKETS = SHORT_MAX_VALUE + 1
 _SNAPSHOT_UNSET = object()
 
 
+def resolve_bucket_snapshot(table, base_snapshot_id=None):
+    """Capture the same restore point for input assignment and worker writers."""
+    if base_snapshot_id == 0:
+        return None
+    manager = table.snapshot_manager()
+    if base_snapshot_id is None:
+        return manager.get_latest_snapshot()
+    snapshot = manager.get_snapshot_by_id(base_snapshot_id)
+    if snapshot is None:
+        raise ValueError("Snapshot id '{}' doesn't exist".format(base_snapshot_id))
+    return snapshot
+
+
+def bucket_read_builder(table, partition, snapshot):
+    """Pin metadata lookup and partition selection without creating a scanner."""
+    from pypaimon.common.options.core_options import CoreOptions
+
+    scan_table = table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id)})
+    read_builder = scan_table.new_read_builder()
+    if scan_table.partition_keys:
+        predicate_builder = read_builder.new_predicate_builder()
+        predicates = [
+            predicate_builder.is_null(key) if value is None
+            else predicate_builder.equal(key, value)
+            for key, value in zip(scan_table.partition_keys, partition)
+        ]
+        read_builder.with_filter(predicate_builder.and_predicates(predicates))
+    return read_builder
+
+
 def to_signed_int32(value: int) -> int:
     """Return the Java ``int`` representation of ``value``."""
     value &= 0xFFFFFFFF
@@ -376,27 +406,8 @@ class HashBucketAssigner:
     def _active_data_buckets(self, partition: Tuple, snapshot) -> Set[int]:
         if snapshot is None:
             return set()
-        from pypaimon.common.options.core_options import CoreOptions
-
-        scan_table = self.table.copy(
-            {CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id)}
-        )
-        read_builder = scan_table.new_read_builder()
-        if scan_table.partition_keys:
-            predicate_builder = read_builder.new_predicate_builder()
-            predicates = [
-                predicate_builder.is_null(key) if value is None
-                else predicate_builder.equal(key, value)
-                for key, value in zip(scan_table.partition_keys, partition)
-            ]
-            read_builder.with_filter(
-                predicate_builder.and_predicates(predicates)
-            )
-        # HASH validation needs all live data-file buckets, not the subset a
-        # SELECT policy exposes. This internal manifest lookup returns no rows.
-        scanner = read_builder.new_scan().file_scanner
-        scanner.skip_level0 = False
-        return {entry.bucket for entry in scanner.plan_files()}
+        from pypaimon.execution.dispatch import dynamic_bucket_data_buckets
+        return dynamic_bucket_data_buckets(self.table, partition, snapshot)
 
 
 @dataclass

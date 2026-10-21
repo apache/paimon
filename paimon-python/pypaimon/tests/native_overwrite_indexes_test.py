@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.drop_global_index import GlobalIndexDropper
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.tests.native_commit_semantics_test import _publication
 

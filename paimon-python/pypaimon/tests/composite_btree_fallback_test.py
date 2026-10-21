@@ -23,7 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.data_evolution_global_index_scanner import (
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
     DataEvolutionGlobalIndexScanner,
     is_supported_scalar_index,
 )
@@ -32,7 +32,7 @@ from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,

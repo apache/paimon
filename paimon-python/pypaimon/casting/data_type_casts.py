@@ -246,14 +246,10 @@ def _schema_evolution_cast_supported(source_type, target_type) -> bool:
     cached = _EXECUTABLE_CAST_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    # Probe a one-row (null-valued) array rather than an empty one. An empty
-    # array only resolves the cast kernel; some kernels additionally reject the
-    # target type parameters on any non-empty input -- e.g. INT -> DECIMAL(10,2)
-    # has a kernel but needs precision >= 12 to hold an int's range at scale 2,
-    # so an empty probe passes yet the read later fails with ArrowInvalid. A
-    # single null row triggers that static type-parameter validation while
-    # avoiding per-value parse/overflow errors (which ``safe=False`` -- matching
-    # the read path -- tolerates anyway).
+    # Probe a one-row (null-valued) array rather than an empty one. Some Arrow
+    # kernels validate target parameters only for a non-empty input. Using the
+    # read executor also includes Java's per-value overflow-to-NULL rules, such
+    # as integer-to-DECIMAL targets narrower than the source type's full range.
     try:
         cast_array_for_schema_evolution(
             pa.nulls(1, type=source_pa), target_pa, source_type, target_type)

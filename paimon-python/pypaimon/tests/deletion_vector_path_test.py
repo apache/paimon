@@ -32,7 +32,8 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
-from pypaimon.read.native_plan import native_plan, native_runtime_available
+from pypaimon.execution.native.read.plan import (native_plan)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId

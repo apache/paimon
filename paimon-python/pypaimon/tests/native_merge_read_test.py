@@ -24,8 +24,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_commit import (
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_commit import (
     create_native_write_table, from_native_commit_messages)
 
 
@@ -112,7 +112,7 @@ def test_unsupported_python_merge_fails_before_raw_split_dispatch(
         failure = patch.dict(sys.modules, {
             'pypaimon_rust': None, 'pypaimon_rust.datafusion': None})
     else:
-        failure = patch('pypaimon.read.native_plan._prepare_native_read',
+        failure = patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                         side_effect=RuntimeError('native setup failed'))
     with failure, patch.object(read, '_create_split_read') as dispatch:
         with pytest.raises(NotImplementedError, match='sequence-group'):

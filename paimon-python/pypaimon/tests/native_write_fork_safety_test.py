@@ -53,21 +53,22 @@ def _operation(tmp_path, operation):
             streaming = operation == 'stream-write'
             builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
             name = 'StreamTableWrite' if streaming else 'BatchTableWrite'
-            context.enter_context(patch('pypaimon.write.write_builder.' + name, pure))
+            context.enter_context(patch('pypaimon.write.table_write.' + name, pure))
             factory = 'create_native_write'
-            module = 'pypaimon.write.native_write.'
+            module = 'pypaimon.execution.native.write.native_write.'
             invoke = builder.new_write
         elif operation == 'commit':
             committer = table.new_batch_write_builder().new_commit()
             context.callback(committer.close)
             context.enter_context(patch.object(committer.file_store_commit, 'commit', pure))
-            context.enter_context(patch('pypaimon.write.native_commit.native_messages_supported', return_value=True))
+            context.enter_context(patch(
+                'pypaimon.execution.native.write.native_commit.native_messages_supported', return_value=True))
             message = Mock()
             message.is_empty.return_value = False
-            factory, module = 'create_native_commit', 'pypaimon.write.native_commit.'
+            factory, module = 'create_native_commit', 'pypaimon.execution.native.write.native_commit.'
             invoke = lambda: committer.commit([message])
         else:
-            module = 'pypaimon.write.native_update.'
+            module = 'pypaimon.execution.native.write.native_update.'
             if operation == 'upsert':
                 upsert = TableUpsertByKey(table, 'test', 7)
                 context.enter_context(patch.object(upsert, '_group_by_partition', pure))
@@ -90,7 +91,7 @@ def _operation(tmp_path, operation):
                 factory = 'create_native_predicate_update'
                 invoke = lambda: updater.update_by_predicate(None, {'value': 'new'})
             elif operation == 'delete':
-                context.enter_context(patch('pypaimon.write.table_update.TableDeleteByRowId', pure))
+                context.enter_context(patch('pypaimon.execution.python.write.table_update.TableDeleteByRowId', pure))
                 factory = 'create_native_delete'
                 invoke = lambda: updater.delete_by_row_id([0])
             elif operation == 'predicate-delete':
@@ -120,7 +121,7 @@ def test_native_preparation_propagates_fork_errors_without_python_mutations(tmp_
         setattr(error, '__cause__' if chain == 'cause' else '__context__', fork)
     with _operation(tmp_path, operation) as (invoke, factory, pure), patch.dict(
             sys.modules, {'pypaimon_rust': module}), patch(
-            'pypaimon.read.native_plan.native_runtime_available', return_value=True), patch(
+            'pypaimon.execution.native.runtime.native_runtime_available', return_value=True), patch(
             factory, side_effect=error):
         with pytest.raises(_ForkSafetyError) as raised:
             invoke()
@@ -136,7 +137,7 @@ def test_ordinary_native_preparation_failures_keep_the_safe_python_fallback(tmp_
     module.ForkSafetyError = _ForkSafetyError
     with _operation(tmp_path, operation) as (invoke, factory, pure), patch.dict(
             sys.modules, {'pypaimon_rust': module}), patch(
-            'pypaimon.read.native_plan.native_runtime_available', return_value=not missing_runtime), patch(
+            'pypaimon.execution.native.runtime.native_runtime_available', return_value=not missing_runtime), patch(
             factory, side_effect=error):
         with pytest.raises(_PythonFallbackEntered):
             invoke()
@@ -151,9 +152,9 @@ def test_merge_native_failures_never_restart_python_execution(tmp_path, phase):
     failure = _ForkSafetyError('Jindo SDK cannot be reused after process fork')
     native = Mock()
     native.prepare_commit.side_effect = failure
-    with patch('pypaimon.write.native_merge_into.create_native_merge_into',
+    with patch('pypaimon.execution.native.write.native_merge_into.create_native_merge_into',
                side_effect=failure if phase == 'prepare' else None, return_value=native), patch(
-            'pypaimon.table.data_evolution_merge_into._prepare', side_effect=_PythonFallbackEntered) as pure:
+            'pypaimon.write.merge_inputs._prepare', side_effect=_PythonFallbackEntered) as pure:
         with pytest.raises(_ForkSafetyError) as raised:
             merge_into(table, pa.table({'id': [1]}), on='id', commit_user='job')
         assert raised.value is failure

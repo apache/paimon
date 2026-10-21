@@ -29,7 +29,7 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.global_index_update_checker import (
+from pypaimon.execution.python.write.global_index_update_checker import (
     apply_global_index_update_action,
 )
 
@@ -107,7 +107,7 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
         entries = [_index_entry("idx-name", (), 1)]
 
         with mock.patch(
-                "pypaimon.write.global_index_update_checker."
+                "pypaimon.execution.python.write.global_index_update_checker."
                 "scan_global_index_entries",
                 return_value=entries):
             with self.assertRaisesRegex(RuntimeError, "Conflicted columns"):
@@ -118,7 +118,7 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
         entries = [_index_entry("idx-name-age", (), 1, extra_field_ids=[2])]
 
         with mock.patch(
-                "pypaimon.write.global_index_update_checker."
+                "pypaimon.execution.python.write.global_index_update_checker."
                 "scan_global_index_entries",
                 return_value=entries):
             with self.assertRaises(RuntimeError) as ctx:
@@ -139,7 +139,7 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
             "file": replace(deleted, index_file=replace(entry.index_file, file_name="another-index")),
         }
         with mock.patch(
-                "pypaimon.write.global_index_update_checker.scan_global_index_entries",
+                "pypaimon.execution.python.write.global_index_update_checker.scan_global_index_entries",
                 return_value=[entry]):
             self.assertEqual([], apply_global_index_update_action(
                 table, object(), ["name"], {("p0",)}, [deleted]))
@@ -155,7 +155,7 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
         table = _Table(options)
 
         with mock.patch(
-                "pypaimon.write.global_index_update_checker."
+                "pypaimon.execution.python.write.global_index_update_checker."
                 "scan_global_index_entries") as scan:
             messages = apply_global_index_update_action(
                 table,
@@ -179,7 +179,7 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
         ]
 
         with mock.patch(
-                "pypaimon.write.global_index_update_checker."
+                "pypaimon.execution.python.write.global_index_update_checker."
                 "scan_global_index_entries",
                 return_value=entries):
             messages = apply_global_index_update_action(
@@ -212,7 +212,7 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
         ]
 
         with mock.patch(
-                "pypaimon.write.global_index_update_checker."
+                "pypaimon.execution.python.write.global_index_update_checker."
                 "scan_global_index_entries",
                 return_value=entries):
             messages = apply_global_index_update_action(

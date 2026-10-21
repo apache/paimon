@@ -24,7 +24,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('tenant', pa.string()), ('p', pa.string()),

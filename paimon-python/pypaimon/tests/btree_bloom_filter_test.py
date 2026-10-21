@@ -25,15 +25,15 @@ import unittest
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.globalindex.btree.bloom_filter import (
+from pypaimon.execution.python.globalindex.btree.bloom_filter import (
     BloomFilter,
     murmur_hash_bytes,
 )
-from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
-from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
-from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.execution.python.globalindex.btree.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.btree.btree_index_reader import BTreeIndexReader
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.schema.data_types import AtomicType
 
 

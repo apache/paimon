@@ -32,9 +32,14 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
-from pypaimon.read.native_plan import (
-    _catalog_options, _configure_native_read_builder, _native_read_builder,
-    _predicate_to_native, _resolved_schema_json, native_plan, native_runtime_available)
+from pypaimon.execution.native.read.builder import (
+    _configure_native_read_builder,
+    _native_read_builder,
+    _predicate_to_native,
+)
+from pypaimon.execution.native.read.plan import native_plan
+from pypaimon.execution.native.runtime import native_runtime_available
+from pypaimon.execution.native.table import _catalog_options, _resolved_schema_json
 from pypaimon.read.plan import Plan
 from pypaimon.read.table_scan import TableScan
 from pypaimon.read.variant_read_type import with_variant_extractions
@@ -251,7 +256,7 @@ class NativePlanTest(unittest.TestCase):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         from pypaimon.filesystem.local_file_io import LocalFileIO
-        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+        from pypaimon.execution.native.table import _resolved_schema_file_io_options
 
         class CustomIO(LocalFileIO):
             pass
@@ -297,7 +302,7 @@ class NativePlanTest(unittest.TestCase):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
         from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+        from pypaimon.execution.native.table import _resolved_schema_file_io_options
 
         properties = Options({'s3.path-style-access': True, 's3.endpoint': 'http://localhost:9000'})
         # No storage connection is needed to check the resolved context transfer.
@@ -321,9 +326,9 @@ class NativePlanTest(unittest.TestCase):
         scan = _scan(native_enabled=False, file_scanner=fs)
         scan.table.options.native_read_enabled.return_value = True
         expected = Plan([], 1)
-        with patch('pypaimon.read.native_plan.native_runtime_available',
+        with patch('pypaimon.execution.native.runtime.native_runtime_available',
                    return_value=True), \
-                patch('pypaimon.read.native_plan.native_plan',
+                patch('pypaimon.execution.native.read.plan.native_plan',
                       return_value=expected) as np:
             self.assertEqual(scan.plan(), expected)
         np.assert_called_once()
@@ -338,7 +343,7 @@ class NativePlanTest(unittest.TestCase):
         fs = Mock(partition_key_predicate=pred)
         scan = _scan(native_enabled=True, file_scanner=fs)
 
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([keep, drop], 1)) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([keep, drop], 1)) as np:
             plan = scan.plan()
 
         np.assert_called_once_with(
@@ -355,7 +360,7 @@ class NativePlanTest(unittest.TestCase):
         fs.scan.return_value = sentinel
         scan = _scan(native_enabled=True, file_scanner=fs)
         split = Mock(partition=Mock(values=[2026, 7]), snapshot_id=1)
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([split], 1)):
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([split], 1)):
             self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
 
@@ -363,7 +368,7 @@ class NativePlanTest(unittest.TestCase):
         splits = [Mock(partition=Mock(values=[1])), Mock(partition=Mock(values=[2]))]
         fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 1)):
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan(splits, 1)):
             self.assertEqual(scan.plan().splits(), splits)
 
     def test_plan_forwards_filter_limit_partition_and_time_travel(self):
@@ -385,7 +390,7 @@ class NativePlanTest(unittest.TestCase):
         scan.table.schema_manager.latest.return_value.id = 3
         split = Mock(partition=Mock(values=['2026-08-02']), snapshot_id=3)
 
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([split], 3)) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([split], 3)) as np:
             plan = scan.plan()
 
         self.assertEqual(plan.snapshot_id, 3)
@@ -405,7 +410,7 @@ class NativePlanTest(unittest.TestCase):
             Range(1, 2), Range(5, 5)])
         split = Mock(partition=Mock(values=[]), snapshot_id=3)
 
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([split], 3)) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([split], 3)) as np:
             plan = scan.plan()
 
         np.assert_called_once_with(
@@ -425,7 +430,7 @@ class NativePlanTest(unittest.TestCase):
         fs.data_evolution = True
         fs._global_index_result = GlobalIndexResult.create_empty()
 
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([], 1)) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 1)) as np:
             plan = scan.plan()
 
         np.assert_called_once_with(
@@ -449,7 +454,7 @@ class NativePlanTest(unittest.TestCase):
         bitmap = GlobalIndexResult.from_range(Range(1, 1)).results()
         fs._global_index_result = ScoredGlobalIndexResult.create(bitmap, lambda _: 0.75)
         split = IndexedSplit(DataSplit([], None, 0), [Range(1, 1)], [0.75])
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([split], 9)) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([split], 9)) as np:
             plan = scan.plan()
         self.assertIs(np.call_args[1]['global_index_result'], fs._global_index_result)
         self.assertIsNone(np.call_args[1]['row_ranges'])
@@ -470,7 +475,7 @@ class NativePlanTest(unittest.TestCase):
                 fs._global_index_result = result
                 scan.table.is_primary_key_table = primary_key
 
-                with patch('pypaimon.read.native_plan.native_plan') as np:
+                with patch('pypaimon.execution.native.read.plan.native_plan') as np:
                     self.assertIs(scan.plan(), fallback)
 
                 np.assert_not_called()
@@ -485,7 +490,7 @@ class NativePlanTest(unittest.TestCase):
             fs.scan.return_value = sentinel
             scan = _scan(native_enabled=True, file_scanner=fs)
             setup(scan, fs)
-            with patch('pypaimon.read.native_plan.native_plan') as np:
+            with patch('pypaimon.execution.native.read.plan.native_plan') as np:
                 self.assertIs(scan.plan(), sentinel)
             np.assert_not_called()
             fs.scan.assert_called_once_with()
@@ -515,7 +520,7 @@ class NativePlanTest(unittest.TestCase):
             with self.subTest(snapshot_id=snapshot_id):
                 fs = Mock(partition_key_predicate=None)
                 scan = _scan(native_enabled=True, file_scanner=fs)
-                with patch('pypaimon.read.native_plan.native_plan',
+                with patch('pypaimon.execution.native.read.plan.native_plan',
                            return_value=Plan([], snapshot_id)):
                     result = scan.plan()
                 self.assertEqual(result.splits(), [])
@@ -528,9 +533,9 @@ class NativePlanTest(unittest.TestCase):
         sentinel = object()
         fs.scan.return_value = sentinel
         scan = _scan(native_enabled=True, file_scanner=fs)
-        with patch('pypaimon.read.native_plan.native_runtime_available',
+        with patch('pypaimon.execution.native.runtime.native_runtime_available',
                    return_value=False), \
-                patch('pypaimon.read.native_plan.native_plan') as np:
+                patch('pypaimon.execution.native.read.plan.native_plan') as np:
             self.assertIs(scan.plan(), sentinel)
         np.assert_not_called()
         fs.scan.assert_called_once_with()
@@ -545,7 +550,7 @@ class NativePlanTest(unittest.TestCase):
         }
         split = Mock(partition=Mock(values=[]), snapshot_id=1)
 
-        with patch('pypaimon.read.native_plan.native_plan',
+        with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([split], 1)) as native:
             self.assertEqual(scan.plan().splits(), [split])
 
@@ -559,7 +564,7 @@ class NativePlanTest(unittest.TestCase):
             'scalar-index.search-mode': None,
         }
 
-        with patch('pypaimon.read.native_plan.native_plan',
+        with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([], 1)) as native:
             self.assertEqual(scan.plan().snapshot_id, 1)
 
@@ -577,7 +582,7 @@ class NativePlanTest(unittest.TestCase):
         split = Mock(partition=Mock(values=[]), snapshot_id=1)
 
         with patch(
-                'pypaimon.read.native_plan.native_plan',
+                'pypaimon.execution.native.read.plan.native_plan',
                 return_value=Plan([split], 1)) as native:
             self.assertEqual(scan.plan().splits(), [split])
 
@@ -591,7 +596,7 @@ class NativePlanTest(unittest.TestCase):
             'future.scan-option': 'value',
         }
 
-        with patch('pypaimon.read.native_plan.native_plan',
+        with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([], 1)) as native:
             self.assertEqual(scan.plan().snapshot_id, 1)
 
@@ -604,7 +609,7 @@ class NativePlanTest(unittest.TestCase):
         sentinel = object()
         fs.scan.return_value = sentinel
         scan = _scan(native_enabled=True, file_scanner=fs)
-        with patch('pypaimon.read.native_plan.native_plan',
+        with patch('pypaimon.execution.native.read.plan.native_plan',
                    side_effect=RuntimeError('unsupported scheme viewfs://')):
             self.assertIs(scan.plan(), sentinel)
         fs.scan.assert_called_once_with()
@@ -618,7 +623,7 @@ class NativePlanTest(unittest.TestCase):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(native_enabled=True, file_scanner=fs)
         with patch.dict(sys.modules, {'pypaimon_rust': module}), patch(
-                'pypaimon.read.native_plan.native_plan',
+                'pypaimon.execution.native.read.plan.native_plan',
                 side_effect=ForkSafetyError('cannot reuse Jindo after fork')):
             with self.assertRaises(ForkSafetyError):
                 scan.plan()
@@ -630,7 +635,7 @@ class NativePlanTest(unittest.TestCase):
         scan.table.catalog_environment.catalog_loader = JdbcCatalogLoader(
             CatalogContext.create_from_options(Options({})))
 
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([], 1)) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 1)) as np:
             self.assertEqual(scan.plan().snapshot_id, 1)
 
         np.assert_called_once()
@@ -654,7 +659,7 @@ class NativePlanTest(unittest.TestCase):
                 scan.table.catalog_environment.catalog_loader = loader_class(
                     CatalogContext.create_from_options(Options({})))
 
-                with patch('pypaimon.read.native_plan.native_plan') as np:
+                with patch('pypaimon.execution.native.read.plan.native_plan') as np:
                     self.assertIs(scan.plan(), sentinel)
 
                 np.assert_not_called()
@@ -666,7 +671,7 @@ class NativePlanTest(unittest.TestCase):
         scan = _scan(native_enabled=True, file_scanner=fs)
         counters = ScanStats.empty_native()
         native = Plan([], 7, _scan_stats=counters)
-        with patch('pypaimon.read.native_plan.native_plan', return_value=native) as np:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=native) as np:
             plan, stats = scan.scan_with_stats()
         self.assertEqual(plan.snapshot_id, 7)
         self.assertIs(stats, counters)
@@ -746,7 +751,7 @@ class NativePlanTest(unittest.TestCase):
 
     def test_native_cpp_options_survive_python_backend_selection(self):
         from pypaimon.filesystem.oss_file_io import OssFileIO
-        from pypaimon.read.native_plan import _resolved_schema_file_io_options
+        from pypaimon.execution.native.table import _resolved_schema_file_io_options
 
         options = Options({'fs.oss.impl': 'cpp', 'fs.oss.python.impl': 'legacy',
                            'fs.oss.cpp.library.path': '/test/libbridge.so',
@@ -878,7 +883,7 @@ class NativePlanTest(unittest.TestCase):
     def test_rest_response_requires_matching_path(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.common.identifier import Identifier
-        from pypaimon.read.native_plan import _resolved_rest_table_response
+        from pypaimon.execution.native.table import _resolved_rest_table_response
 
         table = Mock(table_path='/warehouse/t', identifier=Identifier('db', 't'))
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({})))
@@ -895,7 +900,7 @@ class NativePlanTest(unittest.TestCase):
     def test_rest_response_requires_matching_identity(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.common.identifier import Identifier
-        from pypaimon.read.native_plan import _resolved_rest_table_response
+        from pypaimon.execution.native.table import _resolved_rest_table_response
 
         table = Mock(table_path='/warehouse/t', identifier=Identifier('db', 't', branch='dev'))
         loader = RESTCatalogLoader(CatalogContext.create_from_options(Options({})))
@@ -914,7 +919,7 @@ class NativePlanTest(unittest.TestCase):
     def test_rest_native_builder_reuses_loaded_metadata(self):
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.common.identifier import Identifier
-        from pypaimon.read.native_plan import _native_read_builder
+        from pypaimon.execution.native.read.builder import _native_read_builder
 
         response = json.dumps({'name': 't$branch_dev', 'path': 'oss://bucket/t',
                                'id': 'uuid', 'isExternal': False})
@@ -942,7 +947,7 @@ class NativePlanTest(unittest.TestCase):
         fake_module.datafusion = fake_df
         with patch.dict(sys.modules, {'pypaimon_rust': fake_module,
                                       'pypaimon_rust.datafusion': fake_df}), \
-                patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved):
+                patch('pypaimon.execution.native.table._resolved_schema_json', return_value=resolved):
             for _ in range(3):
                 self.assertIs(_native_read_builder(table), native_table.new_read_builder.return_value)
             native_table.copy_with_pinned_snapshot.assert_not_called()
@@ -968,7 +973,7 @@ class NativePlanTest(unittest.TestCase):
 
     def test_native_rest_cache_invalidation_and_serialization(self):
         import pickle
-        from pypaimon.read.native_plan import _NativeRestTableCache
+        from pypaimon.execution.native.table import _NativeRestTableCache
 
         fake_df = ModuleType('pypaimon_rust.datafusion')
         fake_df.Table = Mock()
@@ -988,14 +993,14 @@ class NativePlanTest(unittest.TestCase):
             restored = pickle.loads(pickle.dumps(cache))
             self.assertEqual(restored._states, {})
             self.assertIsNot(restored.get(response, db, table, options), original)
-            with patch('pypaimon.read.native_plan.os.getpid', return_value=-1):
+            with patch('pypaimon.execution.native.table.os.getpid', return_value=-1):
                 self.assertIsNot(cache.get(response, db, table, options), original)
 
     def test_native_rest_cache_lifetime_and_concurrent_access(self):
         import gc
         import weakref
         from concurrent.futures import ThreadPoolExecutor
-        from pypaimon.read.native_plan import _NativeRestTableCache
+        from pypaimon.execution.native.table import _NativeRestTableCache
 
         class NativeTable:
             pass
@@ -1021,7 +1026,7 @@ class NativePlanTest(unittest.TestCase):
         import multiprocessing
         import os
         from threading import Event, Lock, Thread, current_thread
-        from pypaimon.read.native_plan import _NativeRestTableCache
+        from pypaimon.execution.native.table import _NativeRestTableCache
 
         if 'fork' not in multiprocessing.get_all_start_methods():
             self.skipTest('fork required')
@@ -1051,7 +1056,7 @@ class NativePlanTest(unittest.TestCase):
             def access():
                 results.append(cache.get('response', 'db', 't', {}))
 
-            with patch('pypaimon.read.native_plan.Lock', side_effect=new_lock):
+            with patch('pypaimon.execution.native.table.Lock', side_effect=new_lock):
                 first = Thread(target=access, name='first', daemon=True)
                 second = Thread(target=access, name='second', daemon=True)
                 first.start()
@@ -1095,7 +1100,7 @@ class NativePlanTest(unittest.TestCase):
 
         from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
         from pypaimon.common.identifier import Identifier
-        from pypaimon.read.native_plan import _NativeRestTableCache, _rest_data_token
+        from pypaimon.execution.native.table import _NativeRestTableCache, _rest_data_token
 
         if 'fork' not in multiprocessing.get_all_start_methods():
             self.skipTest('fork required')
@@ -1156,7 +1161,7 @@ class NativePlanTest(unittest.TestCase):
         from pypaimon.catalog.rest.rest_token import RESTToken
         from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
         from pypaimon.common.identifier import Identifier
-        from pypaimon.read.native_plan import _NativeRestTableCache, _rest_data_token
+        from pypaimon.execution.native.table import _NativeRestTableCache, _rest_data_token
 
         identifier = Identifier('default', 't')
         path = 'oss://bucket/table'
@@ -1188,7 +1193,7 @@ class NativePlanTest(unittest.TestCase):
                 'response', database='default', table='t', rest_options={})
 
     def test_native_rest_cache_retries_failed_construction(self):
-        from pypaimon.read.native_plan import _NativeRestTableCache
+        from pypaimon.execution.native.table import _NativeRestTableCache
 
         fake_df = ModuleType('pypaimon_rust.datafusion')
         fake_df.Table = Mock()
@@ -1215,8 +1220,8 @@ class NativePlanTest(unittest.TestCase):
         builder.new_scan.return_value.plan.return_value.splits.return_value = [split]
         builder.new_scan.return_value.plan.return_value.snapshot_id.return_value = 3
 
-        with patch('pypaimon.read.native_plan._native_read_builder', return_value=builder), \
-                patch('pypaimon.read.native_plan.deserialize_split_v1') as des:
+        with patch('pypaimon.execution.native.read.builder._native_read_builder', return_value=builder), \
+                patch('pypaimon.read.split_serializer.deserialize_split_v1') as des:
             decoded = Mock()
             des.return_value = decoded
             result = native_plan(table, row_ranges=[(1, 2)])
@@ -1237,7 +1242,7 @@ class NativePlanTest(unittest.TestCase):
                 scan = SimpleNamespace(plan=lambda: rust_plan)
                 builder = Mock()
                 builder.new_scan.return_value = scan
-                with patch('pypaimon.read.native_plan._native_read_builder', return_value=builder):
+                with patch('pypaimon.execution.native.read.builder._native_read_builder', return_value=builder):
                     plan = native_plan(table)
                 self.assertEqual(plan.snapshot_id, snapshot_id)
                 self.assertEqual(plan.splits(), [])
@@ -1286,7 +1291,7 @@ class NativePlanTest(unittest.TestCase):
                 fs = Mock(partition_key_predicate=None)
                 scan = _scan(True, fs)
                 fs._row_ranges = ranges
-                with patch('pypaimon.read.native_plan.native_plan',
+                with patch('pypaimon.execution.native.read.plan.native_plan',
                            return_value=Plan([], 3)) as native:
                     result = scan.plan()
                 self.assertEqual(result.snapshot_id, 3)
@@ -1300,7 +1305,7 @@ class NativePlanTest(unittest.TestCase):
                 fs = Mock(partition_key_predicate=None)
                 scan = _scan(True, fs)
                 setattr(fs, selection, 0)
-                with patch('pypaimon.read.native_plan.native_plan',
+                with patch('pypaimon.execution.native.read.plan.native_plan',
                            return_value=Plan([], 3)) as native:
                     self.assertEqual(scan.plan().snapshot_id, 3)
                 native.assert_called_once()
@@ -1312,7 +1317,7 @@ class NativePlanTest(unittest.TestCase):
         scan.table.options.options = Options({'scan.watermark': '200'})
         scan.table._applied_dynamic_options = {'scan.watermark': '200'}
         scan.table.schema_manager.latest.return_value.id = 2
-        with patch('pypaimon.read.native_plan.native_plan',
+        with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([], 1)) as native:
             self.assertEqual(scan.plan().snapshot_id, 1)
         native.assert_called_once()
@@ -1330,7 +1335,7 @@ class NativePlanTest(unittest.TestCase):
                         'index-file-in-data-file-dir': str(bucket_local).lower(),
                         'deletion-vectors.merge-on-read': str(merge_on_read).lower(),
                     })
-                    with patch('pypaimon.read.native_plan.native_plan',
+                    with patch('pypaimon.execution.native.read.plan.native_plan',
                                return_value=Plan([], 1)) as native:
                         self.assertEqual(scan.plan().snapshot_id, 1)
                     native.assert_called_once()
@@ -1342,7 +1347,7 @@ class NativePlanTest(unittest.TestCase):
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
         scan.table._applied_dynamic_options = {'incremental-between-timestamp': '100,200'}
         scan._incremental_snapshot_range = (2, 4)
-        with patch('pypaimon.read.native_plan.native_plan',
+        with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([], 4)) as native:
             self.assertEqual(scan.plan().snapshot_id, 4)
         self.assertEqual(native.call_args[1]['incremental_range'], (2, 4))
@@ -1356,9 +1361,9 @@ class NativePlanTest(unittest.TestCase):
         rust_scan.plan.return_value = rust_plan
         builder = Mock()
         builder.new_incremental_scan.return_value = rust_scan
-        with patch('pypaimon.read.native_plan.native_runtime_available',
+        with patch('pypaimon.execution.native.runtime.native_runtime_available',
                    return_value=True), patch(
-                'pypaimon.read.native_plan._native_read_builder',
+                'pypaimon.execution.native.read.builder._native_read_builder',
                 return_value=builder):
             plan = native_plan(
                 table, incremental_range=(2, 4),
@@ -1375,7 +1380,7 @@ class NativePlanTest(unittest.TestCase):
         scan = _scan(True, fs)
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
         scan._incremental_snapshot_range = None
-        with patch('pypaimon.read.native_plan.native_plan') as native:
+        with patch('pypaimon.execution.native.read.plan.native_plan') as native:
             plan = scan.plan()
         self.assertEqual(plan.splits(), [])
         self.assertIsNone(plan.snapshot_id)
@@ -1392,7 +1397,7 @@ class NativePlanTest(unittest.TestCase):
         # A file-name shard may own files from any bucket; never filter the
         # already-selected Rust splits again using a Python bucket rule.
         splits = [Mock(bucket=0)]
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits, 3)) as native:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan(splits, 3)) as native:
             self.assertEqual(scan.plan().splits(), splits)
         self.assertEqual(native.call_args[1]['shard'], (1, 2))
         self.assertEqual(native.call_args[1]['limit'], 1)
@@ -1409,7 +1414,7 @@ class NativePlanTest(unittest.TestCase):
         scan.predicate = Mock()
         splits = [Mock(bucket=0), Mock(bucket=0)]
         # Rust receives the predicate and owns refinement before LIMIT.
-        with patch('pypaimon.read.native_plan.native_plan', return_value=Plan(splits[1:], 3)) as native:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan(splits[1:], 3)) as native:
             self.assertEqual(scan.plan().splits(), splits[1:])
         self.assertEqual(native.call_args[1]['shard'], (1, 2))
         self.assertEqual(native.call_args[1]['limit'], 1)
@@ -1419,27 +1424,19 @@ class NativePlanTest(unittest.TestCase):
         fs.scan.assert_not_called()
 
     def test_native_runtime_availability_handles_uninstalled_extension(self):
-        with patch('pypaimon.read.native_plan.import_module', side_effect=ImportError('not installed')):
+        with patch('pypaimon.execution.native.runtime.import_module', side_effect=ImportError('not installed')):
             self.assertFalse(native_runtime_available())
 
-    def test_installed_extension_requires_companion_data_apis(self):
-        from pypaimon.casting.schema_evolution import _native_schema_cast, read_arrow_schema
+    def test_installed_extension_requires_write_nullability_api(self):
         from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
 
         array = pyarrow.array([1], type=pyarrow.int32())
         data = pyarrow.table({'id': array})
-        field = DataField(0, 'id', AtomicType('INT'))
-        operations = (
-            lambda: _native_schema_cast(array, pyarrow.int64(), field.type, AtomicType('BIGINT')),
-            lambda: read_arrow_schema([field]),
-            lambda: normalize_arrow_write_nullability(data, data.schema),
-        )
         # Missing symbols in an installed extension are packaging errors. They
-        # must not silently disable core casts or NULL validation.
+        # must not silently disable core NULL validation on write inputs.
         with patch.dict(sys.modules, {'pypaimon_rust.data': ModuleType('pypaimon_rust.data')}):
-            for operation in operations:
-                with self.subTest(operation=operation), self.assertRaises(ImportError):
-                    operation()
+            with self.assertRaises(ImportError):
+                normalize_arrow_write_nullability(data, data.schema)
 
     def test_native_runtime_availability_does_not_probe_versioned_apis(self):
         fake_df = ModuleType('pypaimon_rust.datafusion')

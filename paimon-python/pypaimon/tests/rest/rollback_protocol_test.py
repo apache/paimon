@@ -34,11 +34,11 @@ from pypaimon.catalog.table_rollback import TableRollback
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import Options
-from pypaimon.read.native_plan import _resolved_rest_table_response
+from pypaimon.execution.native.table import (_resolved_rest_table_response)
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.instant import Instant
-from pypaimon.write.file_store_commit import FileStoreCommit
-from pypaimon.write.native_commit import _rest_catalog_supported
+from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
 
 
 @pytest.fixture
@@ -336,7 +336,7 @@ def test_same_branch_copy_and_independent_load_preserve_identity(table, catalog,
 
 
 def test_copied_branch_rejects_source_read_metadata(table, monkeypatch):
-    monkeypatch.setattr('pypaimon.read.native_plan.native_runtime_available', lambda *args: True)
+    monkeypatch.setattr('pypaimon.execution.native.runtime.native_runtime_available', lambda *args: True)
 
     assert _resolved_rest_table_response(table) == table.catalog_environment.rest_table_response
     assert _resolved_rest_table_response(table.copy({'branch': 'main'})) is not None

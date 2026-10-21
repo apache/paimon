@@ -23,7 +23,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 

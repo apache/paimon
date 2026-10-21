@@ -25,7 +25,7 @@ from unittest.mock import patch
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=pytest.mark.native_plan)],

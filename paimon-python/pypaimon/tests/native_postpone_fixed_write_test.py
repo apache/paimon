@@ -24,7 +24,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlan, PostponeBucketPlanner
 
 pytestmark = pytest.mark.native_plan
@@ -298,7 +298,7 @@ def test_cannot_fallback_after_native_data(tmp_path):
 
 def test_distributed_worker_uses_pickled_plan_without_python_routing(tmp_path):
     from pypaimon.write.ray_datasink import PaimonDatasink
-    from pypaimon.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 
     table = _table(tmp_path)
     plan = pickle.loads(pickle.dumps(PostponeBucketPlan({('a',): 3})))
@@ -398,7 +398,7 @@ def test_concurrent_bucket_owners_cannot_silently_lose_update(
 
 @pytest.mark.parametrize('native_commit', [False, True])
 def test_disjoint_bucket_owners_can_commit_concurrently(tmp_path, native_rest_catalog, native_commit):
-    from pypaimon.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 
     table = _table(tmp_path, {'commit.native.enabled': str(native_commit).lower()}, native_rest_catalog)
     extractor = PostponeFixedBucketRowKeyExtractor(table, PostponeBucketPlan({('a',): 3}))

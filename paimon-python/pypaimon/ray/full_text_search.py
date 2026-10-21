@@ -24,17 +24,17 @@ from threading import Event
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.ray.vector_search import _execution_options, _map_tasks, _require_ray, _scores, _shared_scalar_filters
-from pypaimon.table.source.full_text_read import (
+from pypaimon.execution.python.read.search.full_text_read import (
     DataEvolutionFullTextRead, _index_candidate_limit, _index_type, _raw_row_ranges, _split_search_splits,
 )
-from pypaimon.table.source import global_index_live_row_filter
+from pypaimon.execution.python.read.search import global_index_live_row_filter
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 def _execute_full_text_search(builder, *, concurrency=None, ray_remote_args=None):
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    from pypaimon.table.source.native_search_plan import python_search_reader
+    from pypaimon.execution.native.read.native_search_plan import python_search_reader
     reader = python_search_reader(builder.new_full_text_read())
     if (type(reader) is not DataEvolutionFullTextRead
             or not reader._table.options.data_evolution_enabled()):

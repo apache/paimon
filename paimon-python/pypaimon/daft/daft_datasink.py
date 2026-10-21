@@ -438,10 +438,10 @@ def make_fixed_bucket_udf(table: FileStoreTable):
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+    from pypaimon.write.input_routing import FixedBucketInputRouter
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
-    extractor = FixedBucketRowKeyExtractor(table.table_schema)
+    extractor = FixedBucketInputRouter(table.table_schema)
 
     @daft.func.batch(return_dtype=DataType.int32())
     def _fixed_bucket(*columns) -> Series:
@@ -468,10 +468,10 @@ def make_dynamic_routing_udf(
 
     from pypaimon.index.dynamic_bucket import compute_assigner, to_signed_int32
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.write.input_routing import DynamicBucketInputRouter
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
-    extractor = DynamicBucketRowKeyExtractor(table.table_schema)
+    extractor = DynamicBucketInputRouter(table.table_schema)
     return_fields = {
         assigner_column: DataType.int32(),
         key_hash_column: DataType.int32(),
@@ -528,7 +528,7 @@ def make_dynamic_bucket_assignment_udf(
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.write.input_routing import DynamicBucketInputRouter
 
     catalog_options = _extract_catalog_options(table)
     table_identifier = _extract_identifier(table)
@@ -582,26 +582,28 @@ def make_dynamic_bucket_assignment_udf(
             table_path,
             schema_token,
         )
-        extractor = DynamicBucketRowKeyExtractor(
-            worker_table.table_schema,
-            table=worker_table,
+        from pypaimon.index.dynamic_bucket import HashBucketAssigner, resolve_bucket_snapshot
+
+        router = DynamicBucketInputRouter(worker_table.table_schema)
+        snapshot = resolve_bucket_snapshot(worker_table, base_snapshot_id)
+        options = worker_table.options
+        assigner = HashBucketAssigner(
+            worker_table,
             num_channels=num_channels,
             num_assigners=num_assigners,
             assign_id=assign_id,
             ignore_existing=ignore_existing,
-            maintain_index=False,
-            base_snapshot_id=base_snapshot_id,
+            target_bucket_row_number=options.dynamic_bucket_target_row_num(),
+            max_buckets_num=options.dynamic_bucket_max_buckets(),
+            snapshot=snapshot,
         )
         buckets = []
         offset = 0
         for batch in arrow_table.to_batches():
             batch_hashes = key_hash_values[offset:offset + batch.num_rows]
-            _, batch_buckets, _ = (
-                extractor.extract_partition_bucket_status_from_hashes_batch(
-                    batch, batch_hashes
-                )
-            )
-            buckets.extend(batch_buckets)
+            partitions, partition_hashes = router.extract_partition_hashes_batch(batch)
+            buckets.extend(bucket for bucket, _ in assigner.assign_batch(
+                partitions, partition_hashes, batch_hashes))
             offset += batch.num_rows
         arrays = [
             arrow_table.column(field.name).combine_chunks()
@@ -609,7 +611,7 @@ def make_dynamic_bucket_assignment_udf(
         ]
         arrays.append(pa.array(buckets, type=pa.int32()))
         arrays.append(pa.array(
-            [extractor.base_snapshot_id] * arrow_table.num_rows,
+            [snapshot.id if snapshot is not None else 0] * arrow_table.num_rows,
             type=pa.int64(),
         ))
         return Series.from_arrow(

@@ -24,8 +24,7 @@ contract is pinned down without going through the full read pipeline.
 
 import unittest
 
-from pypaimon.read.reader.first_row_merge_function import \
-    FirstRowMergeFunction
+from pypaimon.execution.python.read.reader.first_row_merge_function import (FirstRowMergeFunction)
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.table.row.row_kind import RowKind
 

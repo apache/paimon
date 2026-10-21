@@ -30,7 +30,7 @@ import pypaimon.multimodal as pm
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.ray import vector_search as search_module
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 
 
 SCHEMA = pa.schema([

@@ -69,7 +69,7 @@ class ResolvingFileIOTest(unittest.TestCase):
         import pyarrow as pa
         import pyarrow.parquet as pq
         from pathlib import Path
-        from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+        from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         with tempfile.TemporaryDirectory() as directory:

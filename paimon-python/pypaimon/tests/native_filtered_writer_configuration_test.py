@@ -24,13 +24,13 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.tests.native_blob_uri_reader_test import Factory
 from pypaimon.tests.native_write_routing_test import _table
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -64,6 +64,36 @@ def test_native_setters_delegate_written_state_without_permitting_fallback(tmp_p
         writer.close()
 
 
+@pytest.mark.parametrize('setter', ['consumer', 'factory'])
+@pytest.mark.parametrize('clear', [False, True])
+@pytest.mark.parametrize('state_error', [False, True])
+def test_blob_setters_preserve_python_state_errors_without_replaying(tmp_path, setter, clear, state_error):
+    core = Mock()
+    writer = NativeTableWrite(_table(tmp_path), 'job', None, False, core)
+    previous = (lambda name, value: True) if setter == 'consumer' else Factory()
+    replacement = None if clear else ((lambda name, value: False) if setter == 'consumer' else Factory())
+    method = 'with_blob_' + ('consumer' if setter == 'consumer' else 'uri_reader_factory')
+    message = (method + ' must be called before any write operation' if state_error
+               else method + ' requires a Paimon table')
+    error = ValueError('Paimon data invalid for ' + message + ': None')
+    try:
+        getattr(writer, method)(previous)
+        getattr(core, method).reset_mock()
+        getattr(core, method).side_effect = error
+        with patch.object(writer, '_new_python_writer', side_effect=AssertionError('Python fallback')):
+            with pytest.raises(RuntimeError if state_error else ValueError, match=message) as raised:
+                getattr(writer, method)(replacement)
+        if state_error:
+            assert raised.value.__cause__ is error
+        else:
+            assert raised.value is error
+        getattr(core, method).assert_called_once()
+        assert writer._python_writer is None
+        assert getattr(writer, '_blob_' + ('consumer' if setter == 'consumer' else 'uri_reader_factory')) is previous
+    finally:
+        writer.close()
+
+
 def _blob_table(catalog, native):
     fields = [DataField(0, 'id', AtomicType('INT')), DataField(1, 'op', AtomicType('STRING')),
               DataField(2, 'payload', AtomicType('BLOB'))]
@@ -87,8 +117,8 @@ def test_core_rejection_does_not_change_live_blob_configuration(rest_catalog, se
     try:
         getattr(writer, method)(previous)
         getattr(core, method).reset_mock()
-        getattr(core, method).side_effect = ValueError('must be called before any write operation')
-        with pytest.raises(ValueError, match='before any write'):
+        getattr(core, method).side_effect = ValueError(method + ' must be called before any write operation')
+        with pytest.raises(RuntimeError, match='before any write'):
             getattr(writer, method)(None)
         getattr(core, method).assert_called_once()
         if setter == 'factory':
@@ -134,7 +164,7 @@ def test_filtered_blob_batches_allow_configuration_and_real_writes_lock_it(rest_
             ], schema=schema))
             for setter in (lambda: writer.with_blob_consumer(None),
                            lambda: writer.with_blob_uri_reader_factory(None)):
-                with pytest.raises((ValueError, RuntimeError), match='before.*writ'):
+                with pytest.raises(RuntimeError, match='before.*writ'):
                     setter()
             if native:
                 with pytest.raises((ValueError, RuntimeError), match='before.*writ'):

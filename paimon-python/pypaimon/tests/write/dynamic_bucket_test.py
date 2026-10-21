@@ -39,7 +39,7 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
 
 class DynamicBucketTest(unittest.TestCase):

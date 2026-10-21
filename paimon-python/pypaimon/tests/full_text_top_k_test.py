@@ -20,12 +20,14 @@ from unittest.mock import patch
 
 import pytest
 
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
-    NativeFullTextIndexOptions, PaimonFullTextInput, _search_top_k,
+from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
+from pypaimon.execution.python.read.native_full_text_global_index_reader import (
+    PaimonFullTextInput,
+    _search_top_k,
 )
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead, _search_raw_full_text
+from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead, _search_raw_full_text
 from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit
 from pypaimon.tests.vector_search_filter_test import _StubTable, _entry, _field, _bitmap, match_query
 
@@ -144,7 +146,7 @@ def test_per_shard_top_k_preserves_global_ranking_and_duplicate_precedence(overl
         def close(self):
             pass
 
-    with patch("pypaimon.table.source.full_text_read._create_full_text_reader",
+    with patch("pypaimon.execution.python.read.search.full_text_read._create_full_text_reader",
                side_effect=lambda kind, io, path, metas, bound: Reader(int(metas[0].file_name))):
         read = DataEvolutionFullTextRead(_StubTable([field], entries), 1, field, match_query("paimon"))
         result = read._eval_column_query({"text": splits}, None)

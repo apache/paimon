@@ -32,6 +32,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
+from pypaimon.read.table_scan import TableScan
 
 
 class _FakeField:
@@ -68,7 +69,7 @@ class _FakeTable:
         self.identifier = identifier or Identifier("db", "table")
 
 
-class _FakeScan:
+class _FakeScan(TableScan):
     def __init__(self, plan, identifier=None, auth_result=None):
         self._plan = plan
         self._query_auth_fn = None

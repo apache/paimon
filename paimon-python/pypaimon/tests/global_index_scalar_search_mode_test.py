@@ -20,10 +20,10 @@ from types import SimpleNamespace
 
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
-from pypaimon.globalindex.data_evolution_global_index_coverage import (
+from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
     DataEvolutionGlobalIndexCoverage,
 )
-from pypaimon.globalindex.data_evolution_global_index_scanner import (
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
     DataEvolutionGlobalIndexScanner,
 )
 from pypaimon.utils.range import Range

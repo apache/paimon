@@ -24,14 +24,14 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.ray.vector_search import (
     _execution_options, _map_tasks, _require_ray, _shared_scalar_filters, _worker_pre_filter,
 )
-from pypaimon.table.source.vector_search_read import (
+from pypaimon.execution.python.read.search.vector_search_read import (
     BatchVectorSearchReadImpl, _filtered_raw_row_ranges, _offer_score, _scored_result, _split_search_splits,
 )
 
 
 def _execute_batch_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    from pypaimon.table.source.native_search_plan import python_search_reader
+    from pypaimon.execution.native.read.native_search_plan import python_search_reader
     reader = python_search_reader(builder.new_batch_vector_search_read())
     if (type(reader) is not BatchVectorSearchReadImpl
             or not reader._table.options.data_evolution_enabled()):

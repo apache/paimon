@@ -26,9 +26,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_plan
+from pypaimon.execution.native.read.plan import (native_plan)
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 

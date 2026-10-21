@@ -207,7 +207,7 @@ class RayIntegrationTest(unittest.TestCase):
         from pypaimon.data.generic_variant import GenericVariant
         from pypaimon.read.datasource.ray_datasource import RayDatasource
         from pypaimon.read.datasource.split_provider import CatalogSplitProvider
-        from pypaimon.read.native_plan import native_runtime_available
+        from pypaimon.execution.native.runtime import (native_runtime_available)
         from pypaimon.ray import read_paimon
 
         variant_type = pa.struct([

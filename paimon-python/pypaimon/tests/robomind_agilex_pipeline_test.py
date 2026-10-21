@@ -387,6 +387,7 @@ def test_canonical_action_backfill_resumes_after_schema_change(
 def test_ray_ingest_matches_local_schema_rows_and_backfill(
         agilex_input, tmp_path):
     ray = pytest.importorskip("ray")
+    was_initialized = ray.is_initialized()
 
     root, paths = agilex_input
     local_warehouse = tmp_path / "local-comparison"
@@ -404,7 +405,7 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
     )
     ray_result = ray_pipeline.ingest
     ray_backfill = ray_pipeline.backfill
-    assert not ray.is_initialized()
+    assert ray.is_initialized() == was_initialized
     assert ray_result.episodes_snapshot_id == 1
     assert ray_result.frames_snapshot_id == 1
     assert ray_result.mode == "ray"

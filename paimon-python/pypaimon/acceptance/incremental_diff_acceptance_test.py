@@ -34,10 +34,8 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.scanner.append_table_split_generator import \
-    AppendTableSplitGenerator
-from pypaimon.read.scanner.incremental_diff_scanner import \
-    IncrementalDiffScanner
+from pypaimon.execution.python.read.scanner.append_table_split_generator import (AppendTableSplitGenerator)
+from pypaimon.execution.python.read.scanner.incremental_diff_scanner import (IncrementalDiffScanner)
 
 
 class IncrementalDiffAcceptanceTest(unittest.TestCase):

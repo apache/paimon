@@ -24,7 +24,7 @@ from unittest import mock
 import numpy as np
 
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
+from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter, _iter_training_batches,
 )
 from pypaimon.schema.data_types import ArrayType, AtomicType
@@ -99,7 +99,8 @@ class VindexTrainingTest(unittest.TestCase):
                                 with open(reference_path, "wb") as output:
                                     native.write(output)
                         with mock.patch(
-                            "pypaimon.globalindex.vindex.vindex_vector_index_writer.ADD_BATCH_SIZE", 127
+                            "pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer.ADD_BATCH_SIZE",
+                            127
                         ):
                             result = writer.finish()
                         self.assertEqual(1, len(result))

@@ -56,12 +56,15 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.bucket_select_converter import (
-    MAX_VALUES, create_bucket_selector)
+from pypaimon.execution.python.read.scanner.bucket_select_converter import (MAX_VALUES, create_bucket_selector)
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.write.row_key_extractor import (FixedBucketRowKeyExtractor,
-                                              _bucket_from_hash,
-                                              _hash_bytes_by_words)
+from pypaimon.execution.python.write.row_key_extractor import (
+    FixedBucketRowKeyExtractor,
+)
+from pypaimon.write.input_routing import (
+    _bucket_from_hash,
+    _hash_bytes_by_words,
+)
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.internal_row import RowKind
 
@@ -386,8 +389,7 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
     # ----- replace_partition_predicate --------------------------------
 
     def test_replace_partition_leaf_to_true_drops_constraint(self):
-        from pypaimon.read.scanner.bucket_select_converter import \
-            replace_partition_predicate
+        from pypaimon.execution.python.read.scanner.bucket_select_converter import (replace_partition_predicate)
         # ``part = 'a' AND id = 1`` against partition {part: 'a'} →
         # part leaf becomes True → AND fold removes it → only ``id = 1``
         pred = PredicateBuilder.and_predicates([
@@ -402,8 +404,7 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
         self.assertEqual(result.field, 'id')
 
     def test_replace_partition_leaf_to_false_collapses_and(self):
-        from pypaimon.read.scanner.bucket_select_converter import \
-            replace_partition_predicate
+        from pypaimon.execution.python.read.scanner.bucket_select_converter import (replace_partition_predicate)
         # ``part = 'a' AND id = 1`` against partition {part: 'b'} →
         # part leaf becomes False → AND collapses to AlwaysFalse (False).
         pred = PredicateBuilder.and_predicates([
@@ -415,8 +416,7 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
         self.assertIs(result, False)
 
     def test_replace_partition_leaf_in_or_keeps_other_branch(self):
-        from pypaimon.read.scanner.bucket_select_converter import \
-            replace_partition_predicate
+        from pypaimon.execution.python.read.scanner.bucket_select_converter import (replace_partition_predicate)
         # ``(part='a' AND id=1) OR (part='b' AND id=2)`` against
         # partition {part: 'a'} → first OR child becomes ``id=1``, second
         # collapses to AlwaysFalse and is dropped. Result is just ``id=1``.
@@ -438,8 +438,7 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
         self.assertEqual(result.literals, [1])
 
     def test_replace_partition_leaf_in_or_other_partition(self):
-        from pypaimon.read.scanner.bucket_select_converter import \
-            replace_partition_predicate
+        from pypaimon.execution.python.read.scanner.bucket_select_converter import (replace_partition_predicate)
         # Same predicate, partition {part: 'b'} → second branch survives
         # as ``id=2``.
         pred = PredicateBuilder.or_predicates([
@@ -459,8 +458,7 @@ class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
         self.assertEqual(result.literals, [2])
 
     def test_replace_partition_leaf_unrelated_predicate_unchanged(self):
-        from pypaimon.read.scanner.bucket_select_converter import \
-            replace_partition_predicate
+        from pypaimon.execution.python.read.scanner.bucket_select_converter import (replace_partition_predicate)
         # No partition leaf → predicate returned as-is.
         pred = self.pb.equal('id', 42)
         result = replace_partition_predicate(

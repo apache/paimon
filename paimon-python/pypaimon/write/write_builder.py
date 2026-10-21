@@ -15,20 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import logging
 import uuid
 from abc import ABC
 from typing import Optional
 
-from pypaimon.read.native_plan import _raise_if_native_fork_safety_error
+from pypaimon.execution.dispatch import create_write
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
 from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
                                          TableUpdate)
 from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
                                         TableWrite)
-
-logger = logging.getLogger(__name__)
 
 
 class WriteBuilder(ABC):
@@ -70,25 +67,6 @@ class WriteBuilder(ABC):
         else:
             return str(uuid.uuid4())
 
-    def _native_write(self, static_partition=None, stream=False, **kwargs):
-        from pypaimon.read.merge_engine_support import check_sequence_field_supported
-
-        # Keep invalid configurations outside the native fallback handler and
-        # enforce the same contract regardless of which writer is selected.
-        check_sequence_field_supported(self.table)
-        if not self.table.options.native_write_enabled():
-            return None
-        try:
-            from pypaimon.write.native_write import create_native_write
-            return create_native_write(self.table, self.commit_user,
-                                       static_partition, stream,
-                                       restore_snapshot_id=self.restore_snapshot_id, **kwargs)
-        except Exception as error:
-            _raise_if_native_fork_safety_error(error)
-            # Construction has not written any data; the normal writer is safe.
-            logger.debug('Native writer preparation failed; using Python: %s', error)
-            return None
-
 
 class BatchWriteBuilder(WriteBuilder):
 
@@ -101,9 +79,9 @@ class BatchWriteBuilder(WriteBuilder):
         return self
 
     def new_write(self) -> BatchTableWrite:
-        return (self._native_write(self.static_partition)
-                or BatchTableWrite(self.table, self.commit_user, self.static_partition,
-                                   restore_snapshot_id=self.restore_snapshot_id))
+        return create_write(
+            self.table, self.commit_user, self.static_partition,
+            restore_snapshot_id=self.restore_snapshot_id)
 
     def new_update(self) -> BatchTableUpdate:
         return BatchTableUpdate(self.table, self.commit_user)
@@ -116,9 +94,9 @@ class BatchWriteBuilder(WriteBuilder):
 class StreamWriteBuilder(WriteBuilder):
 
     def new_write(self) -> StreamTableWrite:
-        return (self._native_write(stream=True)
-                or StreamTableWrite(self.table, self.commit_user,
-                                    restore_snapshot_id=self.restore_snapshot_id))
+        return create_write(
+            self.table, self.commit_user, stream=True,
+            restore_snapshot_id=self.restore_snapshot_id)
 
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)

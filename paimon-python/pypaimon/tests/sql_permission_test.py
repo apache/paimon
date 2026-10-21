@@ -35,7 +35,7 @@ from pypaimon.management.policy_management import PolicyAlreadyExistException
 from pypaimon.management.policy_type import PolicyType
 from pypaimon.management.resource_type import ResourceType
 from pypaimon.management.row_filter import RowFilter
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 

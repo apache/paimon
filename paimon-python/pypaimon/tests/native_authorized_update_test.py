@@ -29,11 +29,11 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_update import NativeShardTableUpdator, _native_row_id_table
+from pypaimon.execution.native.write.native_update import NativeShardTableUpdator, _native_row_id_table
 
 
 rest_catalog = native_plan_rest_test.rest_catalog
@@ -91,7 +91,7 @@ def _native_only(stack, use_native):
                 'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_partition',
                 'pypaimon.write.table_delete.TableDeleteByRowId._scan_anchor_ranges',
                 'pypaimon.write.table_update.ShardTableUpdator',
-                'pypaimon.table.data_evolution_merge_into._build_tables',
+                'pypaimon.execution.python.write.merge_into._build_tables',
                 'pypaimon.read.table_read.TableRead.to_arrow'):
             stack.enter_context(patch(method, side_effect=AssertionError('Python mutation fallback')))
 
@@ -290,8 +290,10 @@ def test_guarded_native_update_resolves_the_rest_table_instead_of_switching_to_p
     catalog, _ = rest_catalog
     table = _table(catalog, True)
     resolved = object()
-    with patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table', return_value=resolved) as create:
+    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch(
+                'pypaimon.execution.native.write.native_update.create_native_write_table',
+                return_value=resolved) as create:
         assert _native_row_id_table(table) is resolved
     create.assert_called_once_with(table)
 
@@ -348,8 +350,8 @@ def test_custom_query_authorization_stays_on_python_path(rest_catalog):
     table = _table(catalog, True)
     custom_auth = Mock()
     with patch.object(table.catalog_environment, 'table_query_auth', return_value=custom_auth), \
-            patch('pypaimon.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_update.create_native_write_table') as create:
+            patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_update.create_native_write_table') as create:
         assert _native_row_id_table(table) is None
     create.assert_not_called()
     custom_auth.assert_not_called()

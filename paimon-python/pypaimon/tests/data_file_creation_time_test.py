@@ -164,7 +164,7 @@ def _expected_epoch_millis(zone):
 @pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
 @pytest.mark.parametrize('reverse', [False, True], ids=['newer-first', 'older-first'])
 def test_rest_commit_publishes_creation_time_instants(tmp_path, zone, native, reverse):
-    from pypaimon.read.native_plan import native_runtime_available
+    from pypaimon.execution.native.runtime import (native_runtime_available)
 
     if native and not native_runtime_available():
         pytest.skip('pypaimon-rust not installed')

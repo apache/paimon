@@ -36,7 +36,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.write.table_write import TableWrite
-from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
@@ -435,7 +435,7 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1', 'p2', 'p1', 'p2'],
         }, schema=self.pa_schema)
 
-        with patch('pypaimon.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED',
+        with patch('pypaimon.execution.python.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED',
                    False):
             groups = ex.extract_partition_bucket_groups(data)
 
@@ -479,7 +479,7 @@ class TableWriteTest(unittest.TestCase):
         # still allowed on the Python 3.7 lane. The capability probe must treat
         # that as unsupported so writes fall back instead of failing every
         # write_arrow_batch.
-        from pypaimon.write import row_key_extractor as rk
+        from pypaimon.execution.python.write import row_key_extractor as rk
 
         def raise_missing_kernel(self, *args, **kwargs):
             raise pa.ArrowKeyError("No function registered with name: hash_list")
@@ -810,7 +810,7 @@ class TableWriteTest(unittest.TestCase):
             PostponeFixedBucketBatchTableWrite,
             PostponeFixedBucketWriteBuilder,
         )
-        from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+        from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
         self.assertIsInstance(
             write_builder, PostponeFixedBucketWriteBuilder)
         self.assertIsInstance(
@@ -841,7 +841,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(expect.cast(read_arrow_schema(table.fields)), actual)
 
     def test_postpone_file_store_write_validates_runtime_bucket_count(self):
-        from pypaimon.write.file_store_write import (
+        from pypaimon.execution.python.write.file_store_write import (
             PostponeFixedBucketFileStoreWrite,
         )
 
@@ -1030,7 +1030,7 @@ class TableWriteTest(unittest.TestCase):
 
     def test_postpone_default_bucket_function_matches_java(self):
         from pypaimon.write.postpone_bucket import PostponeBucketPlan
-        from pypaimon.write.row_key_extractor import (
+        from pypaimon.execution.python.write.row_key_extractor import (
             PostponeFixedBucketRowKeyExtractor,
         )
 
@@ -1058,7 +1058,7 @@ class TableWriteTest(unittest.TestCase):
             AtomicType,
             DataField,
         )
-        from pypaimon.write.row_key_extractor import RowKeyExtractor
+        from pypaimon.execution.python.write.row_key_extractor import RowKeyExtractor
 
         cases = [
             (

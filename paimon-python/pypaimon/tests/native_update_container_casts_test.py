@@ -99,7 +99,7 @@ def _native_only(native):
                             (TableUpdate, '_build_predicate_update_table'),
                             (TableUpsertByKey, '_upsert_partition')]:
             stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
-        stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+        stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                   side_effect=AssertionError('Python MERGE fallback')))
     return stack
 

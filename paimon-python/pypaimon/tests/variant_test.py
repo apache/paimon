@@ -77,7 +77,7 @@ from pypaimon.data.variant_shredding import (
     rebuild_value,
     shredding_schema_to_arrow_type,
 )
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import (
     AtomicType,
     DataField,
@@ -1563,7 +1563,7 @@ class TestVariantPaimonTable(unittest.TestCase):
     def test_native_writer_preserves_shredded_variant_types(self):
         try:
             import pypaimon_rust  # noqa: F401
-            from pypaimon.write.native_write import NativeTableWrite  # noqa: F401
+            from pypaimon.execution.native.write.native_write import NativeTableWrite  # noqa: F401
         except ImportError:
             self.skipTest('native writer is not available')
         self._check_shredding_type_preservation(native=True)

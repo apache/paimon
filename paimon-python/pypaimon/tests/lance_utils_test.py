@@ -20,7 +20,7 @@ import unittest
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.read.reader.lance_utils import to_lance_specified
+from pypaimon.execution.python.read.reader.lance_utils import (to_lance_specified)
 
 
 class LanceUtilsTest(unittest.TestCase):

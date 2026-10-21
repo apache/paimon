@@ -32,7 +32,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_commit import CommitFailRetryResult
+from pypaimon.execution.python.write.file_store_commit import CommitFailRetryResult
 
 
 class AoReaderTest(unittest.TestCase):

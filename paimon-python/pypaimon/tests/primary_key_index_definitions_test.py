@@ -27,14 +27,22 @@ from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
-from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
-from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-from pypaimon.table.source.primary_key_full_text_scan import (
-    _current_payloads, _should_read_source as _full_text_should_read_source)
-from pypaimon.table.source.primary_key_vector_read import (
-    PrimaryKeyVectorRead, _allowed, _include_row_ids)
-from pypaimon.table.source.primary_key_vector_scan import (
-    PrimaryKeyVectorScan, _bucket_splits, _should_read_source)
+from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
+from pypaimon.execution.python.read.search.primary_key_full_text_scan import PrimaryKeyFullTextScan
+from pypaimon.execution.python.read.search.primary_key_full_text_scan import (
+    _current_payloads,
+    _should_read_source as _full_text_should_read_source,
+)
+from pypaimon.execution.python.read.search.primary_key_vector_read import (
+    PrimaryKeyVectorRead,
+    _allowed,
+    _include_row_ids,
+)
+from pypaimon.execution.python.read.search.primary_key_vector_scan import (
+    PrimaryKeyVectorScan,
+    _bucket_splits,
+    _should_read_source,
+)
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition)
 from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
@@ -238,15 +246,13 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             table, 2147483647, DataField(1, "embedding", AtomicType("VECTOR(1)")),
             [0.0], options={"ivf.refine_factor": "2"})
 
-        from pypaimon.table.source.primary_key_vector_scan import (
-            PrimaryKeyVectorScanPlan)
+        from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
         plan = PrimaryKeyVectorScanPlan(1, [])
         with self.assertRaisesRegex(ValueError, "limit overflow"):
             reader.read_plan(plan)
 
     def test_pk_vector_raw_fallback_uses_vector_search_mode(self):
-        from pypaimon.table.source.primary_key_vector_scan import (
-            PrimaryKeyVectorScanPlan)
+        from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
 
         field = DataField(1, "embedding", AtomicType("VECTOR(1)"))
         plan = PrimaryKeyVectorScanPlan(1, [])
@@ -370,10 +376,10 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                 return []
 
         with mock.patch(
-                "pypaimon.table.source.primary_key_vector_scan."
+                "pypaimon.execution.python.read.search.primary_key_vector_scan."
                 "TimeTravelUtil.try_travel_to_snapshot",
                 return_value=snapshot), mock.patch(
-                "pypaimon.table.source.primary_key_vector_scan.IndexFileHandler",
+                "pypaimon.execution.python.read.search.primary_key_vector_scan.IndexFileHandler",
                 _IndexHandler):
             plan = PrimaryKeyVectorScan(
                 _Table(), schema.fields[0], index_type="vindex").scan()

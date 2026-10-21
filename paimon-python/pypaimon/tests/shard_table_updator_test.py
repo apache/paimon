@@ -19,11 +19,34 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+
+
+class ShardUpdateValidationTest(unittest.TestCase):
+
+    def test_empty_update_columns_are_rejected_before_selecting_a_backend(self):
+        from pypaimon.write.table_update import BatchTableUpdate, StreamTableUpdate
+
+        for update_type in (BatchTableUpdate, StreamTableUpdate):
+            for native in (False, True):
+                with self.subTest(update_type=update_type.__name__, native=native):
+                    table = SimpleNamespace(
+                        field_names=['value'],
+                        options=SimpleNamespace(native_write_enabled=lambda: native))
+                    update = update_type(table, 'writer').with_update_type([])
+                    with patch('pypaimon.write.table_update.prepare_native_write_operation',
+                               side_effect=AssertionError('Prepared a backend for invalid columns')) as prepare, \
+                            patch.object(update, '_new_python_shard_updator',
+                                         side_effect=AssertionError('Created a Python shard updater')) as python:
+                        with self.assertRaisesRegex(ValueError, 'Shard update columns must not be empty'):
+                            update.new_shard_updator(0, 1)
+                    prepare.assert_not_called()
+                    python.assert_not_called()
 
 
 class ShardTableUpdatorTest(unittest.TestCase):
@@ -628,7 +651,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             ))
         commit_messages = shard.prepare_commit()
 
-        from pypaimon.write.file_store_commit import FileStoreCommit
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
         original_try_commit = FileStoreCommit._try_commit
         captured_args = {}
 

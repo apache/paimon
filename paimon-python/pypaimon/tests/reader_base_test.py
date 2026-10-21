@@ -39,7 +39,7 @@ from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
 
 class ReaderBasicTest(unittest.TestCase):

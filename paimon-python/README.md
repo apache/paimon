@@ -414,6 +414,14 @@ Native reads return PyArrow batches through the Arrow C Data interface. Native
 planner handles are used directly when available; splits refined by Python
 index or shuffle logic are serialized through the stable split contract and
 reconstructed by Rust. Nested projection and row-kind output are supported.
+Public builders and table APIs delegate to implementations under
+`pypaimon.execution.python` and `pypaimon.execution.native`. Shared plans,
+splits, schemas and commit messages remain independent of either backend.
+Python scanners, search readers and committers are initialized only when Python
+execution is selected. Index execution lives under these implementation
+directories too; public index APIs, results and file formats remain shared.
+See the [execution layout](pypaimon/execution/README.md) for the dependency and
+fallback boundaries.
 Authorization captured by an original Native plan is evaluated in Rust;
 Python-planned or serialized authorization rules retain the Python reader.
 For both materialized

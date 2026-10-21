@@ -26,8 +26,8 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.read.scan_distribution import java_file_name_shard
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
@@ -488,7 +488,7 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
                 return plans
 
     with patch(
-            'pypaimon.read.streaming_table_scan.ManifestFileManager',
+            'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
             side_effect=AssertionError(
                 'streaming changelog native plan fell back to Python')):
         plans = asyncio.run(first_two_frames())

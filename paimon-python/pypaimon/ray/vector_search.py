@@ -25,14 +25,14 @@ import threading
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.table.source.vector_search_read import (
+from pypaimon.execution.python.read.search.vector_search_read import (
     DataEvolutionVectorRead,
     _filtered_raw_row_ranges,
     _offer_score,
     _scored_result,
     _split_search_splits,
 )
-from pypaimon.table.source import global_index_live_row_filter
+from pypaimon.execution.python.read.search import global_index_live_row_filter
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
@@ -40,7 +40,7 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 def _execute_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     """Execute the builder of an already snapshot-pinned ``VectorQuery``."""
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    from pypaimon.table.source.native_search_plan import python_search_reader
+    from pypaimon.execution.native.read.native_search_plan import python_search_reader
     reader = python_search_reader(builder.new_vector_search_read())
     if (type(reader) is not DataEvolutionVectorRead
             or not reader._table.options.data_evolution_enabled()):

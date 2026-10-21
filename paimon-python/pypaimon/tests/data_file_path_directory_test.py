@@ -102,7 +102,7 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         table = self._create_with_options(
             "db.t_native", {"data-file.path-directory": "data"})
         scan = table.new_read_builder().new_scan()
-        with mock.patch("pypaimon.read.native_plan.native_runtime_available", return_value=True):
+        with mock.patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True):
             self.assertTrue(scan._native_plan_supported())
 
     def test_native_write_dispatches_with_configured_directory(self):
@@ -110,8 +110,8 @@ class DataFilePathDirectoryTest(unittest.TestCase):
             "db.t_native_write", {"data-file.path-directory": "data",
                                   "write.native.enabled": "true"})
         sentinel = object()
-        with mock.patch("pypaimon.write.native_write.create_native_write", return_value=sentinel):
-            self.assertIs(table.new_batch_write_builder()._native_write(), sentinel)
+        with mock.patch("pypaimon.execution.native.write.native_write.create_native_write", return_value=sentinel):
+            self.assertIs(table.new_batch_write_builder().new_write(), sentinel)
 
     def test_native_commit_dispatches_with_configured_directory(self):
         table = self._create_with_options(
@@ -120,9 +120,12 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         commit = table.new_batch_write_builder().new_commit()
         sentinel = object()
         try:
-            with mock.patch("pypaimon.write.native_commit.native_messages_supported", return_value=True), \
-                    mock.patch("pypaimon.write.native_commit.create_native_commit", return_value=sentinel), \
-                    mock.patch("pypaimon.write.native_commit.to_native_commit_messages", return_value=[]):
+            with mock.patch(
+                "pypaimon.execution.native.write.native_commit.native_messages_supported", return_value=True), \
+                    mock.patch(
+                        "pypaimon.execution.native.write.native_commit.create_native_commit", return_value=sentinel), \
+                    mock.patch(
+                        "pypaimon.execution.native.write.native_commit.to_native_commit_messages", return_value=[]):
                 self.assertEqual(commit._prepare_native_commit([]), (sentinel, []))
         finally:
             # The sentinel represents a prepared committer, not a real resource.

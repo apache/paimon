@@ -34,12 +34,10 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.read.reader.deduplicate_merge_function import \
-    DeduplicateMergeFunction
-from pypaimon.read.reader.partial_update_merge_function import \
-    PartialUpdateMergeFunction
-from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
-from pypaimon.write.writer.write_buffer import WriteBuffer
+from pypaimon.execution.python.read.reader.deduplicate_merge_function import (DeduplicateMergeFunction)
+from pypaimon.execution.python.read.reader.partial_update_merge_function import (PartialUpdateMergeFunction)
+from pypaimon.execution.python.write.writer.key_value_data_writer import KeyValueDataWriter
+from pypaimon.execution.python.write.writer.write_buffer import WriteBuffer
 
 
 # Layout matches what ``KeyValueDataWriter._add_system_fields`` emits:

@@ -31,7 +31,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow

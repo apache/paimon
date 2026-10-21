@@ -23,7 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.read.table_read import TableRead
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
 from pypaimon.tests.data_evolution_test_helpers import BatchModeMixin, DataEvolutionTestBase
 from pypaimon.utils.range import Range
 
@@ -127,8 +127,8 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         original_generator = TableRead._arrow_batch_generator
         generators = []
         batch_sizes = []
-        module = 'pypaimon.table.source.vector_search_read'
-        from pypaimon.table.source.vector_search_read import _compute_scores
+        module = 'pypaimon.execution.python.read.search.vector_search_read'
+        from pypaimon.execution.python.read.search.vector_search_read import _compute_scores
 
         def batches(table_read, splits):
             arrow, generator = original(table_read, splits)

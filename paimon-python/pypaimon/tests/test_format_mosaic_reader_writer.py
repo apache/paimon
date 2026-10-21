@@ -23,7 +23,7 @@ import pytest
 
 import mosaic
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.reader.format_mosaic_reader import FormatMosaicReader
+from pypaimon.execution.python.read.reader.format_mosaic_reader import (FormatMosaicReader)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 

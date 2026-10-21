@@ -26,10 +26,10 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.utils.range import Range
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.execution.python.write.file_store_write import FileStoreWrite
 
 
 @pytest.fixture(params=[False, pytest.param(True, marks=[
@@ -237,7 +237,7 @@ def test_python_pk_sorted_index_refines_splits_at_selected_snapshot(catalog, cov
     write(table, [{'id': 2, 'v': 99}], schema)
     predicate = table.new_read_builder().new_predicate_builder().equal('v', 20)
     with patch('pypaimon.index.index_file_handler.IndexFileHandler.scan', return_value=[entry]) as scan_index, \
-            patch('pypaimon.table.source.primary_key_sorted_index_scan.reader_factory',
+            patch('pypaimon.execution.python.read.search.primary_key_sorted_index_scan.reader_factory',
                   return_value=lambda *args: _Reader([Range(1, 1)])):
         plan, rows = read(table.copy({'scan.version': '1'}), False, predicate)
     assert rows == [{'id': 2, 'v': 20}]
@@ -247,7 +247,7 @@ def test_python_pk_sorted_index_refines_splits_at_selected_snapshot(catalog, cov
     # The latest snapshot includes a newer version. Index pruning must not
     # resurrect the old matching version from a merge-required split.
     with patch('pypaimon.index.index_file_handler.IndexFileHandler.scan', return_value=[entry]), \
-            patch('pypaimon.table.source.primary_key_sorted_index_scan.reader_factory',
+            patch('pypaimon.execution.python.read.search.primary_key_sorted_index_scan.reader_factory',
                   return_value=lambda *args: _Reader([Range(1, 1)])):
         assert read(table, False, predicate)[1] == []
 

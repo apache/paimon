@@ -18,7 +18,7 @@
 import unittest
 from unittest.mock import patch
 
-from pypaimon.write.row_key_extractor import SimpleHashBucketAssigner
+from pypaimon.execution.python.write.row_key_extractor import SimpleHashBucketAssigner
 
 
 class SimpleHashBucketAssignerTest(unittest.TestCase):
@@ -92,7 +92,7 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
         self.assertEqual(initial, [0, 0, 1, 1, 2, 2])
         index = assigner._partition_index[()]
 
-        with patch('pypaimon.write.row_key_extractor.random.choice') as choice:
+        with patch('pypaimon.execution.python.write.row_key_extractor.random.choice') as choice:
             for h, selected in enumerate([0, 1, 2, 0, 1, 2], start=6):
                 choice.return_value = selected
                 self.assertEqual(assigner.assign((), h), selected)

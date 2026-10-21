@@ -25,7 +25,7 @@ import pytest
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.tests.native_blob_write_test import _table, _read
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -301,7 +301,7 @@ def test_reader_factory_replacement_clear_and_native_rows(tmp_path):
             [{'id': 1, 'large': b'inline', 'small': None}],
             schema=PyarrowFieldParser.from_paimon_schema(table.fields)))
         assert factory.opened == []
-        with pytest.raises(ValueError, match='before any write'):
+        with pytest.raises(RuntimeError, match='before any write'):
             writer.with_blob_uri_reader_factory(factory)
     finally:
         writer.close()

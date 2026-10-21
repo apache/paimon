@@ -26,7 +26,7 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 
 
@@ -103,9 +103,9 @@ def test_table_source_metadata_conditions_keep_selected_view_and_callable_rows(
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python MERGE matching')))
             stack.enter_context(patch('pypaimon.ray.merge_condition._load_datafusion',
                                       side_effect=AssertionError('Native conditions loaded Python DataFusion')))
@@ -136,8 +136,10 @@ def test_native_condition_transport_does_not_load_python_datafusion(native_rest_
     native_table, native_source = Mock(), Mock()
     core = native_table.new_batch_write_builder.return_value._with_commit_user.return_value.new_update.return_value
     core.merge_into.return_value = []
-    with patch('pypaimon.write.native_merge_into._native_row_id_table', return_value=native_table), \
-            patch('pypaimon.write.native_merge_into.create_native_write_table', return_value=native_source), \
+    with patch('pypaimon.execution.native.write.native_merge_into._native_row_id_table', return_value=native_table), \
+            patch(
+                'pypaimon.execution.native.write.native_merge_into.create_native_write_table',
+                return_value=native_source), \
             patch('pypaimon.ray.merge_condition._load_datafusion',
                   side_effect=AssertionError('Loaded optional Python execution engine')) as python_engine:
         messages = target.new_batch_write_builder().new_update().merge_into(
@@ -156,7 +158,7 @@ def test_python_merge_conditions_still_require_the_python_execution_engine(nativ
     source = pa.table({'key': [0], 'value': [91]}, schema=_SCHEMA)
     with patch('pypaimon.ray.merge_condition._load_datafusion',
                side_effect=ImportError('Install pypaimon[datafusion]')) as python_engine, \
-            patch('pypaimon.table.data_evolution_merge_into._build_tables') as matching:
+            patch('pypaimon.execution.python.write.merge_into._build_tables') as matching:
         with pytest.raises(ImportError, match=r'pypaimon\[datafusion\]'):
             target.new_batch_write_builder().new_update().merge_into(
                 source, on=['key'], when_matched=[WhenMatched.update(

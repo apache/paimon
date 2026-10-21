@@ -32,7 +32,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.write.blob_format_writer import BlobFormatWriter
+from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
 def _normalize_naive_datetimes(value):
@@ -415,7 +415,7 @@ class LocalFileIO(FileIO):
     def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import lance
-            from pypaimon.read.reader.lance_utils import to_lance_specified
+            from pypaimon.execution.python.read.reader.lance_utils import (to_lance_specified)
             file_path_for_lance, storage_options = to_lance_specified(self, path)
             
             writer = lance.file.LanceFileWriter(
@@ -445,7 +445,7 @@ class LocalFileIO(FileIO):
             from vortex._lib.io import write as vortex_write
             os.makedirs(os.path.dirname(path), exist_ok=True)
 
-            from pypaimon.read.reader.vortex_utils import to_vortex_specified
+            from pypaimon.execution.python.read.reader.vortex_utils import (to_vortex_specified)
             _, store_kwargs = to_vortex_specified(self, path)
 
             if store_kwargs:
@@ -460,7 +460,7 @@ class LocalFileIO(FileIO):
 
     def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
         try:
-            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+            from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
             from pypaimon.schema.data_types import PyarrowFieldParser
 
             if fields is None:

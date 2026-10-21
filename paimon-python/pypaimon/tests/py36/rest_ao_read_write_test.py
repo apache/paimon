@@ -44,7 +44,7 @@ from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
 
 
 class RESTAOReadWritePy36Test(RESTBaseTest):

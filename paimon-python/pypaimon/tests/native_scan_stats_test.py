@@ -27,7 +27,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.native_plan import _native_table, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test, native_query_auth_test
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
@@ -65,7 +66,7 @@ def _append(table, rows, schema, overwrite=False):
 
 
 def _native_explain(builder, verbose=False):
-    with patch('pypaimon.read.scanner.file_scanner.FileScanner.scan_with_stats',
+    with patch('pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
                side_effect=AssertionError('explain fell back to Python')):
         result = builder.explain(verbose)
     assert result.native_planned

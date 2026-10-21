@@ -18,15 +18,13 @@
 """Builder to build batch vector search over multiple query vectors."""
 
 from abc import ABC, abstractmethod
+from copy import copy
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
 )
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl,
-)
-from pypaimon.table.source.vector_search_read import BatchVectorSearchRead  # noqa: F401
+from pypaimon.table.source.search_types import BatchVectorSearchRead  # noqa: F401
 
 
 class BatchVectorSearchBuilder(ABC):
@@ -112,7 +110,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         return self
 
     def execute_batch_local(self):
-        from pypaimon.table.source.native_vector_search import try_native_vector_search
+        from pypaimon.execution.native.read.native_vector_search import try_native_vector_search
         results = try_native_vector_search(self, self._query_vectors, batch=True)
         if results is not None:
             return results
@@ -128,7 +126,15 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         if not self._query_vectors:
             raise ValueError(
                 "Query vectors must be set via with_query_vectors()")
-        reader = BatchVectorSearchReadImpl(
+        from pypaimon.execution.native.read.native_search_plan import native_vector_read
+        execution = copy(self)
+        execution._options = dict(self._options)
+        execution._query_vectors = list(self._query_vectors)
+        return native_vector_read(self, execution._new_python_batch_vector_read, batch=True)
+
+    def _new_python_batch_vector_read(self):
+        from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl
+        return BatchVectorSearchReadImpl(
             self._table,
             self._limit,
             self._vector_column,
@@ -137,5 +143,3 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
             partition_filter=self._partition_filter,
             options=self._options,
         )
-        from pypaimon.table.source.native_search_plan import native_vector_read
-        return native_vector_read(self, reader, batch=True)

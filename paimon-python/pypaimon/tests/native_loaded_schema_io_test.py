@@ -23,7 +23,7 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.data_evolution_merge_into import WhenMatched
@@ -31,7 +31,7 @@ from pypaimon.tests import native_plan_rest_test
 from pypaimon.tests.native_authorized_update_test import (
     _ROWS, _SCHEMA, _expected, _files, _native_only, _operate, _restricted, _rows, _table,
 )
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.write.native_write import NativeTableWrite
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
