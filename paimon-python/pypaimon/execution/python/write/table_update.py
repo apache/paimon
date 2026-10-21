@@ -253,6 +253,8 @@ class PythonTableUpdateMixin:
                 f"{len(array)} != {row_count}."
             )
         if array.type != data_type:
+            PythonTableUpdateMixin._validate_assignment_struct_fields(
+                array.type, data_type)
             if isinstance(array, pa.ChunkedArray):
                 array = pa.chunked_array(
                     [chunk.cast(data_type) for chunk in array.chunks],
@@ -261,6 +263,27 @@ class PythonTableUpdateMixin:
             else:
                 array = array.cast(data_type)
         return array
+
+    @staticmethod
+    def _validate_assignment_struct_fields(source, target):
+        if pa.types.is_struct(source) and pa.types.is_struct(target):
+            if [field.name for field in source] != [field.name for field in target]:
+                raise ValueError("Assignment struct fields must match in order.")
+            for source_field, target_field in zip(source, target):
+                PythonTableUpdateMixin._validate_assignment_struct_fields(
+                    source_field.type, target_field.type)
+        elif pa.types.is_map(source) and pa.types.is_map(target):
+            PythonTableUpdateMixin._validate_assignment_struct_fields(
+                source.key_type, target.key_type)
+            PythonTableUpdateMixin._validate_assignment_struct_fields(
+                source.item_type, target.item_type)
+        else:
+            list_types = (pa.types.is_list, pa.types.is_large_list,
+                          pa.types.is_fixed_size_list)
+            if (any(check(source) for check in list_types)
+                    and any(check(target) for check in list_types)):
+                PythonTableUpdateMixin._validate_assignment_struct_fields(
+                    source.value_type, target.value_type)
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
