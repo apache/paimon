@@ -22,7 +22,7 @@ from typing import Any, Iterable, List, Mapping, Optional, Sequence
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.execution.dispatch import prepare_native_write_operation
+from pypaimon.write.backend_dispatch import prepare_native_write_operation
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
@@ -234,7 +234,7 @@ def merge_into(
         commit_user, commit_identifier=BATCH_COMMIT_IDENTIFIER):
     """Select MERGE execution before consuming source input or staging files."""
     if target_table.options.native_write_enabled():
-        from pypaimon.execution.dispatch import prepare_native_merge_into
+        from pypaimon.write.backend_dispatch import prepare_native_merge_into
 
         native = prepare_native_merge_into(
             target_table, source, on, when_matched, when_not_matched,

@@ -27,7 +27,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution import search_dispatch
+from pypaimon.table.source import search_dispatch
 from pypaimon.table.source.search_types import VectorSearchScanPlan
 
 

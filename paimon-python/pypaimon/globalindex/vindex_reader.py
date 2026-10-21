@@ -29,7 +29,7 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
         self._index_path = index_path
         self._io_meta = io_metas[0]
         self._options = dict(options or {})
-        from pypaimon.execution.index_dispatch import _VindexReaderExecution
+        from pypaimon.globalindex.index_dispatch import _VindexReaderExecution
         self._execution = _VindexReaderExecution(self)
 
     def visit_vector_search(self, vector_search):

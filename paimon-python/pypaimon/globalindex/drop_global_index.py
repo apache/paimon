@@ -88,7 +88,7 @@ class GlobalIndexDropper:
 
     def build(self) -> List[CommitMessage]:
         partition_filter = self._resolve_partition_filter()
-        from pypaimon.execution.index_dispatch import build_global_index_drop
+        from pypaimon.globalindex.index_dispatch import build_global_index_drop
         return build_global_index_drop(self, partition_filter)
 
     def _resolve_partition_filter(self) -> Optional[Predicate]:

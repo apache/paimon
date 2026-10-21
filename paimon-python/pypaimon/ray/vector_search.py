@@ -40,7 +40,7 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 def _execute_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     """Execute the builder of an already snapshot-pinned ``VectorQuery``."""
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    from pypaimon.execution.search_dispatch import python_search_reader
+    from pypaimon.table.source.search_dispatch import python_search_reader
     reader = python_search_reader(builder.new_vector_search_read())
     if (type(reader) is not DataEvolutionVectorRead
             or not reader._table.options.data_evolution_enabled()):
@@ -199,7 +199,7 @@ def _shared_scalar_filters(splits, predicate, remote_args, worker=None):
 
 
 def _search_raw_split(context, split):
-    from pypaimon.execution.read_support import _ClosableArrowBatchReader
+    from pypaimon.read.read_support import _ClosableArrowBatchReader
 
     table_read, column, query, limit, metric = context
     scorer = DataEvolutionVectorRead(table_read.table, limit, column, query)

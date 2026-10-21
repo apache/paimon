@@ -55,7 +55,7 @@ def merge_into(
     and returns an Arrow Array or ChunkedArray of the same length. Empty
     clauses do not invoke callbacks; callback errors propagate to the caller.
     """
-    from pypaimon.execution.update_dispatch import merge_into as execute
+    from pypaimon.write.update_dispatch import merge_into as execute
     return execute(
         target_table, source, on=on, when_matched=when_matched,
         when_not_matched=when_not_matched, commit_user=commit_user,

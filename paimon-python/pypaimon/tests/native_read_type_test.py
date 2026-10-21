@@ -409,7 +409,7 @@ def test_map_projection_preserves_masked_key_nullability(tmp_path, native):
     # batch schema independently of the core's conservative read nullability.
     with patch.object(FileSystemCatalog, 'auth_table_query', return_value=auth), \
             patch('pypaimon.read.table_read.read_arrow_schema', PyarrowFieldParser.from_paimon_schema), \
-            patch('pypaimon.execution.read_support.read_arrow_schema', PyarrowFieldParser.from_paimon_schema):
+            patch('pypaimon.read.read_support.read_arrow_schema', PyarrowFieldParser.from_paimon_schema):
         splits = builder.new_scan().plan().splits()
         result = builder.new_read().to_arrow_batch_reader(splits).read_all()
     assert result.num_rows == 3

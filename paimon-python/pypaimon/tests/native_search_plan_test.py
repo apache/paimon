@@ -26,7 +26,7 @@ import pytest
 import pyarrow as pa
 
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.execution.search_dispatch import python_search_reader
+from pypaimon.table.source.search_dispatch import python_search_reader
 from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
 from pypaimon.execution.python.read.search.full_text_scan import DataEvolutionFullTextScan
 from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead

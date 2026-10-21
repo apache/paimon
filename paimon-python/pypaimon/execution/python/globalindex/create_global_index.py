@@ -116,7 +116,7 @@ class PythonGlobalIndexBuilder:
             return self._build_sorted_index(
                 splits, unindexed_ranges, index_field, table_read, index_path)
         if execution == "ray":
-            from pypaimon.execution.python.globalindex.ray_build import build_vector_index
+            from pypaimon.ray.vector_index_build import build_vector_index
             return build_vector_index(
                 self, splits, unindexed_ranges, index_field, table_read,
                 index_path, concurrency, ray_remote_args)
@@ -299,7 +299,7 @@ class PythonGlobalIndexBuilder:
     def _build_generic_shard(
         self, index_split, index_range, index_field, table_read, index_path: str, file_name=None
     ) -> Optional[CommitMessage]:
-        from pypaimon.execution.read_support import _ClosableArrowBatchReader
+        from pypaimon.read.read_support import _ClosableArrowBatchReader
 
         writer = None
         try:

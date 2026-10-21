@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Ray datasource facades preserve hooks and own retained worker readers."""
+"""Ray datasource adapters preserve hooks and own retained worker readers."""
 
 from pathlib import Path
 import pickle
@@ -182,11 +182,9 @@ import sys
 from types import SimpleNamespace
 
 class BlockExecution(importlib.abc.MetaPathFinder):
-    allow_shared = False
-
     def find_spec(self, fullname, path=None, target=None):
         if (fullname.startswith(('pypaimon.execution.python', 'pypaimon.execution.native', 'pypaimon_rust'))
-                or (not self.allow_shared and fullname.startswith('pypaimon.execution.datasource'))):
+                or fullname.startswith('pypaimon.execution.datasource')):
             raise AssertionError('Datasource configuration loaded execution: ' + fullname)
 
 guard = BlockExecution()
@@ -217,7 +215,6 @@ assert type(pickle.loads(pickle.dumps(resolved))) is PreResolvedSplitProvider
 assert RayDatasource.__module__ == 'pypaimon.read.datasource.ray_datasource'
 assert CatalogSplitProvider.__module__ == 'pypaimon.read.datasource.split_provider'
 
-guard.allow_shared = True
 import pyarrow as pa
 from unittest.mock import Mock, patch
 from pypaimon import Schema

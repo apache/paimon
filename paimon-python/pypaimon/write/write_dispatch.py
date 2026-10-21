@@ -62,7 +62,7 @@ class NativeTableWrite:
         return self._execution._written
 
     def _new_python_writer(self):
-        from pypaimon.execution.dispatch import create_python_write
+        from pypaimon.write.backend_dispatch import create_python_write
 
         writer = create_python_write(
             self.table, self.commit_user, self.static_partition, self.stream,
@@ -81,7 +81,7 @@ class NativeTableWrite:
         return writer
 
     def _switch_to_python(self):
-        from pypaimon.execution.dispatch import switch_writer_to_python
+        from pypaimon.write.backend_dispatch import switch_writer_to_python
 
         return switch_writer_to_python(self)
 
@@ -170,7 +170,7 @@ class NativeTableWrite:
     def write_pandas(self, dataframe):
         if self._python_writer is not None:
             return self._python_writer.write_pandas(dataframe)
-        from pypaimon.execution.write_input import _pandas_write_batch
+        from pypaimon.write.input_adapter import _pandas_write_batch
 
         return self.write_arrow_batch(_pandas_write_batch(
             self.table, dataframe, self._schema, self._table_schema))
@@ -184,7 +184,7 @@ class NativeTableWrite:
         if self._python_writer is not None:
             return self._python_writer.write_ray(
                 dataset, overwrite, concurrency, ray_remote_args, hash_fixed_precluster, static_partition)
-        from pypaimon.execution.write_input import _write_ray
+        from pypaimon.write.input_adapter import _write_ray
 
         _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
                    hash_fixed_precluster, static_partition)
@@ -227,13 +227,13 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
         self._python_writer = None
 
     def _new_python_writer(self):
-        from pypaimon.execution.dispatch import create_python_write
+        from pypaimon.write.backend_dispatch import create_python_write
 
         return self._configure_python_writer(create_python_write(
             self.table, self.commit_user, self.static_partition,
             fixed_bucket=True, bucket_plan=self._bucket_plan))
 
     def _distributed_write_options(self, *, overwrite=False):
-        from pypaimon.execution.write_input import postpone_distributed_write_options
+        from pypaimon.write.input_adapter import postpone_distributed_write_options
 
         return postpone_distributed_write_options(self.table, self._bucket_plan, overwrite)

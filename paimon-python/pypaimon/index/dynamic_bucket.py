@@ -406,7 +406,7 @@ class HashBucketAssigner:
     def _active_data_buckets(self, partition: Tuple, snapshot) -> Set[int]:
         if snapshot is None:
             return set()
-        from pypaimon.execution.dispatch import dynamic_bucket_data_buckets
+        from pypaimon.write.backend_dispatch import dynamic_bucket_data_buckets
         return dynamic_bucket_data_buckets(self.table, partition, snapshot)
 
 

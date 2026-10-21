@@ -59,15 +59,15 @@ class TableUpsertByKey:
         Returns:
             List of CommitMessages to be committed.
         """
-        from pypaimon.execution.update_dispatch import UpsertOperations
+        from pypaimon.write.update_dispatch import UpsertOperations
         return UpsertOperations.upsert(self, data, upsert_keys, update_cols)
 
     def upsert_rows(self, rows, upsert_keys: List[str], update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import UpsertOperations
+        from pypaimon.write.update_dispatch import UpsertOperations
         return UpsertOperations.upsert_rows(self, rows, upsert_keys, update_cols)
 
     def _create_native_upsert(self, data, upsert_keys, columns):
-        from pypaimon.execution.update_dispatch import UpsertOperations
+        from pypaimon.write.update_dispatch import UpsertOperations
         return UpsertOperations._create_native_upsert(self, data, upsert_keys, columns)
 
     def _new_row_id_updater(self):

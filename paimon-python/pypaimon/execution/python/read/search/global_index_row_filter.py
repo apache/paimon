@@ -18,7 +18,7 @@
 """Exact row filtering for data-evolution search candidates."""
 
 from pypaimon.common.like_optimization import try_optimize_like
-from pypaimon.execution.read_support import _ClosableArrowBatchReader
+from pypaimon.read.read_support import _ClosableArrowBatchReader
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.execution.python.read.search.global_index_live_row_filter import table_at_snapshot
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64

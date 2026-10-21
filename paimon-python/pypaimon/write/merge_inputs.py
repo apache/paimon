@@ -123,7 +123,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.execution.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)
@@ -177,7 +177,7 @@ def _prepare(
     )
 
     if has_condition:
-        from pypaimon.execution.merge_condition import extract_columns
+        from pypaimon.write.merge_condition import extract_columns
 
         target_names = set(full_target_field_names)
         if is_self_merge:
@@ -273,7 +273,7 @@ def _resolve_target_projection(
            for clause in clauses for value in clause.spec.values()):
         needed.update(target_field_names if callable_columns is None else callable_columns)
     if any(c.condition is not None for c in clauses):
-        from pypaimon.execution.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         target_set = set(target_field_names)
         for clause in clauses:
             if clause.condition is not None:

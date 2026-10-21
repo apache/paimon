@@ -193,7 +193,7 @@ def _build_matched_transform(
     for clause in clauses:
         rewritten = None
         if clause.condition is not None:
-            from pypaimon.execution.merge_condition import (
+            from pypaimon.write.merge_condition import (
                 remap_source_on_keys, rewrite_condition,
             )
             rewritten = remap_source_on_keys(
@@ -203,7 +203,7 @@ def _build_matched_transform(
 
     _filter_batch = None
     if any(r is not None for _, r, _ in prepared_clauses):
-        from pypaimon.execution.merge_condition import filter_batch as _filter_batch
+        from pypaimon.write.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch
@@ -259,7 +259,7 @@ def _build_matched_delete_transform(
     for clause in clauses:
         rewritten = None
         if clause.condition is not None:
-            from pypaimon.execution.merge_condition import (
+            from pypaimon.write.merge_condition import (
                 remap_source_on_keys, rewrite_condition,
             )
             rewritten = remap_source_on_keys(
@@ -269,7 +269,7 @@ def _build_matched_delete_transform(
 
     _filter_batch = None
     if any(r is not None for r, _ in prepared_clauses):
-        from pypaimon.execution.merge_condition import filter_batch as _filter_batch
+        from pypaimon.write.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch

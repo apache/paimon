@@ -75,7 +75,7 @@ def _operation(tmp_path, operation):
                 factory = 'create_native_upsert'
                 invoke = lambda: upsert.upsert(data, ['id'])
             elif operation == 'row-id-updater':
-                context.enter_context(patch('pypaimon.execution.update_dispatch.TableUpdateByRowId', pure))
+                context.enter_context(patch('pypaimon.write.update_dispatch.TableUpdateByRowId', pure))
                 factory, invoke = 'create_native_update_by_row_id', updater.new_update_by_row_id
             elif operation in ('update', 'batch-update'):
                 data = data.append_column('_ROW_ID', pa.array([0], pa.int64()))

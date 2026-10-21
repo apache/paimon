@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.write.commit_message import CommitMessage
 
-from pypaimon.execution.dispatch import create_write
+from pypaimon.write.backend_dispatch import create_write
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.table_write import BatchTableWrite
 from pypaimon.write.write_builder import BatchWriteBuilder

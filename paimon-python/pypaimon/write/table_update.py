@@ -47,7 +47,7 @@ class TableUpdate:
         self.projection = None
 
     def _new_row_id_updater(self, commit_identifier: int, _precomputed_files_info=None) -> TableUpdateByRowId:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._new_row_id_updater(self, commit_identifier, _precomputed_files_info)
 
     def with_update_type(self, update_cols: List[str]):
@@ -68,16 +68,16 @@ class TableUpdate:
 
     def new_shard_updator(self, shard_num: int, total_shard_count: int):
         """Create a shard updater for scan and rewrite style updates."""
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations.new_shard_updator(self, shard_num, total_shard_count)
 
     def _update_by_arrow_with_row_id(self, table: pa.Table, commit_identifier: int) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._update_by_arrow_with_row_id(self, table, commit_identifier)
 
     def _update_by_arrow_batches_with_row_id(
             self, tables: Iterable[pa.Table], commit_identifier: int) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._update_by_arrow_batches_with_row_id(self, tables, commit_identifier)
 
     def _upsert_by_arrow_with_key(
@@ -101,16 +101,16 @@ class TableUpdate:
         Returns:
             List of :class:`CommitMessage` objects to be committed.
         """
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._upsert_by_arrow_with_key(self, table, upsert_keys, commit_identifier)
 
     def _upsert_by_key(self, rows, upsert_keys: List[str], commit_identifier: int) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._upsert_by_key(self, rows, upsert_keys, commit_identifier)
 
     def _merge_into(self, source: Any, on, when_matched: Sequence, when_not_matched: Sequence,
                     commit_identifier: int) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._merge_into(self, source, on, when_matched, when_not_matched, commit_identifier)
 
     def _update_by_predicate(
@@ -122,19 +122,19 @@ class TableUpdate:
         literals or callables receiving one matched logical file group as an
         Arrow table.
         """
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._update_by_predicate(self, predicate, assignments, commit_identifier, read_columns)
 
     def _delete_by_predicate(self, predicate: Optional[Predicate], commit_identifier: int) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._delete_by_predicate(self, predicate, commit_identifier)
 
     def _delete_by_row_id(self, row_ids: Sequence[int], commit_identifier: int) -> List[CommitMessage]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._delete_by_row_id(self, row_ids, commit_identifier)
 
     def _matched_delete_row_ids(self, predicate: Optional[Predicate]) -> List[int]:
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations._matched_delete_row_ids(self, predicate)
 
     _predicate_fields = staticmethod(predicate_fields)
@@ -222,7 +222,7 @@ class BatchTableUpdate(TableUpdate):
         file groups. Conflicting overlap is rejected and all files staged by
         earlier batches are aborted.
         """
-        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations.update_by_arrow_batches_with_row_id(self, tables)
 
     def upsert_by_arrow_with_key(

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Torch dataset facades keep execution and resource ownership shared."""
+"""Torch dataset adapters retain readers, hooks, and worker cancellation."""
 
 import pickle
 import queue
@@ -102,7 +102,7 @@ class _HookedBatchDataset(TorchBatchIterDataset):
         return super()._prepare_batches(batches, worker_id)
 
 
-def test_torch_facades_preserve_public_identity_pickle_and_runtime_hooks():
+def test_torch_adapters_preserve_public_identity_pickle_and_runtime_hooks():
     dataset = _HookedBatchDataset(_Reader(), ['unselected'], 'pyarrow', 1)
     dataset.events = []
     dataset.marker = 'public state'
@@ -179,8 +179,8 @@ def test_torch_prefetch_cancellation_closes_all_retained_sources():
             return sources[splits[0]]
 
     dataset = TorchIterDataset(Reader(), [0, 1], prefetch_concurrency=2)
-    with patch('pypaimon.execution.datasource.torch_dataset.queue.Queue', TrackingQueue), \
-            patch('pypaimon.execution.datasource.torch_dataset.threading.Thread', producer_thread):
+    with patch('pypaimon.read.datasource.torch_dataset.queue.Queue', TrackingQueue), \
+            patch('pypaimon.read.datasource.torch_dataset.threading.Thread', producer_thread):
         rows = iter(dataset)
         try:
             assert next(rows) == {'id': 7}
@@ -226,7 +226,8 @@ def test_torch_dataset_adapters_do_not_import_either_execution_backend():
                 def find_spec(self, fullname, path=None, target=None):
                     if (fullname == 'pypaimon_rust'
                             or fullname.startswith('pypaimon.execution.python')
-                            or fullname.startswith('pypaimon.execution.native')):
+                            or fullname.startswith('pypaimon.execution.native')
+                            or fullname.startswith('pypaimon.execution.datasource')):
                         raise AssertionError('Unexpected backend import: ' + fullname)
 
             sys.meta_path.insert(0, BlockBackends())
@@ -258,7 +259,6 @@ def test_torch_dataset_adapters_do_not_import_either_execution_backend():
             reader = Reader()
             rows = TorchIterDataset(reader, [1])
             batches = TorchBatchIterDataset(reader, [1], 'pyarrow', 1)
-            assert 'pypaimon.execution.datasource.torch_dataset' not in sys.modules
             assert list(rows) == [{'id': 7}]
             assert [batch.num_rows for batch in batches] == [1, 1]
             assert TorchDataset(reader, [1])[1] == {'id': 11}

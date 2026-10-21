@@ -30,7 +30,7 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.write.table_update import TableUpdate
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey

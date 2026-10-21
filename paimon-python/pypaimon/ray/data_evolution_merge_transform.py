@@ -51,7 +51,7 @@ def vectorized_matched_transform(
     update_schema: pa.Schema,
     callable_input: Optional[pa.Table] = None,
 ) -> pa.Table:
-    from pypaimon.execution.merge_transform import vectorized_matched_transform as execute
+    from pypaimon.write.merge_transform import vectorized_matched_transform as execute
     return execute(batch, spec, on_pairs, update_cols, row_id_name, update_schema, callable_input)
 
 
@@ -60,7 +60,7 @@ def vectorized_delete_transform(
     row_id_name: str,
     delete_schema: pa.Schema,
 ) -> pa.Table:
-    from pypaimon.execution.merge_transform import vectorized_delete_transform as execute
+    from pypaimon.write.merge_transform import vectorized_delete_transform as execute
     return execute(batch, row_id_name, delete_schema)
 
 
@@ -70,12 +70,12 @@ def vectorized_insert_transform(
     target_field_names: Sequence[str],
     target_pa_schema: pa.Schema,
 ) -> pa.Table:
-    from pypaimon.execution.merge_transform import vectorized_insert_transform as execute
+    from pypaimon.write.merge_transform import vectorized_insert_transform as execute
     return execute(batch, spec, target_field_names, target_pa_schema)
 
 
 def cast_to_schema(batch: pa.Table, schema: pa.Schema) -> pa.Table:
-    from pypaimon.execution.merge_transform import cast_to_schema as execute
+    from pypaimon.write.merge_transform import cast_to_schema as execute
     return execute(batch, schema)
 
 
@@ -84,18 +84,18 @@ def build_update_schema(
     update_cols: Sequence[str],
     row_id_name: str,
 ) -> pa.Schema:
-    from pypaimon.execution.merge_transform import build_update_schema as execute
+    from pypaimon.write.merge_transform import build_update_schema as execute
     return execute(target_pa_schema, update_cols, row_id_name)
 
 
 def build_delete_schema(row_id_name: str) -> pa.Schema:
-    from pypaimon.execution.merge_transform import build_delete_schema as execute
+    from pypaimon.write.merge_transform import build_delete_schema as execute
     return execute(row_id_name)
 
 
 def _merge_callable_input(batch: pa.Table, on_pairs):
     # Arrow joins coalesce ON keys; callbacks still expose both SQL aliases.
-    from pypaimon.execution.merge_transform import _merge_callable_input as execute
+    from pypaimon.write.merge_transform import _merge_callable_input as execute
     return execute(batch, on_pairs)
 
 
@@ -107,5 +107,5 @@ def _resolve_spec_array(
     out_type: pa.DataType,
     callable_input: Optional[pa.Table] = None,
 ):
-    from pypaimon.execution.merge_transform import _resolve_spec_array as execute
+    from pypaimon.write.merge_transform import _resolve_spec_array as execute
     return execute(val, batch, available, on_pairs, out_type, callable_input)

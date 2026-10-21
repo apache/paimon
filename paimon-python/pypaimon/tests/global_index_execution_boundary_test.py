@@ -36,6 +36,8 @@ from unittest.mock import Mock, patch
 
 class RejectPythonIndexes(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'ray' or fullname.startswith('pypaimon.ray'):
+            raise AssertionError('Ray integration imported for a local index: ' + fullname)
         if fullname.startswith('pypaimon.execution.python'):
             raise AssertionError('Python index execution imported: ' + fullname)
         if fullname in ('paimon_vindex', 'paimon_ftindex', 'lumina'):
@@ -149,6 +151,54 @@ with patch.object(vindex_reader, '_native_reader_type', return_value=RustReader)
             reader.close()
         assert stream.closed
 assert not any(name.startswith('pypaimon.execution.python') for name in sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, '-c', textwrap.dedent(script)],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_local_python_index_build_does_not_import_ray_integration():
+    script = r"""
+import importlib.abc
+import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+class RejectRay(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'ray' or fullname.startswith('pypaimon.ray'):
+            raise AssertionError('Ray integration imported for a local index: ' + fullname)
+
+sys.meta_path.insert(0, RejectRay())
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
+from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
+
+read_builder = Mock()
+read_builder.new_scan.return_value.plan_all_files.return_value.splits.return_value = []
+table = SimpleNamespace(
+    options=CoreOptions(Options({
+        'bucket': '-1', 'row-tracking.enabled': 'true', 'write.native.enabled': 'false',
+    })),
+    identifier='db.table', is_primary_key_table=False,
+    field_dict={'embedding': DataField(0, 'embedding', ArrayType('ARRAY', AtomicType('FLOAT')))},
+    new_read_builder=lambda: read_builder,
+)
+for kind in ('btree', 'bitmap', 'full-text') + VINDEX_IDENTIFIERS:
+    builder = GlobalIndexBuilder(table, 'embedding', index_type=kind)
+    assert builder.build() == []
+    try:
+        builder.build(execution='local', concurrency=1)
+    except ValueError as error:
+        assert "execution='ray'" in str(error)
+    else:
+        raise AssertionError('Local index build accepted Ray-only options')
+assert not any(name == 'ray' or name.startswith('pypaimon.ray') for name in sys.modules)
 """
     result = subprocess.run(
         [sys.executable, '-c', textwrap.dedent(script)],

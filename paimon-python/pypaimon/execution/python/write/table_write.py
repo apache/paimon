@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from ray.data import Dataset
 
 
-from pypaimon.execution.write_input import _pandas_write_batch, _write_ray
+from pypaimon.write.input_adapter import _pandas_write_batch, _write_ray
 
 
 class PythonTableWriteMixin:

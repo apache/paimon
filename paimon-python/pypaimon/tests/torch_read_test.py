@@ -45,7 +45,7 @@ from pypaimon.read.datasource.torch_dataset import (
     TorchShuffledIterDataset,
     _resolve_distributed_context,
 )
-from pypaimon.execution.datasource.torch_dataset import _shuffle_record_batches
+from pypaimon.read.datasource.torch_dataset import _shuffle_record_batches
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.utils.range import Range
@@ -476,7 +476,7 @@ class TorchBatchShuffleTest(unittest.TestCase):
 
     def test_shuffle_drains_before_arrow_offset_overflow(self):
         table = pa.table({"text": [str(i).zfill(4) for i in range(12)]})
-        with patch("pypaimon.execution.datasource.torch_dataset._MAX_ARROW_OFFSET", 12):
+        with patch("pypaimon.read.datasource.torch_dataset._MAX_ARROW_OFFSET", 12):
             batches = list(_shuffle_record_batches(
                 iter(table.to_batches(max_chunksize=3)), 3, random.Random(3)))
         self.assertEqual(sorted(row["text"] for b in batches for row in b.to_pylist()),
@@ -1105,7 +1105,7 @@ class TorchReadTest(unittest.TestCase):
         )
 
     def test_torch_batch_sizing_respects_arrow_offset_limit(self):
-        from pypaimon.execution.datasource.torch_dataset import (
+        from pypaimon.read.datasource.torch_dataset import (
             _sized_record_batches)
 
         batches = iter([
@@ -1113,7 +1113,7 @@ class TorchReadTest(unittest.TestCase):
             pa.record_batch([pa.array(['bbbb'])], names=['value']),
         ])
         with patch(
-            'pypaimon.execution.datasource.torch_dataset._MAX_ARROW_OFFSET', 4
+            'pypaimon.read.datasource.torch_dataset._MAX_ARROW_OFFSET', 4
         ):
             actual = list(_sized_record_batches(batches, batch_size=2))
 
@@ -1123,7 +1123,7 @@ class TorchReadTest(unittest.TestCase):
         )
 
     def test_default_tensor_converter_supports_fixed_size_list(self):
-        from pypaimon.execution.datasource.torch_dataset import _default_to_tensor
+        from pypaimon.read.datasource.torch_dataset import _default_to_tensor
 
         values = pa.array([1, 2, 3, 4, 5, 6], type=pa.int32())
         features = pa.FixedSizeListArray.from_arrays(values, 3)

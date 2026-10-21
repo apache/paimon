@@ -75,7 +75,7 @@ def create_write(table, commit_user, static_partition=None, stream=False,
                 restore_snapshot_id=restore_snapshot_id, fixed_bucket=fixed_bucket, bucket_plan=bucket_plan)
         native = try_prepare_native(prepare)
         if native is not None:
-            from pypaimon.execution.write_dispatch import NativeTableWrite
+            from pypaimon.write.write_dispatch import NativeTableWrite
             return NativeTableWrite.from_native(native)
     return create_python_write(
         table, commit_user, static_partition, stream, restore_snapshot_id, fixed_bucket, bucket_plan)

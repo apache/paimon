@@ -4804,7 +4804,7 @@ class MergeConditionUnitTest(unittest.TestCase):
             try_parse_self_merge_predicate,
         )
         with self.assertLogs(
-                'pypaimon.execution.merge_condition', level='DEBUG') as logs:
+                'pypaimon.write.merge_condition', level='DEBUG') as logs:
             self.assertIsNone(try_parse_self_merge_predicate(
                 't.id =', self._predicate_fields(),
             ))

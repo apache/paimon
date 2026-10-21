@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
-from pypaimon.execution.merge_transform import (
+from pypaimon.write.merge_transform import (
     SourceColumnRef,
     _NormalizedClause,
     build_delete_schema,
@@ -116,7 +116,7 @@ def _resolve_source_projection(
             if isinstance(value, SourceColumnRef):
                 needed.add(value.column)
         if clause.condition is not None:
-            from pypaimon.execution.merge_condition import extract_columns
+            from pypaimon.write.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in source_set:
@@ -134,7 +134,7 @@ def _build_matched_transform(
     update_schema: pa.Schema,
     callable_input_columns: Optional[Sequence[str]] = None,
 ):
-    from pypaimon.execution.merge_transform import _build_matched_transform as execute
+    from pypaimon.write.merge_transform import _build_matched_transform as execute
     return execute(clauses, on_map, on_pairs, update_cols, row_id_name, update_schema, callable_input_columns)
 
 
@@ -144,7 +144,7 @@ def _build_matched_delete_transform(
     row_id_name: str,
     delete_schema: pa.Schema,
 ):
-    from pypaimon.execution.merge_transform import _build_matched_delete_transform as execute
+    from pypaimon.write.merge_transform import _build_matched_delete_transform as execute
     return execute(clauses, on_map, row_id_name, delete_schema)
 
 
@@ -179,7 +179,7 @@ def build_self_merge_update_plan(
     target_set = set(target_field_names)
     for clause in clauses:
         if clause.condition is not None:
-            from pypaimon.execution.merge_condition import extract_columns
+            from pypaimon.write.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in target_set:
@@ -394,7 +394,7 @@ def build_self_merge_delete_ds(
     target_set = set(target_field_names)
     for clause in clauses:
         if clause.condition is not None:
-            from pypaimon.execution.merge_condition import extract_columns
+            from pypaimon.write.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in target_set:
@@ -1096,13 +1096,13 @@ def build_not_matched_insert_ds(
     for clause in clauses:
         rewritten = None
         if clause.condition is not None:
-            from pypaimon.execution.merge_condition import rewrite_condition
+            from pypaimon.write.merge_condition import rewrite_condition
             rewritten = rewrite_condition(clause.condition)
         prepared_clauses.append((clause.spec, rewritten))
 
     _filter_batch_nm = None
     if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.execution.merge_condition import filter_batch as _filter_batch_nm
+        from pypaimon.write.merge_condition import filter_batch as _filter_batch_nm
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch

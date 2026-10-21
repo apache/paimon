@@ -810,7 +810,7 @@ class TableWriteTest(unittest.TestCase):
             PostponeFixedBucketBatchTableWrite,
             PostponeFixedBucketWriteBuilder,
         )
-        from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
+        from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
         self.assertIsInstance(
             write_builder, PostponeFixedBucketWriteBuilder)
         self.assertIsInstance(

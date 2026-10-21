@@ -220,7 +220,7 @@ class AbstractVectorSearchBuilderImpl:
         reject_search_under_query_auth(self._table)
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
-        from pypaimon.execution.search_dispatch import create_vector_scan
+        from pypaimon.table.source.search_dispatch import create_vector_scan
         execution = copy(self)
         execution._options = dict(self._options)
         return create_vector_scan(self, execution._new_python_vector_scan, self._native_batch_search)
@@ -249,7 +249,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         return self
 
     def execute_local(self):
-        from pypaimon.execution.search_dispatch import execute_vector_search
+        from pypaimon.table.source.search_dispatch import execute_vector_search
         return execute_vector_search(self, self._query_vector)
 
     def new_vector_search_read(self):
@@ -261,7 +261,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Vector column must be set via with_vector_column()")
         if self._query_vector is None:
             raise ValueError("Query vector must be set via with_query_vector()")
-        from pypaimon.execution.search_dispatch import create_vector_read
+        from pypaimon.table.source.search_dispatch import create_vector_read
         execution = copy(self)
         execution._options = dict(self._options)
         execution._query_vector = copy(self._query_vector)

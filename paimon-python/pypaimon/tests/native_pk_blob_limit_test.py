@@ -26,7 +26,7 @@ from pypaimon import CatalogFactory
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 

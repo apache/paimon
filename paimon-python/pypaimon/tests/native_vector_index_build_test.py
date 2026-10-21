@@ -24,7 +24,7 @@ import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-from pypaimon.execution.vindex_input import (
+from pypaimon.globalindex.vindex_input import (
     PaimonVindexInput,
 )
 from pypaimon.globalindex.vindex_options import (

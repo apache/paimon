@@ -26,7 +26,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.consumer.consumer import Consumer
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.execution.dispatch import propagate_fork_safety_error as _raise_if_native_fork_safety_error
+from pypaimon.write.backend_dispatch import propagate_fork_safety_error as _raise_if_native_fork_safety_error
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.execution.python.read.scanner.append_table_split_generator import \

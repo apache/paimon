@@ -17,7 +17,7 @@
 
 from typing import Dict, List, Optional
 
-from pypaimon.execution.dispatch import (
+from pypaimon.write.backend_dispatch import (
     abort_table_commit, close_table_commit, commit_table_messages, prepare_native_commit,
     python_commit, truncate_partitions_commit, truncate_table_commit,
 )

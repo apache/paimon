@@ -31,7 +31,7 @@ pytest.importorskip("paimon_vindex")
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.execution.python.globalindex import ray_build as vector_index_build
+from pypaimon.ray import vector_index_build
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.tests.ray_vector_search_test import add_rows, VECTORS

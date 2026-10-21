@@ -70,5 +70,5 @@ class SystemTableScan:
         self.system_table = system_table
 
     def plan(self) -> Plan:
-        from pypaimon.execution.read_dispatch import plan_system_table
+        from pypaimon.read.read_dispatch import plan_system_table
         return plan_system_table(self)

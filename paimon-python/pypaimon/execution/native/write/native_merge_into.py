@@ -28,7 +28,7 @@ from pypaimon.execution.native.write.native_update import (
 
 
 def _callable_assignment(function, on_pairs):
-    from pypaimon.execution.merge_transform import _merge_callable_input
+    from pypaimon.write.merge_transform import _merge_callable_input
 
     def evaluate(batch):
         return function(_merge_callable_input(batch, on_pairs))
@@ -40,7 +40,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
     from pypaimon.write.merge_inputs import _is_self_merge, _is_table_like, _prepare
     from pypaimon.write.merge_inputs import _normalize_on, _union_update_cols
     from pypaimon.write.merge_types import SourceColumnRef, TargetColumnRef, LiteralValue
-    from pypaimon.execution.merge_condition import rewrite_condition
+    from pypaimon.write.merge_condition import rewrite_condition
 
     target_keys, source_keys = _normalize_on(on)
     self_merge = _is_self_merge(table, source, target_keys, source_keys)

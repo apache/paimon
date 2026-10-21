@@ -40,7 +40,7 @@ from pypaimon.ray.data_evolution_merge_join import (
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
-from pypaimon.execution.merge_transform import (
+from pypaimon.write.merge_transform import (
     LiteralValue,
     OnSpec,
     SetSpec,
@@ -237,7 +237,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.execution.merge_condition import (
+        from pypaimon.write.merge_condition import (
             _load_datafusion, extract_target_columns,
         )
         _load_datafusion()
@@ -311,7 +311,7 @@ def _prepare(
     )
 
     if has_condition:
-        from pypaimon.execution.merge_condition import extract_columns
+        from pypaimon.write.merge_condition import extract_columns
         target_names = set(full_target_field_names)
         if is_self_merge:
             target_names |= set(target_on_cols)
@@ -341,7 +341,7 @@ def _prepare(
     if (is_self_merge and matched_specs
             and all(c.condition is not None for c in matched_specs)):
         from pypaimon.common.predicate_builder import PredicateBuilder
-        from pypaimon.execution.merge_condition import (
+        from pypaimon.write.merge_condition import (
             try_parse_self_merge_predicate,
         )
         predicates = [
@@ -722,7 +722,7 @@ def _resolve_target_projection(
            for clause in clauses for value in clause.spec.values()):
         needed.update(target_field_names if callable_columns is None else callable_columns)
     if any(c.condition is not None for c in clauses):
-        from pypaimon.execution.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         target_set = set(target_field_names)
         for clause in clauses:
             if clause.condition is not None:

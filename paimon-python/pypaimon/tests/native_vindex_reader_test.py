@@ -26,7 +26,7 @@ import pytest
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.vector_search import VectorSearch
-from pypaimon.execution.vindex_input import (
+from pypaimon.globalindex.vindex_input import (
     PaimonVindexInput,
 )
 from pypaimon.globalindex.vindex_options import (

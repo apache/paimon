@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 _PARTITIONS = [

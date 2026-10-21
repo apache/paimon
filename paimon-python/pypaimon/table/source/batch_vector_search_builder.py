@@ -110,7 +110,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         return self
 
     def execute_batch_local(self):
-        from pypaimon.execution.search_dispatch import execute_vector_search
+        from pypaimon.table.source.search_dispatch import execute_vector_search
         return execute_vector_search(self, self._query_vectors, batch=True)
 
     def new_batch_vector_search_read(self):
@@ -123,7 +123,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         if not self._query_vectors:
             raise ValueError(
                 "Query vectors must be set via with_query_vectors()")
-        from pypaimon.execution.search_dispatch import create_vector_read
+        from pypaimon.table.source.search_dispatch import create_vector_read
         execution = copy(self)
         execution._options = dict(self._options)
         execution._query_vectors = [copy(vector) for vector in self._query_vectors]
