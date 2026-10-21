@@ -41,6 +41,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
+import static org.apache.paimon.format.mosaic.MosaicObjects.hasUsableMinMax;
 
 /** Extracts statistics from Mosaic file metadata. */
 public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
@@ -120,8 +121,8 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
                 seenColumns.add(colIdx);
                 nullCounts[colIdx] += stat.getNullCount();
 
-                if (stat.hasMinMax()) {
-                    DataType dataType = rowType.getFields().get(colIdx).type();
+                DataType dataType = rowType.getFields().get(colIdx).type();
+                if (hasUsableMinMax(stat, dataType)) {
                     Object min = convertStatsValue(stat.getMin(), dataType);
                     Object max = convertStatsValue(stat.getMax(), dataType);
                     if (min instanceof Comparable) {

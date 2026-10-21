@@ -31,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -86,6 +87,18 @@ class MosaicSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
     @Override
     protected String fileCompression() {
         return "zstd";
+    }
+
+    @Override
+    protected SimpleColStats regenerate(SimpleColStats stats, DataType type) {
+        switch (type.getTypeRoot()) {
+            case FLOAT:
+            case DOUBLE:
+                // Mosaic float bounds can hide NaN or -0.0, so only the null count is kept.
+                return new SimpleColStats(null, null, stats.nullCount());
+            default:
+                return stats;
+        }
     }
 
     @Test

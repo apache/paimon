@@ -65,6 +65,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
+import static org.apache.paimon.format.mosaic.MosaicObjects.hasUsableMinMax;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** File reader for Mosaic format. */
@@ -533,8 +534,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             }
 
             nullCounts[i] = stats.getNullCount();
-            if (stats.hasMinMax()) {
-                DataType dataType = fields.get(i).type();
+            DataType dataType = fields.get(i).type();
+            if (hasUsableMinMax(stats, dataType)) {
                 Object min = convertStatsValue(stats.getMin(), dataType);
                 Object max = convertStatsValue(stats.getMax(), dataType);
                 minValues.setField(i, min);

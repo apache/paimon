@@ -21,7 +21,9 @@ package org.apache.paimon.format.mosaic;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.mosaic.ColumnStatistics;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
@@ -84,6 +86,21 @@ public class MosaicObjects {
             default:
                 return null;
         }
+    }
+
+    /**
+     * Mosaic updates FLOAT and DOUBLE min/max with a partial comparison. A leading NaN pins both
+     * bounds to NaN, a later NaN never replaces a bound, and {@code -0.0} never replaces {@code
+     * +0.0} (or the reverse). Any of those can make a predicate skip a row group or file that still
+     * contains a matching row, and Mosaic stats carry no NaN count to detect it. A missing bound is
+     * not used for skipping.
+     */
+    static boolean hasUsableMinMax(ColumnStatistics stats, DataType dataType) {
+        if (!stats.hasMinMax()) {
+            return false;
+        }
+        DataTypeRoot root = dataType.getTypeRoot();
+        return root != DataTypeRoot.FLOAT && root != DataTypeRoot.DOUBLE;
     }
 
     private static Timestamp convertTimestamp(ByteBuffer buf, int precision) {
