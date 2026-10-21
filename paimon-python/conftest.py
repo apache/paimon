@@ -36,13 +36,6 @@ _force_native_commit_for_test = False
 _force_native_update_for_test = False
 
 
-def pytest_addoption(parser):
-    parser.addoption(
-        "--robomind-agilex-input",
-        help="Downloaded RoboMIND AgileX directory for the optional sample test.",
-    )
-
-
 @pytest.fixture
 def native_rest_catalog(tmp_path):
     """A local REST catalog for native writer and committer integration tests."""

@@ -111,11 +111,6 @@ torch = [
     "torch",
     "Pillow",
 ]
-# ACT uses the same LeRobot stack; do not maintain its versions twice.
-act = [
-    "pypaimon[lerobot]; python_version >= '3.10'",
-    "Pillow; python_version >= '3.10'",
-]
 daft = [
     "daft>=0.7.6; python_version >= '3.10'",
 ]
@@ -222,4 +217,4 @@ include = ["pypaimon*"]
 exclude = ["pypaimon.tests*"]
 
 [tool.setuptools.package-data]
-pypaimon = ["_full_version", "benchmark/act/default_experiment.json"]
+pypaimon = ["_full_version"]

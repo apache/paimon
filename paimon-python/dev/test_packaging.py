@@ -116,11 +116,10 @@ class PackagingTest(unittest.TestCase):
     def test_distribution_contents(self):
         names, metadata, _ = wheel_contents(self.wheel)
         self.assertEqual(">=3.6", metadata["Requires-Python"])
-        self.assertFalse(any(name.startswith("pypaimon/tests/")
+        self.assertFalse(any(name.startswith(("pypaimon/tests/", "pypaimon/benchmark/"))
                              for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
-        for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py",
-                     "pypaimon/benchmark/act/default_experiment.json"):
+        for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
             self.assertIn(name, names)
         execution_files = (
             "pypaimon/execution/python/deletionvectors/__init__.py",
@@ -230,6 +229,7 @@ class PackagingTest(unittest.TestCase):
                 self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
                                  or name.startswith(prefix + "pypaimon/tests/")
+                                 or name.startswith(prefix + "pypaimon/benchmark/")
                                  for name in names))
 
     @staticmethod
