@@ -21,6 +21,11 @@ package org.apache.paimon.format.vortex;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
@@ -28,7 +33,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongIterator;
-import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import dev.vortex.api.DataSource;
 import dev.vortex.api.Expression;
@@ -36,180 +41,310 @@ import dev.vortex.api.ImmutableScanOptions;
 import dev.vortex.api.Partition;
 import dev.vortex.api.Scan;
 import dev.vortex.api.ScanOptions;
-import dev.vortex.api.Session;
 import dev.vortex.arrow.ArrowAllocation;
+import dev.vortex.arrow.ArrowBatchStream;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.UInt8Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.ipc.ArrowReader;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
-/** File reader for Vortex format. */
+/**
+ * File reader for Vortex format.
+ *
+ * <p>Each Arrow batch from the native scan is a new root that this reader owns until the consumer
+ * releases the batch, so a later batch never overwrites one that the consumer still holds. Batches
+ * are returned as {@link VectorizedRowIterator}s, so engines can consume them column by column.
+ *
+ * <p>A pushed-down filter or a row selection drops rows in native code. The file position of each
+ * returned row then comes from the Vortex row index, because deletion vectors and row tracking
+ * depend on it.
+ */
 public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
-    private final ArrowBatchReader arrowBatchReader;
+    private static final String ROW_INDEX_FIELD = "_PAIMON_VORTEX_ROW_INDEX";
+
     private final Path filePath;
     private final BufferAllocator allocator;
-    private final Session session;
+    @Nullable private final Closeable readable;
     private final DataSource dataSource;
     private final Scan scan;
-    private final LongIterator positionIterator;
+    private final ArrowBatchReader arrowBatchReader;
     @Nullable private final int[] physicalFieldMapping;
-    private ArrowReader currentArrowReader;
-    private Partition currentPartition;
-    private long returnedPosition = -1;
+    private final boolean readsRowIndex;
+    private final Set<VectorSchemaRoot> activeBatches = new HashSet<>();
 
-    public VortexRecordsReader(
-            Path path,
+    @Nullable private ArrowBatchStream currentStream;
+    private long nextPosition;
+    private boolean closed;
+
+    VortexRecordsReader(
+            VortexInput input,
+            Path filePath,
             RowType dataSchemaRowType,
             RowType projectedRowType,
-            @Nullable long[] rowIndices,
-            @Nullable Expression predicate,
-            Map<String, String> storageOptions) {
-        this.filePath = path;
+            @Nullable RoaringBitmap32 selection,
+            @Nullable Expression filter) {
+        this.filePath = filePath;
+
         RowType physicalReadRowType = physicalReadRowType(dataSchemaRowType, projectedRowType);
         this.physicalFieldMapping =
                 physicalFieldMapping(dataSchemaRowType, physicalReadRowType, projectedRowType);
+        this.arrowBatchReader = new ArrowBatchReader(physicalReadRowType, true);
+
+        List<String> columns = physicalReadRowType.getFieldNames();
+        this.readsRowIndex = filter != null || selection != null || columns.isEmpty();
+
         this.allocator =
                 ArrowAllocation.rootAllocator()
                         .newChildAllocator("vortex-reader", 0, Long.MAX_VALUE);
 
+        Closeable openedReadable = null;
+        DataSource openedDataSource = null;
         try {
-            this.session = Session.create();
-            try {
-                this.dataSource = DataSource.open(session, path.toUri().toString(), storageOptions);
-                try {
-                    ImmutableScanOptions.Builder scanBuilder =
-                            ImmutableScanOptions.builder().ordered(true);
-
-                    java.util.List<String> columns = physicalReadRowType.getFieldNames();
-                    // The scan clones the projection it is given, so both the root and the select
-                    // built here are ours to release once dataSource.scan has returned.
-                    try (Expression root = Expression.root();
-                            Expression projection =
-                                    Expression.select(columns.toArray(new String[0]), root)) {
-                        scanBuilder.projection(projection);
-
-                        if (rowIndices != null) {
-                            scanBuilder.selectionIndices(rowIndices);
-                            scanBuilder.selectionMode(ScanOptions.SelectionMode.INCLUDE);
-                        }
-                        if (predicate != null) {
-                            scanBuilder.filter(predicate);
-                        }
-                        this.scan = dataSource.scan(scanBuilder.build());
-                    }
-                } catch (Exception e) {
-                    dataSource.close();
-                    throw e;
-                }
-            } catch (Exception e) {
-                session.close();
-                throw e;
+            openedReadable = input.readable();
+            openedDataSource = input.open();
+            // The scan clones the expressions it is given, so the projection is ours to release
+            // once the scan exists.
+            try (Expression projection = projection(columns)) {
+                this.scan = openedDataSource.scan(scanOptions(projection, selection, filter));
             }
-        } catch (Exception e) {
-            allocator.close();
-            throw new RuntimeException(e);
+        } catch (Throwable t) {
+            closeQuietly(openedDataSource, t);
+            closeQuietly(openedReadable, t);
+            closeQuietly(allocator, t);
+            throw t;
         }
 
-        this.arrowBatchReader = new ArrowBatchReader(physicalReadRowType, true);
-        long totalRowCount = dataSource.rowCount();
-        this.positionIterator =
-                rowIndices != null
-                        ? LongIterator.fromArray(rowIndices)
-                        : LongIterator.fromRange(0, totalRowCount > 0 ? totalRowCount : 0);
+        this.readable = openedReadable;
+        this.dataSource = openedDataSource;
     }
 
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        // Try to load the next batch from the current ArrowReader
-        if (currentArrowReader != null && currentArrowReader.loadNextBatch()) {
-            return toBatchIterator(currentArrowReader.getVectorSchemaRoot());
-        }
-
-        // Close current reader and move to the next partition
-        closeCurrentArrowReader();
-
-        while (scan.hasNext()) {
-            closeCurrentPartition();
-            currentPartition = scan.next();
-            currentArrowReader = currentPartition.scanArrow(allocator);
-            if (currentArrowReader.loadNextBatch()) {
-                return toBatchIterator(currentArrowReader.getVectorSchemaRoot());
-            }
-            closeCurrentArrowReader();
-        }
-
-        return null;
-    }
-
-    private FileRecordIterator<InternalRow> toBatchIterator(VectorSchemaRoot vsr) {
-        Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
-        ProjectedRow projectedRow =
-                physicalFieldMapping == null ? null : ProjectedRow.from(physicalFieldMapping);
-
-        return new FileRecordIterator<InternalRow>() {
-            @Override
-            public long returnedPosition() {
-                return returnedPosition;
-            }
-
-            @Override
-            public Path filePath() {
-                return filePath;
-            }
-
-            @Nullable
-            @Override
-            public InternalRow next() {
-                if (!rows.hasNext()) {
-                    return null;
+        while (true) {
+            VectorSchemaRoot root = currentStream == null ? null : currentStream.next();
+            if (root != null) {
+                track(root);
+                if (root.getRowCount() > 0) {
+                    return toBatchIterator(root);
                 }
-                returnedPosition = positionIterator.next();
-                InternalRow row = rows.next();
-                return projectedRow == null ? row : projectedRow.replaceRow(row);
+                releaseBatch(root);
+                continue;
             }
 
-            @Override
-            public void releaseBatch() {}
-        };
-    }
-
-    private void closeCurrentArrowReader() {
-        if (currentArrowReader != null) {
-            try {
-                currentArrowReader.close();
-            } catch (IOException e) {
-                // ignore
+            closeCurrentStream();
+            if (!scan.hasNext()) {
+                return null;
             }
-            currentArrowReader = null;
-        }
-    }
 
-    private void closeCurrentPartition() {
-        if (currentPartition != null) {
-            currentPartition.close();
-            currentPartition = null;
+            try (Partition partition = scan.next()) {
+                currentStream = partition.scanArrow(allocator);
+            }
         }
     }
 
     @Override
-    public void close() {
-        closeCurrentArrowReader();
-        closeCurrentPartition();
-        scan.close();
-        dataSource.close();
-        session.close();
-        allocator.close();
+    public void close() throws IOException {
+        if (closed) {
+            return;
+        }
+        closed = true;
+
+        Throwable failure = null;
+        try {
+            closeCurrentStream();
+        } catch (Throwable t) {
+            failure = t;
+        }
+
+        List<VectorSchemaRoot> unreleased;
+        synchronized (activeBatches) {
+            unreleased = new ArrayList<>(activeBatches);
+            activeBatches.clear();
+        }
+        for (VectorSchemaRoot root : unreleased) {
+            failure = closeQuietly(root, failure);
+        }
+
+        failure = closeQuietly(scan, failure);
+        failure = closeQuietly(dataSource, failure);
+        failure = closeQuietly(readable, failure);
+        failure = closeQuietly(allocator, failure);
+
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        } else if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        } else if (failure instanceof Error) {
+            throw (Error) failure;
+        } else if (failure != null) {
+            throw new IOException(failure);
+        }
+    }
+
+    private static ScanOptions scanOptions(
+            Expression projection,
+            @Nullable RoaringBitmap32 selection,
+            @Nullable Expression filter) {
+        // Paimon merges sorted files and maps deletion vectors by position, so rows must keep
+        // their file order.
+        ImmutableScanOptions.Builder builder = ImmutableScanOptions.builder().ordered(true);
+
+        if (selection != null) {
+            builder.selectionRoaringBitmap(serializeSelection(selection))
+                    .selectionMode(ScanOptions.SelectionMode.INCLUDE_ROARING);
+        }
+
+        if (filter != null) {
+            builder.filter(filter);
+        }
+
+        return builder.projection(projection).build();
+    }
+
+    private Expression projection(List<String> columns) {
+        if (!readsRowIndex) {
+            try (Expression root = Expression.root()) {
+                return Expression.select(columns.toArray(new String[0]), root);
+            }
+        }
+
+        String[] names = new String[columns.size() + 1];
+        Expression[] values = new Expression[columns.size() + 1];
+        try {
+            for (int i = 0; i < columns.size(); i++) {
+                names[i] = columns.get(i);
+                values[i] = Expression.column(columns.get(i));
+            }
+            names[columns.size()] = ROW_INDEX_FIELD;
+            values[columns.size()] = Expression.rowIdx();
+            return Expression.pack(names, values, false);
+        } finally {
+            for (Expression value : values) {
+                if (value != null) {
+                    value.close();
+                }
+            }
+        }
+    }
+
+    private void track(VectorSchemaRoot root) {
+        synchronized (activeBatches) {
+            activeBatches.add(root);
+        }
+    }
+
+    private void releaseBatch(VectorSchemaRoot root) {
+        boolean owned;
+        synchronized (activeBatches) {
+            owned = activeBatches.remove(root);
+        }
+        if (owned) {
+            root.close();
+        }
+    }
+
+    private FileRecordIterator<InternalRow> toBatchIterator(VectorSchemaRoot root) {
+        VectorizedColumnBatch physicalBatch = arrowBatchReader.readVectorizedBatch(root);
+        VectorizedColumnBatch batch = projectedBatch(physicalBatch);
+        int rowCount = root.getRowCount();
+
+        LongIterator positions;
+        if (readsRowIndex) {
+            positions = rowIndexPositions((UInt8Vector) root.getVector(ROW_INDEX_FIELD), rowCount);
+        } else {
+            positions = LongIterator.fromRange(nextPosition, nextPosition + rowCount);
+            nextPosition += rowCount;
+        }
+
+        VectorizedRowIterator iterator =
+                new VectorizedRowIterator(
+                        filePath, new ColumnarRow(batch), () -> releaseBatch(root));
+        iterator.reset(positions);
+        return iterator;
+    }
+
+    private VectorizedColumnBatch projectedBatch(VectorizedColumnBatch physicalBatch) {
+        if (physicalFieldMapping == null) {
+            return physicalBatch;
+        }
+
+        ColumnVector[] columns = new ColumnVector[physicalFieldMapping.length];
+        for (int i = 0; i < physicalFieldMapping.length; i++) {
+            int index = physicalFieldMapping[i];
+            columns[i] = index < 0 ? AllNullColumnVector.INSTANCE : physicalBatch.columns[index];
+        }
+        return physicalBatch.copy(columns);
+    }
+
+    private void closeCurrentStream() {
+        if (currentStream != null) {
+            ArrowBatchStream stream = currentStream;
+            currentStream = null;
+            stream.close();
+        }
+    }
+
+    private static LongIterator rowIndexPositions(UInt8Vector rowIndex, int rowCount) {
+        return new LongIterator() {
+
+            private int i = 0;
+
+            @Override
+            public boolean hasNext() {
+                return i < rowCount;
+            }
+
+            @Override
+            public long next() {
+                return rowIndex.get(i++);
+            }
+        };
+    }
+
+    /**
+     * Serializes a 32-bit selection as a portable Roaring64 bitmap: a little-endian count of 32-bit
+     * bitmaps, then each bitmap after its little-endian high 32 bits. All Paimon file positions
+     * have zero high bits, so there is one bitmap.
+     */
+    @VisibleForTesting
+    static byte[] serializeSelection(RoaringBitmap32 selection) {
+        byte[] bitmap = selection.serialize();
+        return ByteBuffer.allocate(Long.BYTES + Integer.BYTES + bitmap.length)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(1L)
+                .putInt(0)
+                .put(bitmap)
+                .array();
+    }
+
+    @Nullable
+    private static Throwable closeQuietly(
+            @Nullable AutoCloseable closeable, @Nullable Throwable failure) {
+        if (closeable == null) {
+            return failure;
+        }
+
+        try {
+            closeable.close();
+        } catch (Throwable t) {
+            if (failure == null) {
+                return t;
+            }
+            failure.addSuppressed(t);
+        }
+        return failure;
     }
 
     @VisibleForTesting

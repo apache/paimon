@@ -20,7 +20,12 @@ package dev.vortex.api;
 
 import dev.vortex.jni.NativeSession;
 
-/** A Vortex session that manages the native runtime. */
+/**
+ * A Vortex session: the native registries, the write options and the footer cache.
+ *
+ * <p>A session is safe to share across threads. It is expensive to create, and its footer cache
+ * is only useful when it is reused, so normally one session lives for the whole process.
+ */
 public final class Session implements AutoCloseable {
 
     private long pointer;

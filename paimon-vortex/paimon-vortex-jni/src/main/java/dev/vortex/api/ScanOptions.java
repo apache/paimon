@@ -35,7 +35,11 @@ public interface ScanOptions {
 
     OptionalLong rowRangeEnd();
 
+    /** Sorted ascending, unique row indices. The native scan rejects any other order. */
     Optional<long[]> selectionIndices();
+
+    /** A portable serialized Roaring64 bitmap of row indices. */
+    Optional<byte[]> selectionRoaringBitmap();
 
     @Value.Default
     default SelectionMode selectionMode() {
@@ -49,11 +53,48 @@ public interface ScanOptions {
         return false;
     }
 
+    @Value.Check
+    default void validateSelectionPayload() {
+        boolean hasIndices = selectionIndices().isPresent();
+        boolean hasBitmap = selectionRoaringBitmap().isPresent();
+        if (hasIndices && hasBitmap) {
+            throw new IllegalArgumentException(
+                    "row selection must use either indices or a roaring bitmap, not both");
+        }
+
+        switch (selectionMode()) {
+            case INCLUDE_ALL:
+                if (hasIndices || hasBitmap) {
+                    throw new IllegalArgumentException(
+                            "row selection payload requires a selection mode");
+                }
+                break;
+            case INCLUDE:
+            case EXCLUDE:
+                if (!hasIndices) {
+                    throw new IllegalArgumentException(
+                            "selection indices are required for index selection modes");
+                }
+                break;
+            case INCLUDE_ROARING:
+            case EXCLUDE_ROARING:
+                if (!hasBitmap || selectionRoaringBitmap().get().length == 0) {
+                    throw new IllegalArgumentException(
+                            "a non-empty roaring bitmap is required for roaring selection modes");
+                }
+                break;
+            default:
+                throw new IllegalArgumentException("unknown selection mode " + selectionMode());
+        }
+    }
+
     /** Selection mode for row indices. */
     enum SelectionMode {
         INCLUDE_ALL((byte) 0),
         INCLUDE((byte) 1),
-        EXCLUDE((byte) 2);
+        EXCLUDE((byte) 2),
+        INCLUDE_ROARING((byte) 3),
+        EXCLUDE_ROARING((byte) 4);
 
         private final byte code;
 

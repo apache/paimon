@@ -9,13 +9,20 @@ The Java source code under `src/main/java/dev/vortex/` is adapted from the upstr
 (Apache License 2.0). The `dev.vortex.jni` package name is preserved to match the JNI
 native method signatures in the pre-compiled Rust library.
 
+The Java declarations must match the JNI signatures of the native library version in
+`vortex.jni.version` (currently 0.89.0). A signature that differs still links, and then fails at
+run time, so update both together.
+
 Key adaptations from upstream:
 - Build system changed from Gradle to Maven.
 - Target Java version set to 1.8 for Paimon compatibility (upstream requires JDK 17).
 - `java.lang.ref.Cleaner` (JDK 9+) replaced with explicit `close()` via `AutoCloseable`.
-- Protobuf-based expression serialization replaced with native pointer-based `Expression` API.
 - Arrow memory allocation uses `Unsafe` allocator (via `arrow-memory-unsafe`) to guarantee
   buffer alignment required by Vortex's Rust FFI.
+- Vortex exports strings and binaries as `Utf8View` and `BinaryView`. Arrow Java 15 cannot import
+  view types, and newer Arrow Java versions need Java 11. `ArrowBatchStream` imports those columns
+  as `Utf8` and `Binary` by copying their values, and moves all other columns without a copy.
+- Only the parts of the upstream API that Paimon uses are kept.
 
 ## Native Library
 
@@ -30,6 +37,7 @@ The published jar includes pre-built binaries for:
 | macOS Apple Silicon   | `darwin-aarch64`     | `libvortex_jni.dylib`   |
 | Linux x86_64          | `linux-amd64`        | `libvortex_jni.so`      |
 | Linux aarch64         | `linux-aarch64`      | `libvortex_jni.so`      |
+| Windows x86_64        | `win-amd64`          | `libvortex_jni.dll`     |
 
 No Rust toolchain or manual build is required.
 
