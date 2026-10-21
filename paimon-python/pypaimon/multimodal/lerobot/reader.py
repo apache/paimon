@@ -42,7 +42,8 @@ class _PaimonTableFrameReader:
         self._table = self._table._copy_with_snapshot(snapshot)
         self.num_rows = snapshot.next_row_id
         self.file_io = self._table.file_io
-        self._locator = _FrameLocator(self._table, snapshot, splits)
+        self._locator = _FrameLocator(
+            self._table, snapshot, splits, projection=columns)
 
     def read_indices(self, indices, columns):
         builder = self._table.new_read_builder().with_projection(columns)
@@ -74,9 +75,10 @@ class _PaimonTableFrameReader:
 class _FrameLocator:
     """Locate LeRobot frame rows in one fixed Paimon snapshot."""
 
-    def __init__(self, table, snapshot, splits):
+    def __init__(self, table, snapshot, splits, *, projection):
         self._table = table
         self._snapshot = snapshot
+        self._projection = list(projection)
         self._scanner = None
         self._scanner_initialized = False
         self._process_id = os.getpid()
@@ -145,7 +147,8 @@ class _FrameLocator:
         self._scanner_initialized = False
         splits = self._splits
         if splits is None:
-            splits = self._table.new_read_builder().new_scan().plan().splits()
+            splits = self._table.new_read_builder().with_projection(
+                self._projection).new_scan().plan().splits()
         self._set_splits(splits)
         self._process_id = process_id
 
