@@ -26,7 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
+from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
@@ -172,7 +172,7 @@ def test_native_ray_explicit_plan_does_not_load_metadata(tmp_path, forbid_python
 
 
 def test_native_metadata_preparation_failure_selects_python_before_input(tmp_path):
-    from pypaimon.execution.dispatch import create_postpone_bucket_planner
+    from pypaimon.write.backend_dispatch import create_postpone_bucket_planner
     from pypaimon.write.postpone_bucket import PostponeBucketPlanner
 
     table = _table(tmp_path)

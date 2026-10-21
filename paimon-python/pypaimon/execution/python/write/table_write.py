@@ -27,6 +27,7 @@ from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.row_utils import (
     require_columns,
     row_to_named_values,
+    validate_write_columns,
 )
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.execution.python.write.file_store_write import FileStoreWrite
@@ -201,7 +202,7 @@ class PythonTableWriteMixin:
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
-        write_cols = list(write_cols)
+        write_cols = validate_write_columns(write_cols)
         for col in write_cols:
             if col not in self.table_pyarrow_schema.names:
                 raise ValueError(f"Column {col} is not in table schema.")
@@ -216,6 +217,8 @@ class PythonTableWriteMixin:
         return self
 
     def with_blob_consumer(self, blob_consumer: BlobConsumer):
+        if blob_consumer is not None and not callable(blob_consumer):
+            raise TypeError('blob_consumer must be callable')
         if self.file_store_write.data_writers:
             raise RuntimeError(
                 "with_blob_consumer must be called before any write operation."
@@ -224,6 +227,8 @@ class PythonTableWriteMixin:
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
+            raise TypeError('URI reader factory must provide callable create')
         if self.file_store_write.data_writers:
             raise RuntimeError(
                 "with_blob_uri_reader_factory must be called before any "

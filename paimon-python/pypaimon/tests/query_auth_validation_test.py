@@ -622,19 +622,17 @@ class TestStreamingPlanAuthorization(unittest.TestCase):
     def _entry(self, scan, path):
         if path == "initial":
             return lambda: scan._create_initial_plan(None)
-        if path == "catchup":
-            return lambda: scan._create_catch_up_plan(1, None)
         return lambda: scan._create_follow_up_plan(None)
 
     def test_every_plan_path_wraps_with_the_authorization(self):
-        for path in ("initial", "delta", "catchup"):
+        for path in ("initial", "delta"):
             scan, auth = self._scan(stale=False)
             plan = self._entry(scan, path)()
             self.assertIsInstance(plan.splits()[0], QueryAuthSplit)
             self.assertIs(plan.splits()[0].auth_result, auth)
 
     def test_every_plan_path_refuses_a_stale_rule(self):
-        for path in ("initial", "delta", "catchup"):
+        for path in ("initial", "delta"):
             scan, _ = self._scan(stale=True)
             with self.assertRaises(ValueError):
                 self._entry(scan, path)()

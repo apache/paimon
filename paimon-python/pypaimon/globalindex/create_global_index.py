@@ -131,11 +131,11 @@ class GlobalIndexBuilder:
         if execution == "local" and (concurrency is not None or ray_remote_args is not None):
             raise ValueError("Ray options require execution='ray'.")
         if execution == "ray":
-            from pypaimon.execution.python.globalindex.ray_build import validate_build_options
+            from pypaimon.ray.vector_index_build import validate_build_options
             concurrency, ray_remote_args = validate_build_options(
                 self, concurrency, ray_remote_args)
         partition_filter = self._resolve_partition_filter()
-        from pypaimon.execution.index_dispatch import build_global_index
+        from pypaimon.globalindex.index_dispatch import build_global_index
         return build_global_index(
             self, partition_filter, execution=execution, concurrency=concurrency,
             ray_remote_args=ray_remote_args)
@@ -164,7 +164,10 @@ class GlobalIndexBuilder:
 
     def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
-            return self._partition_filter
+            from pypaimon.read.push_down_utils import rewrite_predicate_indices
+
+            self._table.new_read_builder().with_partition_filter(self._partition_filter)
+            return rewrite_predicate_indices(self._partition_filter, self._table.partition_keys_fields)
         if self._partitions is None:
             return None
 

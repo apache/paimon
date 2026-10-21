@@ -21,7 +21,9 @@ import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_utils import validate_write_columns
 
 if TYPE_CHECKING:
     from ray.data import Dataset
@@ -58,6 +60,7 @@ class TableWrite:
         return PythonTableWriteMixin.write_pandas(self, dataframe)
 
     def with_write_type(self, write_cols: List[str]):
+        write_cols = validate_write_columns(write_cols)
         from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
         return PythonTableWriteMixin.with_write_type(self, write_cols)
 
@@ -193,4 +196,4 @@ class StreamTableWrite(TableWrite):
                          restore_snapshot_id=restore_snapshot_id)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        return self._prepare_commit(commit_identifier)
+        return self._prepare_commit(validate_commit_identifier(commit_identifier))

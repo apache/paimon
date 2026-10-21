@@ -240,7 +240,7 @@ class ReadBuilder:
         early filter usually prunes aggressively (e.g. very wide
         HASH_FIXED tables with a tight predicate).
         """
-        from pypaimon.execution.read_explain import explain
+        from pypaimon.read.read_explain import explain
         return explain(self, verbose)
 
     def read_type(self) -> List[DataField]:

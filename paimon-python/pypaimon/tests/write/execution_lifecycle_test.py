@@ -217,7 +217,7 @@ def test_invalid_commit_configuration_fails_before_allocating_either_backend(
 def test_native_writer_does_not_construct_python_writer_or_file_index(
         tmp_path):
     import pyarrow as pa
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     table = _data_evolution_table(tmp_path)
     native_table, builder = _core_builder()
@@ -377,7 +377,7 @@ def test_native_callback_error_keeps_publication_outside_fallback_and_closes_onc
 @pytest.mark.parametrize('written', [False, True])
 def test_native_writer_attribute_queries_never_select_python(tmp_path, stream, written):
     import pyarrow as pa
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
     from pypaimon.write.table_write import TableWrite
 
     table = _data_evolution_table(tmp_path)
@@ -408,7 +408,7 @@ def test_native_writer_attribute_queries_never_select_python(tmp_path, stream, w
 
 
 def test_native_writer_explicit_python_diagnostics_keep_lazy_fallback(tmp_path):
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     table = _data_evolution_table(tmp_path)
     core = Mock()
@@ -441,7 +441,7 @@ def test_native_writer_explicit_python_diagnostics_keep_lazy_fallback(tmp_path):
     'file_store_write', 'row_key_extractor', 'table_pyarrow_schema', 'restore_snapshot_id', 'batch_committed',
 ])
 def test_native_writer_diagnostic_assignment_selects_python_before_changing_configuration(tmp_path, attribute):
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     table = _data_evolution_table(tmp_path)
     core = Mock()
@@ -456,7 +456,7 @@ def test_native_writer_diagnostic_assignment_selects_python_before_changing_conf
 
 
 def test_native_batch_preparation_failure_retains_public_lifecycle_state_without_python(tmp_path):
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     core = Mock()
     failure = OSError('batch preparation failed')
@@ -475,7 +475,7 @@ def test_native_batch_preparation_failure_retains_public_lifecycle_state_without
 
 @pytest.mark.parametrize('failed', [False, True])
 def test_explicit_python_diagnostics_preserve_empty_native_batch_preparation_state(tmp_path, failed):
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     core = Mock()
     if failed:

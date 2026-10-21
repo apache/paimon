@@ -123,15 +123,22 @@ class PackagingTest(unittest.TestCase):
                      "pypaimon/benchmark/act/default_experiment.json"):
             self.assertIn(name, names)
         execution_files = (
-            "pypaimon/execution/dispatch.py",
-            "pypaimon/execution/read_dispatch.py",
-            "pypaimon/execution/read_support.py",
-            "pypaimon/execution/read_explain.py",
-            "pypaimon/execution/index_dispatch.py",
-            "pypaimon/execution/search_dispatch.py",
-            "pypaimon/execution/update_dispatch.py",
-            "pypaimon/execution/write_dispatch.py",
-            "pypaimon/execution/vindex_input.py",
+            "pypaimon/write/backend_dispatch.py",
+            "pypaimon/read/read_dispatch.py",
+            "pypaimon/read/read_support.py",
+            "pypaimon/read/read_explain.py",
+            "pypaimon/globalindex/index_dispatch.py",
+            "pypaimon/table/source/search_dispatch.py",
+            "pypaimon/write/update_dispatch.py",
+            "pypaimon/write/write_dispatch.py",
+            "pypaimon/globalindex/vindex_input.py",
+            "pypaimon/write/input_adapter.py",
+            "pypaimon/write/merge_condition.py",
+            "pypaimon/write/merge_transform.py",
+            "pypaimon/read/datasource/torch_dataset.py",
+            "pypaimon/read/datasource/ray_datasource.py",
+            "pypaimon/read/datasource/split_provider.py",
+            "pypaimon/write/ray_datasink.py",
             "pypaimon/execution/python/read/table_read.py",
             "pypaimon/execution/python/read/table_scan.py",
             "pypaimon/execution/python/read/auth_support.py",
@@ -140,12 +147,13 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/read/format_table_scan.py",
             "pypaimon/execution/python/read/object_table_read.py",
             "pypaimon/execution/python/read/object_table_scan.py",
-            "pypaimon/execution/python/read/system_table_read.py",
-            "pypaimon/execution/python/read/system_table_scan.py",
+            "pypaimon/table/system/system_table_read.py",
+            "pypaimon/table/system/system_table_scan.py",
             "pypaimon/execution/python/merge_engine_dispatch.py",
             "pypaimon/execution/python/read/search/vector_search_read.py",
+            "pypaimon/execution/python/read/search/factories.py",
             "pypaimon/execution/python/read/search/hybrid_search.py",
-            "pypaimon/execution/python/globalindex/ray_build.py",
+            "pypaimon/ray/vector_index_build.py",
             "pypaimon/execution/python/globalindex/btree/btree_index_reader.py",
             "pypaimon/execution/python/globalindex/btree/block_handle.py",
             "pypaimon/execution/python/globalindex/block_compression.py",
@@ -174,8 +182,13 @@ class PackagingTest(unittest.TestCase):
         )
         for name in execution_files:
             self.assertIn(name, names)
+        for name in names:
+            if name.startswith("pypaimon/execution/") and name.endswith(".py"):
+                self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
-            "pypaimon/ray/vector_index_build.py",
+            "pypaimon/execution/python/globalindex/ray_build.py",
+            "pypaimon/execution/python/read/system_table_read.py",
+            "pypaimon/execution/python/read/system_table_scan.py",
             "pypaimon/common/merge_engine_dispatch.py",
             "pypaimon/read/native_plan.py",
             "pypaimon/read/native_row_iterator.py",
@@ -192,7 +205,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/globalindex/btree_format/block_handle.py",
             "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
             "pypaimon/globalindex/block_compression.py",
-            "pypaimon/globalindex/vindex_input.py",
         )
         for name in internal_aliases:
             self.assertNotIn(name, names)

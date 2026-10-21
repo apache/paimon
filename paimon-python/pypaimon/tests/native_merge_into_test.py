@@ -442,7 +442,7 @@ def test_native_table_source_keeps_its_selected_branch(tmp_path):
 @pytest.mark.parametrize('location', ['local', 'file-uri', 'directory', 'external'])
 def test_python_written_partition_source_uses_java_paths_for_native_merge(tmp_path, stream, source_mode, location):
     from pathlib import Path
-    from pypaimon.execution.write_dispatch import NativeTableWrite
+    from pypaimon.write.write_dispatch import NativeTableWrite
 
     target = _table(tmp_path / 'target', [dict(id=1, value=10, name='old')])
     warehouse = tmp_path / 'source'

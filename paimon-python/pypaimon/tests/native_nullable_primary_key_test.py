@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = pytest.mark.native_plan

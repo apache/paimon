@@ -28,7 +28,7 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.utils.range import Range
 
-from pypaimon.execution.read_support import _MAX_ARROW_OFFSET, _batch_offset_usage
+from pypaimon.read.read_support import _MAX_ARROW_OFFSET, _batch_offset_usage
 
 
 class _BlobFileState:

@@ -44,8 +44,8 @@ from pypaimon.read.datasource.torch_dataset import (
     TorchShuffledBatchIterDataset,
     TorchShuffledIterDataset,
     _resolve_distributed_context,
-    _shuffle_record_batches,
 )
+from pypaimon.read.datasource.torch_dataset import _shuffle_record_batches
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.utils.range import Range

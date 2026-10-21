@@ -169,7 +169,7 @@ def test_native_dynamic_metadata_preserves_missing_hash_index_validation(tmp_pat
 def test_dynamic_metadata_preparation_fallback_happens_before_assignment(tmp_path):
     table = _table(tmp_path, '-1')
     snapshot, _ = _seed_snapshot(table)
-    from pypaimon.execution.dispatch import dynamic_bucket_data_buckets
+    from pypaimon.write.backend_dispatch import dynamic_bucket_data_buckets
     with patch('pypaimon.execution.native.read.plan.native_plan',
                side_effect=RuntimeError('unrestricted grant needed')), \
             patch('pypaimon.execution.python.write.bucket_metadata.dynamic_bucket_data_buckets',

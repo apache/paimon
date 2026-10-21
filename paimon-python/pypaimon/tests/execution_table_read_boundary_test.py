@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Public special-table readers keep execution behind their operations."""
+"""Special-table APIs load backends only for operations that need them."""
 
 import subprocess
 import sys
@@ -45,7 +45,6 @@ def test_importing_and_configuring_special_table_readers_is_lazy():
             for module in (
                 'format_table_read', 'format_table_scan',
                 'object_table_read', 'object_table_scan',
-                'system_table_read', 'system_table_scan',
             ):
                 assert 'pypaimon.execution.python.read.' + module not in sys.modules, module
             assert 'pypaimon_rust' not in sys.modules
@@ -63,8 +62,7 @@ def test_native_system_scan_never_materializes_the_python_provider():
         _build_arrow_table=Mock(side_effect=AssertionError('Python provider')),
         base_table=SimpleNamespace(options=SimpleNamespace(native_read_enabled=lambda: True)),
     )
-    with patch('pypaimon.execution.native.read.system_table.try_read_native_system_table', return_value=rows), \
-            patch.dict(sys.modules, {'pypaimon.execution.python.read.system_table_scan': None}):
+    with patch('pypaimon.execution.native.read.system_table.try_read_native_system_table', return_value=rows):
         plan = SystemTableScan(provider).plan()
     provider._build_arrow_table.assert_not_called()
     split, = plan.splits()

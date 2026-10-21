@@ -241,7 +241,7 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         self._partition_filter = None
 
     def execute_local(self) -> ScoredGlobalIndexResult:
-        from pypaimon.execution.search_dispatch import execute_hybrid_search
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
         return execute_hybrid_search(self)
 
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':

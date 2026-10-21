@@ -19,7 +19,7 @@
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.execution.vindex_input import VindexReaderResources, _filter_bytes
+from pypaimon.globalindex.vindex_input import VindexReaderResources, _filter_bytes
 
 
 def _native_reader_type():

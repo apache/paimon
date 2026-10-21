@@ -623,7 +623,7 @@ class AbstractVectorSearchReadImpl:
         return [_scored_result(heap) for heap in heaps]
 
     def _score_refine_splits(self, table_read, splits, queries_by_row, query_vectors, metric):
-        from pypaimon.execution.read_support import _ClosableArrowBatchReader
+        from pypaimon.read.read_support import _ClosableArrowBatchReader
 
         heaps = [[] for _ in query_vectors]
         reader, batches = table_read._new_arrow_batch_reader(splits)
@@ -792,7 +792,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         return [_scored_result(heap) for heap in heaps]
 
     def _score_raw_splits(self, table_read, splits, metric):
-        from pypaimon.execution.read_support import _ClosableArrowBatchReader
+        from pypaimon.read.read_support import _ClosableArrowBatchReader
 
         reader, batches = table_read._new_arrow_batch_reader(splits)
         # Close the underlying iterator as well if scoring fails mid-batch.

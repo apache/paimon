@@ -55,7 +55,7 @@ assert FileStoreTable.__module__ == 'pypaimon.table.file_store_table'
 
 @pytest.mark.parametrize('link', ['direct', 'cause', 'context'])
 def test_loaded_fork_error_is_propagated_without_loading_native(link):
-    from pypaimon.execution.dispatch import propagate_fork_safety_error
+    from pypaimon.write.backend_dispatch import propagate_fork_safety_error
 
     class ForkSafetyError(RuntimeError):
         pass
@@ -75,7 +75,7 @@ def test_loaded_fork_error_is_propagated_without_loading_native(link):
 
 
 def test_loaded_fork_error_check_terminates_on_cyclic_exception_chain():
-    from pypaimon.execution.dispatch import propagate_fork_safety_error
+    from pypaimon.write.backend_dispatch import propagate_fork_safety_error
 
     sdk = ModuleType('pypaimon_rust')
     sdk.ForkSafetyError = type('ForkSafetyError', (RuntimeError,), {})

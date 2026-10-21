@@ -123,7 +123,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.ray.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)
@@ -177,7 +177,7 @@ def _prepare(
     )
 
     if has_condition:
-        from pypaimon.ray.merge_condition import extract_columns
+        from pypaimon.write.merge_condition import extract_columns
 
         target_names = set(full_target_field_names)
         if is_self_merge:
@@ -273,7 +273,7 @@ def _resolve_target_projection(
            for clause in clauses for value in clause.spec.values()):
         needed.update(target_field_names if callable_columns is None else callable_columns)
     if any(c.condition is not None for c in clauses):
-        from pypaimon.ray.merge_condition import extract_target_columns
+        from pypaimon.write.merge_condition import extract_target_columns
         target_set = set(target_field_names)
         for clause in clauses:
             if clause.condition is not None:
@@ -420,20 +420,6 @@ def _same_table(left, right) -> bool:
 def _current_branch(table):
     current_branch = getattr(table, "current_branch", None)
     return current_branch() if current_branch is not None else None
-
-
-def _merge_callable_input(batch: pa.Table, on_pairs):
-    # Arrow joins coalesce ON keys; callbacks still expose both SQL aliases.
-    for source, target in on_pairs:
-        source_name, target_name = "s." + source, "t." + target
-        if target_name in batch.column_names:
-            if source_name in batch.column_names:
-                batch = batch.set_column(batch.schema.get_field_index(source_name),
-                                         source_name, batch.column(target_name))
-            else:
-                batch = batch.append_column(source_name, batch.column(target_name))
-    return batch.select(sorted(name for name in batch.column_names
-                               if name.startswith(("t.", "s."))))
 
 
 def _normalize_memory_source(source: Any) -> pa.Table:

@@ -212,7 +212,7 @@ def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
 
 def new_streaming_scan(self):
     """Create a stateful streaming scan using the configured backend."""
-    from pypaimon.execution.dispatch import propagate_fork_safety_error
+    from pypaimon.write.backend_dispatch import propagate_fork_safety_error
 
     projection = self._projection_builder()
     projection._validate_map_key_filter()
@@ -275,5 +275,5 @@ def plan_system_table(scan) -> Plan:
         if arrow_table is not None:
             from pypaimon.table.system.system_table_scan import SystemSplit
             return Plan(_splits=[SystemSplit(arrow_table)])
-    from pypaimon.execution.python.read.system_table_scan import plan
-    return plan(scan)
+    from pypaimon.table.system.system_table_scan import SystemSplit
+    return Plan(_splits=[SystemSplit(scan.system_table._build_arrow_table())])

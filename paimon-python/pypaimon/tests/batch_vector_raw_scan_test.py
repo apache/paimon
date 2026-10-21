@@ -239,7 +239,7 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
                                     state['closed'] += 1
 
                         with patch.object(TableRead, '_arrow_batch_generator', tracked), \
-                                patch('pypaimon.execution.read_support.os.cpu_count', return_value=4):
+                                patch('pypaimon.read.read_support.os.cpu_count', return_value=4):
                             actual = (read_table.new_batch_vector_search_builder()
                                       .with_vector_column('embedding').with_query_vectors(queries)
                                       .with_option('metric', metric).with_limit(2).execute_batch_local())

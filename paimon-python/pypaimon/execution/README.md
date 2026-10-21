@@ -17,146 +17,156 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Execution implementations
+# Python and Native execution backends
 
-PyPaimon's public builders and table operations remain in `pypaimon.read`,
-`pypaimon.write` and `pypaimon.table`. Their signatures and configuration are
-independent of the implementation that executes an operation.
+`execution` contains the Python and Native implementations of corresponding
+Paimon operations. A module belongs here because it implements one of those
+backends, not merely because it performs work at runtime.
+
+Keep this boundary when adding or moving code:
+
+* `execution/python` implements Paimon scanning, file reading, merging, writing,
+  updates, commits and indexes in Python.
+* `execution/native` adapts the corresponding operations to `pypaimon_rust`.
+  General Native execution algorithms belong in Rust Core.
+* Public contracts, request validation, backend selection, Arrow/Pandas output
+  adapters, shared input conversion and resource helpers stay in their owning
+  `read`, `write`, `globalindex` or `table` modules.
+* Ray and Torch worker scheduling, dataset/sink adapters, prefetch and shuffle
+  stay with their framework integrations. They call the public table APIs and
+  do not need duplicate Paimon backend implementations.
+* Match Paimon capabilities, not filenames: Python reader/index helper modules
+  can support a corresponding Rust operation without a same-named Rust file.
+  Format/Object file readers have Rust Core counterparts and remain backends.
 
 ```text
 pypaimon/
-  read/                       Public read/scan APIs and shared read contracts
-  write/                      Public write/commit/update APIs and shared inputs
+  read/                         Public read/scan APIs, Arrow output and explain
+    read_dispatch.py            Read/scan selection across the two backends
+    read_support.py             Shared output, schema and reader ownership
+    read_explain.py             ExplainResult construction and rendering
+    datasource/                 Public Ray/Torch framework adapters
+  write/                        Public write/update/commit APIs and shared inputs
+    backend_dispatch.py         Preparation, backend selection and commit coordination
+    write_dispatch.py           Writer coordination and safe pre-write switching
+    update_dispatch.py          Update/upsert/delete/MERGE coordination
+    input_adapter.py            Pandas transport and distributed input conversion
+    merge_condition.py          Shared MERGE condition parsing/evaluation
+    merge_transform.py          Shared Arrow assignments and callable inputs
+    ray_datasink.py              Ray worker writes and coordinator commits
+  globalindex/                  Public index contracts and backend coordination
+    index_dispatch.py           Index selection and Vindex resource ownership
+    vindex_input.py             Python SDK/Native callback streams and ownership
+  table/source/
+    search_dispatch.py          Search selection and transported-plan coordination
+  table/system/                 SystemSplit metadata and common Arrow output
+  ray/
+    vector_index_build.py       Ray index tasks, shard workers and failure draining
   execution/
-    dispatch.py               Preparation and safe backend selection
-    read_dispatch.py          Batch/stream planning and read selection
-    read_support.py           Shared Arrow output, resource and dataset adapters
-    read_explain.py           Explain planning and counter aggregation
-    search_dispatch.py        Search selection and lazy transported-plan reads
-    write_dispatch.py         Writer selection, diagnostics and safe switching
-    update_dispatch.py        Update, delete, upsert and MERGE coordination
-    index_dispatch.py         Index build/drop selection
     python/
-      read/                   Python scanning, file readers and merge execution
-                              Format/object file I/O and system-table filtering
-        search/               Vector, text, hybrid search and candidate filtering
-      write/                  Python writers, committers and update execution
-                              Format-table writing and explicit cleanup
-      globalindex/            Python index readers, writers, build and evaluation
-        ray_build.py          Driver coordination and Python shard workers
-      merge_engine_dispatch.py Python merge-function selection for read and write
+      read/                     File scanners/readers and merge execution
+        search/                 Vector/text/hybrid search and Python factories
+      write/                    File writers, committers and update execution
+      globalindex/              Index file codecs, readers, writers and build algorithms
+      merge_engine_dispatch.py  Python merge-function selection
     native/
-      runtime.py              Lazy runtime discovery and process safety
-      table.py                Rust table/configuration bridge
-      read/                   Native scan/read/search adapters
-      write/                  Native write/commit/update/index adapters
-    vindex_input.py           Shared vector-index streams and I/O callbacks
+      runtime.py                Lazy SDK discovery and process safety
+      table.py                  Rust table/configuration bridge
+      read/                     Rust scan/read/search and system metadata adapters
+      write/                    Rust write/commit/update/index adapters
 ```
 
-## Dependencies
+## Public APIs and dependencies
 
-Both implementations consume shared requests, predicates, schemas, plans, splits,
-commit messages and input adapters. These contracts stay outside either backend.
-Neither implementation imports the other. Public APIs retain configuration and
-validation and delegate execution without inheriting either backend. Explicit
-delegates retain the public object as the request context so subclass and instance
-overrides continue to run. Python scanners, readers, writers and committers
-are created only when Python execution is selected. Direct access to a Python
-scanner, writer router or committer through an existing public property explicitly
-selects that implementation. Attribute inspection and configuration getters do
-not select Python. Public index entry points, interfaces, options, results and
-shared metadata remain in `globalindex`; shared search plans and splits remain in
-`table/source`. Python index file codecs, compression and reader/writer helpers
-live in `execution/python/globalindex`. Vector-index stream ownership and I/O
-callbacks are shared by both backends through `execution/vindex_input.py`.
-Public streaming scan names resolve to the original classes on demand, without
-loading the other backend. Python 3.6 retains eager exports because it does not
-support module-level lazy attribute lookup.
-Public Format, Object and System table classes keep their existing paths and
-delegate file enumeration, decoding and filtering to Python read execution.
-Native system-table planning uses `execution/native/read/system_table.py`.
-Scan authorization and request validation remain shared; Python file-scanner
-pruning, sharding and slicing execute under `execution/python/read`.
+Corresponding Paimon APIs keep configuration, validation and explicit delegation;
+they do not inherit either backend. Public method signatures, defaults, class
+paths and supported subclass/instance hooks remain stable. Shared input/result
+contracts include schemas, predicates, plans, splits and commit messages.
 
-Native adapters convert requests and results and invoke `pypaimon_rust`. General
-execution algorithms belong in Rust Core. The optional extension is loaded only
-when a Native operation is requested. Importing the Python implementation does
-not require or initialize it.
+Neither backend imports the other. Native adapters do not construct or retain
+Python executors. Python implementations do not load the optional Native SDK
+just because it is installed. Planning, reading, writing and committing retain
+independent options; shared plans and commit messages connect those stages.
+Explicit access to an existing Python scanner/router/committer property selects
+that implementation. Ordinary configuration and metadata inspection do not.
 
-Python schema evolution uses Python cast rules and builds Arrow read schemas
-directly, including runtime child nullability. It does not select a cast engine
-based on whether the Native extension is installed.
-The shared Arrow write validator also checks nested nullability directly in
-Python. It never probes the Native extension; visible NULLs in required children
-are rejected, while values hidden by NULL parents retain their existing meaning.
-Table metadata and FileIO classes load Python row-key extractors and BLOB writers
-only when their corresponding Python operation is invoked.
+Framework adapters keep their actual implementation in their original modules,
+including their public class identities, serialization and worker closures.
+Local and Native MERGE use shared `write` helpers without importing the public
+Ray package. Public Ray helper entry points delegate to those same helpers.
+System-table output applies common Arrow filtering/projection to `SystemSplit`
+results from either metadata provider without creating a Python file reader.
 
-Ray and Daft input grouping share bucket arithmetic, binary-row size estimation
-and fixed/dynamic hash routing in `write/bucket_planning.py` and
-`write/input_routing.py`. These operators hold input configuration and partition
-counts, with no file scanner, reader, writer or index maintainer. Native postpone
-and dynamic bucket coordinators load existing buckets from Rust's complete file
-plan, pinned to the restore snapshot and partition. Dynamic assignment still
-requires a complete HASH index for existing data buckets. Python coordinators
-use their Python metadata loader. Selection finishes before assigning input
-keys. Python's Arrow grouping capability probe runs only when its grouping
-implementation is used.
-The public postpone planner uses this shared input planning directly. Supplied
-bucket metadata avoids loading either backend; its Python metadata loader is
-imported only when existing bucket layouts are requested.
+## Corresponding execution APIs
 
-## Selection and failure boundaries
+Compare the operation's inputs, results and lifecycle when changing a backend.
+The public facade and the Native bridge normalize Python objects and Rust FFI
+types at that boundary.
 
-Planning, reading, writing and committing retain their independent options. A
-Native plan can feed a Python reader, and Python writers can prepare messages for
-a Native committer. Transportable `Plan`, `Split` and `CommitMessage` contracts
-connect these stages.
+| Operation | Python execution | Native execution / Rust Core |
+| --- | --- | --- |
+| Batch scan | `PythonTableScanMixin` | `NativeTableScanMixin` / `TableScan` |
+| Split read | `PythonTableReadMixin` | `NativeTableReadMixin` / `TableRead` |
+| Stream scan | `AsyncStreamingTableScan` | `StreamTableScan` / `StreamTableScan` |
+| Write | `PythonTableWriteMixin` | `NativeTableWrite` / `TableWrite` |
+| Commit | `PythonTableCommit` | `NativeTableCommit` / `TableCommit` |
+| Row ID / predicate update, delete and key upsert | Python update executors | Native update adapters / `TableUpdate` |
+| Shard update | `ShardTableUpdator` | `NativeShardTableUpdator` / `ShardTableUpdater` |
+| Index build, drop and search | Python index/search executors | Native index/search adapters / Core index builders and readers |
 
-`dispatch.py` owns preparation fallbacks for writers, committers and updates.
-The writer coordinator in `write_dispatch.py` holds the selected executor and
-any safe preparation fallback. Native writers only adapt inputs/results and
-invoke Rust; they neither construct nor retain a Python writer. Update and index
-coordination likewise lives outside both backends. Python index builders own
-their construction methods; the public index builder no longer exposes private
-Python writer hooks, and Ray workers receive the Python executor directly.
-MERGE selects Python only for an explicit unsupported result, because preparing
-it may consume user input. Native read/scan adapters keep their existing
-capability checks and preparation boundaries. An empty successful result is distinct from an
-unsupported operation. Fork safety errors always propagate.
+Both commit adapters expose `commit(messages, commit_identifier,
+snapshot_properties=None)`, `abort(messages)`,
+`truncate_table(commit_identifier)`,
+`truncate_partitions(partitions, commit_identifier)` and `close()`.
+Message conversion happens during preparation; publication uses the selected
+executor's prepared messages. Batch/stream binding details stay in the Native
+adapter, and overwrite details stay in each backend.
+Public stream write, update and commit entry points normalize integer-like
+commit identifiers to Java `long` / Rust `i64` before execution starts.
+Write-column selections reject empty selections and duplicate names before
+replacing the current configuration. Index build/drop requests bind partition
+predicates to the partition layout and reject predicates containing
+non-partition fields.
 
-Reader iteration errors end that read. Once a writer has accepted its first
-mutation, it cannot switch to a Python writer. Actual update, MERGE and snapshot
-publication calls run outside preparation fallback handlers. A failure may occur
-after a write or publication succeeded, so execution is never replayed through
-another implementation and prepared files are preserved.
+Both stream scans expose `plan()`, `checkpoint()`,
+`restore(next_snapshot_id=None)`, `watermark()`,
+`notify_checkpoint_complete(next_snapshot)`, `stream()`, `stream_sync()` and
+`close()`. A plan call checks available snapshots once. Consumer progress is
+persisted explicitly or after the caller resumes a yielded plan. Cancelling a
+yielded plan preserves its unacknowledged consumer position. Snapshot gaps must
+preserve the configured changelog sequence.
 
-The shared search coordinator keeps a lazy Python factory for transported plans
-or Ray split workers. Native search adapters contain only Rust handles and plan
-metadata; they do not construct or retain a Python executor. Creating a Native
-scan or reader, executing its Native plan, and
-serializing it do not construct that Python executor. Search execution errors
-propagate without a second search through Python. Explicit split reads and Ray
-split workers select their Python factory when invoked, not when their methods
-or optional attributes are inspected.
-Readers capture query vectors and options at construction for both the live
-Native plan and a later transported-plan read.
+Both shard updaters expose `arrow_reader()`, `update_by_arrow_batch(data)`,
+`prepare_commit()` and `close()`. They track actual visible row IDs, require a
+complete read/update cycle before preparation and preserve prepared files when
+closed. This matters when deletion vectors hide physical rows.
 
-Disabling Native options does not import Native adapters. Fork safety checks in
-shared error handling inspect only an already loaded SDK, so Python streaming
-prefetch failures cannot load Native execution. Independent stage options still
-apply: a Python index builder may use a Native reader selected through the public
-read API without importing that reader's implementation itself.
+Python mixins retain public instance hooks while Native adapters own Rust
+handles. Private helper structure follows each implementation's algorithms.
 
-## Tests
+The operation protocols do not imply identical backend capabilities. Python
+Data Evolution reads still reject nested ROW field projections supported by
+Rust. `Plan.stats()` is optional: ordinary Python planning returns no counters,
+while Native planning always records lightweight counters. Python's explicit
+`scan_with_stats()` / explain pass collects additional bookkeeping and can
+change planning concurrency, so it is not enabled by ordinary `plan()` calls.
 
-Existing tests continue through the public APIs. Backend-specific tests patch
-the implementation module where an operation executes. `execution_dispatch_test`
-checks backend dependencies, lazy imports, empty results, preparation failures,
-fork errors, public updater types and prevention of write replay.
-The lazy read/search and execution lifecycle tests also reject Python executor
-construction on Native paths. Global index boundary tests verify those imports
-in fresh processes and preserve the exported public index contracts.
-Strict import guards also exercise complete Python write/update/commit/index
-workflows and Native read/scan/stream preparation, rejecting imports from the
-other backend rather than only checking constructor mocks.
+## Failure and resource boundaries
+
+Only preparation can select a fallback backend. Reads fail without replaying
+through another backend after iteration begins. A writer cannot switch after
+accepting a mutation. Update, MERGE and commit publication calls execute outside
+preparation fallback handlers, because an exception may follow a successful
+write or publication. Preserve prepared files when an outcome is uncertain;
+explicit `TableCommit.abort` remains for known abandoned, uncommitted files.
+
+Close retained readers on completion, cancellation and failures. Cleanup errors
+must not replace a primary read/conversion failure. Ray adapters close their
+worker readers, and Torch prefetch producers observe cancellation while waiting
+on a full queue. Vindex initialization/close support callback reentry without
+publishing a candidate cancelled during initialization.
+
+Tests cover process-isolated backend imports, public hooks and serialization,
+empty results versus unsupported operations, source cleanup, fallback boundaries
+and prevention of write replay or accidental deletion. Packaging tests check
+that backend modules and framework integrations ship at their intended paths.

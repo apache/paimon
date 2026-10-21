@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 rest_catalog = native_plan_rest_test.rest_catalog

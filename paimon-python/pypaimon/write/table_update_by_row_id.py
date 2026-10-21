@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, List, Optional
 import pyarrow as pa
 
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.row_input import RowIdUpdateInputMixin
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class TableUpdateByRowId(RowIdUpdateInputMixin, metaclass=ABCMeta):
 
     def __init__(self, table, commit_user: str, commit_identifier: int,
                  _precomputed_files_info: Optional['RowIdFileIndex'] = None):
+        commit_identifier = validate_commit_identifier(commit_identifier)
         from pypaimon.execution.python.write.table_update_by_row_id import PythonRowIdUpdateMixin
         return PythonRowIdUpdateMixin.__init__(self, table, commit_user, commit_identifier, _precomputed_files_info)
 

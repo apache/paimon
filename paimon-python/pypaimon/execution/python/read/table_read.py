@@ -39,6 +39,7 @@ from pypaimon.execution.python.read.reader.limited_record_reader import LimitedR
 from pypaimon.execution.python.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.read_type import adapter_output_paths
+from pypaimon.read.read_support import close_read_source
 from pypaimon.execution.python.read.split_read import (
     DataEvolutionSplitRead, MergeFileSplitRead, RawFileSplitRead, SplitRead)
 from pypaimon.schema.data_types import DataField, MapType, is_map_blob_type
@@ -134,6 +135,7 @@ class PythonTableReadMixin:
                 return
             remaining = None if limit is None else limit - count
             reader = self._TableRead__create_reader_for_split(split, limit=remaining)
+            failure = None
             try:
                 if self.output_projection is not None or not self._adapter_read_type:
                     from pypaimon.execution.python.read.reader.outer_projection_record_reader import (
@@ -152,8 +154,11 @@ class PythonTableReadMixin:
                         count += 1
                         if limit is not None and count >= limit:
                             return
+            except BaseException as error:
+                failure = error
+                raise
             finally:
-                reader.close()
+                close_read_source(reader, failure)
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
@@ -168,6 +173,7 @@ class PythonTableReadMixin:
                 break
             reader = self._TableRead__create_reader_for_split(
                 split, blob_parallelism, limit=remaining)
+            failure = None
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -221,8 +227,11 @@ class PythonTableReadMixin:
                         yield from self._convert_rows_to_output_batches(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
+            except BaseException as error:
+                failure = error
+                raise
             finally:
-                reader.close()
+                close_read_source(reader, failure)
 
     def _to_arrow_parallel(
         self,
@@ -294,6 +303,7 @@ class PythonTableReadMixin:
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
         reader = self._TableRead__create_reader_for_split(split, blob_parallelism)
+        failure = None
         try:
             if isinstance(reader, RecordBatchReader):
                 for batch in iter(reader.read_arrow_batch, None):
@@ -341,8 +351,11 @@ class PythonTableReadMixin:
                 if row_tuple_chunk:
                     out.extend(self._convert_rows_to_output_batches(
                         row_tuple_chunk, row_kind_chunk, schema))
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            reader.close()
+            close_read_source(reader, failure)
         return out
 
     def _convert_rows_to_output_batches(

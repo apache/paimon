@@ -29,7 +29,7 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.manifest_sidecar import read_sidecar, SUFFIX
 from pypaimon.utils.range import Range
 from pypaimon.execution.native.write.native_commit import native_messages_supported
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 

@@ -125,7 +125,7 @@ class TableScan:
         )
 
     def plan(self) -> Plan:
-        from pypaimon.execution.read_dispatch import plan_scan
+        from pypaimon.read.read_dispatch import plan_scan
         return plan_scan(self)
 
     def plan_all_files(self) -> Plan:
@@ -134,7 +134,7 @@ class TableScan:
         Existing filters and limits still apply. Query authorization must be
         unrestricted, as required by writer restore, overwrite and indexing.
         """
-        from pypaimon.execution.read_dispatch import plan_all_files
+        from pypaimon.read.read_dispatch import plan_all_files
         return plan_all_files(self)
 
     def __auth_query(self, all_columns=False):
@@ -148,7 +148,7 @@ class TableScan:
         keeps going through :meth:`plan`. Native scans always collect lightweight
         counters in the same core planning pass, without opening data files.
         """
-        from pypaimon.execution.read_dispatch import scan_with_stats
+        from pypaimon.read.read_dispatch import scan_with_stats
         return scan_with_stats(self)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
@@ -194,7 +194,7 @@ class TableScan:
         return PythonTableScanMixin._create_file_scanner(self)
 
     def _native_requested(self) -> bool:
-        from pypaimon.execution.read_dispatch import native_plan_requested
+        from pypaimon.read.read_dispatch import native_plan_requested
         return native_plan_requested(self)
 
     def _native_plan_supported(self) -> bool:

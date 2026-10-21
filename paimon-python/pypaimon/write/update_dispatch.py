@@ -22,7 +22,7 @@ from typing import Any, Iterable, List, Mapping, Optional, Sequence
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.execution.dispatch import prepare_native_write_operation
+from pypaimon.write.backend_dispatch import prepare_native_write_operation
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
@@ -227,3 +227,26 @@ class UpsertOperations:
 
     def _create_native_upsert(self, data, upsert_keys, columns):
         return prepare_native_write_operation('upsert', self.table, self.commit_user, data, upsert_keys, columns)
+
+
+def merge_into(
+        target_table, source, *, on, when_matched=(), when_not_matched=(),
+        commit_user, commit_identifier=BATCH_COMMIT_IDENTIFIER):
+    """Select MERGE execution before consuming source input or staging files."""
+    if target_table.options.native_write_enabled():
+        from pypaimon.write.backend_dispatch import prepare_native_merge_into
+
+        native = prepare_native_merge_into(
+            target_table, source, on, when_matched, when_not_matched,
+            commit_user, commit_identifier,
+        )
+        if native is not None:
+            return native.prepare_commit()
+
+    from pypaimon.execution.python.write.merge_into import merge_into as python_merge_into
+
+    return python_merge_into(
+        target_table, source, on=on, when_matched=when_matched,
+        when_not_matched=when_not_matched, commit_user=commit_user,
+        commit_identifier=commit_identifier,
+    )

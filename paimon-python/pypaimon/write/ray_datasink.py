@@ -326,7 +326,7 @@ def write_paimon_dataset(
             )
         )
     ):
-        from pypaimon.execution.dispatch import create_postpone_bucket_planner
+        from pypaimon.write.backend_dispatch import create_postpone_bucket_planner
         from pypaimon.write.input_routing import PostponeFixedBucketInputRouter
 
         planner = (

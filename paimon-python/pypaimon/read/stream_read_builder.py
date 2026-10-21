@@ -125,7 +125,7 @@ class StreamReadBuilder:
 
     def new_streaming_scan(self) -> Union["AsyncStreamingTableScan", "StreamTableScan"]:
         """Create a stateful streaming scan using the configured backend."""
-        from pypaimon.execution.read_dispatch import new_streaming_scan
+        from pypaimon.read.read_dispatch import new_streaming_scan
         return new_streaming_scan(self)
 
     def new_read(self) -> TableRead:

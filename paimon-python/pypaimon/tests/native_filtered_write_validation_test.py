@@ -22,7 +22,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]

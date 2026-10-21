@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.execution.native.write.native_write import create_native_write
 
 

@@ -22,7 +22,7 @@ from importlib import import_module
 
 def _raise_if_native_fork_safety_error(error):
     """Propagate native fork errors without probing or initializing the SDK."""
-    from pypaimon.execution.dispatch import propagate_fork_safety_error
+    from pypaimon.write.backend_dispatch import propagate_fork_safety_error
     propagate_fork_safety_error(error)
 
 

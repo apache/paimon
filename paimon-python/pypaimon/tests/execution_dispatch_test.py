@@ -26,7 +26,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from pypaimon.execution import dispatch
+from pypaimon.write import backend_dispatch as dispatch
 
 
 @pytest.mark.parametrize('result', [None, [], False, 0])

@@ -27,7 +27,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
-from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 native = pytest.mark.skipif(not native_runtime_available(), reason='pypaimon-rust not installed')
@@ -389,7 +389,7 @@ def test_consumed_blob_rows_are_released_without_losing_unplanned_inputs():
 
 @pytest.mark.parametrize('use_native', [False, pytest.param(True, marks=native)])
 def test_automatic_postpone_plan_counts_all_batches_per_partition(tmp_path, use_native):
-    from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
+    from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
     schema = pa.schema([('id', pa.int64()), ('pt', pa.string())])
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'postpone')})
     catalog.create_database('default', True)
@@ -465,7 +465,7 @@ def test_postpone_blob_row_bridge_keeps_sources_until_prepare(fail):
     from pypaimon.schema.data_types import AtomicType, DataField
     from pypaimon.table.row.blob import Blob, BlobDescriptor
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
+    from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
 
     # Exercise the bridge's deferred input lifetime without creating a table:
     # Python catalog validation does not allow a primary-key BLOB schema.

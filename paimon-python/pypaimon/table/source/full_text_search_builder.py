@@ -85,7 +85,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return self
 
     def execute_local(self) -> GlobalIndexResult:
-        from pypaimon.execution.search_dispatch import execute_full_text_search
+        from pypaimon.table.source.search_dispatch import execute_full_text_search
         return execute_full_text_search(self)
 
     def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
@@ -143,27 +143,17 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
-        from pypaimon.execution.search_dispatch import create_full_text_scan
+        from pypaimon.table.source.search_dispatch import create_full_text_scan
         reject_search_under_query_auth(self._table)
         self._primary_key_full_text_definition()
         return create_full_text_scan(self, copy(self)._new_python_full_text_scan)
 
     def _new_python_full_text_scan(self):
-        definition = self._primary_key_full_text_definition()
-        if definition is not None:
-            from pypaimon.execution.python.read.search.primary_key_full_text_scan import PrimaryKeyFullTextScan
-            return PrimaryKeyFullTextScan(
-                self._table, definition, partition_filter=self._partition_filter)
-        from pypaimon.execution.python.read.search.full_text_scan import DataEvolutionFullTextScan
-        return DataEvolutionFullTextScan(
-            self._table,
-            self._text_columns(),
-            partition_filter=self._partition_filter,
-            filter_=self._filter,
-        )
+        from pypaimon.execution.python.read.search.factories import new_full_text_scan
+        return new_full_text_scan(self)
 
     def new_full_text_read(self) -> FullTextRead:
-        from pypaimon.execution.search_dispatch import create_full_text_read
+        from pypaimon.table.source.search_dispatch import create_full_text_read
         reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
@@ -183,21 +173,8 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return create_full_text_read(self, copy(self)._new_python_full_text_read)
 
     def _new_python_full_text_read(self):
-        definition = self._primary_key_full_text_definition()
-        if definition is not None:
-            from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
-            return PrimaryKeyFullTextRead(
-                self._table, self._limit, self._text_columns(), self._query,
-                definition=definition, partition_filter=self._partition_filter)
-        from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
-        return DataEvolutionFullTextRead(
-            self._table,
-            self._limit,
-            self._text_columns(),
-            self._query,
-            partition_filter=self._partition_filter,
-            filter_=self._filter,
-        )
+        from pypaimon.execution.python.read.search.factories import new_full_text_read
+        return new_full_text_read(self)
 
     def _text_columns(self):
         if self._query is None:

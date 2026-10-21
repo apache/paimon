@@ -220,24 +220,14 @@ class AbstractVectorSearchBuilderImpl:
         reject_search_under_query_auth(self._table)
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
-        from pypaimon.execution.search_dispatch import create_vector_scan
+        from pypaimon.table.source.search_dispatch import create_vector_scan
         execution = copy(self)
         execution._options = dict(self._options)
         return create_vector_scan(self, execution._new_python_vector_scan, self._native_batch_search)
 
     def _new_python_vector_scan(self):
-        from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
-        scan_class = DataEvolutionVectorScan
-        if self._is_primary_key_vector_search():
-            from pypaimon.execution.python.read.search.primary_key_vector_scan import PrimaryKeyVectorScan
-            scan_class = PrimaryKeyVectorScan
-        return scan_class(
-            self._table,
-            self._vector_column,
-            filter_=self._filter,
-            partition_filter=self._partition_filter,
-            options=self._options,
-        )
+        from pypaimon.execution.python.read.search.factories import new_vector_scan
+        return new_vector_scan(self)
 
     def _is_primary_key_vector_search(self):
         if self._vector_column is None:
@@ -259,7 +249,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         return self
 
     def execute_local(self):
-        from pypaimon.execution.search_dispatch import execute_vector_search
+        from pypaimon.table.source.search_dispatch import execute_vector_search
         return execute_vector_search(self, self._query_vector)
 
     def new_vector_search_read(self):
@@ -271,24 +261,12 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Vector column must be set via with_vector_column()")
         if self._query_vector is None:
             raise ValueError("Query vector must be set via with_query_vector()")
-        from pypaimon.execution.search_dispatch import create_vector_read
+        from pypaimon.table.source.search_dispatch import create_vector_read
         execution = copy(self)
         execution._options = dict(self._options)
         execution._query_vector = copy(self._query_vector)
         return create_vector_read(execution, execution._new_python_vector_read)
 
     def _new_python_vector_read(self):
-        from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead
-        read_class = DataEvolutionVectorRead
-        if self._is_primary_key_vector_search():
-            from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
-            read_class = PrimaryKeyVectorRead
-        return read_class(
-            self._table,
-            self._limit,
-            self._vector_column,
-            self._query_vector,
-            filter_=self._filter,
-            partition_filter=self._partition_filter,
-            options=self._options,
-        )
+        from pypaimon.execution.python.read.search.factories import new_vector_read
+        return new_vector_read(self)

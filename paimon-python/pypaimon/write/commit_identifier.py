@@ -15,11 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Materialize a Python system-table provider into its shared split contract."""
+"""Commit identifiers share Java long and Rust i64's signed integer domain."""
 
-from pypaimon.read.plan import Plan
-from pypaimon.table.system.system_table_scan import SystemSplit
+import operator
 
 
-def plan(scan) -> Plan:
-    return Plan(_splits=[SystemSplit(scan.system_table._build_arrow_table())])
+def validate_commit_identifier(value):
+    """Normalize Python integer-like values before preparing or publishing files."""
+    identifier = operator.index(value)
+    if not -(1 << 63) <= identifier < (1 << 63):
+        raise OverflowError('commit_identifier must fit in a signed 64-bit integer')
+    return identifier

@@ -29,6 +29,7 @@ from packaging.version import parse
 import ray
 from ray.data.datasource import Datasource
 
+from pypaimon.read.read_support import close_read_source
 from pypaimon.read.datasource.split_provider import SplitProvider
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import PyarrowFieldParser
@@ -168,21 +169,28 @@ class RayDatasource(Datasource):
                 include_row_kind=include_row_kind)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
-            has_data = False
-            for batch in iter(batch_reader.read_next_batch, None):
-                if batch.num_rows == 0:
-                    continue
-                has_data = True
-                table = pyarrow.Table.from_batches([batch])
-                if table.schema != schema:
-                    table = table.cast(schema)
-                yield table
+            failure = None
+            try:
+                has_data = False
+                for batch in iter(batch_reader.read_next_batch, None):
+                    if batch.num_rows == 0:
+                        continue
+                    has_data = True
+                    table = pyarrow.Table.from_batches([batch])
+                    if table.schema != schema:
+                        table = table.cast(schema)
+                    yield table
 
-            if not has_data:
-                yield pyarrow.Table.from_arrays(
-                    [pyarrow.array([], type=field.type) for field in schema],
-                    schema=schema
-                )
+                if not has_data:
+                    yield pyarrow.Table.from_arrays(
+                        [pyarrow.array([], type=field.type) for field in schema],
+                        schema=schema
+                    )
+            except BaseException as error:
+                failure = error
+                raise
+            finally:
+                close_read_source(batch_reader, failure)
 
         # Use partial to create read function without capturing self
         get_read_task = partial(

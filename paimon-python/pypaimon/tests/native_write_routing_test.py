@@ -31,7 +31,7 @@ from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.execution.native.write.native_commit import create_native_write_table
-from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite, NativeTableWrite
+from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite, NativeTableWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlan
 
 rest_catalog = native_plan_rest_test.rest_catalog

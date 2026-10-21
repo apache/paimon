@@ -23,6 +23,7 @@ import operator
 import os
 import queue
 import random
+import sys
 import threading
 import warnings
 from collections import deque
@@ -35,7 +36,8 @@ from torch.utils.data import Dataset, IterableDataset
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.execution.read_support import _MAX_ARROW_OFFSET, _batch_offset_usage
+from pypaimon.read.read_support import (
+    _MAX_ARROW_OFFSET, _batch_offset_usage, close_read_source)
 from pypaimon.read.split import DataSplit, Split
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
@@ -587,14 +589,15 @@ class TorchIterDataset(_BaseTorchIterDataset):
         splits_to_process = self._worker_splits(worker_info)
 
         if self.prefetch_concurrency > 1:
-            for row in self._iter_rows(splits_to_process):
-                yield row
+            yield from self._iter_rows(splits_to_process)
             return
 
         worker_iterator = self.table_read.to_iterator(splits_to_process)
-
-        for offset_row in worker_iterator:
-            yield self._row_to_dict(offset_row)
+        try:
+            for offset_row in worker_iterator:
+                yield self._row_to_dict(offset_row)
+        finally:
+            close_read_source(worker_iterator, sys.exc_info()[1])
 
     def _iter_rows(self, splits: List[Split]):
         n = min(self.prefetch_concurrency, len(splits))
@@ -608,7 +611,10 @@ class TorchIterDataset(_BaseTorchIterDataset):
         def put_item(tag: int, payload):
             while not stop.is_set():
                 try:
-                    q.put((tag, payload), timeout=self._PREFETCH_PUT_TIMEOUT_SEC)
+                    # A full queue must not hold a cancelled producer longer than
+                    # the join budget. Poll cancellation even when the configured
+                    # queue timeout is much longer than that budget.
+                    q.put((tag, payload), timeout=min(self._PREFETCH_PUT_TIMEOUT_SEC, 0.1))
                     return True
                 except queue.Full:
                     continue
@@ -616,12 +622,16 @@ class TorchIterDataset(_BaseTorchIterDataset):
 
         def producer(split_group: List):
             try:
-                for offset_row in self.table_read.to_iterator(split_group):
-                    if stop.is_set():
-                        break
-                    row_dict = self._row_to_dict(offset_row)
-                    if not put_item(self._ROW, row_dict):
-                        break
+                source = self.table_read.to_iterator(split_group)
+                try:
+                    for offset_row in source:
+                        if stop.is_set():
+                            break
+                        row_dict = self._row_to_dict(offset_row)
+                        if not put_item(self._ROW, row_dict):
+                            break
+                finally:
+                    close_read_source(source, sys.exc_info()[1])
                 put_item(self._SENTINEL, None)
             except Exception as e:
                 put_item(self._ERR, e)
@@ -998,12 +1008,20 @@ class TorchShuffledIterDataset(_TorchShuffleMixin, _BaseTorchIterDataset):
             rows = self._iter_ordered_rows(splits_to_process)
         else:
             rows = self._iter_interleaved_rows(splits_to_process)
-        for row in self._iter_buffer_shuffled_rows(rows, worker_id):
-            yield row
+        shuffled = self._iter_buffer_shuffled_rows(rows, worker_id)
+        try:
+            for row in shuffled:
+                yield row
+        finally:
+            close_read_source(shuffled, sys.exc_info()[1])
 
     def _iter_ordered_rows(self, splits: List[Split]) -> Iterator[dict]:
-        for offset_row in self.table_read.to_iterator(splits):
-            yield self._row_to_dict(offset_row)
+        source = self.table_read.to_iterator(splits)
+        try:
+            for offset_row in source:
+                yield self._row_to_dict(offset_row)
+        finally:
+            close_read_source(source, sys.exc_info()[1])
 
     def _iter_interleaved_rows(self, splits: List[Split]) -> Iterator[dict]:
         if not splits:
@@ -1056,14 +1074,17 @@ class TorchShuffledIterDataset(_TorchShuffleMixin, _BaseTorchIterDataset):
     ) -> Iterator[dict]:
         rng = self._shuffle_rng(worker_id)
         buffer = []
-        for row in rows:
-            if len(buffer) < self.buffer_size:
-                buffer.append(row)
-                continue
-            idx = rng.randint(0, self.buffer_size - 1)
-            yield buffer[idx]
-            buffer[idx] = row
+        try:
+            for row in rows:
+                if len(buffer) < self.buffer_size:
+                    buffer.append(row)
+                    continue
+                idx = rng.randint(0, self.buffer_size - 1)
+                yield buffer[idx]
+                buffer[idx] = row
 
-        rng.shuffle(buffer)
-        for row in buffer:
-            yield row
+            rng.shuffle(buffer)
+            for row in buffer:
+                yield row
+        finally:
+            close_read_source(rows, sys.exc_info()[1])

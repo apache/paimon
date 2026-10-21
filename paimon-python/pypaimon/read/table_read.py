@@ -107,7 +107,7 @@ class TableRead:
         Python split reader, the iterator reuses its row view and visits splits
         in order. Close the iterator when stopping before exhaustion.
         """
-        from pypaimon.execution.read_dispatch import to_iterator
+        from pypaimon.read.read_dispatch import to_iterator
         return to_iterator(self, splits)
 
     def to_arrow_batch_reader(
@@ -124,7 +124,7 @@ class TableRead:
         table reads do not guarantee row order. Python fallback reads remain
         serial.
         """
-        from pypaimon.execution.read_support import to_arrow_batch_reader
+        from pypaimon.read.read_support import to_arrow_batch_reader
         return to_arrow_batch_reader(self, splits, blob_parallelism, parallelism)
 
     def _to_managed_arrow_batch_reader(
@@ -138,7 +138,7 @@ class TableRead:
         ``from_batches``. Retain it explicitly so native reads release their
         resources when a caller ends the read early, including serial reads.
         """
-        from pypaimon.execution.read_support import _to_managed_arrow_batch_reader
+        from pypaimon.read.read_support import _to_managed_arrow_batch_reader
         return _to_managed_arrow_batch_reader(self, splits, blob_parallelism, parallelism)
 
     def _new_arrow_batch_reader(
@@ -146,13 +146,13 @@ class TableRead:
             splits: List[Split],
             blob_parallelism: Optional[int] = None,
             parallelism: Optional[int] = None):
-        from pypaimon.execution.read_dispatch import _new_arrow_batch_reader
+        from pypaimon.read.read_dispatch import _new_arrow_batch_reader
         return _new_arrow_batch_reader(self, splits, blob_parallelism, parallelism)
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema, column_name=ROW_KIND_COLUMN) -> pyarrow.Schema:
         """Prepend the row-kind transport column, normally named _row_kind."""
-        from pypaimon.execution.read_support import _add_row_kind_to_schema
+        from pypaimon.read.read_support import _add_row_kind_to_schema
         return _add_row_kind_to_schema(schema, column_name)
 
     @staticmethod
@@ -167,7 +167,7 @@ class TableRead:
         to cast internal dependency columns because masking intentionally may
         change their logical type.
         """
-        from pypaimon.execution.read_support import _try_to_pad_batch_by_schema
+        from pypaimon.read.read_support import _try_to_pad_batch_by_schema
         return _try_to_pad_batch_by_schema(batch, target_schema, allow_type_cast)
 
     def to_arrow(
@@ -202,12 +202,12 @@ class TableRead:
                 ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
                 shrunk to stay within it.
         """
-        from pypaimon.execution.read_dispatch import to_arrow
+        from pypaimon.read.read_dispatch import to_arrow
         return to_arrow(self, splits, parallelism, blob_parallelism)
 
     @staticmethod
     def _batches_to_arrow(batches, schema, allow_type_cast: bool = False):
-        from pypaimon.execution.read_support import _batches_to_arrow
+        from pypaimon.read.read_support import _batches_to_arrow
         return _batches_to_arrow(batches, schema, allow_type_cast)
 
     @property
@@ -306,24 +306,24 @@ class TableRead:
         caps the thread pool; ``1`` forces serial reads. The validation
         message names whichever source produced the offending value.
         """
-        from pypaimon.execution.read_support import _resolve_parallelism
+        from pypaimon.read.read_support import _resolve_parallelism
         return _resolve_parallelism(self, runtime, num_splits)
 
     def _effective_parallelism(
             self, runtime: Optional[int], num_splits: int) -> int:
         """Resolve parallelism and bound speculative unfiltered LIMIT reads."""
-        from pypaimon.execution.read_support import _effective_parallelism
+        from pypaimon.read.read_support import _effective_parallelism
         return _effective_parallelism(self, runtime, num_splits)
 
     @staticmethod
     def _resolve_blob_parallelism(runtime: Optional[int]) -> int:
-        from pypaimon.execution.read_support import _resolve_blob_parallelism
+        from pypaimon.read.read_support import _resolve_blob_parallelism
         return _resolve_blob_parallelism(runtime)
 
     @classmethod
     def _cap_blob_parallelism(cls, workers: int, blob_parallelism: int) -> int:
         """Shrink per-split blob_parallelism so workers*B <= cap (peak reads)."""
-        from pypaimon.execution.read_support import _cap_blob_parallelism
+        from pypaimon.read.read_support import _cap_blob_parallelism
         return _cap_blob_parallelism(cls, workers, blob_parallelism)
 
     def _should_run_parallel(
@@ -337,22 +337,22 @@ class TableRead:
         overhead, no behavior change). A single split is never
         parallelized since there is nothing to fan out across.
         """
-        from pypaimon.execution.read_support import _should_run_parallel
+        from pypaimon.read.read_support import _should_run_parallel
         return _should_run_parallel(self, splits, effective)
 
     def _deferred_blob_limit_may_prune(self, splits: List[Split]) -> bool:
-        from pypaimon.execution.read_support import _deferred_blob_limit_may_prune
+        from pypaimon.read.read_support import _deferred_blob_limit_may_prune
         return _deferred_blob_limit_may_prune(self, splits)
 
     def _requires_batch_iterator_cleanup(self, splits: List[Split], effective: int) -> bool:
         # A serial Core stream owns resources too. PyArrow's reader does not
         # close the Python iterator supplied to from_batches on an early close.
-        from pypaimon.execution.read_support import _requires_batch_iterator_cleanup
+        from pypaimon.read.read_support import _requires_batch_iterator_cleanup
         return _requires_batch_iterator_cleanup(self, splits, effective)
 
     def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
         """Return whether split metadata proves that LIMIT cannot drop rows."""
-        from pypaimon.execution.read_support import _limit_covers_all_splits
+        from pypaimon.read.read_support import _limit_covers_all_splits
         return _limit_covers_all_splits(self, splits)
 
     def _add_row_kind_column_to_batch(
@@ -361,7 +361,7 @@ class TableRead:
         default_row_kind: str = "+I"
     ) -> pyarrow.RecordBatch:
         """Add a _row_kind column to an existing batch."""
-        from pypaimon.execution.read_support import _add_row_kind_column_to_batch
+        from pypaimon.read.read_support import _add_row_kind_column_to_batch
         return _add_row_kind_column_to_batch(self, batch, default_row_kind)
 
     def to_pandas(
@@ -383,8 +383,11 @@ class TableRead:
 
         See :meth:`to_arrow` for the semantics of ``parallelism``.
         """
-        from pypaimon.execution.read_support import to_duckdb
-        return to_duckdb(self, splits, table_name, connection, parallelism)
+        import duckdb
+
+        con = connection or duckdb.connect(database=":memory:")
+        con.register(table_name, self.to_arrow(splits, parallelism=parallelism))
+        return con
 
     def to_ray(
         self,
@@ -410,15 +413,48 @@ class TableRead:
         See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
         for details.
         """
-        from pypaimon.execution.read_support import to_ray
-        return to_ray(
-            self,
-            splits,
+        import ray
+
+        if not splits:
+            schema = self._output_arrow_schema()
+            if self.include_row_kind:
+                schema = self._add_row_kind_to_schema(schema)
+            empty_table = pyarrow.Table.from_arrays(
+                [pyarrow.array([], type=field.type) for field in schema],
+                schema=schema
+            )
+            return ray.data.from_arrow(empty_table)
+
+        if override_num_blocks is not None and override_num_blocks < 1:
+            raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
+
+        from pypaimon.read.datasource.ray_datasource import RayDatasource
+        from pypaimon.read.datasource.split_provider import PreResolvedSplitProvider
+
+        datasource = RayDatasource(
+            PreResolvedSplitProvider(
+                table=self.table,
+                splits=splits,
+                read_type=self.read_type,
+                predicate=self.predicate,
+                limit=self.limit,
+                output_projection=self.output_projection,
+                include_row_kind=self.include_row_kind,
+            )
+        )
+        ds = ray.data.read_datasource(
+            datasource,
             ray_remote_args=ray_remote_args,
             concurrency=concurrency,
             override_num_blocks=override_num_blocks,
-            **read_args,
+            **read_args
         )
+        # Each Ray worker applies the per-task limit independently, so N
+        # workers can collectively yield up to N * limit rows. Cap the
+        # final dataset to the user-visible limit on top.
+        if self.limit is not None:
+            ds = ds.limit(self.limit)
+        return ds
 
     def to_torch(
         self,
@@ -456,26 +492,109 @@ class TableRead:
             sharding_rank: Explicit rank in the intended DDP process group.
             sharding_world_size: Explicit size of that process group.
         """
-        from pypaimon.execution.read_support import to_torch
-        return to_torch(
-            self,
-            splits,
-            streaming,
-            prefetch_concurrency,
-            batch_format=batch_format,
-            batch_size=batch_size,
-            to_tensor_fn=to_tensor_fn,
-            shuffle=shuffle,
-            seed=seed,
-            buffer_size=buffer_size,
-            max_buffer_input_splits=max_buffer_input_splits,
-            auto_detect_rank=auto_detect_rank,
-            sharding_rank=sharding_rank,
-            sharding_world_size=sharding_world_size,
-        )
+        valid_batch_formats = {"row", "pyarrow", "torch"}
+        if batch_format not in valid_batch_formats:
+            raise ValueError(
+                "batch_format must be one of %s, got %r"
+                % (sorted(valid_batch_formats), batch_format)
+            )
+        if (
+            auto_detect_rank
+            or sharding_rank is not None
+            or sharding_world_size is not None
+        ) and not streaming:
+            raise ValueError("distributed sharding requires streaming=True")
+        if batch_size is not None and (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
+            raise ValueError("batch_size must be a positive int or None")
+        if batch_format == "row":
+            if self.output_projection is not None and self.output_projection.named:
+                raise RuntimeError(
+                    "Projection expressions are not supported by Torch row format; "
+                    "use streaming=True with batch_format='pyarrow' or 'torch'")
+            if batch_size is not None:
+                raise ValueError(
+                    "batch_size requires batch_format='pyarrow' or 'torch'"
+                )
+            if to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+        else:
+            if not streaming:
+                raise ValueError(
+                    "batch_format=%r requires streaming=True" % batch_format
+                )
+            if batch_format == "pyarrow" and to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+            if to_tensor_fn is not None and not callable(to_tensor_fn):
+                raise ValueError("to_tensor_fn must be callable")
+            if (
+                isinstance(prefetch_concurrency, bool)
+                or not isinstance(prefetch_concurrency, int)
+                or prefetch_concurrency != 1
+            ):
+                raise ValueError(
+                    "batch formats require prefetch_concurrency=1"
+                )
+
+            from pypaimon.read.datasource.torch_dataset import (
+                TorchBatchIterDataset,
+                TorchShuffledBatchIterDataset,
+            )
+            dataset_type = TorchShuffledBatchIterDataset if shuffle else TorchBatchIterDataset
+            shuffle_options = (dict(seed=seed, buffer_size=buffer_size,
+                                    max_buffer_input_splits=max_buffer_input_splits)
+                               if shuffle else {})
+            return dataset_type(
+                self,
+                splits,
+                batch_format=batch_format,
+                batch_size=batch_size,
+                to_tensor_fn=to_tensor_fn,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
+                **shuffle_options,
+            )
+
+        if shuffle:
+            if not streaming:
+                raise ValueError("shuffle=True only supports streaming=True")
+            if prefetch_concurrency > 1:
+                raise ValueError("shuffle=True does not support prefetch_concurrency > 1")
+            from pypaimon.read.datasource.torch_dataset import TorchShuffledIterDataset
+            dataset = TorchShuffledIterDataset(
+                self,
+                splits,
+                seed=seed,
+                buffer_size=buffer_size,
+                max_buffer_input_splits=max_buffer_input_splits,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
+            )
+            return dataset
+
+        if streaming:
+            from pypaimon.read.datasource.torch_dataset import TorchIterDataset
+            dataset = TorchIterDataset(
+                self,
+                splits,
+                prefetch_concurrency,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
+            )
+            return dataset
+        else:
+            from pypaimon.read.datasource.torch_dataset import TorchDataset
+            dataset = TorchDataset(self, splits)
+            return dataset
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
-        from pypaimon.execution.read_support import _project_batch_to_output
+        from pypaimon.read.read_support import _project_batch_to_output
         return _project_batch_to_output(self, batch)
 
     def _needs_output_projection(self) -> bool:
@@ -518,12 +637,12 @@ class TableRead:
         so a per-split refresh would ask the catalog once per worker; a per-reader one would let
         a later read reuse a schema fetched for an earlier one.
         """
-        from pypaimon.execution.read_support import _begin_auth_read
+        from pypaimon.read.read_support import _begin_auth_read
         return _begin_auth_read(self, splits)
 
     @staticmethod
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
-        from pypaimon.execution.read_support import convert_rows_to_arrow_batch
+        from pypaimon.read.read_support import convert_rows_to_arrow_batch
         return convert_rows_to_arrow_batch(row_tuples, schema)
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
@@ -693,7 +812,7 @@ class TableRead:
         error: Optional[Exception] = None,
         log: bool = False,
     ):
-        from pypaimon.execution.read_dispatch import native_read_fallback
+        from pypaimon.read.read_dispatch import native_read_fallback
         return native_read_fallback(self, reason, error, log)
 
     def _try_native_batches(
@@ -736,7 +855,7 @@ class TableRead:
 
     def _native_resolved_blob_fields(self) -> set:
         """BLOB fields Rust resolves before emitting a batch."""
-        from pypaimon.execution.read_support import _native_resolved_blob_fields
+        from pypaimon.read.read_support import _native_resolved_blob_fields
         return _native_resolved_blob_fields(self)
 
     def _try_native_rows(self, splits):

@@ -256,6 +256,7 @@ class FileScanner:
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
         self.skip_level0 = skip_level0
+        self.level_filter: Optional[Callable[[int], bool]] = None
         self.is_streaming = is_streaming
         self._global_index_result = None
         self._row_ranges = None
@@ -847,6 +848,8 @@ class FileScanner:
         if stats is not None:
             stats.entries_after_bucket += 1
             stats.buckets_after_pruning.add((partition_key, entry.bucket))
+        if self.level_filter is not None and not self.level_filter(entry.file.level):
+            return False
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
         stats_predicate = self.simple_stats_evolutions.filter_unsafe_filter(

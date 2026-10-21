@@ -107,7 +107,7 @@ def test_table_source_metadata_conditions_keep_selected_view_and_callable_rows(
                                       side_effect=AssertionError('Python source materialization')))
             stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python MERGE matching')))
-            stack.enter_context(patch('pypaimon.ray.merge_condition._load_datafusion',
+            stack.enter_context(patch('pypaimon.write.merge_condition._load_datafusion',
                                       side_effect=AssertionError('Native conditions loaded Python DataFusion')))
         messages = builder.new_update().merge_into(
             source, on={'key': metadata}, when_matched=matched, when_not_matched=not_matched,
@@ -140,7 +140,7 @@ def test_native_condition_transport_does_not_load_python_datafusion(native_rest_
             patch(
                 'pypaimon.execution.native.write.native_merge_into.create_native_write_table',
                 return_value=native_source), \
-            patch('pypaimon.ray.merge_condition._load_datafusion',
+            patch('pypaimon.write.merge_condition._load_datafusion',
                   side_effect=AssertionError('Loaded optional Python execution engine')) as python_engine:
         messages = target.new_batch_write_builder().new_update().merge_into(
             source, on={'key': source_key}, when_matched=[WhenMatched.update(
@@ -156,7 +156,7 @@ def test_native_condition_transport_does_not_load_python_datafusion(native_rest_
 def test_python_merge_conditions_still_require_the_python_execution_engine(native_rest_catalog):
     target = _new_table(native_rest_catalog, 'default.python_engine_required')
     source = pa.table({'key': [0], 'value': [91]}, schema=_SCHEMA)
-    with patch('pypaimon.ray.merge_condition._load_datafusion',
+    with patch('pypaimon.write.merge_condition._load_datafusion',
                side_effect=ImportError('Install pypaimon[datafusion]')) as python_engine, \
             patch('pypaimon.execution.python.write.merge_into._build_tables') as matching:
         with pytest.raises(ImportError, match=r'pypaimon\[datafusion\]'):

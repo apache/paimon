@@ -109,7 +109,7 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         table = self._create_with_options(
             "db.t_native_write", {"data-file.path-directory": "data",
                                   "write.native.enabled": "true"})
-        from pypaimon.execution.write_dispatch import NativeTableWrite
+        from pypaimon.write.write_dispatch import NativeTableWrite
 
         adapter = mock.Mock(spec=['write_arrow_batch', 'prepare_commit', 'close'])
         messages = []

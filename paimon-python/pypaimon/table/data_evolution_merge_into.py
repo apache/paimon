@@ -22,6 +22,7 @@ from typing import Any, List, Sequence
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.merge_types import OnSpec, WhenMatched, WhenNotMatched, lit, source_col, target_col
 
 __all__ = [
@@ -55,20 +56,9 @@ def merge_into(
     and returns an Arrow Array or ChunkedArray of the same length. Empty
     clauses do not invoke callbacks; callback errors propagate to the caller.
     """
-    if target_table.options.native_write_enabled():
-        from pypaimon.execution.dispatch import prepare_native_merge_into
-
-        native = prepare_native_merge_into(
-            target_table, source, on, when_matched, when_not_matched,
-            commit_user, commit_identifier,
-        )
-        if native is not None:
-            return native.prepare_commit()
-
-    from pypaimon.execution.python.write.merge_into import merge_into as python_merge_into
-
-    return python_merge_into(
+    commit_identifier = validate_commit_identifier(commit_identifier)
+    from pypaimon.write.update_dispatch import merge_into as execute
+    return execute(
         target_table, source, on=on, when_matched=when_matched,
         when_not_matched=when_not_matched, commit_user=commit_user,
-        commit_identifier=commit_identifier,
-    )
+        commit_identifier=commit_identifier)
