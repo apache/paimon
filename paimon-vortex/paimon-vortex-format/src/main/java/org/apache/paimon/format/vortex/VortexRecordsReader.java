@@ -99,7 +99,8 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         RowType physicalReadRowType = physicalReadRowType(dataSchemaRowType, projectedRowType);
         this.physicalFieldMapping =
                 physicalFieldMapping(dataSchemaRowType, physicalReadRowType, projectedRowType);
-        this.arrowBatchReader = new ArrowBatchReader(physicalReadRowType, true);
+        this.arrowBatchReader =
+                new ArrowBatchReader(physicalReadRowType, true, VortexArrowConverters.INSTANCE);
 
         List<String> columns = physicalReadRowType.getFieldNames();
         this.readsRowIndex = filter != null || selection != null || columns.isEmpty();
