@@ -274,6 +274,11 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.default_value()
         )
+        self._video_decode_parallelism = (
+            table_options.read_video_decode_parallelism()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()
+        )
         self._video_collators = [
             VideoFrameCollator(
                 access,
@@ -448,7 +453,10 @@ class PaimonDatasetReader(ABC):
         video_windows = {} if self.image_transforms is not None else _decode_video_windows(
             plans, rows, getattr(self, "_video_collators", ()),
             self._features, self.return_uint8,
-            return_batch=return_batch, share_memory=share_memory)
+            return_batch=return_batch, share_memory=share_memory,
+            decode_parallelism=getattr(
+                self, "_video_decode_parallelism",
+                CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()))
         for group in row_groups:
             for row in group.values():
                 for key in video_windows:
@@ -1419,7 +1427,7 @@ def _attach_task_labels(rows, task_names, subtask_names):
 
 def _decode_video_windows(
         plans, rows, collators, features, return_uint8, *,
-        return_batch=False, share_memory=False):
+        return_batch=False, share_memory=False, decode_parallelism=1):
     import torch
 
     tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
@@ -1453,16 +1461,24 @@ def _decode_video_windows(
             requests.setdefault((payload, keyframe_index), []).append((
                 offset, [d.frame_index for d in window]))
 
+        def read_frames(decoder, windows):
+            get_frames = getattr(decoder, "get_frames_at", None)
+            if not callable(get_frames):
+                return None
+            indices = sorted({i for _, window in windows for i in window})
+            with torch.inference_mode(inference_enabled), \
+                    torch.set_grad_enabled(grad_enabled):
+                return windows, indices, get_frames(indices=indices).data
+
         output = None if return_batch else [None] * len(plans)
         with torch.inference_mode(inference_enabled), \
-                torch.set_grad_enabled(grad_enabled):
-            for (payload, keyframe_index), windows in requests.items():
-                decoder = collator._decoder(payload, keyframe_index)
-                get_frames = getattr(decoder, "get_frames_at", None)
-                if not callable(get_frames):
+                torch.set_grad_enabled(grad_enabled), \
+                collator._map_decoders(
+                    requests, read_frames, decode_parallelism) as decoded:
+            for result in decoded:
+                if result is None:
                     return key, None
-                indices = sorted({i for _, window in windows for i in window})
-                frames = get_frames(indices=indices).data
+                windows, indices, frames = result
                 if (not torch.is_tensor(frames) or frames.ndim != 4
                         or len(frames) != len(indices)):
                     raise ValueError("Video decoder must return one frame per index.")

@@ -19,8 +19,10 @@
 
 import io
 import os
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from fractions import Fraction
 from itertools import chain
 
@@ -193,6 +195,8 @@ class VideoFrameCollator:
         self.collate_fn = collate_fn
         self.range_parallelism = range_parallelism
         self._decoders = OrderedDict()
+        self._decode_executor = None
+        self._decode_workers = 0
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -205,6 +209,11 @@ class VideoFrameCollator:
         return self._collate(decoded_rows)
 
     def close(self):
+        executor = getattr(self, "_decode_executor", None)
+        self._decode_executor = None
+        self._decode_workers = 0
+        if executor is not None and self._owner_pid == os.getpid():
+            executor.shutdown(wait=True)
         resources = list(self._decoders.values())
         self._decoders.clear()
         first_error = None
@@ -223,7 +232,54 @@ class VideoFrameCollator:
         state = self.__dict__.copy()
         state["_decoders"] = OrderedDict()
         state["_owner_pid"] = None
+        state["_decode_executor"] = None
+        state["_decode_workers"] = 0
         return state
+
+    @contextmanager
+    def _map_decoders(self, requests, decode, parallelism):
+        self._ensure_process_local_cache()
+        limit = min(parallelism, self.max_open_videos, len(requests))
+        if limit <= 1:
+            yield (decode(self._decoder(*key), value)
+                   for key, value in requests.items())
+            return
+        if getattr(self, "_decode_workers", 0) != limit:
+            executor = getattr(self, "_decode_executor", None)
+            if executor is not None:
+                executor.shutdown(wait=True)
+            self._decode_executor = ThreadPoolExecutor(max_workers=limit)
+            self._decode_workers = limit
+        items = iter(requests.items())
+        pending = deque()
+
+        def submit():
+            try:
+                key, value = next(items)
+            except StopIteration:
+                return
+            # Keep cache mutations ordered; pending decoders remain most recent.
+            decoder = self._decoder(*key)
+            pending.append(self._decode_executor.submit(decode, decoder, value))
+
+        def results():
+            while pending:
+                future = pending[0]
+                value = future.result()
+                pending.popleft()
+                yield value
+                del value, future
+                submit()
+
+        try:
+            for _ in range(limit):
+                submit()
+            yield results()
+        finally:
+            for future in pending:
+                future.cancel()
+            # A failed or abandoned batch must finish before cache reuse/close.
+            wait(pending)
 
     def _decode_rows(self, rows):
         decoded = [None] * len(rows)
