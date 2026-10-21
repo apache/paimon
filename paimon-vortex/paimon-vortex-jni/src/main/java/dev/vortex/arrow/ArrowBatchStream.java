@@ -61,6 +61,10 @@ public final class ArrowBatchStream implements AutoCloseable {
     private final ArrowArrayStream stream;
     private final Schema schema;
     private final Layout layout;
+    // The schema of batch roots: all fields except the top-level view columns, which batches
+    // expose as ViewColumns. Each child maps to its root vector, or -1 for a view column.
+    private final Schema rootSchema;
+    private final int[] rootIndexes;
 
     private ArrowBatchStream(
             BufferAllocator allocator, ArrowArrayStream stream, Schema schema, Layout layout) {
@@ -68,6 +72,18 @@ public final class ArrowBatchStream implements AutoCloseable {
         this.stream = stream;
         this.schema = schema;
         this.layout = layout;
+
+        List<Field> rootFields = new ArrayList<>();
+        this.rootIndexes = new int[layout.children.length];
+        for (int i = 0; i < rootIndexes.length; i++) {
+            if (layout.children[i].kind == Kind.VIEW) {
+                rootIndexes[i] = -1;
+            } else {
+                rootIndexes[i] = rootFields.size();
+                rootFields.add(schema.getFields().get(i));
+            }
+        }
+        this.rootSchema = new Schema(rootFields);
     }
 
     /** Takes ownership of {@code stream}, which must be a stream of struct arrays. */
@@ -96,9 +112,9 @@ public final class ArrowBatchStream implements AutoCloseable {
     }
 
     /** Returns the next batch, or null at the end of the stream. */
-    public VectorSchemaRoot next() throws IOException {
+    public ArrowBatch next() throws IOException {
         ArrowArray array = ArrowArray.allocateNew(allocator);
-        boolean moved = false;
+        boolean owned = false;
         try {
             stream.getNext(array);
             ArrowArray.Snapshot snapshot = array.snapshot();
@@ -106,36 +122,53 @@ public final class ArrowBatchStream implements AutoCloseable {
                 return null;
             }
 
-            VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator);
+            VectorSchemaRoot root =
+                    VectorSchemaRoot.create(layout.hasView ? rootSchema : schema, allocator);
             try {
                 if (!layout.hasView) {
                     // Moves the whole batch, then releases and closes the array struct.
-                    moved = true;
+                    owned = true;
                     Data.importIntoVectorSchemaRoot(allocator, array, root, null);
-                    return root;
+                    return new ArrowBatch(root, new ViewColumn[0], null, root.getRowCount());
                 }
 
                 checkZeroOffset(snapshot);
                 long[] children =
                         NativeUtil.toJavaArray(snapshot.children, (int) snapshot.n_children);
+                ViewColumn[] viewColumns = new ViewColumn[children.length];
                 for (int i = 0; i < children.length; i++) {
-                    importColumn(children[i], layout.children[i], root.getVector(i));
+                    if (rootIndexes[i] < 0) {
+                        // Read lazily from native memory, which the batch keeps alive.
+                        viewColumns[i] = viewColumn(ArrowArray.wrap(children[i]).snapshot());
+                    } else {
+                        importColumn(
+                                children[i], layout.children[i], root.getVector(rootIndexes[i]));
+                    }
                 }
                 root.setRowCount((int) snapshot.length);
-                return root;
+                owned = true;
+                return new ArrowBatch(root, viewColumns, array, (int) snapshot.length);
             } catch (Throwable t) {
                 root.close();
                 throw t;
             }
         } finally {
-            if (!moved) {
-                // Releases the columns that were copied rather than moved.
+            if (!owned) {
                 if (array.snapshot().release != 0) {
                     array.release();
                 }
                 array.close();
             }
         }
+    }
+
+    private static ViewColumn viewColumn(ArrowArray.Snapshot snapshot) {
+        long[] buffers = NativeUtil.toJavaArray(snapshot.buffers, (int) snapshot.n_buffers);
+        // Buffers: validity, views, the data buffers, then the variadic buffer sizes.
+        long[] dataBuffers = new long[buffers.length - 3];
+        System.arraycopy(buffers, 2, dataBuffers, 0, dataBuffers.length);
+        return new ViewColumn(
+                buffers[0], buffers[1], dataBuffers, snapshot.offset, (int) snapshot.length);
     }
 
     @Override
