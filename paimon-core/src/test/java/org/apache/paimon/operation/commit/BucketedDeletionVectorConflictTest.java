@@ -191,7 +191,7 @@ class BucketedDeletionVectorConflictTest {
                         files("X", "Y"),
                         rewrite,
                         Collections.emptyList()),
-                "DV file DA references data file X which is not present after applying changes");
+                "DV references data file X which is not present after applying changes");
     }
 
     @Test
@@ -270,7 +270,7 @@ class BucketedDeletionVectorConflictTest {
                 .isEmpty();
         assertConflict(
                 check(detection(null), files("Y"), Collections.emptyList(), b, kind),
-                "DV file DB references data file X which is not present after applying changes");
+                "DV references data file X which is not present after applying changes");
     }
 
     /** Case 5: A and B rewrite X; after A commits, the ordinary file check rejects B's DELETE X. */
@@ -307,7 +307,7 @@ class BucketedDeletionVectorConflictTest {
                         files("X"),
                         rewrite,
                         Arrays.asList(index(DELETE, old), index(ADD, dv("D1", "X")))),
-                "DV file D1 references data file X which is not present after applying changes");
+                "DV references data file X which is not present after applying changes");
     }
 
     @Test
@@ -318,7 +318,7 @@ class BucketedDeletionVectorConflictTest {
                         Collections.singletonList(file("X", ADD, EMPTY_ROW, 1, 0)),
                         Collections.emptyList(),
                         Collections.singletonList(index(ADD, dv("D1", "X")))),
-                "DV file D1 references data file X which is not present after applying changes");
+                "DV references data file X which is not present after applying changes");
     }
 
     @Test
@@ -331,11 +331,19 @@ class BucketedDeletionVectorConflictTest {
                         Collections.emptyList(),
                         Collections.singletonList(index(ADD, missing))),
                 "Missing data-file references for DV file D1");
+        // Pure data-file additions cannot invalidate retained DV references.
+        assertThat(
+                        check(
+                                detection(missing),
+                                files("X"),
+                                Collections.singletonList(file("Y", ADD)),
+                                Collections.emptyList()))
+                .isEmpty();
         assertConflict(
                 check(
                         detection(missing),
                         files("X"),
-                        Collections.singletonList(file("Y", ADD)),
+                        Arrays.asList(file("X", DELETE), file("Y", ADD)),
                         Collections.emptyList()),
                 "Missing data-file references for DV file D1");
     }

@@ -218,7 +218,9 @@ public abstract class ConflictDetection {
         Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
         for (SimpleFileEntry entry : deltaEntries) {
             // A rewrite may have no DV increment but still invalidate a concurrently added DV.
-            buckets.add(Pair.of(entry.partition(), entry.bucket()));
+            if (entry.kind() == FileKind.DELETE) {
+                buckets.add(Pair.of(entry.partition(), entry.bucket()));
+            }
         }
         Map<Pair<BinaryRow, Integer>, IndexFileMeta> deletedDvs = new HashMap<>();
         Map<Pair<BinaryRow, Integer>, IndexFileMeta> addedDvs = new HashMap<>();
@@ -240,17 +242,11 @@ public abstract class ConflictDetection {
             return Optional.empty();
         }
 
-        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> snapshotFiles =
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> bucketDvs =
                 indexFileHandler.scanBuckets(latestSnapshot, DELETION_VECTORS_INDEX, buckets);
-        Map<Pair<BinaryRow, Integer>, Set<String>> liveFiles = new HashMap<>();
-        for (SimpleFileEntry entry : mergedEntries) {
-            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
-            if (entry.kind() == FileKind.ADD && buckets.contains(bucket)) {
-                liveFiles.computeIfAbsent(bucket, ignored -> new HashSet<>()).add(entry.fileName());
-            }
-        }
+        Map<Pair<BinaryRow, Integer>, Set<String>> pendingRefDataFiles = new HashMap<>();
         for (Pair<BinaryRow, Integer> bucket : buckets) {
-            List<IndexFileMeta> files = snapshotFiles.getOrDefault(bucket, Collections.emptyList());
+            List<IndexFileMeta> files = bucketDvs.getOrDefault(bucket, Collections.emptyList());
             if (files.size() > 1) {
                 return bucketedDvConflict(
                         latestSnapshot, bucket, "Expected at most one DV index per bucket");
@@ -289,20 +285,40 @@ public abstract class ConflictDetection {
                         bucket,
                         "Missing data-file references for DV file " + result.fileName());
             }
-            Set<String> bucketFiles = liveFiles.getOrDefault(bucket, Collections.emptySet());
-            for (DeletionVectorMeta reference : result.dvRanges().values()) {
-                if (!bucketFiles.contains(reference.dataFileName())) {
-                    return bucketedDvConflict(
-                            latestSnapshot,
-                            bucket,
-                            String.format(
-                                    "DV file %s references data file %s which is not present "
-                                            + "after applying changes",
-                                    result.fileName(), reference.dataFileName()));
+            Set<String> references = new HashSet<>(result.dvRanges().keySet());
+            if (!references.isEmpty()) {
+                pendingRefDataFiles.put(bucket, references);
+            }
+        }
+        if (pendingRefDataFiles.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Track only DV references, and stop once all are found in the resulting data files.
+        for (SimpleFileEntry entry : mergedEntries) {
+            if (entry.kind() != FileKind.ADD) {
+                continue;
+            }
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            Set<String> references = pendingRefDataFiles.get(bucket);
+            if (references != null) {
+                references.remove(entry.fileName());
+                if (references.isEmpty()) {
+                    pendingRefDataFiles.remove(bucket);
+                    if (pendingRefDataFiles.isEmpty()) {
+                        return Optional.empty();
+                    }
                 }
             }
         }
-        return Optional.empty();
+        Map.Entry<Pair<BinaryRow, Integer>, Set<String>> missing =
+                pendingRefDataFiles.entrySet().iterator().next();
+        return bucketedDvConflict(
+                latestSnapshot,
+                missing.getKey(),
+                String.format(
+                        "DV references data file %s which is not present after applying changes",
+                        missing.getValue().iterator().next()));
     }
 
     private Optional<RuntimeException> bucketedDvConflict(
