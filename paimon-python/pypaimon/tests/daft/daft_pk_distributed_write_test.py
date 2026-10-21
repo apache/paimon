@@ -318,7 +318,7 @@ def test_hash_dynamic_pk_restores_bucket_mapping_across_commits(catalog):
 @pytest.mark.parametrize('overwrite', [False, True])
 def test_grouped_pk_writes_use_native_without_python_fallback(
         catalog, monkeypatch, bucket, partitioned, overwrite):
-    from pypaimon.execution.native.write.native_write import NativeTableWrite
+    from pypaimon.execution.write_dispatch import NativeTableWrite
 
     def reject_fallback(self):
         raise AssertionError('Grouped Daft write fell back to Python')

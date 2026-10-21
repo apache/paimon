@@ -220,10 +220,10 @@ class AbstractVectorSearchBuilderImpl:
         reject_search_under_query_auth(self._table)
         if self._vector_column is None:
             raise ValueError("Vector column must be set via with_vector_column()")
-        from pypaimon.execution.native.read.native_search_plan import native_vector_scan
+        from pypaimon.execution.search_dispatch import create_vector_scan
         execution = copy(self)
         execution._options = dict(self._options)
-        return native_vector_scan(self, execution._new_python_vector_scan, self._native_batch_search)
+        return create_vector_scan(self, execution._new_python_vector_scan, self._native_batch_search)
 
     def _new_python_vector_scan(self):
         from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
@@ -259,11 +259,8 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
         return self
 
     def execute_local(self):
-        from pypaimon.execution.native.read.native_vector_search import try_native_vector_search
-        result = try_native_vector_search(self, self._query_vector)
-        if result is not None:
-            return result
-        return super().execute_local()
+        from pypaimon.execution.search_dispatch import execute_vector_search
+        return execute_vector_search(self, self._query_vector)
 
     def new_vector_search_read(self):
         # type: () -> VectorSearchRead
@@ -274,10 +271,11 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             raise ValueError("Vector column must be set via with_vector_column()")
         if self._query_vector is None:
             raise ValueError("Query vector must be set via with_query_vector()")
-        from pypaimon.execution.native.read.native_search_plan import native_vector_read
+        from pypaimon.execution.search_dispatch import create_vector_read
         execution = copy(self)
         execution._options = dict(self._options)
-        return native_vector_read(self, execution._new_python_vector_read)
+        execution._query_vector = copy(self._query_vector)
+        return create_vector_read(execution, execution._new_python_vector_read)
 
     def _new_python_vector_read(self):
         from pypaimon.execution.python.read.search.vector_search_read import DataEvolutionVectorRead

@@ -16,13 +16,10 @@
 # under the License.
 
 from dataclasses import replace
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
-from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.execution.native.read.plan import NativeTableScanMixin
-from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
 from pypaimon.read.auth_support import (
     authorize, latest_auth_fields, validate_auth_rules)
 from pypaimon.read.plan import Plan
@@ -33,7 +30,11 @@ from pypaimon.read.scan_stats import ScanStats
 from pypaimon.utils.range import Range
 
 
-class TableScan(PythonTableScanMixin, NativeTableScanMixin):
+if TYPE_CHECKING:
+    from pypaimon.table.file_store_table import FileStoreTable
+
+
+class TableScan:
     """Public scan facade selecting the configured execution backend."""
 
     def __init__(
@@ -43,9 +44,7 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
         limit: Optional[int],
         partition_predicate: Optional[Predicate] = None,
     ):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        self.table: FileStoreTable = table
+        self.table: "FileStoreTable" = table
         self.predicate = predicate
         self.limit = limit
         self.partition_predicate = partition_predicate
@@ -126,26 +125,8 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
         )
 
     def plan(self) -> Plan:
-        native_auth = (self.table.options.query_auth_enabled
-                       and self._native_requested() and self._native_plan_supported())
-        if native_auth:
-            # Rust asks the REST server and carries its complete response in
-            # QueryAuthSplit. Both readers then enforce that captured policy.
-            native = self._try_native_plan()
-            if native is not None:
-                return native
-        auth_result = self.__auth_query()
-        if self._query_auth_fn is not None and self._file_scanner is not None:
-            from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
-            prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
-        # The native planner bypasses the auth-aware file scanner. Resolve auth
-        # before selecting a planning backend.
-        if (not native_auth and auth_result is None and self._native_requested()
-                and self._native_plan_supported()):
-            native = self._try_native_plan()
-            if native is not None:
-                return native
-        return self._python_plan(auth_result)
+        from pypaimon.execution.read_dispatch import plan_scan
+        return plan_scan(self)
 
     def plan_all_files(self) -> Plan:
         """Plan matching files including L0 and all data-evolution column files.
@@ -153,14 +134,8 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
         Existing filters and limits still apply. Query authorization must be
         unrestricted, as required by writer restore, overwrite and indexing.
         """
-        from pypaimon.execution.native.table import _native_query_auth_supported
-        if self._native_requested() and _native_query_auth_supported(self.table) and self._native_plan_supported():
-            plan = self._try_native_plan(all_files=True)
-            if plan is not None:
-                return plan
-        if self.__auth_query(all_columns=True) is not None:
-            raise TableNoPermissionException(self.table.identifier)
-        return self._python_plan_all_files()
+        from pypaimon.execution.read_dispatch import plan_all_files
+        return plan_all_files(self)
 
     def __auth_query(self, all_columns=False):
         return authorize(self.table, self._query_auth_fn, None if all_columns else self._read_type,
@@ -173,22 +148,8 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
         keeps going through :meth:`plan`. Native scans always collect lightweight
         counters in the same core planning pass, without opening data files.
         """
-        native_auth = (self.table.options.query_auth_enabled
-                       and self._native_requested() and self._native_plan_supported())
-        if native_auth:
-            native = self._try_native_plan()
-            if native is not None:
-                return native, native.stats()
-        auth_result = self.__auth_query()
-        if self._query_auth_fn is not None and self._file_scanner is not None:
-            from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
-            prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
-        if (not native_auth and auth_result is None and self._native_requested()
-                and self._native_plan_supported()):
-            native = self._try_native_plan()
-            if native is not None:
-                return native, native.stats()
-        return self._python_scan_with_stats(auth_result)
+        from pypaimon.execution.read_dispatch import scan_with_stats
+        return scan_with_stats(self)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         if self._file_scanner is None:
@@ -227,6 +188,47 @@ class TableScan(PythonTableScanMixin, NativeTableScanMixin):
 
     def _validate_scan_mode(self):
         _validate_scan_mode(self.table)
+
+    def _create_file_scanner(self) -> "FileScanner":
+        from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
+        return PythonTableScanMixin._create_file_scanner(self)
+
+    def _native_requested(self) -> bool:
+        from pypaimon.execution.read_dispatch import native_plan_requested
+        return native_plan_requested(self)
+
+    def _native_plan_supported(self) -> bool:
+        # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
+        from pypaimon.execution.native.read.plan import NativeTableScanMixin
+        return NativeTableScanMixin._native_plan_supported(self)
+
+    def _native_plan_supported_impl(self) -> bool:
+        """Fall back to the Python scanner for scans native can't carry:
+        a primary-key table whose trimmed PK is empty (PK equals the partition
+        key; Rust rejects this schema), unsupported time travel selectors,
+        custom authorization, a missing pypaimon-rust, or a catalog / identifier Rust
+        cannot reconstruct. Keep this capability gate in sync when adding scan
+        features."""
+        from pypaimon.execution.native.read.plan import NativeTableScanMixin
+        return NativeTableScanMixin._native_plan_supported_impl(self)
+
+    def _native_global_index_result_supported(self, request: Optional[ScanRequest] = None) -> bool:
+        from pypaimon.execution.native.read.plan import NativeTableScanMixin
+        return NativeTableScanMixin._native_global_index_result_supported(self, request)
+
+    def _native_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
+        from pypaimon.execution.native.read.plan import NativeTableScanMixin
+        return NativeTableScanMixin._native_row_ranges(self)
+
+    def _try_native_plan(self, all_files=False) -> Optional[Plan]:
+        """Plan via pypaimon_rust, then drop partitions the predicate rejects.
+
+        Predicate and limit are pushed into Rust planning and are still enforced
+        by the reader. Snapshot metadata is preserved even when pruning removes
+        every split.
+        """
+        from pypaimon.execution.native.read.plan import NativeTableScanMixin
+        return NativeTableScanMixin._try_native_plan(self, all_files)
 
 
 __all__ = [

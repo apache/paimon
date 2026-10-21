@@ -15,26 +15,27 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Iterable, List, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+import pyarrow
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.utils.range import Range
+
+if TYPE_CHECKING:
+    from pypaimon.execution.python.write.writer.data_writer import DataWriter
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.execution.dispatch import prepare_native_write_operation
-from pypaimon.execution.python.write.table_update import (
-    PythonTableUpdateMixin, ShardTableUpdator, SingleWriter)
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
-from pypaimon.write.update_validation import _authorize_update, predicate_fields
+from pypaimon.write.update_validation import predicate_fields
 
 __all__ = ["TableUpdate", "BatchTableUpdate", "StreamTableUpdate", "ShardTableUpdator", "SingleWriter"]
 
 
-class TableUpdate(PythonTableUpdateMixin):
+class TableUpdate:
     """Public batch and stream update configuration and execution entry points."""
 
     def __init__(self, table, commit_user):
@@ -45,18 +46,9 @@ class TableUpdate(PythonTableUpdateMixin):
         self.update_cols = None
         self.projection = None
 
-    def _new_row_id_updater(
-            self, commit_identifier: int, _precomputed_files_info=None
-    ) -> TableUpdateByRowId:
-        _authorize_update(self.table)
-        if _precomputed_files_info is None:
-            native = prepare_native_write_operation(
-                'update_by_row_id', self.table, self.commit_user, commit_identifier)
-            if native is not None:
-                return native
-        return TableUpdateByRowId(
-            self.table, self.commit_user, commit_identifier,
-            _precomputed_files_info=_precomputed_files_info)
+    def _new_row_id_updater(self, commit_identifier: int, _precomputed_files_info=None) -> TableUpdateByRowId:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._new_row_id_updater(self, commit_identifier, _precomputed_files_info)
 
     def with_update_type(self, update_cols: List[str]):
         update_cols = list(dict.fromkeys(update_cols))
@@ -76,41 +68,20 @@ class TableUpdate(PythonTableUpdateMixin):
 
     def new_shard_updator(self, shard_num: int, total_shard_count: int):
         """Create a shard updater for scan and rewrite style updates."""
-        if total_shard_count <= 0 or shard_num < 0 or shard_num >= total_shard_count:
-            raise ValueError('Shard index must be smaller than a positive shard count')
-        if self.update_cols == []:
-            raise ValueError('Shard update columns must not be empty')
-        native = prepare_native_write_operation(
-            'shard_update', self.table, self.commit_user, self.projection,
-            self.update_cols, shard_num, total_shard_count,
-            stream=isinstance(self, StreamTableUpdate))
-        if native is not None:
-            return native
-        return self._new_python_shard_updator(shard_num, total_shard_count)
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations.new_shard_updator(self, shard_num, total_shard_count)
 
-    def _update_by_arrow_with_row_id(
-            self, table: pa.Table, commit_identifier: int
-    ) -> List[CommitMessage]:
-        cols = self.update_cols if self.update_cols is not None else [
-            c for c in table.column_names if c != SpecialFields.ROW_ID.name]
-        if table.num_rows and cols and SpecialFields.ROW_ID.name in table.column_names:
-            native = prepare_native_write_operation(
-                'update', self.table, self.commit_user, cols)
-            if native is not None:
-                return native.update_by_arrow_with_row_id(table)
-        return self._new_row_id_updater(commit_identifier).update_columns(table, cols)
+    def _update_by_arrow_with_row_id(self, table: pa.Table, commit_identifier: int) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._update_by_arrow_with_row_id(self, table, commit_identifier)
 
     def _update_by_arrow_batches_with_row_id(
-            self, tables: Iterable[pa.Table], commit_identifier: int
-    ) -> List[CommitMessage]:
-        return super()._update_by_arrow_batches_with_row_id(tables, commit_identifier)
+            self, tables: Iterable[pa.Table], commit_identifier: int) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._update_by_arrow_batches_with_row_id(self, tables, commit_identifier)
 
     def _upsert_by_arrow_with_key(
-            self,
-            table: pa.Table,
-            upsert_keys: List[str],
-            commit_identifier: int,
-    ) -> List[CommitMessage]:
+            self, table: pa.Table, upsert_keys: List[str], commit_identifier: int) -> List[CommitMessage]:
         """Shared implementation for ``upsert_by_arrow_with_key``.
 
         For each row in the input Arrow table:
@@ -130,96 +101,104 @@ class TableUpdate(PythonTableUpdateMixin):
         Returns:
             List of :class:`CommitMessage` objects to be committed.
         """
-        return TableUpsertByKey(
-            self.table, self.commit_user, commit_identifier
-        ).upsert(table, upsert_keys, self.update_cols)
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._upsert_by_arrow_with_key(self, table, upsert_keys, commit_identifier)
 
-    def _upsert_by_key(
-            self,
-            rows,
-            upsert_keys: List[str],
-            commit_identifier: int,
-    ) -> List[CommitMessage]:
-        return TableUpsertByKey(
-            self.table, self.commit_user, commit_identifier
-        ).upsert_rows(rows, upsert_keys, self.update_cols)
+    def _upsert_by_key(self, rows, upsert_keys: List[str], commit_identifier: int) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._upsert_by_key(self, rows, upsert_keys, commit_identifier)
 
-    def _merge_into(
-            self,
-            source: Any,
-            on,
-            when_matched: Sequence,
-            when_not_matched: Sequence,
-            commit_identifier: int,
-    ) -> List[CommitMessage]:
-        from pypaimon.table.data_evolution_merge_into import merge_into
-
-        return merge_into(
-            self.table,
-            source,
-            on=on,
-            when_matched=when_matched,
-            when_not_matched=when_not_matched,
-            commit_user=self.commit_user,
-            commit_identifier=commit_identifier,
-        )
+    def _merge_into(self, source: Any, on, when_matched: Sequence, when_not_matched: Sequence,
+                    commit_identifier: int) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._merge_into(self, source, on, when_matched, when_not_matched, commit_identifier)
 
     def _update_by_predicate(
-            self,
-            predicate: Optional[Predicate],
-            assignments: Mapping[str, Any],
-            commit_identifier: int,
-            read_columns: Optional[Sequence[str]] = None,
-    ) -> List[CommitMessage]:
+            self, predicate: Optional[Predicate], assignments: Mapping[str, Any],
+            commit_identifier: int, read_columns: Optional[Sequence[str]] = None) -> List[CommitMessage]:
         """Shared implementation for SQL-like ``UPDATE ... WHERE ...``.
 
         ``predicate`` identifies the target rows. Assignment values may be
         literals or callables receiving one matched logical file group as an
         Arrow table.
         """
-        has_callable = any(callable(value) for value in assignments.values())
-        has_array = any(
-            isinstance(value, (pa.Array, pa.ChunkedArray))
-            for value in assignments.values()
-        )
-        read_columns = tuple(read_columns or ())
-        self._validate_predicate_update(
-            assignments, read_columns, has_callable, has_array
-        )
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._update_by_predicate(self, predicate, assignments, commit_identifier, read_columns)
 
-        if self.table.options.native_write_enabled():
-            native = prepare_native_write_operation(
-                'predicate_update', self.table, self.commit_user,
-                predicate, list(assignments))
-            if native is not None:
-                return native.update(assignments, read_columns)
-        return self._execute_predicate_update(
-            predicate, assignments, commit_identifier, read_columns,
-            has_callable, has_array)
+    def _delete_by_predicate(self, predicate: Optional[Predicate], commit_identifier: int) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._delete_by_predicate(self, predicate, commit_identifier)
 
-    def _delete_by_predicate(
-            self, predicate: Optional[Predicate], commit_identifier: int,
-    ) -> List[CommitMessage]:
-        native = prepare_native_write_operation(
-            'predicate_delete', self.table, self.commit_user, predicate)
-        if native is not None:
-            return native.delete()
-        return self._execute_predicate_delete(predicate, commit_identifier)
-
-    def _delete_by_row_id(
-            self, row_ids: Sequence[int], commit_identifier: int,
-    ) -> List[CommitMessage]:
-        if len(row_ids):
-            native = prepare_native_write_operation(
-                'delete', self.table, self.commit_user)
-            if native is not None:
-                return native.delete_by_row_id(row_ids)
-        return self._delete_rows_with_python(row_ids)
+    def _delete_by_row_id(self, row_ids: Sequence[int], commit_identifier: int) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._delete_by_row_id(self, row_ids, commit_identifier)
 
     def _matched_delete_row_ids(self, predicate: Optional[Predicate]) -> List[int]:
-        return super()._matched_delete_row_ids(predicate)
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations._matched_delete_row_ids(self, predicate)
 
     _predicate_fields = staticmethod(predicate_fields)
+
+    @staticmethod
+    def _predicate_update_file_groups(splits):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._predicate_update_file_groups(splits)
+
+    def _matched_update_scan_table(self):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._matched_update_scan_table(self)
+
+    def _validate_predicate_update(self, assignments, read_columns, has_callable, has_array):
+        from pypaimon.write.update_validation import _validate_predicate_update
+        return _validate_predicate_update(self, assignments, read_columns, has_callable, has_array)
+
+    def _build_predicate_update_table(self, assignments, matched):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._build_predicate_update_table(self, assignments, matched)
+
+    @staticmethod
+    def _assignment_to_array(value, data_type, row_count):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._assignment_to_array(value, data_type, row_count)
+
+    def _delete_by_partition_filter(self, partition_filter):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._delete_by_partition_filter(self, partition_filter)
+
+    @staticmethod
+    def _partition_delete_message(messages, partition, bucket, snapshot_id):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._partition_delete_message(messages, partition, bucket, snapshot_id)
+
+    def _partition_index_entries(self, snapshot, partition_filter):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._partition_index_entries(self, snapshot, partition_filter)
+
+    def _partition_only_delete_filter(self, predicate):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._partition_only_delete_filter(self, predicate)
+
+    def _rewrite_predicate_to_partition_indices(self, predicate, partition_index):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._rewrite_predicate_to_partition_indices(self, predicate, partition_index)
+
+    def _execute_predicate_update(self, predicate, assignments, commit_identifier,
+                                  read_columns, has_callable, has_array):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._execute_predicate_update(
+            self, predicate, assignments, commit_identifier, read_columns, has_callable, has_array)
+
+    def _execute_predicate_delete(self, predicate, commit_identifier):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._execute_predicate_delete(self, predicate, commit_identifier)
+
+    def _new_python_shard_updator(self, shard_num, total_shard_count):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._new_python_shard_updator(self, shard_num, total_shard_count)
+
+    def _delete_rows_with_python(self, row_ids):
+        from pypaimon.execution.python.write.table_update import PythonTableUpdateMixin
+        return PythonTableUpdateMixin._delete_rows_with_python(self, row_ids)
 
 
 class BatchTableUpdate(TableUpdate):
@@ -236,21 +215,15 @@ class BatchTableUpdate(TableUpdate):
         """Apply column updates keyed by ``_ROW_ID`` to existing rows."""
         return self._update_by_arrow_with_row_id(table, BATCH_COMMIT_IDENTIFIER)
 
-    def update_by_arrow_batches_with_row_id(
-            self, tables: Iterable[pa.Table]
-    ) -> List[CommitMessage]:
+    def update_by_arrow_batches_with_row_id(self, tables: Iterable[pa.Table]) -> List[CommitMessage]:
         """Apply row-id updates from batches using one target-file index.
 
         For each updated column, batches must target disjoint ``first_row_id``
         file groups. Conflicting overlap is rejected and all files staged by
         earlier batches are aborted.
         """
-        native = prepare_native_write_operation(
-            'update', self.table, self.commit_user, self.update_cols)
-        if native is not None:
-            return native.update_by_arrow_batches_with_row_id(tables)
-        return self._update_by_arrow_batches_with_row_id(
-            tables, BATCH_COMMIT_IDENTIFIER)
+        from pypaimon.execution.update_dispatch import TableUpdateOperations
+        return TableUpdateOperations.update_by_arrow_batches_with_row_id(self, tables)
 
     def upsert_by_arrow_with_key(
             self, table: pa.Table, upsert_keys: List[str]
@@ -406,3 +379,56 @@ class StreamTableUpdate(TableUpdate):
             when_not_matched,
             commit_identifier,
         )
+
+
+class ShardTableUpdator:
+
+    def __init__(self, table, projection: Optional[List[str]],
+                 write_cols: List[str], commit_user, shard_num: int, total_shard_count: int):
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator.__init__(self, table, projection, write_cols,
+                                          commit_user, shard_num, total_shard_count)
+
+    @staticmethod
+    def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator.compute_from_files(files)
+
+    def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator.arrow_reader(self)
+
+    def prepare_commit(self) -> List[CommitMessage]:
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator.prepare_commit(self)
+
+    def update_by_arrow_batch(self, data: pa.RecordBatch):
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator.update_by_arrow_batch(self, data)
+
+    def _init_writer(self):
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator._init_writer(self)
+
+
+class SingleWriter:
+
+    def __init__(self, writer: 'DataWriter', partition, first_row_id: int, row_count: int):
+        from pypaimon.execution.python.write.table_update import SingleWriter
+        return SingleWriter.__init__(self, writer, partition, first_row_id, row_count)
+
+    def capacity(self) -> int:
+        from pypaimon.execution.python.write.table_update import SingleWriter
+        return SingleWriter.capacity(self)
+
+    def write(self, data: pa.RecordBatch):
+        from pypaimon.execution.python.write.table_update import SingleWriter
+        return SingleWriter.write(self, data)
+
+    def partition(self) -> Tuple:
+        from pypaimon.execution.python.write.table_update import SingleWriter
+        return SingleWriter.partition(self)
+
+    def end(self) -> DataFileMeta:
+        from pypaimon.execution.python.write.table_update import SingleWriter
+        return SingleWriter.end(self)

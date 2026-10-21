@@ -25,7 +25,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.execution.native.write.native_write import NativeTableWrite, create_native_write
+from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.execution.native.write.native_write import create_native_write
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -60,7 +61,8 @@ def test_inactive_changelog_format_qualifies_for_native_write(
                 'pypaimon.execution.native.write.native_write.create_native_write_table',
                 return_value=native_table) as create:
         writer = create_native_write(table, 'job', static_partition=partition, stream=stream)
-    assert isinstance(writer, NativeTableWrite)
+    from pypaimon.execution.native.write.native_write import NativeTableWrite as NativeWrite
+    assert isinstance(writer, NativeWrite)
     create.assert_called_once_with(table)
     builder = (native_table.new_stream_write_builder.return_value.with_commit_user.return_value if stream
                else native_table.new_batch_write_builder.return_value._with_commit_user.return_value)

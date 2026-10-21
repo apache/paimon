@@ -70,28 +70,6 @@ def test_native_write_error_cannot_trigger_python_replay():
         python_write.assert_not_called()
 
 
-def test_native_predicate_row_ids_uses_the_read_adapter():
-    import pyarrow as pa
-    from pypaimon.execution.native.write.native_update import native_predicate_row_ids
-
-    table = SimpleNamespace(options=SimpleNamespace(
-        row_tracking_enabled=lambda: True, data_evolution_enabled=lambda: False))
-    predicate = object()
-    reader = Mock(side_effect=[
-        [pa.record_batch([[2, 3]], names=['_ROW_ID'])],
-        [pa.record_batch([[9]], names=['_ROW_ID'])],
-    ])
-    with patch('pypaimon.execution.native.write.native_update.native_runtime_available', return_value=True), \
-            patch('pypaimon.execution.native.read.table_read._prepare_native_read', return_value=reader) as prepare, \
-            patch('pypaimon.execution.native.read.split_adapter.native_split_from_python',
-                  side_effect=['native-first', 'native-second']) as convert:
-        assert native_predicate_row_ids(table, predicate, ['first', 'second']) == [2, 3, 9]
-    prepare.assert_called_once_with(table, predicate=predicate, projection=['_ROW_ID'])
-    assert [call[0] for call in reader.call_args_list] == [(['native-first'],), (['native-second'],)]
-    assert [call[1] for call in convert.call_args_list] == [
-        {'ranges_use_row_ids': True}, {'ranges_use_row_ids': True}]
-
-
 def test_native_row_id_updater_keeps_the_public_return_type():
     from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
     from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -99,7 +77,8 @@ def test_native_row_id_updater_keeps_the_public_return_type():
     native = object.__new__(NativeTableUpdateByRowId)
     with patch('pypaimon.execution.native.write.native_update.create_native_update_by_row_id',
                return_value=native):
-        result = dispatch.prepare_native_write_operation('update_by_row_id', object(), 'writer', 1)
+        table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True))
+        result = dispatch.prepare_native_write_operation('update_by_row_id', table, 'writer', 1)
     assert result is native
     assert isinstance(result, TableUpdateByRowId)
     assert issubclass(NativeTableUpdateByRowId, TableUpdateByRowId)

@@ -27,7 +27,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.native.read import native_search_plan
+from pypaimon.execution import search_dispatch
 from pypaimon.table.source.search_types import VectorSearchScanPlan
 
 
@@ -103,8 +103,8 @@ def test_native_search_prepares_scans_reads_and_serializes_without_python(search
         results = read.read_batch_plan(plan) if family == 'batch' else [read.read_plan(plan)]
         assert [list(result.results()) for result in results] == [[7]] * (2 if family == 'batch' else 1)
         # Dropping live handles for transport must not create fallback readers.
-        assert pickle.loads(pickle.dumps(read))._native is None
-        assert pickle.loads(pickle.dumps(scan))._scan is None
+        assert pickle.loads(pickle.dumps(read))._native_reader._native is None
+        assert not pickle.loads(pickle.dumps(scan))._native_scan.available()
     core_scan.scan.assert_called_once_with()
     (core_read.read_batch_plan if family == 'batch' else core_read.read_plan).assert_called_once_with(plan._native_plan)
 
@@ -188,7 +188,7 @@ def test_native_reader_keeps_the_query_options_captured_at_construction(search_t
     with patch(_native_factory('vector'), return_value=native):
         reader = builder.new_vector_search_read()
     builder.with_option('ivf-flat.metric', 'cosine')
-    fallback = native_search_plan.python_search_reader(reader)
+    fallback = search_dispatch.python_search_reader(reader)
     assert fallback._options == {'ivf-flat.metric': 'l2'}
 
 
@@ -199,7 +199,9 @@ def test_batch_reader_freezes_query_sequence_before_lazy_fallback(search_table):
     with patch(_native_factory('batch'), return_value=native):
         reader = builder.new_batch_vector_search_read()
     queries.append([0.0, 1.0])
-    fallback = native_search_plan.python_search_reader(pickle.loads(pickle.dumps(reader)))
+    queries[0][:] = [3.0, 4.0]
+    assert native.with_query_vectors.call_args[0][0] == [[1.0, 0.0]]
+    fallback = search_dispatch.python_search_reader(pickle.loads(pickle.dumps(reader)))
     assert fallback._query_vectors == [[1.0, 0.0]]
 
 
@@ -217,3 +219,15 @@ def test_vector_split_uses_its_shared_contract_module():
     from pypaimon.table.source.vector_search_split import VectorSearchSplit
 
     assert pickle.loads(pickle.dumps(VectorSearchSplit)) is VectorSearchSplit
+
+
+def test_single_reader_freezes_query_values_before_transport_fallback(search_table):
+    query = [1.0, 0.0]
+    builder = _builder(search_table, 'vector').with_query_vector(query)
+    native, _, _ = _native_builder('vector')
+    with patch(_native_factory('vector'), return_value=native):
+        reader = builder.new_vector_search_read()
+    query[:] = [3.0, 4.0]
+    assert native.with_query_vector.call_args[0][0] == [1.0, 0.0]
+    fallback = search_dispatch.python_search_reader(pickle.loads(pickle.dumps(reader)))
+    assert fallback._query_vector == [1.0, 0.0]

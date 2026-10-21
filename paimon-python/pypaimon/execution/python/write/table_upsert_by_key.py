@@ -22,7 +22,6 @@ import pyarrow as pa
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.row.blob import Blob
-from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import require_columns
@@ -45,9 +44,9 @@ class PythonTableUpsertMixin:
 
     @staticmethod
     def _normalize_rows(rows) -> List:
-        if isinstance(rows, InternalRow):
-            return [rows]
-        return list(rows)
+        from pypaimon.write.update_validation import _normalize_rows
+
+        return _normalize_rows(rows)
 
     def _group_rows_by_partition(
             self,
@@ -278,96 +277,18 @@ class PythonTableUpsertMixin:
 
     def _validate_inputs(self, data: pa.Table, upsert_keys: List[str],
                          update_cols: Optional[List[str]]):
-        """Validate inputs before processing."""
-        if not self.table.options.data_evolution_enabled():
-            raise ValueError(
-                "upsert_by_arrow_with_key requires 'data-evolution.enabled' = 'true'."
-            )
+        from pypaimon.write.update_validation import _validate_inputs
 
-        if not self.table.options.row_tracking_enabled():
-            raise ValueError(
-                "upsert_by_arrow_with_key requires 'row-tracking.enabled' = 'true'."
-            )
-
-        if not upsert_keys:
-            raise ValueError("upsert_keys must not be empty.")
-
-        for key in upsert_keys:
-            if key not in self.table.field_names:
-                raise ValueError(
-                    f"upsert_key '{key}' is not in table schema fields: {self.table.field_names}"
-                )
-            if key not in data.column_names:
-                raise ValueError(
-                    f"upsert_key '{key}' is not in input data columns: {data.column_names}"
-                )
-
-        # For partitioned tables, input data must contain partition columns
-        partition_keys = self.table.partition_keys
-        if partition_keys:
-            missing_in_data = [pk for pk in partition_keys if pk not in data.column_names]
-            if missing_in_data:
-                raise ValueError(
-                    f"For partitioned tables, input data must contain all partition key "
-                    f"columns. Missing: {missing_in_data}"
-                )
-
-        if update_cols is not None:
-            for col in update_cols:
-                if col not in self.table.field_names:
-                    raise ValueError(
-                        f"Column '{col}' in update_cols is not in table schema fields: "
-                        f"{self.table.field_names}"
-                    )
-
-        if data.num_rows == 0:
-            raise ValueError("Input data is empty.")
+        return _validate_inputs(self, data, upsert_keys, update_cols)
 
     def _validate_row_inputs(
             self,
             values_by_name: Dict[str, Any],
             upsert_keys: List[str],
             update_cols: Optional[List[str]]):
-        if not self.table.options.data_evolution_enabled():
-            raise ValueError(
-                "upsert_by_key requires 'data-evolution.enabled' = 'true'."
-            )
+        from pypaimon.write.update_validation import _validate_row_inputs
 
-        if not self.table.options.row_tracking_enabled():
-            raise ValueError(
-                "upsert_by_key requires 'row-tracking.enabled' = 'true'."
-            )
-
-        if not upsert_keys:
-            raise ValueError("upsert_keys must not be empty.")
-
-        for key in upsert_keys:
-            if key not in self.table.field_names:
-                raise ValueError(
-                    f"upsert_key '{key}' is not in table schema fields: {self.table.field_names}"
-                )
-
-        unknown_fields = [
-            field_name
-            for field_name in values_by_name
-            if field_name not in self.table.field_names
-        ]
-        if unknown_fields:
-            raise ValueError(
-                f"upsert_by_key got row field(s) {unknown_fields} "
-                f"that are not in table schema fields: {self.table.field_names}"
-            )
-
-        require_columns(values_by_name, upsert_keys, "upsert_by_key")
-        require_columns(values_by_name, self.table.partition_keys, "upsert_by_key")
-
-        if update_cols is not None:
-            for col in update_cols:
-                if col not in self.table.field_names:
-                    raise ValueError(
-                        f"Column '{col}' in update_cols is not in table schema fields: "
-                        f"{self.table.field_names}"
-                    )
+        return _validate_row_inputs(self, values_by_name, upsert_keys, update_cols)
 
     def _build_key_to_row_ids_map(
             self,

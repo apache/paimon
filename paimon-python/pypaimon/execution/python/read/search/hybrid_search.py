@@ -27,8 +27,12 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult, ScoredGlobalIndexResult
 from pypaimon.table.source.hybrid_search_builder import (
     HybridSearchRouteBuilder, HybridSearchRouteResult,
-    WEIGHTED_SCORE_RANKER, MRR_RANKER, _MAX_ROUTE_WORKERS, _RRF_K,
+    WEIGHTED_SCORE_RANKER, MRR_RANKER,
 )
+
+
+_MAX_ROUTE_WORKERS = 4
+_RRF_K = 60.0
 
 
 def execute_local(self) -> ScoredGlobalIndexResult:
@@ -110,10 +114,10 @@ def rank(
         if not route_result.result.results().is_empty()
     ]
     if self._ranker == WEIGHTED_SCORE_RANKER:
-        return self._weighted_score(non_empty)
+        return _weighted_score(self, non_empty)
     if self._ranker == MRR_RANKER:
-        return self._mrr(non_empty)
-    return self._rrf(non_empty)
+        return _mrr(self, non_empty)
+    return _rrf(self, non_empty)
 
 
 def _rrf(self, route_results):

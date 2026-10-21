@@ -32,7 +32,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 from pypaimon.write.table_update import TableUpdate
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey

@@ -26,7 +26,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.read.plan import (native_plan)
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('pt', pa.string()), ('value', pa.int32())])

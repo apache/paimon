@@ -36,7 +36,7 @@ from unittest.mock import Mock, patch
 
 class RejectPythonIndexes(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith('pypaimon.execution.python.globalindex'):
+        if fullname.startswith('pypaimon.execution.python'):
             raise AssertionError('Python index execution imported: ' + fullname)
         if fullname in ('paimon_vindex', 'paimon_ftindex', 'lumina'):
             raise AssertionError('Python index SDK imported: ' + fullname)
@@ -148,7 +148,7 @@ with patch.object(vindex_reader, '_native_reader_type', return_value=RustReader)
             reader.close()
             reader.close()
         assert stream.closed
-assert not any(name.startswith('pypaimon.execution.python.globalindex') for name in sys.modules)
+assert not any(name.startswith('pypaimon.execution.python') for name in sys.modules)
 """
     result = subprocess.run(
         [sys.executable, '-c', textwrap.dedent(script)],

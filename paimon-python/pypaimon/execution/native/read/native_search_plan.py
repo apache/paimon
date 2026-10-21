@@ -17,7 +17,6 @@
 
 """Native search plans with ordinary, transportable Python source metadata."""
 
-from copy import copy
 import hashlib
 import json
 import pickle
@@ -127,14 +126,14 @@ def _result(table, value, primary_key):
             if primary_key else DictBasedScoredIndexResult(value.row_ids()))
 
 
-class _NativeScan:
-    def __init__(self, table, scan, full_text, primary_key, python_factory, source_modes):
+class NativeSearchScan:
+    """Convert Rust scan metadata without selecting another executor."""
+
+    def __init__(self, table, scan, full_text, primary_key, source_modes):
         self._table = table
         self._scan = scan
         self._full_text = full_text
         self._primary_key = primary_key
-        self._python_factory = python_factory
-        self._python_executor = None
         self._source_modes = source_modes
 
     def __getstate__(self):
@@ -142,28 +141,22 @@ class _NativeScan:
         state['_scan'] = None
         return state
 
+    def available(self):
+        return self._scan is not None
+
     def scan(self):
-        if self._scan is None:
-            if self._python_executor is None:
-                self._python_executor = self._python_factory()
-            return self._python_executor.scan()
         return _plan_from_native(self._table, self._scan.scan(), self._full_text, self._primary_key, self._source_modes)
 
 
-class _NativeRead:
-    def __init__(self, table, native, python_factory, primary_key, source_modes):
+class NativeSearchRead:
+    """Read a compatible live Rust plan; transport fallback belongs to dispatch."""
+
+    def __init__(self, table, native, primary_key, source_modes):
         self._table = table
         self._native = native
-        self._python_factory = python_factory
-        self._python_executor = None
         self._primary_key = primary_key
         self._source_modes = source_modes
         self._table_options = dict(table.options.options.to_map())
-
-    def _python_reader(self):
-        if self._python_executor is None:
-            self._python_executor = self._python_factory()
-        return self._python_executor
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -171,43 +164,20 @@ class _NativeRead:
         return state
 
     def read_plan(self, plan):
-        native = self._native_plan(plan)
-        if native is not None and self._native is not None:
-            # Once execution starts, propagate errors without a second search.
-            return _result(self._table, self._native.read_plan(native), self._primary_key)
-        reader = copy(self._python_reader())
-        if plan.snapshot() is not None:
-            reader._table = reader._table._copy_with_snapshot(plan.snapshot())
-        return reader.read_plan(plan)
+        return _result(self._table, self._native.read_plan(plan), self._primary_key)
 
     def read_batch_plan(self, plan):
-        native = self._native_plan(plan)
-        if native is not None and self._native is not None:
-            return [_result(self._table, result, False) for result in self._native.read_batch_plan(native)]
-        reader = copy(self._python_reader())
-        if plan.snapshot() is not None:
-            reader._table = reader._table._copy_with_snapshot(plan.snapshot())
-        return reader.read_batch_plan(plan)
+        return [_result(self._table, result, False)
+                for result in self._native.read_batch_plan(plan)]
 
-    def _native_plan(self, plan):
+    def resolve_plan(self, plan):
         # Search modes choose source work at scan time. A new reader may use
         # another query or limit, but must still consume these captured splits.
-        if (isinstance(plan, _NativePlan) and plan._source_modes == self._source_modes
+        if (self._native is not None and isinstance(plan, _NativePlan)
+                and plan._source_modes == self._source_modes
                 and plan._table_options == self._table_options):
             return plan._unchanged_native_plan()
         return None
-
-
-class _NativeSplitRead(_NativeRead):
-    def read(self, splits):
-        # Explicit split reads select Python only when invoked. Attribute probes
-        # and method inspection must not construct a fallback executor.
-        return self._python_reader().read(splits)
-
-
-class _NativeBatchRead(_NativeRead):
-    def read_batch(self, splits):
-        return self._python_reader().read_batch(splits)
 
 
 def _source_modes(builder, full_text=False):
@@ -218,47 +188,40 @@ def _source_modes(builder, full_text=False):
             (core.vector_index_search_mode(), core.scalar_index_search_mode()))
 
 
-def python_search_reader(reader):
-    """Keep the existing Ray split workers independent of a live native reader."""
-    return reader._python_reader() if isinstance(reader, _NativeRead) else reader
-
-
-def native_vector_scan(builder, python_factory, batch=False):
+def native_vector_scan(builder, batch=False):
     from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
     native = _native_vector_builder(builder, batch)
-    return python_factory() if native is None else _NativeScan(
-        builder._table, native.new_vector_search_scan(), False, builder._is_primary_key_vector_search(), python_factory,
-        _source_modes(builder))
+    return None if native is None else NativeSearchScan(
+        builder._table, native.new_vector_search_scan(), False,
+        builder._is_primary_key_vector_search(), _source_modes(builder))
 
 
-def native_vector_read(builder, python_factory, batch=False):
+def native_vector_read(builder, batch=False):
     from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
     native = _native_vector_builder(builder, batch)
     if native is None:
-        return python_factory()
+        return None
     if batch:
         native.with_query_vectors(builder._query_vectors)
         reader = native.new_batch_vector_search_read()
     else:
         native.with_query_vector(builder._query_vector)
         reader = native.new_vector_search_read()
-    read_class = _NativeBatchRead if batch else _NativeSplitRead
-    return read_class(
-        builder._table, reader, python_factory, builder._is_primary_key_vector_search(), _source_modes(builder))
+    return NativeSearchRead(
+        builder._table, reader, builder._is_primary_key_vector_search(), _source_modes(builder))
 
 
-def native_full_text_scan(builder, python_factory):
+def native_full_text_scan(builder):
     from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder, require_limit=False)
-    return python_factory() if native is None else _NativeScan(
+    return None if native is None else NativeSearchScan(
         builder._table, native.new_full_text_scan(), True,
-        builder._primary_key_full_text_definition() is not None, python_factory, _source_modes(builder, True))
+        builder._primary_key_full_text_definition() is not None, _source_modes(builder, True))
 
 
-def native_full_text_read(builder, python_factory):
+def native_full_text_read(builder):
     from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
     native = _native_full_text_builder(builder)
-    return python_factory() if native is None else _NativeSplitRead(
-        builder._table, native.new_full_text_read(), python_factory,
-        builder._primary_key_full_text_definition() is not None,
-        _source_modes(builder, True))
+    return None if native is None else NativeSearchRead(
+        builder._table, native.new_full_text_read(),
+        builder._primary_key_full_text_definition() is not None, _source_modes(builder, True))

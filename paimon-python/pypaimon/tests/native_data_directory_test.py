@@ -28,7 +28,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.read.plan import (native_plan)
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 

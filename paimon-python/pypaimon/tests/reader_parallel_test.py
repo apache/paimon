@@ -27,7 +27,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.table_read import TableRead, _RemainingRows
+from pypaimon.read.table_read import TableRead
+from pypaimon.execution.python.read.table_read import _RemainingRows
 
 
 class ResolveParallelismTest(unittest.TestCase):

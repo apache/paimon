@@ -108,7 +108,7 @@ def _rows(builder, plan, native):
 
 
 def _frame(builder, native, snapshot=None):
-    with patch('pypaimon.read.stream_read_builder.AsyncStreamingTableScan',
+    with patch('pypaimon.execution.python.read.streaming_table_scan.AsyncStreamingTableScan',
                side_effect=AssertionError('Native stream fell back')) if native else ExitStack():
         scan = builder.new_streaming_scan()
     if native:

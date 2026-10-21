@@ -45,7 +45,6 @@ from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
-from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
 def _pyarrow_lt_7():
@@ -1027,6 +1026,8 @@ class PyArrowFileIO(FileIO):
             raise RuntimeError(f"Failed to write row file {path}: {e}") from e
 
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
+
         try:
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")

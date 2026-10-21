@@ -74,7 +74,7 @@ def merge_into(
     """
     # Empty-target INSERT skips the target scan, but still needs the same
     # unrestricted whole-table grant before any user callback or staging.
-    from pypaimon.write.table_update import _authorize_update
+    from pypaimon.write.update_validation import _authorize_update
     _authorize_update(target_table)
     if any(clause.condition is not None
            for clauses in (when_matched, when_not_matched) for clause in clauses):

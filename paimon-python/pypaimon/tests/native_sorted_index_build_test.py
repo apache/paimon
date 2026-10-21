@@ -28,6 +28,7 @@ import pytest
 from pypaimon import Schema
 from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.execution.native.table import (_native_table)
@@ -107,7 +108,8 @@ def _ids(table, predicate=None):
 
 def _build(table, kind, column='name', **kwargs):
     # A native build must never materialize or sort rows in Python.
-    with patch.object(GlobalIndexBuilder, '_build_sorted_index', side_effect=AssertionError('Python index build ran')):
+    with patch.object(PythonGlobalIndexBuilder, '_build_sorted_index',
+                      side_effect=AssertionError('Python index build ran')):
         return GlobalIndexBuilder(table, column, index_type=kind, **kwargs).build()
 
 
@@ -410,8 +412,8 @@ def test_ineligible_tables_choose_python_before_building(rest_catalog, options):
     catalog, _ = rest_catalog
     table = _create(catalog, options=options)
     _append(table, ROWS)
-    original = GlobalIndexBuilder._build_sorted_index
-    with patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
+    original = PythonGlobalIndexBuilder._build_sorted_index
+    with patch.object(PythonGlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         assert table.create_global_index('name') > 0
     build.assert_called_once()
     assert _ids(table, table.new_read_builder().new_predicate_builder().equal('name', 'a')) == [1, 5]
@@ -482,10 +484,10 @@ def test_query_authorization_remains_on_python_build_path(rest_catalog, restrict
     table = table.copy({'query-auth.enabled': 'true'})
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
         column_masking={'name': '{"name":"NULL"}'} if restricted else None)
-    original = GlobalIndexBuilder._build_sorted_index
+    original = PythonGlobalIndexBuilder._build_sorted_index
     with patch('pypaimon.execution.native.write.native_index_build._native_table',
                side_effect=AssertionError('native auth build')), \
-            patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
+            patch.object(PythonGlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         if restricted:
             with pytest.raises(TableNoPermissionException):
                 GlobalIndexBuilder(table, 'name').build()

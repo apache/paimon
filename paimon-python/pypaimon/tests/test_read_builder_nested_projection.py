@@ -28,7 +28,7 @@ from pypaimon.read.datasource.split_provider import (
     CatalogSplitProvider, PreResolvedSplitProvider)
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
-from pypaimon.read.table_read import _RemainingRows
+from pypaimon.execution.python.read.table_read import _RemainingRows
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 
 

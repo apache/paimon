@@ -32,7 +32,6 @@ from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
 def _normalize_naive_datetimes(value):
@@ -480,6 +479,8 @@ class LocalFileIO(FileIO):
             raise RuntimeError(f"Failed to write row file {path}: {e}") from e
 
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
+
         try:
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")

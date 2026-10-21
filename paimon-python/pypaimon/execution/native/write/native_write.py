@@ -71,12 +71,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
 
 
 class NativeTableWrite:
-    """Use Rust for Arrow batches while retaining PyPaimon's commit-message API.
-
-    Advanced Python writer methods switch to the Python writer before the first
-    native data write. Once Rust has written data, switching would split one
-    logical write across two writers, so it is rejected.
-    """
+    """Adapt Python inputs and commit messages to one Rust writer."""
 
     def __init__(self, table, commit_user, static_partition, stream, native_writer,
                  restore_snapshot_id=None):
@@ -85,7 +80,6 @@ class NativeTableWrite:
         self.static_partition = static_partition
         self.stream = stream
         self._native_writer = native_writer
-        self._python_writer = None
         self._written = False
         self._batch_committed = False
         self._table_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
@@ -101,98 +95,20 @@ class NativeTableWrite:
             self._blob_rows = NativeBlobRows()
             self._native_writer.with_blob_uri_reader_factory(self._blob_rows)
 
-    def _switch_to_python(self):
-        from pypaimon.execution.dispatch import switch_writer_to_python
-        return switch_writer_to_python(self)
-
-    def _new_python_writer(self):
-        from pypaimon.execution.dispatch import create_python_write
-        writer = create_python_write(
-            self.table, self.commit_user, self.static_partition, self.stream,
-            restore_snapshot_id=self._restore_snapshot_id)
-        return self._configure_python_writer(writer)
-
-    def _configure_python_writer(self, writer):
-        if not self.stream:
-            # Empty batch preparation can leave _written false. Explicit
-            # diagnostics must not reset the one-time preparation guard.
-            writer.batch_committed = self._batch_committed
-        if self._write_cols is not None:
-            writer.with_write_type(self._write_cols)
-        if self._blob_consumer is not None:
-            writer.with_blob_consumer(self._blob_consumer)
-        if self._blob_uri_reader_factory is not None:
-            writer.with_blob_uri_reader_factory(self._blob_uri_reader_factory)
-        return writer
-
-    @property
-    def file_store_write(self):
-        """Explicitly request the Python writer's diagnostic implementation."""
-        return self._switch_to_python().file_store_write
-
-    @file_store_write.setter
-    def file_store_write(self, writer):
-        self._switch_to_python().file_store_write = writer
-
-    @property
-    def row_key_extractor(self):
-        """Explicitly request the Python writer's routing implementation."""
-        return self._switch_to_python().row_key_extractor
-
-    @row_key_extractor.setter
-    def row_key_extractor(self, extractor):
-        self._switch_to_python().row_key_extractor = extractor
-
-    @property
-    def table_pyarrow_schema(self):
-        return (self._python_writer.table_pyarrow_schema
-                if self._python_writer is not None else self._table_schema)
-
-    @table_pyarrow_schema.setter
-    def table_pyarrow_schema(self, schema):
-        self._switch_to_python().table_pyarrow_schema = schema
-
-    @property
-    def restore_snapshot_id(self):
-        return (self._python_writer.restore_snapshot_id
-                if self._python_writer is not None else self._restore_snapshot_id)
-
-    @restore_snapshot_id.setter
-    def restore_snapshot_id(self, snapshot_id):
-        self._switch_to_python().restore_snapshot_id = snapshot_id
-
-    @property
-    def batch_committed(self):
-        if self._python_writer is not None:
-            return self._python_writer.batch_committed
-        if self.stream:
-            raise AttributeError('batch_committed')
-        return self._batch_committed
-
-    @batch_committed.setter
-    def batch_committed(self, value):
-        self._switch_to_python().batch_committed = value
-
     def with_write_type(self, write_cols):
-        if self._python_writer is not None:
-            return self._python_writer.with_write_type(write_cols)
         names = list(write_cols)
         if self.table.is_primary_key_table:
             if len(names) == len(self._table_schema.names) and set(names) == set(self._table_schema.names):
                 # Python treats a complete PK write type as the unchanged table
                 # schema. It does not configure a PK column-subset writer.
                 return self
-            # Core's write type is an append-table operation. Keep the existing
-            # Python writer contract for PK setters before any data is staged.
-            return self._switch_to_python().with_write_type(names)
+            raise ValueError('Column-subset primary-key writes require the Python executor')
         self._native_writer.with_write_type(names)
         self._schema = pa.schema([self._table_schema.field(name) for name in names])
         self._write_cols = names
         return self
 
     def with_blob_consumer(self, blob_consumer):
-        if self._python_writer is not None:
-            return self._python_writer.with_blob_consumer(blob_consumer)
         if blob_consumer is None:
             self._configure_native_blob('with_blob_consumer', None)
             self._blob_consumer = None
@@ -210,8 +126,6 @@ class NativeTableWrite:
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
-        if self._python_writer is not None:
-            return self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
         if self._blob_rows is not None:
             if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
                 raise TypeError('URI reader factory must provide callable create')
@@ -238,8 +152,6 @@ class NativeTableWrite:
             raise
 
     def write_arrow(self, data, bucket=None):
-        if self._python_writer is not None:
-            return self._python_writer.write_arrow(data, bucket)
         data = self._prepare_native_arrow_data(data)
         if isinstance(data, pa.RecordBatch):
             return self.write_arrow_batch(data, bucket)
@@ -247,8 +159,6 @@ class NativeTableWrite:
             self.write_arrow_batch(batch, bucket)
 
     def write_arrow_batch(self, data, bucket=None):
-        if self._python_writer is not None:
-            return self._python_writer.write_arrow_batch(data, bucket)
         data = self._prepare_native_arrow_data(data)
         self._write_native_batch(data, bucket)
 
@@ -276,34 +186,16 @@ class NativeTableWrite:
         return data
 
     def write_pandas(self, dataframe):
-        if self._python_writer is not None:
-            return self._python_writer.write_pandas(dataframe)
         from pypaimon.write.input_adapter import _pandas_write_batch
         self.write_arrow_batch(_pandas_write_batch(self.table, dataframe, self._schema, self._table_schema))
 
-    def write_ray(self, dataset, overwrite=False, concurrency=None, ray_remote_args=None,
-                  hash_fixed_precluster='auto', static_partition=None):
-        if self._python_writer is not None:
-            return self._python_writer.write_ray(
-                dataset, overwrite, concurrency, ray_remote_args, hash_fixed_precluster, static_partition)
-        from pypaimon.write.input_adapter import _write_ray
-        _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
-                   hash_fixed_precluster, static_partition)
-
-    def _distributed_write_options(self, *, overwrite=False):
-        return {}
-
     def roll_before_group_if_needed(self, row_count):
-        if self._python_writer is not None:
-            return self._python_writer.roll_before_group_if_needed(row_count)
         if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count <= 0:
             raise ValueError('Group row count must be a positive integer.')
         # Python's group boundary only affects packed video writers. Native
         # selection excludes video, so ordinary Parquet/BLOB writes do not roll.
 
     def write_row(self, row):
-        if self._python_writer is not None:
-            return self._python_writer.write_row(row)
         values = row_to_named_values(row, self.table.table_schema.fields)
         names = self._schema.names
         require_columns(values, names, 'write_row')
@@ -341,10 +233,6 @@ class NativeTableWrite:
                     self._blob_rows.clear()
 
     def prepare_commit(self, commit_identifier=None):
-        if self._python_writer is not None:
-            if self.stream:
-                return self._python_writer.prepare_commit(commit_identifier)
-            return self._python_writer.prepare_commit()
         if self.stream:
             if commit_identifier is None:
                 raise TypeError('StreamTableWrite.prepare_commit requires an identifier')
@@ -361,22 +249,16 @@ class NativeTableWrite:
         return from_native_commit_messages(self.table, messages)
 
     def close(self):
-        if self._python_writer is not None:
-            self._python_writer.close()
-        elif self._native_writer is not None:
+        if self._native_writer is not None:
             self._native_writer.close()
             self._native_writer = None
         if self._blob_rows is not None:
             self._blob_rows.clear()
 
     def abort(self):
-        if self._python_writer is not None:
-            self._python_writer.abort()
-        else:
-            # Closing Rust cleans only files still owned by its writer.
-            # Never delete prepared CommitMessage files: publication can
-            # succeed even when its response raises an exception.
-            self.close()
+        # Rust cleans only files still owned by its writer. Prepared commit
+        # messages must survive failures whose publication outcome is unknown.
+        self.close()
 
 
 class NativePostponeFixedBucketTableWrite(NativeTableWrite):
@@ -392,13 +274,3 @@ class NativePostponeFixedBucketTableWrite(NativeTableWrite):
         # Automatic planning stages input until all partition sizes are known.
         self._defer_blob_input = (bucket_plan is None
                                   and table.options.postpone_default_bucket_num() is None)
-
-    def _new_python_writer(self):
-        from pypaimon.execution.dispatch import create_python_write
-        return self._configure_python_writer(create_python_write(
-            self.table, self.commit_user, self.static_partition,
-            fixed_bucket=True, bucket_plan=self._bucket_plan))
-
-    def _distributed_write_options(self, *, overwrite=False):
-        from pypaimon.write.input_adapter import postpone_distributed_write_options
-        return postpone_distributed_write_options(self.table, self._bucket_plan, overwrite)

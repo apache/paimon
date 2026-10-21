@@ -23,7 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
+from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1

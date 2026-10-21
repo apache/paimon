@@ -173,7 +173,7 @@ class TestNativeStreamFactory:
     def test_optional_native_initialization_falls_back(self, mock_scan_table):
         mock_scan_table.options.native_plan_enabled.return_value = True
         builder = StreamReadBuilder(mock_scan_table)
-        with patch('pypaimon.read.stream_read_builder.StreamTableScan',
+        with patch('pypaimon.execution.native.read.streaming_table_scan.StreamTableScan',
                    side_effect=ImportError('optional native runtime unavailable')):
             assert isinstance(builder.new_streaming_scan(), AsyncStreamingTableScan)
 

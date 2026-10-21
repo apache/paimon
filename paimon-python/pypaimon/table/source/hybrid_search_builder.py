@@ -31,8 +31,6 @@ from pypaimon.globalindex.vector_search_result import (
 RRF_RANKER = "rrf"
 WEIGHTED_SCORE_RANKER = "weighted_score"
 MRR_RANKER = "mrr"
-_RRF_K = 60.0
-_MAX_ROUTE_WORKERS = 4
 
 
 def _check_full_text_options(options: Dict[str, str]):
@@ -243,12 +241,8 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         self._partition_filter = None
 
     def execute_local(self) -> ScoredGlobalIndexResult:
-        from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
-
-        result = try_native_hybrid_search(self)
-        if result is not None:
-            return result
-        return super().execute_local()
+        from pypaimon.execution.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self)
 
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':
         self._limit = limit
@@ -330,18 +324,6 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
             builder.with_filter(self._filter)
         return builder
 
-    def _rrf(self, route_results):
-        from pypaimon.execution.python.read.search.hybrid_search import _rrf
-        return _rrf(self, route_results)
-
-    def _mrr(self, route_results):
-        from pypaimon.execution.python.read.search.hybrid_search import _mrr
-        return _mrr(self, route_results)
-
-    def _weighted_score(self, route_results):
-        from pypaimon.execution.python.read.search.hybrid_search import _weighted_score
-        return _weighted_score(self, route_results)
-
     def _split_partition_filter(self, predicate):
         partition_keys = list(self._table.partition_keys or [])
         if not partition_keys:
@@ -393,13 +375,3 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
                 [cls._rebuild_leaf_indices_by_name(c, name_to_idx)
                  for c in (predicate.literals or [])])
         return predicate.new_index(name_to_idx[predicate.field])
-
-
-def _ranked_row_ids(result):
-    from pypaimon.execution.python.read.search.hybrid_search import _ranked_row_ids as execute
-    return execute(result)
-
-
-def _top_k(scores, limit):
-    from pypaimon.execution.python.read.search.hybrid_search import _top_k as execute
-    return execute(scores, limit)

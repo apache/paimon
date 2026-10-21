@@ -36,7 +36,7 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result
 from pypaimon.execution.python.read.reader.format_pyarrow_reader import (_DecodedRowGroupCache)
-from pypaimon.read.table_read import _ClosableArrowBatchReader
+from pypaimon.execution.read_support import _ClosableArrowBatchReader
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields

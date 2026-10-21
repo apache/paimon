@@ -38,6 +38,7 @@ from pypaimon import Schema
 from pypaimon.common.json_util import JSON
 from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import BITMAP_IDENTIFIER
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.python.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
 from pypaimon.execution.python.globalindex.key_serializer import create_serializer
@@ -1441,7 +1442,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
     ])
 
     def setUp(self):
-        self.builder = object.__new__(GlobalIndexBuilder)
+        self.builder = object.__new__(PythonGlobalIndexBuilder)
         self.builder._table = Mock()
         self.builder._core_options = Mock()
         self.builder._core_options.global_index_row_count_per_shard.return_value = 10

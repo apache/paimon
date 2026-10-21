@@ -23,7 +23,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, ArrayType, DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 from pypaimon.tests.native_blob_write_test import _read, _physical_files
 
 pytestmark = pytest.mark.native_plan

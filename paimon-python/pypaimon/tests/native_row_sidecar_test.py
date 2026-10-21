@@ -27,7 +27,8 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.execution.native.write.native_write import NativeTableWrite, native_runtime_available
+from pypaimon.execution.write_dispatch import NativeTableWrite
+from pypaimon.execution.native.write.native_write import native_runtime_available
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
     not native_runtime_available(), reason='pypaimon-rust not installed')]

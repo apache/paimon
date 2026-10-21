@@ -34,7 +34,7 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 def _execute_full_text_search(builder, *, concurrency=None, ray_remote_args=None):
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    from pypaimon.execution.native.read.native_search_plan import python_search_reader
+    from pypaimon.execution.search_dispatch import python_search_reader
     reader = python_search_reader(builder.new_full_text_read())
     if (type(reader) is not DataEvolutionFullTextRead
             or not reader._table.options.data_evolution_enabled()):

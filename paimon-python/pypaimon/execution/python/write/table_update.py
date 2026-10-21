@@ -36,7 +36,6 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.execution.python.read.scanner.data_evolution_split_generator import (DataEvolutionSplitGenerator)
-from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
@@ -123,14 +122,6 @@ class PythonTableUpdateMixin:
 
         scan = read_builder.new_scan()
         splits = scan.plan_all_files().splits()
-        if (splits
-                and self.table.options.native_write_enabled()
-                and not any(isinstance(split, QueryAuthSplit)
-                            for split in splits)):
-            from pypaimon.execution.dispatch import try_native_predicate_row_ids
-            row_ids = try_native_predicate_row_ids(scan_table, predicate, splits)
-            if row_ids is not None:
-                return row_ids
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []
@@ -213,47 +204,9 @@ class PythonTableUpdateMixin:
             has_callable: bool,
             has_array: bool,
     ):
-        if not self.table.options.data_evolution_enabled():
-            raise ValueError(
-                "update_by_predicate requires "
-                "'data-evolution.enabled' = 'true'."
-            )
-        if not self.table.options.row_tracking_enabled():
-            raise ValueError(
-                "update_by_predicate requires "
-                "'row-tracking.enabled' = 'true'."
-            )
-        if not assignments:
-            raise ValueError("assignments must not be empty.")
-        if read_columns and not has_callable:
-            raise ValueError(
-                "read_columns requires a callable assignment."
-            )
-        if has_callable:
-            if has_array:
-                raise ValueError(
-                    "Callable assignments cannot be combined with Arrow "
-                    "array assignments."
-                )
-            if not read_columns:
-                raise ValueError(
-                    "Callable assignments require read_columns."
-                )
-            for col in read_columns:
-                if col not in self.table.field_names:
-                    raise ValueError(
-                        f"Read column {col} is not in table schema."
-                    )
+        from pypaimon.write.update_validation import _validate_predicate_update
 
-        partition_keys = set(self.table.partition_keys)
-        for col in assignments:
-            if col not in self.table.field_names:
-                raise ValueError(f"Column {col} is not in table schema.")
-            if col in partition_keys:
-                raise ValueError(
-                    "update_by_predicate does not support updating "
-                    f"partition column '{col}'."
-                )
+        return _validate_predicate_update(self, assignments, read_columns, has_callable, has_array)
 
     def _build_predicate_update_table(
             self,
@@ -465,6 +418,7 @@ class PythonTableUpdateMixin:
         return self._delete_by_row_id(row_ids, commit_identifier)
 
     def _new_python_shard_updator(self, shard_num, total_shard_count):
+        from pypaimon.write.table_update import ShardTableUpdator
         return ShardTableUpdator(self.table, self.projection, self.update_cols,
                                  self.commit_user, shard_num, total_shard_count)
 
@@ -550,6 +504,7 @@ class ShardTableUpdator:
             self.update_by_arrow_batch(rest)
 
     def _init_writer(self):
+        from pypaimon.write.table_update import SingleWriter
         if self.writer is None:
             if self.write_pos >= len(self.row_ranges):
                 raise RuntimeError(

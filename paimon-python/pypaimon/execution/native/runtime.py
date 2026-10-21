@@ -21,18 +21,9 @@ from importlib import import_module
 
 
 def _raise_if_native_fork_safety_error(error):
-    """Propagate native fork errors instead of using inherited SDK state."""
-    if not native_runtime_available():
-        return
-    from pypaimon_rust import ForkSafetyError
-
-    current = error
-    seen = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        if isinstance(current, ForkSafetyError):
-            raise current
-        current = current.__cause__ or current.__context__
+    """Propagate native fork errors without probing or initializing the SDK."""
+    from pypaimon.execution.dispatch import propagate_fork_safety_error
+    propagate_fork_safety_error(error)
 
 
 def native_runtime_available() -> bool:

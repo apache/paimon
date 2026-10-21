@@ -27,6 +27,7 @@ import pytest
 
 from pypaimon.api.api_response import GetTableSnapshotResponse
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.tests import native_generic_index_build_test as generic
@@ -57,7 +58,7 @@ def _table(catalog, options=None, partitioned=False):
 def _build(table, kind, options=None, **kwargs):
     settings = generic._options(kind, 4)
     settings.update(options or {})
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                       side_effect=AssertionError('Python rows were materialized')):
         return GlobalIndexBuilder(table, 'name' if kind == 'full-text' else 'embedding',
                                   index_type=kind, options=settings, **kwargs).build()

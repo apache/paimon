@@ -110,11 +110,8 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         return self
 
     def execute_batch_local(self):
-        from pypaimon.execution.native.read.native_vector_search import try_native_vector_search
-        results = try_native_vector_search(self, self._query_vectors, batch=True)
-        if results is not None:
-            return results
-        return super().execute_batch_local()
+        from pypaimon.execution.search_dispatch import execute_vector_search
+        return execute_vector_search(self, self._query_vectors, batch=True)
 
     def new_batch_vector_search_read(self):
         # type: () -> BatchVectorSearchRead
@@ -126,11 +123,11 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         if not self._query_vectors:
             raise ValueError(
                 "Query vectors must be set via with_query_vectors()")
-        from pypaimon.execution.native.read.native_search_plan import native_vector_read
+        from pypaimon.execution.search_dispatch import create_vector_read
         execution = copy(self)
         execution._options = dict(self._options)
-        execution._query_vectors = list(self._query_vectors)
-        return native_vector_read(self, execution._new_python_batch_vector_read, batch=True)
+        execution._query_vectors = [copy(vector) for vector in self._query_vectors]
+        return create_vector_read(execution, execution._new_python_batch_vector_read, batch=True)
 
     def _new_python_batch_vector_read(self):
         from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl

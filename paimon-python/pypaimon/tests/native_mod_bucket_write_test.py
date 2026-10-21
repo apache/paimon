@@ -28,7 +28,7 @@ from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 from pypaimon.execution.python.write.row_key_extractor import FixedBucketRowKeyExtractor
 
 

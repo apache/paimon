@@ -88,15 +88,8 @@ class GlobalIndexDropper:
 
     def build(self) -> List[CommitMessage]:
         partition_filter = self._resolve_partition_filter()
-        messages = self._native_build(partition_filter)
-        if messages is not None:
-            return messages
-        from pypaimon.execution.python.globalindex.drop_global_index import build_global_index_drop
+        from pypaimon.execution.index_dispatch import build_global_index_drop
         return build_global_index_drop(self, partition_filter)
-
-    def _native_build(self, partition_filter):
-        from pypaimon.execution.native.write.native_index_drop import build_native_global_index_drop
-        return build_native_global_index_drop(self, partition_filter)
 
     def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
@@ -133,8 +126,3 @@ def _normalize_index_columns(index_column: Union[str, Sequence[str]]) -> List[st
     if isinstance(index_column, str):
         return [c.strip() for c in index_column.split(",") if c.strip()]
     return [str(c).strip() for c in index_column if str(c).strip()]
-
-
-def _indexed_field_ids(global_meta) -> List[int]:
-    from pypaimon.execution.python.globalindex.drop_global_index import _indexed_field_ids as execute
-    return execute(global_meta)

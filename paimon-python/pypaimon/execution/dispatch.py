@@ -23,13 +23,23 @@ The independent plan/read/write/commit options keep their existing meaning.
 """
 
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
 
 
 def propagate_fork_safety_error(error):
-    from pypaimon.execution.native.runtime import _raise_if_native_fork_safety_error
-    _raise_if_native_fork_safety_error(error)
+    """Recognize an already-loaded SDK error without loading another backend."""
+    runtime = sys.modules.get('pypaimon_rust')
+    error_type = getattr(runtime, 'ForkSafetyError', None)
+    if error_type is None:
+        return
+    current, seen = error, set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, error_type):
+            raise current
+        current = current.__cause__ or current.__context__
 
 
 def try_prepare_native(factory, *args, **kwargs):
@@ -65,7 +75,8 @@ def create_write(table, commit_user, static_partition=None, stream=False,
                 restore_snapshot_id=restore_snapshot_id, fixed_bucket=fixed_bucket, bucket_plan=bucket_plan)
         native = try_prepare_native(prepare)
         if native is not None:
-            return native
+            from pypaimon.execution.write_dispatch import NativeTableWrite
+            return NativeTableWrite.from_native(native)
     return create_python_write(
         table, commit_user, static_partition, stream, restore_snapshot_id, fixed_bucket, bucket_plan)
 
@@ -119,6 +130,8 @@ def prepare_native_commit(owner, messages, *, batch=False):
 
 
 def prepare_native_write_operation(operation, table, commit_user, *args, **kwargs):
+    if not table.options.native_write_enabled():
+        return None
     names = {
         'update': 'create_native_update',
         'update_by_row_id': 'create_native_update_by_row_id',
@@ -139,13 +152,6 @@ def prepare_native_write_operation(operation, table, commit_user, *args, **kwarg
             # rewriting implementation in the Native adapter.
             TableUpdateByRowId.register(native_update.NativeTableUpdateByRowId)
         return native
-    return try_prepare_native(prepare)
-
-
-def try_native_predicate_row_ids(scan_table, predicate, splits):
-    def prepare():
-        from pypaimon.execution.native.write.native_update import native_predicate_row_ids
-        return native_predicate_row_ids(scan_table, predicate, splits)
     return try_prepare_native(prepare)
 
 

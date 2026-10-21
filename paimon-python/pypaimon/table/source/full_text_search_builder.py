@@ -85,12 +85,8 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return self
 
     def execute_local(self) -> GlobalIndexResult:
-        from pypaimon.execution.native.read.native_full_text_search import try_native_full_text_search
-
-        result = try_native_full_text_search(self)
-        if result is not None:
-            return result
-        return super().execute_local()
+        from pypaimon.execution.search_dispatch import execute_full_text_search
+        return execute_full_text_search(self)
 
     def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
         self._field_name = field_name
@@ -147,10 +143,10 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
-        from pypaimon.execution.native.read.native_search_plan import native_full_text_scan
+        from pypaimon.execution.search_dispatch import create_full_text_scan
         reject_search_under_query_auth(self._table)
         self._primary_key_full_text_definition()
-        return native_full_text_scan(self, copy(self)._new_python_full_text_scan)
+        return create_full_text_scan(self, copy(self)._new_python_full_text_scan)
 
     def _new_python_full_text_scan(self):
         definition = self._primary_key_full_text_definition()
@@ -167,7 +163,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         )
 
     def new_full_text_read(self) -> FullTextRead:
-        from pypaimon.execution.native.read.native_search_plan import native_full_text_read
+        from pypaimon.execution.search_dispatch import create_full_text_read
         reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
@@ -184,7 +180,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
                     "Primary-key full-text search only supports the FAST "
                     "full-text index search mode; FULL and DETAIL require "
                     "merge-aware logical-row fallback.")
-        return native_full_text_read(self, copy(self)._new_python_full_text_read)
+        return create_full_text_read(self, copy(self)._new_python_full_text_read)
 
     def _new_python_full_text_read(self):
         definition = self._primary_key_full_text_definition()

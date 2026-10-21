@@ -61,60 +61,67 @@ _GENERIC_INDEX_IDENTIFIERS = tuple(VINDEX_IDENTIFIERS) + (FULL_TEXT_IDENTIFIER,)
 _SORTED_INDEX_RECORDS_PER_FILE_FLOATING = 1.2
 
 
-def build_global_index(self, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
-    read_builder = self._table.new_read_builder()
-    if partition_filter is not None:
-        read_builder = read_builder.with_partition_filter(partition_filter)
+class PythonGlobalIndexBuilder:
+    """Algorithms invoked only by the Python index build path."""
 
-    scan = read_builder.new_scan()
-    plan = scan.plan_all_files()
-    splits = plan.splits()
-    if not splits:
-        return []
+    def __init__(self, request):
+        self._table = request._table
+        self._index_columns = list(request._index_columns)
+        self._index_type = request._index_type
+        self._options = request._options
+        self._core_options = request._core_options
+        self._user_options = dict(request._user_options)
 
-    index_field = self._table.field_dict[self._index_columns[0]]
-    snapshot = self._snapshot_for_plan(plan)
-    unindexed_ranges = _unindexed_row_ranges(
-        self._table,
-        snapshot,
-        partition_filter,
-        index_field.id,
-        self._index_type,
-    )
-    if not unindexed_ranges:
-        return []
+    def build(self, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
+        read_builder = self._table.new_read_builder()
+        if partition_filter is not None:
+            read_builder = read_builder.with_partition_filter(partition_filter)
 
-    if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
-        splits = _filter_non_indexable_splits(
-            self._table, splits, self._index_columns)
+        scan = read_builder.new_scan()
+        plan = scan.plan_all_files()
+        splits = plan.splits()
         if not splits:
             return []
 
-    read_type = [index_field, SpecialFields.ROW_ID]
-    from pypaimon.read.table_read import TableRead
+        index_field = self._table.field_dict[self._index_columns[0]]
+        snapshot = self._snapshot_for_plan(plan)
+        unindexed_ranges = _unindexed_row_ranges(
+            self._table,
+            snapshot,
+            partition_filter,
+            index_field.id,
+            self._index_type,
+        )
+        if not unindexed_ranges:
+            return []
 
-    table_read = TableRead(
-        table=self._table,
-        predicate=None,
-        read_type=read_type,
-    )
-    index_path_factory = self._table.path_factory().global_index_path_factory()
-    index_path = index_path_factory.global_index_root_path()
+        if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
+            splits = _filter_non_indexable_splits(
+                self._table, splits, self._index_columns)
+            if not splits:
+                return []
 
-    if self._index_type in _SORTED_INDEX_IDENTIFIERS:
-        return self._build_sorted_index(
+        read_type = [index_field, SpecialFields.ROW_ID]
+        from pypaimon.read.table_read import TableRead
+
+        table_read = TableRead(
+            table=self._table,
+            predicate=None,
+            read_type=read_type,
+        )
+        index_path_factory = self._table.path_factory().global_index_path_factory()
+        index_path = index_path_factory.global_index_root_path()
+
+        if self._index_type in _SORTED_INDEX_IDENTIFIERS:
+            return self._build_sorted_index(
+                splits, unindexed_ranges, index_field, table_read, index_path)
+        if execution == "ray":
+            from pypaimon.execution.python.globalindex.ray_build import build_vector_index
+            return build_vector_index(
+                self, splits, unindexed_ranges, index_field, table_read,
+                index_path, concurrency, ray_remote_args)
+        return self._build_generic_index(
             splits, unindexed_ranges, index_field, table_read, index_path)
-    if execution == "ray":
-        from pypaimon.ray.vector_index_build import build_vector_index
-        return build_vector_index(
-            self, splits, unindexed_ranges, index_field, table_read,
-            index_path, concurrency, ray_remote_args)
-    return self._build_generic_index(
-        splits, unindexed_ranges, index_field, table_read, index_path)
-
-
-class PythonGlobalIndexBuilder:
-    """Algorithms invoked only by the Python index build path."""
 
     def _snapshot_for_plan(self, plan):
         snapshot_id = getattr(plan, "snapshot_id", None)
@@ -292,7 +299,7 @@ class PythonGlobalIndexBuilder:
     def _build_generic_shard(
         self, index_split, index_range, index_field, table_read, index_path: str, file_name=None
     ) -> Optional[CommitMessage]:
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        from pypaimon.execution.read_support import _ClosableArrowBatchReader
 
         writer = None
         try:

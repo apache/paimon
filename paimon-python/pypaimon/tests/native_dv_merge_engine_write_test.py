@@ -25,7 +25,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 

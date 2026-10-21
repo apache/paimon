@@ -124,6 +124,13 @@ class PackagingTest(unittest.TestCase):
             self.assertIn(name, names)
         execution_files = (
             "pypaimon/execution/dispatch.py",
+            "pypaimon/execution/read_dispatch.py",
+            "pypaimon/execution/read_support.py",
+            "pypaimon/execution/read_explain.py",
+            "pypaimon/execution/index_dispatch.py",
+            "pypaimon/execution/search_dispatch.py",
+            "pypaimon/execution/update_dispatch.py",
+            "pypaimon/execution/write_dispatch.py",
             "pypaimon/execution/vindex_input.py",
             "pypaimon/execution/python/read/table_read.py",
             "pypaimon/execution/python/read/table_scan.py",
@@ -138,6 +145,7 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/merge_engine_dispatch.py",
             "pypaimon/execution/python/read/search/vector_search_read.py",
             "pypaimon/execution/python/read/search/hybrid_search.py",
+            "pypaimon/execution/python/globalindex/ray_build.py",
             "pypaimon/execution/python/globalindex/btree/btree_index_reader.py",
             "pypaimon/execution/python/globalindex/btree/block_handle.py",
             "pypaimon/execution/python/globalindex/block_compression.py",
@@ -167,6 +175,7 @@ class PackagingTest(unittest.TestCase):
         for name in execution_files:
             self.assertIn(name, names)
         internal_aliases = (
+            "pypaimon/ray/vector_index_build.py",
             "pypaimon/common/merge_engine_dispatch.py",
             "pypaimon/read/native_plan.py",
             "pypaimon/read/native_row_iterator.py",

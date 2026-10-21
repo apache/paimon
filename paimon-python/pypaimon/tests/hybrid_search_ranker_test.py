@@ -25,7 +25,7 @@ import unittest
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.table.source.hybrid_search_builder import (
     HybridSearchBuilderImpl, HybridSearchRoute, HybridSearchRouteResult,
-    MRR_RANKER)
+    MRR_RANKER, RRF_RANKER, WEIGHTED_SCORE_RANKER)
 
 
 def _route_result(weight, id_to_scores):
@@ -39,6 +39,12 @@ def _builder(limit):
     return builder
 
 
+def _rank(limit, ranker, results):
+    builder = _builder(limit).with_ranker(ranker)
+    builder._routes = [result.route for result in results]
+    return builder.rank(results)
+
+
 class HybridSearchRankerTest(unittest.TestCase):
 
     def test_weighted_score_normalizes_heterogeneous_route_scales(self):
@@ -46,7 +52,7 @@ class HybridSearchRankerTest(unittest.TestCase):
         vector_route = _route_result(5.0, {1: 0.95, 2: 0.10})
         text_route = _route_result(1.0, {1: 2.0, 2: 25.0})
 
-        ranked = _builder(2)._weighted_score([vector_route, text_route])
+        ranked = _rank(2, WEIGHTED_SCORE_RANKER, [vector_route, text_route])
         getter = ranked.score_getter()
 
         # rowId 1: 5 * 1.0 (vector best) + 1 * 0.0 (text worst) = 5.0
@@ -59,14 +65,14 @@ class HybridSearchRankerTest(unittest.TestCase):
         # min == max: must not divide by zero and must keep contributing.
         single_hit = _route_result(2.0, {7: 42.0})
 
-        ranked = _builder(1)._weighted_score([single_hit])
+        ranked = _rank(1, WEIGHTED_SCORE_RANKER, [single_hit])
 
         self.assertAlmostEqual(ranked.score_getter()(7), 2.0, places=6)
 
     def test_weighted_score_all_tied_route_maps_each_hit_to_full_weight(self):
         tied = _route_result(2.0, {1: 5.0, 2: 5.0, 3: 5.0})
 
-        ranked = _builder(3)._weighted_score([tied])
+        ranked = _rank(3, WEIGHTED_SCORE_RANKER, [tied])
         getter = ranked.score_getter()
 
         self.assertAlmostEqual(getter(1), 2.0, places=6)
@@ -77,7 +83,7 @@ class HybridSearchRankerTest(unittest.TestCase):
         vector_route = _route_result(5.0, {1: 0.95, 2: 0.10})
         text_route = _route_result(1.0, {1: 2.0, 2: 25.0})
 
-        ranked = _builder(2)._rrf([vector_route, text_route])
+        ranked = _rank(2, RRF_RANKER, [vector_route, text_route])
         getter = ranked.score_getter()
 
         # Rank-based fusion respects the 5x vector weight: rowId 1 wins.

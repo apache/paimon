@@ -19,7 +19,7 @@
 
 import sys
 from contextlib import ExitStack, contextmanager
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -31,7 +31,7 @@ from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 _OPERATIONS = ['batch-write', 'stream-write', 'commit', 'upsert', 'row-id-updater', 'update', 'batch-update',
-               'predicate-update', 'delete', 'predicate-delete', 'delete-match']
+               'predicate-update', 'delete', 'predicate-delete']
 
 
 class _ForkSafetyError(RuntimeError):
@@ -75,7 +75,7 @@ def _operation(tmp_path, operation):
                 factory = 'create_native_upsert'
                 invoke = lambda: upsert.upsert(data, ['id'])
             elif operation == 'row-id-updater':
-                context.enter_context(patch('pypaimon.write.table_update.TableUpdateByRowId', pure))
+                context.enter_context(patch('pypaimon.execution.update_dispatch.TableUpdateByRowId', pure))
                 factory, invoke = 'create_native_update_by_row_id', updater.new_update_by_row_id
             elif operation in ('update', 'batch-update'):
                 data = data.append_column('_ROW_ID', pa.array([0], pa.int64()))
@@ -98,14 +98,6 @@ def _operation(tmp_path, operation):
                 context.enter_context(patch.object(updater, '_partition_only_delete_filter', pure))
                 factory = 'create_native_predicate_delete'
                 invoke = lambda: updater.delete_by_predicate(None)
-            else:
-                read_builder = Mock()
-                read_builder.new_scan.return_value.plan_all_files.return_value.splits.return_value = [object()]
-                context.enter_context(patch.object(updater, '_matched_update_scan_table', return_value=SimpleNamespace(
-                    new_read_builder=lambda: read_builder)))
-                read_builder.new_read = pure
-                factory = 'native_predicate_row_ids'
-                invoke = lambda: updater._matched_delete_row_ids(None)
         yield invoke, module + factory, pure
 
 
