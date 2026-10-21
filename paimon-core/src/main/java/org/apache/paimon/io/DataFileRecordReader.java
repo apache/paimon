@@ -62,6 +62,9 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     private final Map<String, Integer> systemFields;
     @Nullable private final RoaringBitmap32 selection;
 
+    // Set once a corrupt file has been skipped, so later readBatch() calls stop reading it.
+    private boolean corrupted;
+
     public DataFileRecordReader(
             RowType tableRowType,
             FormatReaderFactory readerFactory,
@@ -164,15 +167,26 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             LOG.warn("Reader is not initialized, maybe file: {} is corrupt.", filePath);
             return null;
         }
+        if (corrupted) {
+            return null;
+        }
+        FileRecordIterator<InternalRow> iterator;
         try {
-            return readBatchInternal();
+            iterator = readBatchInternal();
         } catch (Exception e) {
             if (ignoreCorruptException(e, ignoreCorruptFiles)) {
                 LOG.warn("Failed to read batch from file: {}, ignore exception", filePath, e);
+                corrupted = true;
                 return null;
             }
             throw new IOException("Failed to read batch from file: " + filePath, e);
         }
+        // Columnar iterators are fully materialized by readBatch(), so failures have already been
+        // handled above. Leave them unwrapped: callers detect vectorized batches by their type.
+        if (ignoreCorruptFiles && iterator != null && !(iterator instanceof ColumnarRowIterator)) {
+            iterator = new IgnoreCorruptFileRecordIterator(iterator);
+        }
+        return iterator;
     }
 
     private FileRecordIterator<InternalRow> readBatchInternal() throws IOException {
@@ -255,5 +269,77 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 && (e instanceof IOException
                         || e instanceof RuntimeException
                         || e instanceof InternalError);
+    }
+
+    /**
+     * Row-based formats (CSV, JSON, TEXT, Avro, ...) decode lazily in {@link #next()}, so a file
+     * that is truncated or corrupt in the middle only fails after {@link #readBatch()} returned.
+     * This iterator extends {@code scan.ignore-corrupt-files} to that point: the rows already
+     * returned are kept and the rest of the file is skipped.
+     */
+    private class IgnoreCorruptFileRecordIterator implements FileRecordIterator<InternalRow> {
+
+        private final FileRecordIterator<InternalRow> iterator;
+
+        private IgnoreCorruptFileRecordIterator(FileRecordIterator<InternalRow> iterator) {
+            this.iterator = iterator;
+        }
+
+        @Nullable
+        @Override
+        public InternalRow next() throws IOException {
+            if (corrupted) {
+                return null;
+            }
+            try {
+                return iterator.next();
+            } catch (Exception e) {
+                return handleCorruptException(e, null);
+            }
+        }
+
+        @Override
+        public boolean skip() throws IOException {
+            if (corrupted) {
+                return false;
+            }
+            try {
+                return iterator.skip();
+            } catch (UnsupportedOperationException e) {
+                throw e;
+            } catch (Exception e) {
+                return handleCorruptException(e, false);
+            }
+        }
+
+        private <T> T handleCorruptException(Exception e, T endOfFile) throws IOException {
+            if (ignoreCorruptException(e, ignoreCorruptFiles)) {
+                LOG.warn(
+                        "Failed to read records from file: {}, ignore the rest of the file",
+                        filePath,
+                        e);
+                corrupted = true;
+                return endOfFile;
+            }
+            if (e instanceof IOException) {
+                throw (IOException) e;
+            }
+            throw (RuntimeException) e;
+        }
+
+        @Override
+        public long returnedPosition() {
+            return iterator.returnedPosition();
+        }
+
+        @Override
+        public Path filePath() {
+            return iterator.filePath();
+        }
+
+        @Override
+        public void releaseBatch() {
+            iterator.releaseBatch();
+        }
     }
 }
