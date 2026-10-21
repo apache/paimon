@@ -166,25 +166,10 @@ class ClusteringTableTest {
         assertThat(readRows()).containsExactly(GenericRow.of(1, 30));
     }
 
-    @Test
-    public void testConsecutiveDvCommitsFromSameWriter() throws Exception {
-        writeRows(Collections.singletonList(GenericRow.of(1, 10)));
-        StreamWriteBuilder builder = table.newStreamWriteBuilder();
-        try (StreamTableWrite write =
-                        (StreamTableWrite) builder.newWrite().withIOManager(ioManager);
-                StreamTableCommit commit = builder.newCommit()) {
-            for (int i = 0; i < 4; i++) {
-                write.write(GenericRow.of(1, 20 + i));
-                List<CommitMessage> messages = write.prepareCommit(true, i);
-                commit.commit(i, messages);
-                assertThat(readRows()).containsExactly(GenericRow.of(1, 20 + i));
-            }
-        }
-    }
-
-    /** Prepared DV updates depend on the preceding result and are committed in checkpoint order. */
-    @Test
-    public void testPendingDvCommitsAreSubmittedInOrder() throws Exception {
+    /** Prepared DV updates depend on their predecessor, even when both await commit. */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testConsecutiveDvCommitsFromSameWriter(boolean pending) throws Exception {
         writeRows(Collections.singletonList(GenericRow.of(1, 10)));
         StreamWriteBuilder builder = table.newStreamWriteBuilder();
         try (StreamTableWrite write =
@@ -192,10 +177,16 @@ class ClusteringTableTest {
                 StreamTableCommit commit = builder.newCommit()) {
             write.write(GenericRow.of(1, 20));
             List<CommitMessage> first = write.prepareCommit(true, 0);
+            if (!pending) {
+                commit.commit(0, first);
+                assertThat(readRows()).containsExactly(GenericRow.of(1, 20));
+            }
             write.write(GenericRow.of(1, 30));
             List<CommitMessage> second = write.prepareCommit(true, 1);
-            commit.commit(0, first);
-            assertThat(readRows()).containsExactly(GenericRow.of(1, 20));
+            if (pending) {
+                commit.commit(0, first);
+                assertThat(readRows()).containsExactly(GenericRow.of(1, 20));
+            }
             commit.commit(1, second);
             assertThat(readRows()).containsExactly(GenericRow.of(1, 30));
         }

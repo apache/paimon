@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -25,15 +26,17 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.RestoreFiles;
 import org.apache.paimon.operation.WriteRestore;
@@ -43,15 +46,19 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.CloseableIterator;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
@@ -71,729 +78,446 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Table-level tests for primary-key compaction with deletion vectors and no clustering. */
+/** Fixed-bucket DV conflicts in non-clustering compaction and direct DELETE operations. */
 class PrimaryKeyDeletionVectorCompactionTest {
 
     @TempDir java.nio.file.Path tempDir;
+    private Catalog catalog;
+    private IOManager ioManager;
 
-    /**
-     * Reproduces a stale bucket DV overwrite with deletion vectors enabled and clustering disabled.
-     *
-     * <p>Write (1,10), (2,20), and (3,30) into one L2 file, then delete id=3 to create the existing
-     * DV D0. A and B both restore D0 before either commits: A updates id=1 to 11, and B updates
-     * id=2 to 21. Each compacts its own L0 file to L1 and uses lookup to mark its old L2 row
-     * deleted. Their L1 key ranges are disjoint, so the existing LSM overlap check cannot detect
-     * the conflict.
-     *
-     * <p>A commits first, replacing D0 with DA, which marks id=1 and id=3 deleted. B must then fail
-     * its COMPACT commit because its DELETE D0 dependency differs from the current DA. The default
-     * DV read, which excludes unmerged L0 files, must return exactly (1,11) and (2,20).
-     *
-     * <p>Without the DV dependency check, B would replace DA with its stale DB, which only marks
-     * id=2 and id=3 deleted. The old (1,10) would become visible again alongside (1,11) and (2,21),
-     * producing three rows for two primary keys.
-     */
-    @Test
-    void testMinimalStaleDvCommit() throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-            writeRows(
-                    table,
-                    ioManager,
-                    Arrays.asList(
-                            GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30)));
-            // Create D0 by deleting id=3, leaving id=1 and id=2 in the same L2 file.
-            writeRows(
-                    table,
-                    ioManager,
-                    Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 3, 30)));
+    @BeforeEach
+    void setUp() throws Exception {
+        catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(tempDir.toString())));
+        ioManager = IOManager.create(tempDir.toString());
+    }
 
-            BatchWriteBuilder first = table.newBatchWriteBuilder();
-            BatchWriteBuilder second = table.newBatchWriteBuilder();
-            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
-                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commitA = first.newCommit();
-                    BatchTableCommit commitB = second.newCommit()) {
-                a.write(GenericRow.of(1, 11));
-                b.write(GenericRow.of(2, 21));
-                List<CommitMessage> preparedA = a.prepareCommit();
-                List<CommitMessage> preparedB = b.prepareCommit();
-                CompactIncrement incrementA = assertLookupCompaction(preparedA, 1, 1);
-                CompactIncrement incrementB = assertLookupCompaction(preparedB, 2, 1);
-                assertThat(oldDvFile(incrementA)).isNotNull().isEqualTo(oldDvFile(incrementB));
-
-                // A replaces D0 with DA; B must not overwrite DA with its stale DB.
-                commitA.commit(preparedA);
-                assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict");
-                assertThat(readRows(table))
-                        .containsExactlyInAnyOrder(GenericRow.of(1, 11), GenericRow.of(2, 20));
-            }
+    @AfterEach
+    void tearDown() throws Exception {
+        try {
+            catalog.close();
+        } finally {
+            ioManager.close();
         }
     }
 
     /**
-     * Full compaction materializes all deletions and removes the old index without an empty
-     * replacement.
+     * A and B restore D0, then update different keys in the same L2 file through disjoint L1 lookup
+     * compactions. After A replaces D0, B must fail. Without the check, B resurrects (1,10),
+     * exposing three rows for two keys: (1,10), (1,11), and (2,21).
      */
     @Test
-    void testFullCompactionClearsDvIndex() throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-            writeRows(
-                    table,
-                    ioManager,
-                    Arrays.asList(
-                            GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30)));
-            writeRows(
-                    table,
-                    ioManager,
-                    Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 3, 30)));
-            IndexFileHandler handler = table.store().newIndexFileHandler();
-            List<IndexFileMeta> oldIndexes =
-                    handler.scan(
-                            table.snapshotManager().latestSnapshot(),
-                            DELETION_VECTORS_INDEX,
-                            BinaryRow.EMPTY_ROW,
-                            0);
-            assertThat(oldIndexes).hasSize(1);
-
-            FileStoreTable compactTable =
-                    table.copy(
-                            Collections.singletonMap(
-                                    COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true"));
-            BatchWriteBuilder builder = compactTable.newBatchWriteBuilder();
-            try (BatchTableWrite write = builder.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commit = builder.newCommit()) {
-                write.compact(BinaryRow.EMPTY_ROW, 0, true);
-                List<CommitMessage> messages = write.prepareCommit();
-                assertThat(messages).hasSize(1);
-                CompactIncrement increment =
-                        ((CommitMessageImpl) messages.get(0)).compactIncrement();
-                assertThat(increment.newIndexFiles()).isEmpty();
-                assertThat(increment.deletedIndexFiles()).containsExactlyElementsOf(oldIndexes);
-                commit.commit(messages);
-            }
-            assertThat(
-                            handler.scan(
-                                    table.snapshotManager().latestSnapshot(),
-                                    DELETION_VECTORS_INDEX))
-                    .isEmpty();
-            assertThat(readRows(table))
-                    .containsExactlyInAnyOrder(GenericRow.of(1, 10), GenericRow.of(2, 20));
-
-            // Restoring the cleared bucket must allow a fresh ADD without deleting the old index
-            // again.
-            BatchWriteBuilder updateBuilder = table.newBatchWriteBuilder();
-            try (BatchTableWrite write = updateBuilder.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commit = updateBuilder.newCommit()) {
-                write.write(GenericRow.of(1, 11));
-                List<CommitMessage> messages = write.prepareCommit();
-                CompactIncrement increment = assertLookupCompaction(messages, 1, 1);
-                assertThat(increment.deletedIndexFiles()).isEmpty();
-                commit.commit(messages);
-            }
+    void testMinimalStaleDvCommit() throws Exception {
+        FileStoreTable table = createTable(3);
+        writeRows(table, GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
+        writeRows(table, GenericRow.ofKind(RowKind.DELETE, 3, 30));
+        BatchWriteBuilder first = table.newBatchWriteBuilder();
+        BatchWriteBuilder second = table.newBatchWriteBuilder();
+        try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
+                BatchTableWrite b = second.newWrite().withIOManager(ioManager);
+                BatchTableCommit commitA = first.newCommit();
+                BatchTableCommit commitB = second.newCommit()) {
+            a.write(GenericRow.of(1, 11));
+            b.write(GenericRow.of(2, 21));
+            List<CommitMessage> preparedA = a.prepareCommit();
+            List<CommitMessage> preparedB = b.prepareCommit();
+            CompactIncrement incrementA = assertLookupCompaction(preparedA, 1, 1);
+            CompactIncrement incrementB = assertLookupCompaction(preparedB, 2, 1);
+            assertThat(incrementA.deletedIndexFiles())
+                    .hasSize(1)
+                    .isEqualTo(incrementB.deletedIndexFiles());
+            commitA.commit(preparedA);
+            assertThatThrownBy(() -> commitB.commit(preparedB))
+                    .hasMessageContaining("Deletion vector conflict");
             assertThat(readRows(table))
                     .containsExactlyInAnyOrder(GenericRow.of(1, 11), GenericRow.of(2, 20));
         }
     }
 
     /**
-     * A direct DV delete records row 0 of X, then a concurrent compaction rewrites X without
-     * changing the bucket's empty DV state. The stale OVERWRITE must fail instead of publishing an
-     * ineffective deletion. A fresh delete against the replacement file removes exactly id=1.
+     * Full rewrite removes D0 without an empty replacement; a restored writer starts a fresh DV.
      */
     @Test
-    void testDirectDvDeleteRejectsRewrittenFile() throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-            writeRows(table, ioManager, Arrays.asList(GenericRow.of(1, 10), GenericRow.of(2, 20)));
-            List<ManifestEntry> baseFiles = table.store().newScan().plan().files();
-            assertThat(baseFiles).hasSize(1);
-            String fileX = baseFiles.get(0).fileName();
-            IndexFileHandler handler = table.store().newIndexFileHandler();
-            assertThat(
-                            handler.scan(
-                                    table.snapshotManager().latestSnapshot(),
-                                    DELETION_VECTORS_INDEX))
-                    .isEmpty();
-
-            // Construct the DataIncrement used by direct DV deletes, rather than a PK upsert.
-            BucketedDvMaintainer delete =
-                    BucketedDvMaintainer.factory(handler)
-                            .create(BinaryRow.EMPTY_ROW, 0, Collections.emptyList());
-            delete.notifyNewDeletion(fileX, 0);
-            IndexFileMeta staleDv = delete.writeDeletionVectorsIndex().newFile().get();
-
-            // Adding a distinct key and compacting forces a physical rewrite with no row deletes.
-            writeRows(table, ioManager, Collections.singletonList(GenericRow.of(3, 30)), true);
-            List<ManifestEntry> rewrittenFiles = table.store().newScan().plan().files();
-            assertThat(rewrittenFiles).hasSize(1);
-            String fileY = rewrittenFiles.get(0).fileName();
-            assertThat(fileY).isNotEqualTo(fileX);
-            long compactSnapshot = table.snapshotManager().latestSnapshot().id();
-            assertThat(
-                            handler.scan(
-                                    table.snapshotManager().latestSnapshot(),
-                                    DELETION_VECTORS_INDEX))
-                    .isEmpty();
-
-            try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                assertThatThrownBy(
-                                () ->
-                                        commit.commit(
-                                                Collections.singletonList(
-                                                        new CommitMessageImpl(
-                                                                BinaryRow.EMPTY_ROW,
-                                                                0,
-                                                                1,
-                                                                DataIncrement.indexIncrement(
-                                                                        Collections.singletonList(
-                                                                                staleDv)),
-                                                                CompactIncrement
-                                                                        .emptyIncrement()))))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining("references data file " + fileX);
-            }
-            assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(compactSnapshot);
-            assertThat(readRows(table))
-                    .containsExactlyInAnyOrder(
-                            GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
-
-            // In this fixture id=1 is also first in Y; compute a fresh DV for Y explicitly.
-            BucketedDvMaintainer freshDelete =
-                    BucketedDvMaintainer.factory(handler)
-                            .create(BinaryRow.EMPTY_ROW, 0, Collections.emptyList());
-            freshDelete.notifyNewDeletion(fileY, 0);
-            try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                commit.commit(
-                        Collections.singletonList(
-                                new CommitMessageImpl(
-                                        BinaryRow.EMPTY_ROW,
-                                        0,
-                                        1,
-                                        DataIncrement.indexIncrement(
-                                                Collections.singletonList(
-                                                        freshDelete
-                                                                .writeDeletionVectorsIndex()
-                                                                .newFile()
-                                                                .get())),
-                                        CompactIncrement.emptyIncrement())));
-            }
-            assertThat(readRows(table))
-                    .containsExactlyInAnyOrder(GenericRow.of(2, 20), GenericRow.of(3, 30));
+    void testFullCompactionClearsDvIndex() throws Exception {
+        FileStoreTable table = createTable(3);
+        writeRows(table, GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
+        writeRows(table, GenericRow.ofKind(RowKind.DELETE, 3, 30));
+        List<IndexFileMeta> old = currentDvs(table);
+        assertThat(old).hasSize(1);
+        BatchWriteBuilder builder = rewriteTable(table).newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> messages = write.prepareCommit();
+            assertThat(compactIncrement(messages).newIndexFiles()).isEmpty();
+            assertThat(compactIncrement(messages).deletedIndexFiles())
+                    .containsExactlyElementsOf(old);
+            commit.commit(messages);
         }
+        assertThat(currentDvs(table)).isEmpty();
+        assertThat(readRows(table))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 10), GenericRow.of(2, 20));
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(1, 11));
+            List<CommitMessage> messages = write.prepareCommit();
+            assertThat(assertLookupCompaction(messages, 1, 1).deletedIndexFiles()).isEmpty();
+            commit.commit(messages);
+        }
+        assertThat(readRows(table))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 11), GenericRow.of(2, 20));
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testConcurrentCompactionRejectsStaleDvWithDisjointKeys(boolean existingDv)
-            throws Exception {
-        testConcurrentCompactionRejectsStaleDv(existingDv, false);
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testConcurrentCompactionRejectsStaleDvWithDifferentFiles(boolean existingDv)
-            throws Exception {
-        testConcurrentCompactionRejectsStaleDv(existingDv, true);
+    /** Rewriting X without changing the DV version invalidates a direct DELETE of X's row 0. */
+    @Test
+    void testDirectDvDeleteRejectsRewrittenFile() throws Exception {
+        FileStoreTable table = createTable(3);
+        writeRows(table, GenericRow.of(1, 10), GenericRow.of(2, 20));
+        assertThat(dataFiles(table)).hasSize(1);
+        String fileX = dataFiles(table).get(0).fileName();
+        assertThat(currentDvs(table)).isEmpty();
+        CommitMessage stale = prepareDelete(table, fileX, 0);
+        writeRows(table, Collections.singletonList(GenericRow.of(3, 30)), true);
+        assertThat(dataFiles(table)).hasSize(1);
+        String fileY = dataFiles(table).get(0).fileName();
+        assertThat(fileY).isNotEqualTo(fileX);
+        assertThat(currentDvs(table)).isEmpty();
+        long snapshot = table.snapshotManager().latestSnapshot().id();
+        assertThatThrownBy(() -> commitDelete(table, stale))
+                .hasMessageContaining("Deletion vector conflict")
+                .hasMessageContaining("references data file " + fileX);
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot);
+        assertThat(readRows(table))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
+        // id=1 is the first row of both X and its replacement Y.
+        commitDelete(table, prepareDelete(table, fileY, 0));
+        assertThat(readRows(table))
+                .containsExactlyInAnyOrder(GenericRow.of(2, 20), GenericRow.of(3, 30));
     }
 
     /**
-     * Rejects stale L5 compaction that would duplicate a primary key already updated in L4.
-     *
-     * @param existingDv whether to delete a seed row to create a DV before both writers restore;
-     *     false starts with a known-empty DV baseline while keeping deletion vectors enabled
+     * A and B update one baseline: different keys in the same/different files, or the same key in
+     * L4/L5. Only A's values and deletion markers may become visible.
      */
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testConcurrentCompactionRejectsStaleDvWithSameKeyAcrossLevels(boolean existingDv)
-            throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 6);
-            List<GenericRow> expected = new ArrayList<>();
-            for (int id = 1; id <= 20; id++) {
-                expected.add(GenericRow.of(id, id * 10));
-            }
-            writeRows(table, ioManager, expected);
-            if (existingDv) {
-                writeRows(
-                        table,
-                        ioManager,
-                        Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 20, 200)));
-                expected.remove(expected.size() - 1);
-            }
-            List<ManifestEntry> baseFiles = table.store().newScan().plan().files();
-            assertThat(baseFiles).hasSize(1);
-            DataFileMeta fileX = baseFiles.get(0).file();
-            assertThat(fileX.level()).isEqualTo(5);
-            assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
-
-            BatchWriteBuilder first = table.newBatchWriteBuilder();
-            BatchWriteBuilder second = table.newBatchWriteBuilder();
-            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
-                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commitA = first.newCommit();
-                    BatchTableCommit commitB = second.newCommit()) {
-                // Both updates target id=1 in X. A only compacts its L0 file to L4 and uses
-                // lookup to mark the old row in X deleted; B rewrites X and its own update to L5.
-                a.write(GenericRow.of(1, 100));
-                b.write(GenericRow.of(1, 200));
-                List<CommitMessage> preparedA = a.prepareCommit();
+    @ParameterizedTest(name = "existingDv={0}, differentFiles={1}, rewriteB={2}")
+    @CsvSource({
+        "false,false,false",
+        "true,false,false",
+        "false,true,false",
+        "true,true,false",
+        "false,false,true",
+        "true,false,true"
+    })
+    void testConcurrentCompactionRejectsStaleDv(
+            boolean existingDv, boolean differentFiles, boolean rewriteB) throws Exception {
+        FileStoreTable table = createTable(rewriteB ? 6 : 3);
+        List<GenericRow> expected = seedRows(table, existingDv, differentFiles);
+        List<DataFileMeta> base = dataFiles(table);
+        int level = rewriteB ? 4 : 1;
+        int keyB = rewriteB ? 1 : differentFiles ? 21 : 2;
+        BatchWriteBuilder first = table.newBatchWriteBuilder();
+        BatchWriteBuilder second = table.newBatchWriteBuilder();
+        try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
+                BatchTableWrite b = second.newWrite().withIOManager(ioManager);
+                BatchTableCommit commitA = first.newCommit();
+                BatchTableCommit commitB = second.newCommit()) {
+            a.write(GenericRow.of(1, 100));
+            b.write(GenericRow.of(keyB, 200));
+            List<CommitMessage> preparedA = a.prepareCommit();
+            if (rewriteB) {
                 b.compact(BinaryRow.EMPTY_ROW, 0, true);
-                List<CommitMessage> preparedB = b.prepareCommit();
-                CompactIncrement incrementA = assertLookupCompaction(preparedA, 1, 4);
-                assertThat(preparedB).hasSize(1);
-                assertThat(preparedB.get(0).bucket()).isZero();
-                CompactIncrement incrementB =
-                        ((CommitMessageImpl) preparedB.get(0)).compactIncrement();
+            }
+            List<CommitMessage> preparedB = b.prepareCommit();
+            CompactIncrement incrementA = assertLookupCompaction(preparedA, 1, level);
+            CompactIncrement incrementB = compactIncrement(preparedB);
+            assertThat(incrementA.deletedIndexFiles())
+                    .hasSize(existingDv ? 1 : 0)
+                    .isEqualTo(incrementB.deletedIndexFiles());
+            String fileX = base.get(0).fileName();
+            assertThat(base).allSatisfy(file -> assertThat(file.level()).isEqualTo(level + 1));
+            assertThat(readDvs(table, incrementA).get(fileX).isDeleted(0)).isTrue();
+            if (rewriteB) {
                 assertThat(incrementB.compactBefore())
                         .extracting(DataFileMeta::fileName)
-                        .contains(fileX.fileName());
+                        .contains(fileX);
                 assertThat(incrementB.compactAfter())
                         .singleElement()
                         .satisfies(
                                 file -> {
+                                    assertThat(file.fileName()).isNotEqualTo(fileX);
                                     assertThat(file.level()).isEqualTo(5);
-                                    assertThat(file.minKey().getInt(0)).isEqualTo(1);
-                                    assertThat(file.maxKey().getInt(0)).isEqualTo(expected.size());
                                     assertThat(file.rowCount()).isEqualTo(expected.size());
                                 });
-                // Full compaction consumes the old deletion marks, but still depends on the DV
-                // baseline. Clearing publishes only DELETE old DV, without an empty index.
                 assertThat(incrementB.newIndexFiles()).isEmpty();
-                assertThat(oldDvFile(incrementB)).isEqualTo(oldDvFile(incrementA));
-                if (existingDv) {
-                    assertThat(oldDvFile(incrementA)).isNotNull();
-                } else {
-                    assertThat(oldDvFile(incrementA)).isNull();
-                }
-                Map<String, DeletionVector> dvA =
-                        table.store()
-                                .newIndexFileHandler()
-                                .readAllDeletionVectors(
-                                        BinaryRow.EMPTY_ROW, 0, incrementA.newIndexFiles());
-                assertThat(dvA).containsKey(fileX.fileName());
-                assertThat(dvA.get(fileX.fileName()).isDeleted(0)).isTrue();
-
-                // The overlapping key ranges are in different levels, so the LSM check alone
-                // would accept B and expose id=1 in both A's L4 file and B's L5 file.
-                commitA.commit(preparedA);
-                if (!existingDv) {
-                    assertThat(incrementB.deletedIndexFiles()).isEmpty();
-                }
-                assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining(
-                                existingDv
-                                        ? "expected DV file " + oldDvFile(incrementB)
-                                        : "references data file " + fileX.fileName());
-                expected.set(0, GenericRow.of(1, 100));
-                assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
-            }
-        }
-    }
-
-    /**
-     * Rejects stale bucket DVs for disjoint-key updates in the same or different data files.
-     *
-     * @param existingDv whether to delete a seed row to create a DV before both writers restore;
-     *     false starts with a known-empty DV baseline while keeping deletion vectors enabled
-     * @param differentFiles whether A and B update keys in different L2 files in the same bucket;
-     *     false updates id=1 and id=2 in one file, while true updates id=1 in X and id=21 in Y
-     */
-    private void testConcurrentCompactionRejectsStaleDv(boolean existingDv, boolean differentFiles)
-            throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-
-            // Larger base files stay in L2 while each single-row update is compacted to L1.
-            int lastKey = differentFiles ? 40 : 20;
-            int keyB = differentFiles ? 21 : 2;
-            List<GenericRow> expected = new ArrayList<>();
-            for (int id = 1; id <= lastKey; id++) {
-                expected.add(GenericRow.of(id, id * 10));
-            }
-            writeRows(table, ioManager, expected.subList(0, 20));
-            if (differentFiles) {
-                // Keep the two disjoint base files separate when upgrading the second one to L2.
-                FileStoreTable seedTable =
-                        table.copy(
-                                Collections.singletonMap(COMPACTION_SMALL_FILE_RATIO.key(), "0"));
-                writeRows(seedTable, ioManager, expected.subList(20, 40), true);
-            }
-            if (existingDv) {
-                // A delete creates a real DV without leaving an L1 file shared by A and B.
-                writeRows(
-                        table,
-                        ioManager,
-                        Collections.singletonList(
-                                GenericRow.ofKind(RowKind.DELETE, lastKey, lastKey * 10)));
-                expected.remove(expected.size() - 1);
-            }
-            List<DataFileMeta> baseFiles =
-                    table.store().newScan().plan().files().stream()
-                            .map(ManifestEntry::file)
-                            .sorted(Comparator.comparingInt(file -> file.minKey().getInt(0)))
-                            .collect(Collectors.toList());
-            assertThat(baseFiles)
-                    .hasSize(differentFiles ? 2 : 1)
-                    .allSatisfy(file -> assertThat(file.level()).isEqualTo(2));
-            assertThat(baseFiles.get(0).minKey().getInt(0)).isEqualTo(1);
-            assertThat(baseFiles.get(0).maxKey().getInt(0)).isEqualTo(20);
-            if (differentFiles) {
-                assertThat(baseFiles.get(1).minKey().getInt(0)).isEqualTo(21);
-                assertThat(baseFiles.get(1).maxKey().getInt(0)).isEqualTo(40);
-            }
-            assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
-
-            BatchWriteBuilder first = table.newBatchWriteBuilder();
-            BatchWriteBuilder second = table.newBatchWriteBuilder();
-            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
-                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commitA = first.newCommit();
-                    BatchTableCommit commitB = second.newCommit()) {
-                // Prepare both results from the same snapshot before publishing either one.
-                a.write(GenericRow.of(1, 100));
-                b.write(GenericRow.of(keyB, keyB * 100));
-                List<CommitMessage> preparedA = a.prepareCommit();
-                List<CommitMessage> preparedB = b.prepareCommit();
-                CompactIncrement incrementA = assertLookupCompaction(preparedA, 1, 1);
-                CompactIncrement incrementB = assertLookupCompaction(preparedB, keyB, 1);
-                assertThat(oldDvFile(incrementB)).isEqualTo(oldDvFile(incrementA));
-                if (existingDv) {
-                    assertThat(oldDvFile(incrementA)).isNotNull();
-                } else {
-                    assertThat(oldDvFile(incrementA)).isNull();
-                }
+            } else {
+                assertLookupCompaction(preparedB, keyB, level);
+                Map<String, DeletionVector> dvB = readDvs(table, incrementB);
+                assertThat(
+                                dvB.get(base.get(differentFiles ? 1 : 0).fileName())
+                                        .isDeleted(differentFiles ? 0 : 1))
+                        .isTrue();
                 if (differentFiles) {
-                    String fileX = baseFiles.get(0).fileName();
-                    String fileY = baseFiles.get(1).fileName();
-                    Map<String, DeletionVector> dvA =
-                            table.store()
-                                    .newIndexFileHandler()
-                                    .readAllDeletionVectors(
-                                            BinaryRow.EMPTY_ROW, 0, incrementA.newIndexFiles());
-                    Map<String, DeletionVector> dvB =
-                            table.store()
-                                    .newIndexFileHandler()
-                                    .readAllDeletionVectors(
-                                            BinaryRow.EMPTY_ROW, 0, incrementB.newIndexFiles());
-                    assertThat(dvA).containsKey(fileX);
-                    assertThat(dvA.get(fileX).isDeleted(0)).isTrue();
-                    assertThat(dvB).containsKey(fileY).doesNotContainKey(fileX);
-                    assertThat(dvB.get(fileY).isDeleted(0)).isTrue();
+                    assertThat(dvB).doesNotContainKey(fileX);
                 }
-
-                // The single-key L1 ranges do not conflict. Only the stale DV dependency
-                // prevents B from replacing A's deletion mark for id=1 in the L2 file.
-                commitA.commit(preparedA);
-                assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict");
-
-                // B's APPEND may be committed, but the default DV read excludes unmerged L0.
-                // A's update remains visible exactly once and B's stale compact is not visible.
-                expected.set(0, GenericRow.of(1, 100));
-                assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
             }
+            commitA.commit(preparedA);
+            assertThatThrownBy(() -> commitB.commit(preparedB))
+                    .hasMessageContaining("Deletion vector conflict");
+            expected.set(0, GenericRow.of(1, 100));
+            assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
         }
     }
 
-    /**
-     * A and B physically rewrite the same X from one snapshot. Once A replaces X, B must fail the
-     * ordinary file deletion check, with or without an existing DV, and leave A's rows unchanged.
-     */
+    /** Direct OVERWRITE deletes reject stale DVs; explicit recomputation retains both deletions. */
+    @ParameterizedTest(name = "primaryKey={0}, existingDv={1}")
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testConcurrentDeletesAndRecomputation(boolean primaryKey, boolean existingDv)
+            throws Exception {
+        FileStoreTable table = createTable(primaryKey, 3);
+        writeRows(table, GenericRow.of(1, 10), GenericRow.of(2, 20), GenericRow.of(3, 30));
+        assertThat(dataFiles(table)).hasSize(1);
+        String file = dataFiles(table).get(0).fileName();
+        List<GenericRow> expected = new ArrayList<>(Arrays.asList(GenericRow.of(2, 20)));
+        if (existingDv) {
+            commitDelete(table, prepareDelete(table, file, 2));
+        } else {
+            expected.add(GenericRow.of(3, 30));
+        }
+        CommitMessage a = prepareDelete(table, file, 0);
+        CommitMessage b = prepareDelete(table, file, 1);
+        DataIncrement increment = ((CommitMessageImpl) a).newFilesIncrement();
+        assertThat(increment.deletedIndexFiles())
+                .hasSize(existingDv ? 1 : 0)
+                .isEqualTo(((CommitMessageImpl) b).newFilesIncrement().deletedIndexFiles());
+        commitDelete(table, a);
+        long snapshot = table.snapshotManager().latestSnapshot().id();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThatThrownBy(() -> commitDelete(table, b))
+                .hasMessageContaining("Deletion vector conflict");
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot);
+        assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
+        CommitMessage recomputed = prepareDelete(table, file, 1);
+        assertThat(((CommitMessageImpl) recomputed).newFilesIncrement().deletedIndexFiles())
+                .isEqualTo(increment.newIndexFiles());
+        commitDelete(table, recomputed);
+        expected.remove(0);
+        assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    /** Two physical rewrites of X conflict through the ordinary file deletion check. */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testConcurrentCompactionsRewriteSameFile(boolean existingDv) throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-            List<GenericRow> expected =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    GenericRow.of(1, 10),
-                                    GenericRow.of(2, 20),
-                                    GenericRow.of(3, 30)));
-            writeRows(table, ioManager, expected);
-            if (existingDv) {
-                writeRows(
-                        table,
-                        ioManager,
-                        Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 3, 30)));
-                expected.remove(2);
+        FileStoreTable table = createTable(3);
+        List<GenericRow> expected = seedRows(table, existingDv, false);
+        String fileX = dataFiles(table).get(0).fileName();
+        BatchWriteBuilder first = rewriteTable(table).newBatchWriteBuilder();
+        BatchWriteBuilder second = rewriteTable(table).newBatchWriteBuilder();
+        try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
+                BatchTableWrite b = second.newWrite().withIOManager(ioManager);
+                BatchTableCommit commitA = first.newCommit();
+                BatchTableCommit commitB = second.newCommit()) {
+            a.compact(BinaryRow.EMPTY_ROW, 0, true);
+            b.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> preparedA = a.prepareCommit();
+            List<CommitMessage> preparedB = b.prepareCommit();
+            for (List<CommitMessage> messages : Arrays.asList(preparedA, preparedB)) {
+                CompactIncrement compact = compactIncrement(messages);
+                assertRewrite(compact, fileX);
+                assertThat(compact.newIndexFiles()).isEmpty();
+                assertThat(compact.deletedIndexFiles()).hasSize(existingDv ? 1 : 0);
             }
-            List<ManifestEntry> baseFiles = table.store().newScan().plan().files();
-            assertThat(baseFiles).hasSize(1);
-            String fileX = baseFiles.get(0).fileName();
-            FileStoreTable rewriteTable =
-                    table.copy(
-                            Collections.singletonMap(
-                                    COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true"));
-            BatchWriteBuilder first = rewriteTable.newBatchWriteBuilder();
-            BatchWriteBuilder second = rewriteTable.newBatchWriteBuilder();
-            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
-                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commitA = first.newCommit();
-                    BatchTableCommit commitB = second.newCommit()) {
-                a.compact(BinaryRow.EMPTY_ROW, 0, true);
-                b.compact(BinaryRow.EMPTY_ROW, 0, true);
-                List<CommitMessage> preparedA = a.prepareCommit();
-                List<CommitMessage> preparedB = b.prepareCommit();
-                for (List<CommitMessage> messages : Arrays.asList(preparedA, preparedB)) {
-                    assertThat(messages).hasSize(1);
-                    CompactIncrement compact =
-                            ((CommitMessageImpl) messages.get(0)).compactIncrement();
-                    assertThat(compact.compactBefore())
-                            .extracting(DataFileMeta::fileName)
-                            .containsExactly(fileX);
-                    assertThat(compact.compactAfter())
-                            .extracting(DataFileMeta::fileName)
-                            .isNotEmpty()
-                            .doesNotContain(fileX);
-                    assertThat(compact.newIndexFiles()).isEmpty();
-                    assertThat(compact.deletedIndexFiles()).hasSize(existingDv ? 1 : 0);
-                }
-                commitA.commit(preparedA);
-                long latest = table.snapshotManager().latestSnapshot().id();
-                assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("File deletion conflicts detected")
-                        .hasStackTraceContaining("Trying to delete file " + fileX);
-                assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(latest);
-                assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
-            }
+            commitA.commit(preparedA);
+            long snapshot = table.snapshotManager().latestSnapshot().id();
+            assertThatThrownBy(() -> commitB.commit(preparedB))
+                    .hasMessageContaining("File deletion conflicts detected")
+                    .hasStackTraceContaining("Trying to delete file " + fileX);
+            assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshot);
+            assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
         }
     }
 
     /**
-     * B physically rewrites X without producing a DV; A then marks a row of X deleted. The retained
-     * DV reference must reject B even though there is no DV replacement to check.
-     */
-    @Test
-    void testRewriteWithoutDvChangesRejectsConcurrentDeletion() throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-            List<GenericRow> expected = new ArrayList<>();
-            for (int id = 1; id <= 20; id++) {
-                expected.add(GenericRow.of(id, id * 10));
-            }
-            writeRows(table, ioManager, expected);
-            DataFileMeta input = table.store().newScan().plan().files().get(0).file();
-            FileStoreTable rewriteTable =
-                    table.copy(
-                            Collections.singletonMap(
-                                    COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true"));
-            BatchWriteBuilder first = table.newBatchWriteBuilder();
-            BatchWriteBuilder second = rewriteTable.newBatchWriteBuilder();
-            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
-                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commitA = first.newCommit();
-                    BatchTableCommit commitB = second.newCommit()) {
-                b.compact(BinaryRow.EMPTY_ROW, 0, true);
-                List<CommitMessage> preparedB = b.prepareCommit();
-                CompactIncrement incrementB =
-                        ((CommitMessageImpl) preparedB.get(0)).compactIncrement();
-                assertThat(incrementB.compactBefore())
-                        .extracting(DataFileMeta::fileName)
-                        .containsExactly(input.fileName());
-                assertThat(incrementB.compactAfter())
-                        .singleElement()
-                        .satisfies(
-                                output -> {
-                                    assertThat(output.fileName()).isNotEqualTo(input.fileName());
-                                    assertThat(output.level()).isEqualTo(2);
-                                });
-                assertThat(incrementB.newIndexFiles()).isEmpty();
-                assertThat(incrementB.deletedIndexFiles()).isEmpty();
-                a.write(GenericRow.of(1, 100));
-                List<CommitMessage> preparedA = a.prepareCommit();
-                assertLookupCompaction(preparedA, 1, 1);
-                commitA.commit(preparedA);
-                assertThatThrownBy(() -> commitB.commit(preparedB))
-                        .hasMessageContaining("Deletion vector conflict")
-                        .hasMessageContaining("references data file " + input.fileName());
-                expected.set(0, GenericRow.of(1, 100));
-                assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
-            }
-        }
-    }
-
-    /**
-     * Freeze a partial compact's input as X while retaining the bucket's real D0 for Y. B emits no
-     * DV changes. A changing X must reject B; A changing only Y must allow B and preserve DA.
+     * B rewrites X without a DV increment. A's new DV for X must reject B; a DV change only for Y
+     * must allow B. Exercise both an initially absent DV and D0 already referencing Y.
      */
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testPartialRewriteChecksOnlyItsInputs(boolean changeInput) throws Exception {
-        try (Catalog catalog =
-                        CatalogFactory.createCatalog(
-                                CatalogContext.create(new Path(tempDir.toString())));
-                IOManager ioManager = IOManager.create(tempDir.toString())) {
-            FileStoreTable table = createTable(catalog, 3);
-            List<GenericRow> expected = new ArrayList<>();
-            for (int id = 1; id <= 40; id++) {
-                expected.add(GenericRow.of(id, id * 10));
-            }
-            writeRows(table, ioManager, expected.subList(0, 20));
-            writeRows(
-                    table.copy(Collections.singletonMap(COMPACTION_SMALL_FILE_RATIO.key(), "0")),
-                    ioManager,
-                    expected.subList(20, 40),
-                    true);
-            writeRows(
-                    table,
-                    ioManager,
-                    Collections.singletonList(GenericRow.ofKind(RowKind.DELETE, 40, 400)));
-            expected.remove(39);
-            List<DataFileMeta> inputs =
-                    table.store().newScan().plan().files().stream()
-                            .map(ManifestEntry::file)
-                            .sorted(Comparator.comparingInt(file -> file.minKey().getInt(0)))
-                            .collect(Collectors.toList());
-            assertThat(inputs).hasSize(2);
-            List<IndexFileMeta> oldIndexes =
-                    table.store()
-                            .newIndexFileHandler()
-                            .scan(
-                                    table.snapshotManager().latestSnapshot(),
-                                    DELETION_VECTORS_INDEX,
-                                    BinaryRow.EMPTY_ROW,
-                                    0);
-            assertThat(oldIndexes).hasSize(1);
-            assertThat(oldIndexes.get(0).dvRanges())
+    @CsvSource({"false,true", "true,true", "true,false"})
+    void testRewriteWithoutDvChanges(boolean existingDv, boolean changeInput) throws Exception {
+        FileStoreTable table = createTable(3);
+        List<GenericRow> expected = seedRows(table, existingDv, existingDv);
+        List<DataFileMeta> inputs = dataFiles(table);
+        String fileX = inputs.get(0).fileName();
+        List<IndexFileMeta> old = currentDvs(table);
+        assertThat(old).hasSize(existingDv ? 1 : 0);
+        if (existingDv) {
+            assertThat(old.get(0).dvRanges())
                     .containsKey(inputs.get(1).fileName())
-                    .doesNotContainKey(inputs.get(0).fileName());
-            // Select X for a real rewrite, retaining the full, unmodified bucket DV metadata.
-            RestoreFiles selected =
-                    new RestoreFiles(
-                            table.snapshotManager().latestSnapshot(),
-                            1,
-                            Collections.singletonList(inputs.get(0)),
-                            null,
-                            oldIndexes,
-                            null);
-            BatchWriteBuilder first = table.newBatchWriteBuilder();
-            BatchWriteBuilder second =
-                    table.copy(
-                                    Collections.singletonMap(
-                                            COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true"))
-                            .newBatchWriteBuilder();
-            try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
-                    BatchTableWrite b = second.newWrite().withIOManager(ioManager);
-                    BatchTableCommit commitA = first.newCommit();
-                    BatchTableCommit commitB = second.newCommit()) {
-                ((TableWriteImpl<?>) b)
-                        .getWrite()
-                        .withWriteRestore(
-                                new WriteRestore() {
-                                    @Override
-                                    public long latestCommittedIdentifier(String user) {
-                                        return Long.MIN_VALUE;
-                                    }
+                    .doesNotContainKey(fileX);
+        }
+        RestoreFiles selected =
+                new RestoreFiles(
+                        table.snapshotManager().latestSnapshot(),
+                        1,
+                        Collections.singletonList(inputs.get(0)),
+                        null,
+                        old,
+                        null);
+        BatchWriteBuilder first = table.newBatchWriteBuilder();
+        BatchWriteBuilder second = rewriteTable(table).newBatchWriteBuilder();
+        try (BatchTableWrite a = first.newWrite().withIOManager(ioManager);
+                BatchTableWrite b = second.newWrite().withIOManager(ioManager);
+                BatchTableCommit commitA = first.newCommit();
+                BatchTableCommit commitB = second.newCommit()) {
+            // Restrict a real rewrite to X, but retain the complete bucket DV metadata.
+            ((TableWriteImpl<?>) b)
+                    .getWrite()
+                    .withWriteRestore(
+                            new WriteRestore() {
+                                @Override
+                                public long latestCommittedIdentifier(String user) {
+                                    return Long.MIN_VALUE;
+                                }
 
-                                    @Override
-                                    public RestoreFiles restoreFiles(
-                                            BinaryRow partition,
-                                            int bucket,
-                                            boolean scanDynamicBucketIndex,
-                                            boolean scanDeleteVectorsIndex,
-                                            boolean scanSourceIndexPayloads) {
-                                        return selected;
-                                    }
-                                });
-                b.compact(BinaryRow.EMPTY_ROW, 0, true);
-                List<CommitMessage> pending = b.prepareCommit();
-                assertThat(pending).hasSize(1);
-                CompactIncrement compact = ((CommitMessageImpl) pending.get(0)).compactIncrement();
-                assertThat(compact.newIndexFiles()).isEmpty();
-                assertThat(compact.deletedIndexFiles()).isEmpty();
-                assertThat(compact.compactBefore())
-                        .extracting(DataFileMeta::fileName)
-                        .containsExactly(inputs.get(0).fileName());
-                assertThat(compact.compactAfter())
-                        .singleElement()
-                        .satisfies(
-                                output ->
-                                        assertThat(output.fileName())
-                                                .isNotEqualTo(inputs.get(0).fileName()));
-                int key = changeInput ? 1 : 21;
-                a.write(GenericRow.of(key, 999));
-                List<CommitMessage> update = a.prepareCommit();
-                String currentDv =
-                        assertLookupCompaction(update, key, 1).newIndexFiles().get(0).fileName();
-                commitA.commit(update);
-                if (changeInput) {
-                    assertThatThrownBy(() -> commitB.commit(pending))
-                            .hasMessageContaining("Deletion vector conflict")
-                            .hasMessageContaining(
-                                    "references data file " + inputs.get(0).fileName());
-                } else {
-                    commitB.commit(pending);
-                }
-                expected.set(key - 1, GenericRow.of(key, 999));
-                assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
-                assertThat(
-                                table.store()
-                                        .newIndexFileHandler()
-                                        .scan(
-                                                table.snapshotManager().latestSnapshot(),
-                                                DELETION_VECTORS_INDEX,
-                                                BinaryRow.EMPTY_ROW,
-                                                0))
-                        .extracting(IndexFileMeta::fileName)
-                        .containsExactly(currentDv);
+                                @Override
+                                public RestoreFiles restoreFiles(
+                                        BinaryRow partition,
+                                        int bucket,
+                                        boolean scanDynamicBucketIndex,
+                                        boolean scanDeleteVectorsIndex,
+                                        boolean scanSourceIndexPayloads) {
+                                    return selected;
+                                }
+                            });
+            b.compact(BinaryRow.EMPTY_ROW, 0, true);
+            List<CommitMessage> pending = b.prepareCommit();
+            CompactIncrement compact = compactIncrement(pending);
+            assertRewrite(compact, fileX);
+            assertThat(compact.compactAfter())
+                    .singleElement()
+                    .satisfies(file -> assertThat(file.level()).isEqualTo(2));
+            assertThat(compact.newIndexFiles()).isEmpty();
+            assertThat(compact.deletedIndexFiles()).isEmpty();
+            int key = changeInput ? 1 : 21;
+            a.write(GenericRow.of(key, 999));
+            List<CommitMessage> update = a.prepareCommit();
+            String currentDv =
+                    assertLookupCompaction(update, key, 1).newIndexFiles().get(0).fileName();
+            commitA.commit(update);
+            if (changeInput) {
+                assertThatThrownBy(() -> commitB.commit(pending))
+                        .hasMessageContaining("Deletion vector conflict")
+                        .hasMessageContaining("references data file " + fileX);
+            } else {
+                commitB.commit(pending);
             }
+            expected.set(key - 1, GenericRow.of(key, 999));
+            assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(expected);
+            assertThat(currentDvs(table))
+                    .extracting(IndexFileMeta::fileName)
+                    .containsExactly(currentDv);
         }
     }
 
-    private static String oldDvFile(CompactIncrement increment) {
-        return increment.deletedIndexFiles().isEmpty()
-                ? null
-                : increment.deletedIndexFiles().get(0).fileName();
+    private FileStoreTable createTable(int numLevels) throws Exception {
+        return createTable(true, numLevels);
     }
 
-    private FileStoreTable createTable(Catalog catalog, int numLevels) throws Exception {
+    private FileStoreTable createTable(boolean primaryKey, int numLevels) throws Exception {
         catalog.createDatabase("default", true);
         Identifier identifier = Identifier.create("default", "t");
-        catalog.createTable(
-                identifier,
+        Schema.Builder schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column("v", DataTypes.INT())
-                        .primaryKey("id")
                         .option(BUCKET.key(), "1")
+                        .option("bucket-key", "id")
                         .option(DELETION_VECTORS_ENABLED.key(), "true")
-                        .option(NUM_LEVELS.key(), String.valueOf(numLevels))
-                        .build(),
-                false);
+                        .option(NUM_LEVELS.key(), String.valueOf(numLevels));
+        if (primaryKey) {
+            schema.primaryKey("id");
+        }
+        catalog.createTable(identifier, schema.build(), false);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    private List<GenericRow> seedRows(
+            FileStoreTable table, boolean existingDv, boolean differentFiles) throws Exception {
+        int lastKey = differentFiles ? 40 : 20;
+        List<GenericRow> rows = new ArrayList<>();
+        for (int id = 1; id <= lastKey; id++) {
+            rows.add(GenericRow.of(id, id * 10));
+        }
+        writeRows(table, rows.subList(0, 20), false);
+        if (differentFiles) {
+            writeRows(
+                    table.copy(Collections.singletonMap(COMPACTION_SMALL_FILE_RATIO.key(), "0")),
+                    rows.subList(20, 40),
+                    true);
+        }
+        if (existingDv) {
+            writeRows(table, GenericRow.ofKind(RowKind.DELETE, lastKey, lastKey * 10));
+            rows.remove(rows.size() - 1);
+        }
+        List<DataFileMeta> files = dataFiles(table);
+        assertThat(files).hasSize(differentFiles ? 2 : 1);
+        for (int i = 0; i < files.size(); i++) {
+            assertThat(files.get(i).minKey().getInt(0)).isEqualTo(i * 20 + 1);
+            assertThat(files.get(i).maxKey().getInt(0)).isEqualTo((i + 1) * 20);
+        }
+        assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(rows);
+        return rows;
+    }
+
+    private List<DataFileMeta> dataFiles(FileStoreTable table) {
+        return table.store().newScan().plan().files().stream()
+                .map(ManifestEntry::file)
+                .sorted(Comparator.comparingInt(file -> file.minKey().getInt(0)))
+                .collect(Collectors.toList());
+    }
+
+    private List<IndexFileMeta> currentDvs(FileStoreTable table) {
+        return table.store()
+                .newIndexFileHandler()
+                .scan(
+                        table.snapshotManager().latestSnapshot(),
+                        DELETION_VECTORS_INDEX,
+                        BinaryRow.EMPTY_ROW,
+                        0);
+    }
+
+    private Map<String, DeletionVector> readDvs(FileStoreTable table, CompactIncrement increment) {
+        return table.store()
+                .newIndexFileHandler()
+                .readAllDeletionVectors(BinaryRow.EMPTY_ROW, 0, increment.newIndexFiles());
+    }
+
+    private FileStoreTable rewriteTable(FileStoreTable table) {
+        return table.copy(
+                Collections.singletonMap(COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true"));
+    }
+
+    private CompactIncrement compactIncrement(List<CommitMessage> messages) {
+        assertThat(messages).hasSize(1);
+        assertThat(messages.get(0).bucket()).isZero();
+        return ((CommitMessageImpl) messages.get(0)).compactIncrement();
+    }
+
+    private void assertRewrite(CompactIncrement increment, String input) {
+        assertThat(increment.compactBefore())
+                .extracting(DataFileMeta::fileName)
+                .containsExactly(input);
+        assertThat(increment.compactAfter())
+                .extracting(DataFileMeta::fileName)
+                .isNotEmpty()
+                .doesNotContain(input);
     }
 
     private CompactIncrement assertLookupCompaction(
             List<CommitMessage> messages, int key, int outputLevel) {
-        assertThat(messages).hasSize(1);
-        assertThat(messages.get(0).bucket()).isZero();
-        CompactIncrement increment = ((CommitMessageImpl) messages.get(0)).compactIncrement();
+        CompactIncrement increment = compactIncrement(messages);
         assertThat(increment.compactBefore())
                 .singleElement()
                 .satisfies(file -> assertThat(file.level()).isZero());
@@ -809,13 +533,50 @@ class PrimaryKeyDeletionVectorCompactionTest {
         return increment;
     }
 
-    private void writeRows(Table table, IOManager ioManager, List<GenericRow> rows)
+    private CommitMessage prepareDelete(FileStoreTable table, String file, long position)
             throws Exception {
-        writeRows(table, ioManager, rows, false);
+        // Use the same producer and DataIncrement layout as Spark's persistDeletionVectors.
+        BaseAppendDeleteFileMaintainer maintainer =
+                BaseAppendDeleteFileMaintainer.forBucketedAppend(
+                        table.store().newIndexFileHandler(),
+                        table.snapshotManager().latestSnapshot(),
+                        BinaryRow.EMPTY_ROW,
+                        0);
+        BitmapDeletionVector dv = new BitmapDeletionVector();
+        dv.delete(position);
+        maintainer.notifyNewDeletionVector(file, dv);
+        List<IndexFileMeta> added = new ArrayList<>();
+        List<IndexFileMeta> deleted = new ArrayList<>();
+        for (IndexManifestEntry entry : maintainer.persist()) {
+            (entry.kind() == FileKind.ADD ? added : deleted).add(entry.indexFile());
+        }
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        1,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                added,
+                                deleted),
+                        CompactIncrement.emptyIncrement());
+        CommitMessageSerializer serializer = new CommitMessageSerializer();
+        return serializer.deserialize(serializer.getVersion(), serializer.serialize(message));
     }
 
-    private void writeRows(
-            Table table, IOManager ioManager, List<GenericRow> rows, boolean fullCompaction)
+    private void commitDelete(FileStoreTable table, CommitMessage message) throws Exception {
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private void writeRows(FileStoreTable table, GenericRow... rows) throws Exception {
+        writeRows(table, Arrays.asList(rows), false);
+    }
+
+    private void writeRows(FileStoreTable table, List<GenericRow> rows, boolean fullCompaction)
             throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite().withIOManager(ioManager);

@@ -2513,19 +2513,13 @@ public class FileStoreCommitTest {
             }
         }
         assertThat(attempts.get()).isEqualTo(1);
-        assertThat(
-                        store.newIndexFileHandler()
-                                .scan(
-                                        store.snapshotManager().latestSnapshot(),
-                                        DELETION_VECTORS_INDEX,
-                                        partition,
-                                        0))
-                .extracting(IndexFileMeta::fileName)
+        assertThat(bucketDvNames(store, partition, 0))
                 .containsExactly(uncertainSuccess ? "writer-dv" : "concurrent-dv");
     }
 
+    /** Clearing and recreating bucket 0 must leave bucket 1's DV dependency valid. */
     @Test
-    public void testBucketedDvConflictIgnoresOtherBuckets() throws Exception {
+    public void testBucketedDvClearAndRecreateAcrossBuckets() throws Exception {
         TestFileStore store =
                 createStore(
                         false,
@@ -2537,10 +2531,25 @@ public class FileStoreCommitTest {
         try (FileStoreCommitImpl commit = store.newCommit()) {
             commit.commit(bucketedDvCommittable(partition, 0, 0, null, "dv-0"), false);
             commit.commit(bucketedDvCommittable(partition, 1, 1, null, "dv-1"), false);
-            commit.commit(bucketedDvCommittable(partition, 0, 2, "dv-0", "dv-0-next"), false);
-            // The bucket-1 baseline is still valid despite changes to bucket 0 and index manifest.
+            commit.commit(bucketedDvCommittable(partition, 0, 2, "dv-0", null), false);
+            assertThat(bucketDvNames(store, partition, 0)).isEmpty();
             commit.commit(bucketedDvCommittable(partition, 1, 3, "dv-1", "dv-1-next"), false);
+            commit.commit(bucketedDvCommittable(partition, 0, 4, null, "dv-0-next"), false);
         }
+        assertThat(bucketDvNames(store, partition, 0)).containsExactly("dv-0-next");
+        assertThat(bucketDvNames(store, partition, 1)).containsExactly("dv-1-next");
+    }
+
+    private List<String> bucketDvNames(TestFileStore store, BinaryRow partition, int bucket) {
+        return store.newIndexFileHandler()
+                .scan(
+                        store.snapshotManager().latestSnapshot(),
+                        DELETION_VECTORS_INDEX,
+                        partition,
+                        bucket)
+                .stream()
+                .map(IndexFileMeta::fileName)
+                .collect(Collectors.toList());
     }
 
     private ManifestCommittable bucketedDvCommittable(
@@ -2548,32 +2557,13 @@ public class FileStoreCommitTest {
             int bucket,
             long identifier,
             @Nullable String expected,
-            String added) {
-        CompactIncrement increment =
-                new CompactIncrement(
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonList(
-                                new IndexFileMeta(
-                                        DELETION_VECTORS_INDEX,
-                                        added,
-                                        1L,
-                                        0L,
-                                        new LinkedHashMap<>(),
-                                        null)),
-                        new ArrayList<>());
+            @Nullable String added) {
+        CompactIncrement increment = CompactIncrement.emptyIncrement();
         if (expected != null) {
-            increment
-                    .deletedIndexFiles()
-                    .add(
-                            new IndexFileMeta(
-                                    DELETION_VECTORS_INDEX,
-                                    expected,
-                                    1L,
-                                    0L,
-                                    new LinkedHashMap<>(),
-                                    null));
+            increment.deletedIndexFiles().add(emptyBucketedDv(expected));
+        }
+        if (added != null) {
+            increment.newIndexFiles().add(emptyBucketedDv(added));
         }
         ManifestCommittable committable = new ManifestCommittable(identifier);
         committable.addFileCommittable(
@@ -2582,53 +2572,8 @@ public class FileStoreCommitTest {
         return committable;
     }
 
-    @Test
-    public void testConsecutiveBucketedDvCommitsThroughEmptyBaseline() throws Exception {
-        TestFileStore store =
-                createStore(
-                        false,
-                        Collections.singletonMap(
-                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
-        BinaryRow partition = gen.getPartition(gen.next());
-        ManifestCommittable base = bucketedDvCommittable(partition, 0, 0, null, "base-dv");
-        IndexFileMeta baseDv =
-                ((CommitMessageImpl) base.fileCommittables().get(0))
-                        .compactIncrement()
-                        .newIndexFiles()
-                        .get(0);
-        CompactIncrement removal =
-                new CompactIncrement(
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonList(baseDv));
-        ManifestCommittable clear = new ManifestCommittable(1);
-        clear.addFileCommittable(
-                new CommitMessageImpl(partition, 0, 1, DataIncrement.emptyIncrement(), removal));
-        ManifestCommittable next = bucketedDvCommittable(partition, 0, 2, null, "next-dv");
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            commit.commit(base, false);
-            commit.commit(clear, false);
-            assertThat(
-                            store.newIndexFileHandler()
-                                    .scan(
-                                            store.snapshotManager().latestSnapshot(),
-                                            DELETION_VECTORS_INDEX,
-                                            partition,
-                                            0))
-                    .isEmpty();
-            commit.commit(next, false);
-        }
-        assertThat(
-                        store.newIndexFileHandler()
-                                .scan(
-                                        store.snapshotManager().latestSnapshot(),
-                                        DELETION_VECTORS_INDEX,
-                                        partition,
-                                        0))
-                .extracting(IndexFileMeta::fileName)
-                .containsExactly("next-dv");
+    private IndexFileMeta emptyBucketedDv(String name) {
+        return new IndexFileMeta(DELETION_VECTORS_INDEX, name, 1L, 0L, new LinkedHashMap<>(), null);
     }
 
     @ParameterizedTest
