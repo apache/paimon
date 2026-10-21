@@ -464,7 +464,11 @@ class PaimonDatasetReader(ABC):
                 for key in video_windows:
                     row.pop(key, None)
         _decode_video_rows(
-            row_groups, getattr(self, "_video_collators", ()))
+            row_groups, getattr(self, "_video_collators", ()),
+            decode_pool=getattr(self, "_video_decode_pool", None),
+            decode_parallelism=getattr(
+                self, "_video_decode_parallelism",
+                CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()))
         converted = {
             position: _torch_row(
                 row, self._features, self.return_uint8)
@@ -2183,7 +2187,8 @@ def _identity(values):
     return values
 
 
-def _decode_video_rows(row_groups, collators):
+def _decode_video_rows(
+        row_groups, collators, decode_parallelism=_MAX_VISUAL_WORKERS, decode_pool=None):
     tasks = []
     for collator in collators:
         targets = []
@@ -2199,14 +2204,24 @@ def _decode_video_rows(row_groups, collators):
 
     if not tasks:
         return
-    if len(tasks) == 1:
-        decoded_groups = [tasks[0][0](tasks[0][2])]
+    if decode_parallelism == 1:
+        decoded_groups = [collator(rows) for collator, _, rows in tasks]
     else:
-        with ThreadPoolExecutor(
-                max_workers=min(
-                    len(tasks), _MAX_VISUAL_WORKERS)) as executor:
-            decoded_groups = list(executor.map(
-                lambda task: task[0](task[2]), tasks))
+        from concurrent.futures import wait
+
+        pool = decode_pool if decode_pool is not None else _VideoDecodePool()
+        futures = []
+        try:
+            executor = pool.get(decode_parallelism)
+            for collator, _, rows in tasks:
+                futures.append(executor.submit(collator, rows))
+            decoded_groups = [future.result() for future in futures]
+        finally:
+            for future in futures:
+                future.cancel()
+            wait(futures)
+            if decode_pool is None:
+                pool.close()
 
     for (collator, targets, _), decoded in zip(tasks, decoded_groups):
         for (rows, index), row in zip(targets, decoded):

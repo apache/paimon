@@ -268,7 +268,10 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             collator.close()
 
     def test_video_windows_share_worker_pool_across_cameras(self):
-        import torch
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
         from contextlib import ExitStack
         from pypaimon.multimodal.lerobot.dataset import _decode_video_windows
         from pypaimon.table.row.blob import VideoFrameDescriptor
@@ -317,6 +320,76 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             pool.close()
             for collator in collators:
                 collator.close()
+
+    def test_dataloader_fallback_honors_decode_limit(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        import time
+        import pyarrow as pa
+        import pypaimon.multimodal as pm
+
+        names = ("camera_a", "camera_b")
+        features = {name: {"dtype": "int64", "shape": [1]}
+                    for name in ("index", "episode_index", "frame_index", "task_index")}
+        features["timestamp"] = {"dtype": "float32", "shape": [1]}
+        features.update({name: {"dtype": "video", "shape": [2, 2, 3]} for name in names})
+        metadata = {
+            "repo_id": "test/fallback",
+            "info": {"codebase_version": "v3.0", "fps": 10, "total_frames": 1,
+                     "total_episodes": 1, "total_tasks": 1, "features": features},
+            "episodes": [{"episode_index": 0, "dataset_from_index": 0,
+                          "dataset_to_index": 1, "length": 1, "tasks": ["pick"]}],
+            "tasks": ["pick"], "stats": {},
+        }
+
+        class Reader(pm.PaimonDatasetReader):
+            def read_indices(self, indices, columns):
+                row = {name: 0 for name in features}
+                row.update({name: b"video" for name in names})
+                return pa.Table.from_pylist(
+                    [{name: row[name] for name in columns}], schema=self.schema)
+
+        active = [0, 0]
+        lock = threading.Lock()
+
+        class Collator:
+            def __init__(self, name):
+                self.video_column = self.output_column = name
+
+            def __call__(self, rows):
+                with lock:
+                    active[0] += 1
+                    active[1] = max(active)
+                try:
+                    time.sleep(0.02)
+                    return [dict(row, **{self.output_column: torch.ones(
+                        (3, 2, 2), dtype=torch.uint8)}) for row in rows]
+                finally:
+                    with lock:
+                        active[0] -= 1
+
+            def close(self):
+                pass
+
+        for transforms in (None, identity):
+            with self.subTest(transforms=transforms):
+                reader = Reader(metadata, file_io="test-file-io",
+                                delta_timestamps={name: [0.0] for name in names},
+                                image_transforms=transforms, return_uint8=True)
+                reader._video_collators = [Collator(name) for name in names]
+                reader._video_decode_parallelism = 1
+                dataset = pm.PaimonLeRobotDataset(reader)
+                active[:] = [0, 0]
+                try:
+                    with patch("torch.get_num_threads", return_value=2):
+                        batch = next(iter(dataset.to_dataloader(batch_size=1, num_workers=0)))
+                    self.assertEqual(active, [0, 1])
+                    for name in names:
+                        self.assertTrue(torch.equal(batch[name], torch.ones_like(batch[name])))
+                finally:
+                    dataset.close()
 
     def test_real_pyav_payloads_match_serial(self):
         try:
