@@ -26,8 +26,6 @@ from pypaimon.write.merge_transform import (
     _NormalizedClause,
     build_delete_schema,
     build_update_schema,
-    cast_to_schema,
-    vectorized_insert_transform,
 )
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
@@ -134,7 +132,7 @@ def _build_matched_transform(
     update_schema: pa.Schema,
     callable_input_columns: Optional[Sequence[str]] = None,
 ):
-    from pypaimon.write.merge_transform import _build_matched_transform as execute
+    from pypaimon.execution.python.write.merge_transform import _build_matched_transform as execute
     return execute(clauses, on_map, on_pairs, update_cols, row_id_name, update_schema, callable_input_columns)
 
 
@@ -144,7 +142,7 @@ def _build_matched_delete_transform(
     row_id_name: str,
     delete_schema: pa.Schema,
 ):
-    from pypaimon.write.merge_transform import _build_matched_delete_transform as execute
+    from pypaimon.execution.python.write.merge_transform import _build_matched_delete_transform as execute
     return execute(clauses, on_map, row_id_name, delete_schema)
 
 
@@ -1092,47 +1090,9 @@ def build_not_matched_insert_ds(
             right_on=tuple(f"t.{c}" for c in target_on),
         )
 
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.write.merge_condition import rewrite_condition
-            rewritten = rewrite_condition(clause.condition)
-        prepared_clauses.append((clause.spec, rewritten))
+    from pypaimon.execution.python.write.merge_transform import _build_insert_transform
 
-    _filter_batch_nm = None
-    if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.write.merge_condition import filter_batch as _filter_batch_nm
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch_nm(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-                if matched.num_rows > 0:
-                    parts.append(vectorized_insert_transform(
-                        matched, spec, captured_field_names, out_schema
-                    ))
-                if matched.num_rows < remaining.num_rows:
-                    not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                    remaining = _filter_batch_nm(
-                        remaining, not_cond, _pre_rewritten=True,
-                    )
-                else:
-                    remaining = remaining.slice(0, 0)
-            else:
-                parts.append(vectorized_insert_transform(
-                    remaining, spec, captured_field_names, out_schema
-                ))
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return out_schema.empty_table()
-        return cast_to_schema(pa.concat_tables(parts), out_schema)
+    _transform = _build_insert_transform(clauses, captured_field_names, out_schema)
 
     return unmatched.map_batches(
         _transform, **_map_kwargs(ray_remote_args)

@@ -2805,7 +2805,7 @@ class BlobTest(unittest.TestCase):
 
         from pypaimon.common.identifier import Identifier
         from pypaimon.common.uri_reader import HttpUriReader, UriReaderFactory
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         class TokenFileIO:
             def new_input_stream(self, path):
@@ -2917,7 +2917,7 @@ class BlobTest(unittest.TestCase):
         from pypaimon.common.identifier import Identifier
         from pypaimon.common.uri_reader import FileUriReader, UriReaderFactory
         from pypaimon.table.row.offset_row import OffsetRow
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         shared_uri = "s3://shared/blob"
         data_a = b"AAAA"
@@ -2976,7 +2976,7 @@ class BlobTest(unittest.TestCase):
         from pypaimon.read.table_read import TableRead
         from pypaimon.schema.data_types import AtomicType, DataField
         from pypaimon.table.row.offset_row import OffsetRow
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         view_struct = BlobViewStruct(Identifier.from_string("db.source"), 1, 0)
         view_bytes = view_struct.serialize()

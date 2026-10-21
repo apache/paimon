@@ -448,7 +448,7 @@ class DataWriter(ABC):
         ``VariantUtils.variantFileType``) can read ``parquetType.getId().intValue()``
         without a NullPointerException.
         """
-        from pypaimon.data.variant_shredding import shred_variant_column
+        from pypaimon.execution.python.read.variant_shredding import shred_variant_column
         columns = list(data.columns)
         fields = list(data.schema)
         changed = False

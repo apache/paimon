@@ -51,7 +51,7 @@ pypaimon/
     write_dispatch.py           Writer coordination and safe pre-write switching
     update_dispatch.py          Update/upsert/delete/MERGE coordination
     input_adapter.py            Pandas transport and distributed input conversion
-    merge_condition.py          Shared MERGE condition parsing/evaluation
+    merge_condition.py          Shared MERGE condition parsing and validation
     merge_transform.py          Shared Arrow assignments and callable inputs
     ray_datasink.py              Ray worker writes and coordinator commits
   globalindex/                  Public index contracts and backend coordination
@@ -67,6 +67,10 @@ pypaimon/
       casting/                  Old-file array casts and executable-cast probes
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
+        blob_view_lookup.py     Upstream Blob descriptor planning, loading and resolution
+        interval_partition.py   Primary-key sorted-run grouping
+        map_shared_shredding.py Physical MAP decoding and selected-column pruning
+        variant_shredding.py    Physical VARIANT reconstruction and shredding
       deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
       write/                    File writers, committers and update execution
       globalindex/              Index file codecs, readers, writers and build algorithms
@@ -104,6 +108,18 @@ conversion and the local schema manager's executable-cast probe belong to
 Python execution. The schema manager delegates that probe lazily when validating
 a local type change. Python commit partition-spec parsing also belongs to its
 executor; Native commits pass the spec to Rust.
+
+Physical MAP/VARIANT codecs and Blob View resolution belong to Python
+execution. Public value objects, schema/spec parsing and selected-key metadata
+stay in `data`. MERGE condition evaluation and first-matching-clause selection
+also belong to Python execution; callable transport, SQL rewriting and shared
+Arrow assignment adapters stay in `write`.
+
+Dynamic bucket HASH index publication and writer-owned pending state belong
+to the Python writer. The shared input bucket assigner remains in `index`:
+distributed producers use it to route inputs before either backend writes.
+`input_routing` and `bucket_planning` similarly serve both backends' input
+protocols without retaining a file writer or publishing data.
 
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.

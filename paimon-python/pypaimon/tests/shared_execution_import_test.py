@@ -167,3 +167,26 @@ assert not any(name.startswith(('pypaimon.execution.python', 'pypaimon_rust')) f
     result = subprocess.run([sys.executable, '-c', source], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             universal_newlines=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_all_native_adapters_import_without_python_execution_or_sdk_initialization():
+    source = """
+import importlib
+import importlib.abc
+import pkgutil
+import sys
+
+class BlockExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(('pypaimon.execution.python', 'pypaimon_rust')):
+            raise AssertionError('Native adapter initialized another executor: ' + fullname)
+
+sys.meta_path.insert(0, BlockExecution())
+from pypaimon.execution import native
+for module in pkgutil.walk_packages(native.__path__, native.__name__ + '.'):
+    importlib.import_module(module.name)
+assert not any(name.startswith(('pypaimon.execution.python', 'pypaimon_rust')) for name in sys.modules)
+"""
+    result = subprocess.run([sys.executable, '-c', source], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr

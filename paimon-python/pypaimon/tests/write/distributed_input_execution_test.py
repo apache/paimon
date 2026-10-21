@@ -52,7 +52,7 @@ def forbid_python_execution():
             'execution.python.write.row_key_extractor.SimpleHashBucketAssigner.__init__',
             'execution.python.read.scanner.file_scanner.FileScanner.__init__',
             'execution.python.write.table_write.PythonTableWrite.__init__',
-            'index.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
+            'execution.python.write.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
         ]:
             stack.enter_context(patch('pypaimon.' + target, side_effect=AssertionError(target)))
         yield
@@ -131,7 +131,7 @@ def test_daft_dynamic_assignment_restores_pinned_native_metadata_without_python_
             'execution.python.write.row_key_extractor.DynamicBucketRowKeyExtractor.__init__',
             'execution.python.write.row_key_extractor.SimpleHashBucketAssigner.__init__',
             'execution.python.read.scanner.file_scanner.FileScanner.__init__',
-            'index.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
+            'execution.python.write.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
         ]:
             stack.enter_context(patch('pypaimon.' + target, side_effect=AssertionError(target)))
         stack.enter_context(patch('pypaimon.daft.daft_datasink._load_worker_table', return_value=table))

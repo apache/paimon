@@ -26,10 +26,10 @@ from pypaimon.execution.python.casting.schema_evolution import cast_array_for_sc
 from pypaimon.common.file_io import FileIO
 from pypaimon.utils.arrow_utils import zero_column_batch
 from pypaimon.data.map_shared_shredding import (
-    assemble_normal_map_selected_keys,
     is_map_selected_keys_field,
     map_selected_keys,
 )
+from pypaimon.execution.python.read.map_shared_shredding import assemble_normal_map_selected_keys
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.execution.python.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader

@@ -37,7 +37,7 @@ from pypaimon.data.map_shared_shredding import (
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.blob_read_support import deferred_blob_field_names
-from pypaimon.read.interval_partition import IntervalPartition, SortedRun
+from pypaimon.execution.python.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
     predicate_field_names,

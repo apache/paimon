@@ -116,12 +116,19 @@ class PackagingTest(unittest.TestCase):
     def test_distribution_contents(self):
         names, metadata, _ = wheel_contents(self.wheel)
         self.assertEqual(">=3.6", metadata["Requires-Python"])
-        self.assertFalse(any(name.startswith(("pypaimon/tests/", "pypaimon/benchmark/"))
+        self.assertFalse(any(name.startswith("pypaimon/tests/")
                              for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
         for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
             self.assertIn(name, names)
         execution_files = (
+            "pypaimon/execution/python/read/blob_view_lookup.py",
+            "pypaimon/execution/python/read/interval_partition.py",
+            "pypaimon/execution/python/read/map_shared_shredding.py",
+            "pypaimon/execution/python/read/variant_shredding.py",
+            "pypaimon/execution/python/write/dynamic_bucket.py",
+            "pypaimon/execution/python/write/merge_condition.py",
+            "pypaimon/execution/python/write/merge_transform.py",
             "pypaimon/schema/data_type_casts.py",
             "pypaimon/utils/numeric_utils.py",
             "pypaimon/utils/temporal_utils.py",
@@ -201,6 +208,8 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
+            "pypaimon/utils/blob_view_lookup.py",
+            "pypaimon/read/interval_partition.py",
             "pypaimon/casting/__init__.py",
             "pypaimon/casting/data_type_casts.py",
             "pypaimon/casting/schema_evolution.py",
@@ -251,7 +260,6 @@ class PackagingTest(unittest.TestCase):
                 self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
                                  or name.startswith(prefix + "pypaimon/tests/")
-                                 or name.startswith(prefix + "pypaimon/benchmark/")
                                  for name in names))
 
     @staticmethod

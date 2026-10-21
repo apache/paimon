@@ -22,8 +22,7 @@ import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
 from pypaimon.schema.arrow_schema import read_arrow_schema
-from pypaimon.data.map_shared_shredding import \
-    assemble_normal_map_selected_keys
+from pypaimon.execution.python.read.map_shared_shredding import assemble_normal_map_selected_keys
 from pypaimon.execution.python.read.reader.data_file_batch_reader import \
     cast_array_for_schema_evolution
 from pypaimon.read.reader.field_indices import (

@@ -23,15 +23,14 @@ from typing import Any, List, Optional, Sequence
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.write.merge_transform import (
+from pypaimon.execution.python.write.merge_transform import (
+    _build_insert_transform,
     _build_matched_delete_transform,
     _build_matched_transform,
 )
 from pypaimon.write.merge_transform import (
     build_delete_schema,
     build_update_schema,
-    cast_to_schema,
-    vectorized_insert_transform,
 )
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
@@ -517,67 +516,6 @@ def _new_table_write(table, commit_user: str, commit_identifier: int):
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
         return BatchTableWrite(table, commit_user)
     return StreamTableWrite(table, commit_user)
-
-
-def _build_insert_transform(
-    clauses: List[_NormalizedClause],
-    target_field_names: Sequence[str],
-    target_pa_schema: pa.Schema,
-):
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.write.merge_condition import rewrite_condition
-
-            rewritten = rewrite_condition(clause.condition)
-        prepared_clauses.append((clause.spec, rewritten))
-
-    _filter_batch = None
-    if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.write.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True
-                )
-                if matched.num_rows > 0:
-                    parts.append(
-                        vectorized_insert_transform(
-                            matched,
-                            spec,
-                            target_field_names,
-                            target_pa_schema,
-                        )
-                    )
-                if matched.num_rows < remaining.num_rows:
-                    not_cond = "COALESCE(NOT ({}), TRUE)".format(rewritten)
-                    remaining = _filter_batch(
-                        remaining, not_cond, _pre_rewritten=True
-                    )
-                else:
-                    remaining = remaining.slice(0, 0)
-            else:
-                parts.append(
-                    vectorized_insert_transform(
-                        remaining,
-                        spec,
-                        target_field_names,
-                        target_pa_schema,
-                    )
-                )
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return target_pa_schema.empty_table()
-        return cast_to_schema(pa.concat_tables(parts), target_pa_schema)
-
-    return _transform
 
 
 def _normalize_source(source: Any, on_columns=()) -> pa.Table:

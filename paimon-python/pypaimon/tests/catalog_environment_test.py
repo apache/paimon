@@ -29,7 +29,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
-from pypaimon.utils.blob_view_lookup import BlobViewLookup
+from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
 
 class CatalogEnvironmentTest(unittest.TestCase):
