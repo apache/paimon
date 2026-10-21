@@ -30,15 +30,38 @@ class _PaimonTableFrameReader:
     def __init__(self, frames_table, *, columns):
         self._table, self.snapshot_id, splits = _indexed_read_table(
             frames_table, columns)
+        options = self._table.options.options
+        if not any(options.contains(option) for option in (
+                CoreOptions.READ_NATIVE_ENABLED, CoreOptions.SCAN_NATIVE_PLAN_ENABLED)):
+            from pypaimon.execution.native.runtime import native_runtime_available
+            if native_runtime_available():
+                self._table = self._table.copy_without_time_travel({
+                    CoreOptions.READ_NATIVE_ENABLED.key(): "true"})
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
+        self._table = self._table._copy_with_snapshot(snapshot)
         self.num_rows = snapshot.next_row_id
         self.file_io = self._table.file_io
         self._locator = _FrameLocator(self._table, snapshot, splits)
 
     def read_indices(self, indices, columns):
-        splits, needs_filter = self._locator.locate(indices)
         builder = self._table.new_read_builder().with_projection(columns)
+        if (self._table.options.native_plan_enabled()
+                or self._table.options.native_read_enabled()):
+            from pypaimon.execution.native.runtime import native_runtime_available
+            if native_runtime_available():
+                # Keep lookup predicates in the native plan and residual read.
+                builder.with_filter(_index_predicate(self._table, indices))
+                scan = builder.new_scan()
+                if scan._native_plan_supported():
+                    # Authorized scans must retain the complete planning path.
+                    if scan._query_auth_fn is not None or self._table.options.query_auth_enabled:
+                        return builder.new_read().to_arrow(scan.plan().splits())
+                    plan = scan._try_native_plan()
+                    if plan is not None:
+                        return builder.new_read().to_arrow(plan.splits())
+                builder = self._table.new_read_builder().with_projection(columns)
+        splits, needs_filter = self._locator.locate(indices)
         if needs_filter:
             builder = builder.with_filter(
                 _index_predicate(self._table, indices))
