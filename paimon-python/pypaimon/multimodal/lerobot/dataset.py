@@ -50,7 +50,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _validate_lerobot_schema,
 )
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
-from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
@@ -279,6 +279,7 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()
         )
+        self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
                 access,
@@ -454,6 +455,7 @@ class PaimonDatasetReader(ABC):
             plans, rows, getattr(self, "_video_collators", ()),
             self._features, self.return_uint8,
             return_batch=return_batch, share_memory=share_memory,
+            decode_pool=getattr(self, "_video_decode_pool", None),
             decode_parallelism=getattr(
                 self, "_video_decode_parallelism",
                 CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()))
@@ -514,6 +516,9 @@ class PaimonDatasetReader(ABC):
         return self.get_items(indices)
 
     def close(self):
+        pool = getattr(self, "_video_decode_pool", None)
+        if pool is not None:
+            pool.close()
         first_error = None
         for collator in getattr(self, "_video_collators", ()):
             try:
@@ -1427,7 +1432,21 @@ def _attach_task_labels(rows, task_names, subtask_names):
 
 def _decode_video_windows(
         plans, rows, collators, features, return_uint8, *,
-        return_batch=False, share_memory=False, decode_parallelism=1):
+        return_batch=False, share_memory=False, decode_parallelism=1, decode_pool=None):
+    pool = decode_pool if decode_pool is not None else _VideoDecodePool()
+    try:
+        return _decode_video_windows_with_pool(
+            plans, rows, collators, features, return_uint8,
+            return_batch=return_batch, share_memory=share_memory,
+            decode_parallelism=decode_parallelism, executor=pool.get(decode_parallelism))
+    finally:
+        if decode_pool is None:
+            pool.close()
+
+
+def _decode_video_windows_with_pool(
+        plans, rows, collators, features, return_uint8, *,
+        return_batch, share_memory, decode_parallelism, executor):
     import torch
 
     tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
@@ -1474,7 +1493,7 @@ def _decode_video_windows(
         with torch.inference_mode(inference_enabled), \
                 torch.set_grad_enabled(grad_enabled), \
                 collator._map_decoders(
-                    requests, read_frames, decode_parallelism) as decoded:
+                    requests, read_frames, decode_parallelism, executor) as decoded:
             for result in decoded:
                 if result is None:
                     return key, None
@@ -1532,12 +1551,12 @@ def _decode_video_windows(
                             output[offset] = output[offset].float().div_(255)
         return key, output
 
-    if len(tasks) == 1:
-        decoded = [decode(tasks[0])]
+    if executor is None or len(tasks) == 1:
+        decoded = [decode(task) for task in tasks]
     else:
         with ThreadPoolExecutor(
-                max_workers=min(len(tasks), _MAX_VISUAL_WORKERS)) as executor:
-            decoded = list(executor.map(decode, tasks))
+                max_workers=min(len(tasks), _MAX_VISUAL_WORKERS)) as camera_executor:
+            decoded = list(camera_executor.map(decode, tasks))
     return {key: windows for key, windows in decoded if windows is not None}
 
 

@@ -1177,8 +1177,8 @@ class CoreOptions:
         .int_type()
         .default_value(1)
         .with_description(
-            "Maximum concurrent video payload decodes per video feature in a "
-            "PyPaimon LeRobot worker. Limited by read.video.max-open-decoders.")
+            "Maximum concurrent video payload decodes shared by all cameras in a "
+            "PyPaimon LeRobot Dataset worker.")
     )
 
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (

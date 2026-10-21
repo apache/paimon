@@ -251,8 +251,8 @@ uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan pat
 Set `table = table.copy({"read.video.max-open-decoders": "8"})` before
 constructing the dataset to limit cached decoders per camera per worker (default: 16).
 Each open decoder uses memory and a file handle, so usage grows with cameras and workers.
-`read.video.decode-parallelism` controls concurrent video decodes per camera per worker
-(default: 1), capped by `read.video.max-open-decoders`. Values above 1 enable parallel
+`read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
+Dataset worker (default: 1). Values above 1 enable parallel
 decoding for video windows without `image_transforms`, using more CPU and memory.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:

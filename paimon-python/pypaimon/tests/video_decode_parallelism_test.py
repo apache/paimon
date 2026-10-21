@@ -27,7 +27,7 @@ from unittest.mock import patch
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
 from pypaimon.table.row.blob import BlobDescriptor
 
 
@@ -35,7 +35,7 @@ def identity(value):
     return value
 
 
-def decode_worker(collator, connection):
+def decode_worker(collator, pool, connection):
     try:
         requests = OrderedDict(
             ((BlobDescriptor("child-%s" % i, 0, 1), None), i)
@@ -43,10 +43,11 @@ def decode_worker(collator, connection):
         with patch("pypaimon.multimodal.video.Blob.from_file", side_effect=lambda *args:
                    SimpleNamespace(new_input_stream=lambda: io.BytesIO(b"video"))):
             with collator._map_decoders(
-                    requests, lambda stream, value: value, 2) as values:
+                    requests, lambda stream, value: value, 2, pool.get(2)) as values:
                 result = list(values)
         connection.send((result, collator._owner_pid == os.getpid()))
     finally:
+        pool.close()
         collator.close()
         connection.close()
 
@@ -66,11 +67,15 @@ class VideoDecodeParallelismTest(unittest.TestCase):
     def streams(self, *args):
         return SimpleNamespace(new_input_stream=lambda: io.BytesIO(b"video"))
 
-    def test_bounded_parallelism_and_eviction(self):
-        collator = self.collator()
-        barrier = threading.Barrier(2)
+    def test_shared_limit_across_cameras_and_eviction(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        pool = _VideoDecodePool()
+        executor = pool.get(2)
+        collators = [self.collator() for _ in range(3)]
         active = [0, 0]
         lock = threading.Lock()
+        barrier = threading.Barrier(2)
 
         def decode(stream, value):
             with lock:
@@ -84,20 +89,31 @@ class VideoDecodeParallelismTest(unittest.TestCase):
                 with lock:
                     active[0] -= 1
 
-        with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
-            with collator._map_decoders(self.requests(), decode, 4) as values:
-                self.assertEqual(list(values), list(range(8)))
+        def camera(collator, count):
+            with collator._map_decoders(self.requests(count), decode, 2, executor) as values:
+                return list(values)
+
+        try:
+            with patch("pypaimon.multimodal.video.Blob.from_file", self.streams), \
+                    ThreadPoolExecutor(max_workers=3) as cameras:
+                # One camera has a single payload; it must also share the budget.
+                futures = [cameras.submit(camera, c, n)
+                           for c, n in zip(collators, (1, 3, 8))]
+                self.assertEqual([f.result() for f in futures],
+                                 [list(range(n)) for n in (1, 3, 8)])
             self.assertEqual(active, [0, 2])
-            executor = collator._decode_executor
-            with collator._map_decoders(self.requests(2), decode, 4) as values:
-                self.assertEqual(list(values), [0, 1])
-            self.assertIs(executor, collator._decode_executor)
-        streams = list(collator._decoders.values())
-        collator.close()
+            self.assertIs(executor, pool.get(2))
+        finally:
+            pool.close()
+            for collator in collators:
+                streams = list(collator._decoders.values())
+                collator.close()
+                self.assertTrue(all(stream.closed for _, stream in streams))
         self.assertTrue(executor._shutdown)
-        self.assertTrue(all(stream.closed for _, stream in streams))
 
     def test_error_drains_running_decodes(self):
+        pool = _VideoDecodePool()
+        executor = pool.get(2)
         collator = self.collator()
         barrier = threading.Barrier(2)
         started = threading.Event()
@@ -116,7 +132,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
 
         def consume():
             try:
-                with collator._map_decoders(self.requests(2), decode, 2) as values:
+                with collator._map_decoders(self.requests(2), decode, 2, executor) as values:
                     list(values)
             except Exception as error:
                 errors.append(error)
@@ -132,52 +148,47 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             finally:
                 release.set()
                 thread.join(5)
+                pool.close()
                 collator.close()
         self.assertTrue(finished.is_set())
         self.assertEqual(str(errors[0]), "decode failed")
 
     def test_serial_and_pickle(self):
+        pool = _VideoDecodePool()
+        self.assertIsNone(pool.get(1))
         collator = self.collator(1)
         owner = threading.get_ident()
         with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
             with collator._map_decoders(
-                    self.requests(3), lambda stream, value: threading.get_ident(), 4) as values:
+                    self.requests(3), lambda stream, value: threading.get_ident(), 1) as values:
                 self.assertEqual(list(values), [owner] * 3)
-        self.assertIsNone(collator._decode_executor)
+        pool.get(2).submit(identity, 1).result()
+        restored_collator, restored_pool = pickle.loads(pickle.dumps((collator, pool)))
+        self.assertIsNone(restored_pool._executor)
+        self.assertFalse(restored_collator._decoders)
+        pool.close()
         collator.close()
-        collator = self.collator()
-        with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
-            with collator._map_decoders(
-                    self.requests(2), lambda stream, value: value, 2) as values:
-                self.assertEqual(list(values), [0, 1])
-        restored = pickle.loads(pickle.dumps(collator))
-        self.assertIsNone(restored._decode_executor)
-        self.assertFalse(restored._decoders)
-        collator.close()
-        restored.close()
+        restored_pool.close()
+        restored_collator.close()
 
     @unittest.skipUnless(hasattr(os, "fork"), "requires fork")
     def test_fork_discards_inherited_executor(self):
-        collator = self.collator()
-        with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
-            with collator._map_decoders(
-                    self.requests(2), lambda stream, value: value, 2) as values:
-                list(values)
-            executor = collator._decode_executor
-            # A child must discard the inherited pool, never join parent threads.
+        pool = _VideoDecodePool()
+        executor = pool.get(2)
+        try:
             with patch("pypaimon.multimodal.video.os.getpid", return_value=-1), \
                     patch.object(executor, "shutdown", side_effect=AssertionError("inherited pool")):
-                collator._ensure_process_local_cache()
-                self.assertIsNone(collator._decode_executor)
-        executor.shutdown(wait=True)
-        collator.close()
+                child_executor = pool.get(2)
+                self.assertIsNot(executor, child_executor)
+                pool.close()
+                self.assertTrue(child_executor._shutdown)
+        finally:
+            executor.shutdown(wait=True)
 
     def test_workers_rebuild_pool(self):
         collator = self.collator()
-        with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
-            with collator._map_decoders(
-                    self.requests(2), lambda stream, value: value, 2) as values:
-                list(values)
+        pool = _VideoDecodePool()
+        pool.get(2).submit(identity, 1).result()
         try:
             for method in ("spawn", "fork"):
                 if method not in multiprocessing.get_all_start_methods():
@@ -185,7 +196,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
                 with self.subTest(method=method):
                     ctx = multiprocessing.get_context(method)
                     receive, send = ctx.Pipe(duplex=False)
-                    worker = ctx.Process(target=decode_worker, args=(collator, send))
+                    worker = ctx.Process(target=decode_worker, args=(collator, pool, send))
                     worker.start()
                     send.close()
                     try:
@@ -199,6 +210,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
                             worker.join(5)
                         receive.close()
         finally:
+            pool.close()
             collator.close()
 
     def test_parallel_windows_match_serial_and_preserve_torch_mode(self):
@@ -254,6 +266,57 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             self.assertTrue(torch.equal(frames, pixels.permute(0, 3, 1, 2)))
         finally:
             collator.close()
+
+    def test_video_windows_share_worker_pool_across_cameras(self):
+        import torch
+        from contextlib import ExitStack
+        from pypaimon.multimodal.lerobot.dataset import _decode_video_windows
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+
+        pool = _VideoDecodePool()
+        collators = [self.collator(1) for _ in range(3)]
+        names = ["camera-%s" % i for i in range(3)]
+        for collator, name in zip(collators, names):
+            collator.video_column = name
+        rows = {0: {name: VideoFrameDescriptor(name, 0, 1, 0, -1, 0).serialize()
+                    for name in names}}
+        plans = [{"windows": {name: [0] for name in names}}]
+        features = {name: {"dtype": "video", "shape": [4, 5, 3]} for name in names}
+        threads = set()
+        lock = threading.Lock()
+
+        def read(indices):
+            with lock:
+                threads.add(threading.get_ident())
+            return SimpleNamespace(data=torch.ones((len(indices), 3, 4, 5), dtype=torch.uint8))
+
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(patch("torch.get_num_threads", return_value=1))
+                for collator in collators:
+                    stack.enter_context(patch.object(
+                        collator, "_decoder", return_value=SimpleNamespace(get_frames_at=read)))
+                for parallelism in (1, 2):
+                    threads.clear()
+                    result = _decode_video_windows(
+                        plans, rows, collators, features, True, return_batch=True,
+                        decode_parallelism=parallelism, decode_pool=pool)
+                    self.assertEqual(set(result), set(names))
+                    self.assertLessEqual(len(threads), parallelism)
+                    for value in result.values():
+                        self.assertTrue(torch.equal(value, torch.ones_like(value)))
+                    if parallelism == 1:
+                        self.assertEqual(threads, {threading.get_ident()})
+                    else:
+                        self.assertNotIn(threading.get_ident(), threads)
+                executor = pool.get(2)
+                _decode_video_windows(plans, rows, collators, features, True,
+                                      decode_parallelism=2, decode_pool=pool)
+                self.assertIs(executor, pool.get(2))
+        finally:
+            pool.close()
+            for collator in collators:
+                collator.close()
 
     def test_real_pyav_payloads_match_serial(self):
         try:

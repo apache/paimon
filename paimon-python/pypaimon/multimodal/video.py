@@ -30,6 +30,35 @@ from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
+class _VideoDecodePool:
+    """One lazily created decode pool per dataset and worker process."""
+
+    def __init__(self):
+        self._executor = None
+        self._parallelism = 0
+        self._pid = os.getpid()
+
+    def get(self, parallelism):
+        if self._pid != os.getpid():
+            # Never join threads inherited from the parent process.
+            self._executor = None
+            self._pid = os.getpid()
+        if self._executor is not None and self._parallelism != parallelism:
+            self.close()
+        if parallelism > 1 and self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=parallelism)
+        self._parallelism = parallelism
+        return self._executor
+
+    def close(self):
+        executor, self._executor = self._executor, None
+        if executor is not None and self._pid == os.getpid():
+            executor.shutdown(wait=True)
+
+    def __getstate__(self):
+        return {"_executor": None, "_parallelism": 0, "_pid": None}
+
+
 def _encode_images_to_video(
         images,
         output_path,
@@ -195,8 +224,6 @@ class VideoFrameCollator:
         self.collate_fn = collate_fn
         self.range_parallelism = range_parallelism
         self._decoders = OrderedDict()
-        self._decode_executor = None
-        self._decode_workers = 0
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -209,11 +236,6 @@ class VideoFrameCollator:
         return self._collate(decoded_rows)
 
     def close(self):
-        executor = getattr(self, "_decode_executor", None)
-        self._decode_executor = None
-        self._decode_workers = 0
-        if executor is not None and self._owner_pid == os.getpid():
-            executor.shutdown(wait=True)
         resources = list(self._decoders.values())
         self._decoders.clear()
         first_error = None
@@ -232,24 +254,16 @@ class VideoFrameCollator:
         state = self.__dict__.copy()
         state["_decoders"] = OrderedDict()
         state["_owner_pid"] = None
-        state["_decode_executor"] = None
-        state["_decode_workers"] = 0
         return state
 
     @contextmanager
-    def _map_decoders(self, requests, decode, parallelism):
+    def _map_decoders(self, requests, decode, parallelism, executor=None):
         self._ensure_process_local_cache()
         limit = min(parallelism, self.max_open_videos, len(requests))
-        if limit <= 1:
+        if executor is None:
             yield (decode(self._decoder(*key), value)
                    for key, value in requests.items())
             return
-        if getattr(self, "_decode_workers", 0) != limit:
-            executor = getattr(self, "_decode_executor", None)
-            if executor is not None:
-                executor.shutdown(wait=True)
-            self._decode_executor = ThreadPoolExecutor(max_workers=limit)
-            self._decode_workers = limit
         items = iter(requests.items())
         pending = deque()
 
@@ -260,7 +274,7 @@ class VideoFrameCollator:
                 return
             # Keep cache mutations ordered; pending decoders remain most recent.
             decoder = self._decoder(*key)
-            pending.append(self._decode_executor.submit(decode, decoder, value))
+            pending.append(executor.submit(decode, decoder, value))
 
         def results():
             while pending:
