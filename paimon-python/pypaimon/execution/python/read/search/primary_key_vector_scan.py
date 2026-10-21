@@ -87,7 +87,7 @@ class PrimaryKeyVectorScan(VectorSearchScan):
             lambda entry: _matches(entry, self._vector_column.id, index_type,
                                    self._partition_filter))
         return PrimaryKeyVectorScanPlan(
-            snapshot.id, _bucket_splits(source_splits, entries))
+            snapshot.id, _bucket_splits(source_splits, entries), snapshot)
 
 
 def _matches(entry, field_id, index_type, partition_filter):

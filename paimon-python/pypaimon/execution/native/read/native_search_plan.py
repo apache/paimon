@@ -15,17 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Native search plans with ordinary, transportable Python source metadata."""
+"""Translate ordinary snapshot-and-split plans to and from Rust Core."""
 
-import hashlib
 import json
-import pickle
+from copy import copy, deepcopy
 
 from pypaimon.common.json_util import JSON
-from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.options.options import Options
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-from pypaimon.read.split_serializer import deserialize_split_v1
+from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.execution.native.table import (_partition_fields)
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.source.search_types import (
@@ -35,44 +32,7 @@ from pypaimon.table.source.search_types import (
 )
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 from pypaimon.utils.range import Range
-from pypaimon.write.commit_message_serializer import _index_from_row
-
-
-def _metadata_fingerprint(plan):
-    # Only captured metadata participates: never pickle a Table, catalog or
-    # live native handle. This also detects edits through a shallow copy.
-    metadata = (plan.snapshot(), plan.splits(), getattr(plan, 'snapshot_id', None))
-    return hashlib.sha256(pickle.dumps(metadata, protocol=4)).digest()
-
-
-class _NativePlan:
-    def __getstate__(self):
-        # Transport immutable snapshot data and ordinary Python splits. The
-        # original result and its metadata remain unchanged by serialization.
-        state = self.__dict__.copy()
-        state.pop('_native_plan', None)
-        state.pop('_native_fingerprint', None)
-        return state
-
-    def _unchanged_native_plan(self):
-        native = getattr(self, '_native_plan', None)
-        return native if native is not None and self._native_fingerprint == _metadata_fingerprint(self) else None
-
-
-class _NativeVectorPlan(_NativePlan, VectorSearchScanPlan):
-    pass
-
-
-class _NativeFullTextPlan(_NativePlan, FullTextScanPlan):
-    pass
-
-
-class _NativePkVectorPlan(_NativePlan, PrimaryKeyVectorScanPlan):
-    pass
-
-
-class _NativePkFullTextPlan(_NativePlan, PrimaryKeyFullTextScanPlan):
-    pass
+from pypaimon.write.commit_message_serializer import _index_from_row, _index_row
 
 
 def _range(value):
@@ -83,11 +43,11 @@ def _files(values):
     return [_index_from_row(bytes(value)) for value in values]
 
 
-def _plan_from_native(table, native, full_text, primary_key, source_modes):
+def _plan_from_native(table, native, full_text, primary_key):
     from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
     from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
 
-    metadata = json.loads(native._metadata())
+    metadata = json.loads(native.metadata())
     snapshot = JSON.from_json(json.dumps(metadata['snapshot']), Snapshot) if metadata['snapshot'] is not None else None
     splits = []
     for value in metadata['splits']:
@@ -108,17 +68,65 @@ def _plan_from_native(table, native, full_text, primary_key, source_modes):
             splits.append(RawFullTextSearchSplit(ranges) if full_text else RawVectorSearchSplit(
                 ranges, _files(value['scalar_index_files']), value['index_type']))
     if primary_key:
-        cls = _NativePkFullTextPlan if full_text else _NativePkVectorPlan
-        plan = cls(metadata['snapshot_id'] or 0, splits)
-        plan._snapshot = snapshot
+        cls = PrimaryKeyFullTextScanPlan if full_text else PrimaryKeyVectorScanPlan
+        plan = cls(metadata['snapshot_id'] or 0, splits, snapshot)
     else:
-        cls = _NativeFullTextPlan if full_text else _NativeVectorPlan
+        cls = FullTextScanPlan if full_text else VectorSearchScanPlan
         plan = cls(splits, snapshot)
-    plan._native_plan = native
-    plan._source_modes = source_modes
-    plan._table_options = dict(table.options.options.to_map())
-    plan._native_fingerprint = _metadata_fingerprint(plan)
     return plan
+
+
+def _split_metadata(split, full_text, column):
+    from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
+    from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
+
+    expected = ((PrimaryKeyFullTextSearchSplit, IndexFullTextSearchSplit, RawFullTextSearchSplit) if full_text else
+                (PrimaryKeyVectorSearchSplit, IndexVectorSearchSplit, RawVectorSearchSplit))
+    if not isinstance(split, expected):
+        raise TypeError('Unsupported %s search split: %s' % (
+            'full-text' if full_text else 'vector', type(split).__name__))
+
+    def files(values):
+        return [list(_index_row(value)) for value in values]
+
+    def range_(value):
+        return {'from': value.from_, 'to': value.to}
+
+    if isinstance(split, (PrimaryKeyVectorSearchSplit, PrimaryKeyFullTextSearchSplit)):
+        return {'kind': 'primary-key', 'data_split': list(serialize_split_v1(split.data_split)),
+                'payloads': files(split.payloads), 'uncovered_data_files': list(split.uncovered_data_files),
+                'row_ranges_by_file': {name: [range_(value) for value in values]
+                                       for name, values in split.row_ranges_by_file.items()}}
+    if isinstance(split, (IndexVectorSearchSplit, IndexFullTextSearchSplit)):
+        return {'kind': 'index', 'column': split.column_name if full_text else column,
+                'row_range': {'from': split.row_range_start, 'to': split.row_range_end},
+                'index_files': files(split.full_text_index_files if full_text else split.vector_index_files),
+                'scalar_index_files': files(split.scalar_index_files)}
+    if isinstance(split, RawVectorSearchSplit):
+        return {'kind': 'raw', 'row_ranges': [range_(value) for value in split.row_ranges],
+                'scalar_index_files': files(split.scalar_index_files), 'index_type': split.index_type}
+    if isinstance(split, RawFullTextSearchSplit):
+        return {'kind': 'raw', 'row_ranges': [range_(value) for value in split.row_ranges],
+                'scalar_index_files': [], 'index_type': None}
+    raise TypeError('Unsupported search split: %s' % type(split).__name__)
+
+
+def _plan_to_native(plan, full_text, column=None):
+    from pypaimon_rust.datafusion import FullTextScanPlan as NativeFullTextPlan, VectorScanPlan as NativeVectorPlan
+
+    snapshot = plan.snapshot()
+    return (NativeFullTextPlan if full_text else NativeVectorPlan)(
+        None if snapshot is None else JSON.to_json(snapshot),
+        json.dumps([_split_metadata(split, full_text, column) for split in plan.splits()]))
+
+
+def _capture_builder(builder):
+    # Public builders contain only table configuration. Freeze query values and
+    # options for reader transport without copying the catalog or live SDK cache.
+    captured = copy(builder)
+    captured.__dict__ = {key: value if key == '_table' else deepcopy(value)
+                         for key, value in builder.__dict__.items()}
+    return captured
 
 
 def _result(table, value, primary_key):
@@ -129,12 +137,13 @@ def _result(table, value, primary_key):
 class NativeSearchScan:
     """Convert Rust scan metadata without selecting another executor."""
 
-    def __init__(self, table, scan, full_text, primary_key, source_modes):
+    def __init__(self, table, scan, full_text, primary_key, builder=None, batch=False):
         self._table = table
         self._scan = scan
         self._full_text = full_text
         self._primary_key = primary_key
-        self._source_modes = source_modes
+        self._builder = builder
+        self._batch = batch
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -142,50 +151,77 @@ class NativeSearchScan:
         return state
 
     def available(self):
-        return self._scan is not None
+        return self._scan is not None or self._builder is not None
 
     def scan(self):
-        return _plan_from_native(self._table, self._scan.scan(), self._full_text, self._primary_key, self._source_modes)
+        if self._scan is None:
+            native = _builder_to_native(self._builder, self._full_text, self._batch, scan=True)
+            self._scan = native.new_full_text_scan() if self._full_text else native.new_vector_search_scan()
+        return _plan_from_native(self._table, self._scan.scan(), self._full_text, self._primary_key)
 
 
 class NativeSearchRead:
-    """Read a compatible live Rust plan; transport fallback belongs to dispatch."""
+    """Convert source metadata and delegate complete queries to Rust Core."""
 
-    def __init__(self, table, native, primary_key, source_modes):
+    def __init__(self, table, native, primary_key, full_text=False, builder=None, batch=False):
         self._table = table
         self._native = native
         self._primary_key = primary_key
-        self._source_modes = source_modes
-        self._table_options = dict(table.options.options.to_map())
+        self._full_text = full_text
+        self._builder = builder
+        self._batch = batch
 
     def __getstate__(self):
         state = self.__dict__.copy()
         state['_native'] = None
         return state
 
+    def _get_native_reader(self):
+        if self._native is None:
+            native = _builder_to_native(self._builder, self._full_text, self._batch)
+            self._native = (native.new_full_text_read() if self._full_text else
+                            native.new_batch_vector_search_read() if self._batch else
+                            native.new_vector_search_read())
+        return self._native
+
+    def _plan(self, plan):
+        if (self._primary_key and isinstance(plan, (PrimaryKeyVectorScanPlan, PrimaryKeyFullTextScanPlan))
+                and plan.snapshot() is None and plan.snapshot_id):
+            snapshot = self._table.snapshot_manager().get_snapshot_by_id(plan.snapshot_id)
+            if snapshot is None:
+                raise ValueError('Captured search snapshot %s is unavailable' % plan.snapshot_id)
+            plan = copy(plan)
+            plan._snapshot = snapshot
+        column = None if self._builder is None or self._full_text else self._builder._vector_column.name
+        return _plan_to_native(plan, self._full_text, column)
+
     def read_plan(self, plan, executor=None):
+        native = self._get_native_reader()
+        plan = self._plan(plan)
         if executor is None:
-            result = self._native.read_plan(plan)
+            result = native.read_plan(plan)
         else:
             self._validate_task_execution()
             from pypaimon.execution.native.read.search_execution import native_task_executor
             callback = native_task_executor(self._table, executor)
             try:
-                result = self._native.read_plan(plan, executor=callback)
+                result = native._read_plan_with_executor(plan, callback)
             finally:
                 callback.cancel()
                 callback.raise_if_failed()
         return _result(self._table, result, self._primary_key)
 
     def read_batch_plan(self, plan, executor=None):
+        native = self._get_native_reader()
+        plan = self._plan(plan)
         if executor is None:
-            results = self._native.read_batch_plan(plan)
+            results = native.read_batch_plan(plan)
         else:
             self._validate_task_execution()
             from pypaimon.execution.native.read.search_execution import native_task_executor
             callback = native_task_executor(self._table, executor)
             try:
-                results = self._native.read_batch_plan(plan, executor=callback)
+                results = native._read_batch_plan_with_executor(plan, callback)
             finally:
                 callback.cancel()
                 callback.raise_if_failed()
@@ -196,22 +232,36 @@ class NativeSearchRead:
         if self._primary_key or not self._table.options.data_evolution_enabled():
             raise ValueError('Distributed search supports only data-evolution tables')
 
-    def resolve_plan(self, plan):
-        # Search modes choose source work at scan time. A new reader may use
-        # another query or limit, but must still consume these captured splits.
-        if (self._native is not None and isinstance(plan, _NativePlan)
-                and plan._source_modes == self._source_modes
-                and plan._table_options == self._table_options):
-            return plan._unchanged_native_plan()
-        return None
+    def read(self, splits):
+        return self.read_plan(self._split_plan(splits))
+
+    def read_batch(self, splits):
+        return self.read_batch_plan(self._split_plan(splits))
+
+    def _split_plan(self, splits):
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        snapshot = TimeTravelUtil.resolve_snapshot(self._table)
+        if self._primary_key:
+            cls = PrimaryKeyFullTextScanPlan if self._full_text else PrimaryKeyVectorScanPlan
+            return cls(0 if snapshot is None else snapshot.id, splits, snapshot)
+        return (FullTextScanPlan if self._full_text else VectorSearchScanPlan)(splits, snapshot)
 
 
-def _source_modes(builder, full_text=False):
-    options = dict(builder._table.options.options.to_map())
-    options.update(getattr(builder, '_options', {}))
-    core = CoreOptions(Options(options))
-    return ((core.full_text_index_search_mode(),) if full_text else
-            (core.vector_index_search_mode(), core.scalar_index_search_mode()))
+def _builder_to_native(builder, full_text, batch=False, scan=False):
+    if full_text:
+        from pypaimon.execution.native.read.native_full_text_search import _native_full_text_builder
+        native = _native_full_text_builder(builder, require_limit=not scan)
+    else:
+        from pypaimon.execution.native.read.native_vector_search import _native_vector_builder
+        native = _native_vector_builder(builder, batch)
+        if native is not None and not scan:
+            if batch:
+                native.with_query_vectors(builder._query_vectors)
+            else:
+                native.with_query_vector(builder._query_vector)
+    if native is None:
+        raise RuntimeError('Native search runtime is unavailable for the captured reader configuration')
+    return native
 
 
 def native_vector_scan(builder, batch=False):
@@ -219,7 +269,7 @@ def native_vector_scan(builder, batch=False):
     native = _native_vector_builder(builder, batch)
     return None if native is None else NativeSearchScan(
         builder._table, native.new_vector_search_scan(), False,
-        builder._is_primary_key_vector_search(), _source_modes(builder))
+        builder._is_primary_key_vector_search(), _capture_builder(builder), batch)
 
 
 def native_vector_read(builder, batch=False):
@@ -234,7 +284,8 @@ def native_vector_read(builder, batch=False):
         native.with_query_vector(builder._query_vector)
         reader = native.new_vector_search_read()
     return NativeSearchRead(
-        builder._table, reader, builder._is_primary_key_vector_search(), _source_modes(builder))
+        builder._table, reader, builder._is_primary_key_vector_search(), False,
+        _capture_builder(builder), batch)
 
 
 def native_full_text_scan(builder):
@@ -242,7 +293,7 @@ def native_full_text_scan(builder):
     native = _native_full_text_builder(builder, require_limit=False)
     return None if native is None else NativeSearchScan(
         builder._table, native.new_full_text_scan(), True,
-        builder._primary_key_full_text_definition() is not None, _source_modes(builder, True))
+        builder._primary_key_full_text_definition() is not None, _capture_builder(builder))
 
 
 def native_full_text_read(builder):
@@ -250,4 +301,4 @@ def native_full_text_read(builder):
     native = _native_full_text_builder(builder)
     return None if native is None else NativeSearchRead(
         builder._table, native.new_full_text_read(),
-        builder._primary_key_full_text_definition() is not None, _source_modes(builder, True))
+        builder._primary_key_full_text_definition() is not None, True, _capture_builder(builder))

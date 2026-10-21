@@ -141,8 +141,10 @@ class PrimaryKeyVectorSearchSplit:
 
 
 class PrimaryKeyVectorScanPlan(VectorSearchScanPlan):
-    def __init__(self, snapshot_id, splits):
-        super().__init__(splits)
+    def __init__(self, snapshot_id, splits, snapshot=None):
+        if snapshot is not None and snapshot.id != snapshot_id:
+            raise ValueError('Primary-key plan snapshot ID does not match its captured snapshot')
+        super().__init__(splits, snapshot)
         self.snapshot_id = snapshot_id
 
 
@@ -155,6 +157,8 @@ class PrimaryKeyFullTextSearchSplit:
 
 
 class PrimaryKeyFullTextScanPlan(FullTextScanPlan):
-    def __init__(self, snapshot_id, splits):
-        super().__init__(splits)
+    def __init__(self, snapshot_id, splits, snapshot=None):
+        if snapshot is not None and snapshot.id != snapshot_id:
+            raise ValueError('Primary-key plan snapshot ID does not match its captured snapshot')
+        super().__init__(splits, snapshot)
         self.snapshot_id = snapshot_id

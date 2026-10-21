@@ -71,7 +71,7 @@ def try_native_hybrid_search(builder, executor=None):
         from pypaimon.execution.native.read.search_execution import native_task_executor
         callback = native_task_executor(table, executor)
         try:
-            result = native.execute(executor=callback)
+            result = native._execute_with_executor(callback)
         finally:
             callback.cancel()
             callback.raise_if_failed()

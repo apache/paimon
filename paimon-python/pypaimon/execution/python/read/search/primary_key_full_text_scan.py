@@ -61,7 +61,7 @@ class PrimaryKeyFullTextScan(FullTextScan):
                 entry, self._definition.field_id,
                 self._definition.index_type, self._partition_filter))
         return PrimaryKeyFullTextScanPlan(
-            snapshot.id, _full_text_bucket_splits(source_splits, entries))
+            snapshot.id, _full_text_bucket_splits(source_splits, entries), snapshot)
 
 
 def _matches(entry, field_id, index_type, partition_filter):

@@ -19,16 +19,16 @@
 
 from contextlib import ExitStack
 import importlib
+import json
 import pickle
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.table.source import search_dispatch
-from pypaimon.table.source.search_types import VectorSearchScanPlan
+from pypaimon.table.source.search_types import FullTextScanPlan, VectorSearchScanPlan
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def _factories(builder, family):
 
 
 def _native_builder(family):
-    plan = SimpleNamespace(_metadata=lambda: '{"snapshot":null,"snapshot_id":null,"splits":[]}')
+    plan = SimpleNamespace(metadata=lambda: '{"snapshot":null,"snapshot_id":null,"splits":[]}')
     result = SimpleNamespace(row_ids=lambda: {7: 0.5})
     reader = SimpleNamespace(read_plan=Mock(return_value=result), read_batch_plan=Mock(return_value=[result, result]))
     scan = SimpleNamespace(scan=Mock(return_value=plan))
@@ -92,21 +92,41 @@ def _forbid_python_execution():
     return stack
 
 
+def _ordinary_plan(family):
+    return (FullTextScanPlan if family == 'text' else VectorSearchScanPlan)([], None)
+
+
 @pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
-def test_native_search_prepares_scans_reads_and_serializes_without_python(search_table, family):
+def test_native_search_prepares_plain_plans_and_transports_readers_without_python(search_table, family):
     builder = _builder(search_table, family)
     native, core_scan, core_read = _native_builder(family)
     scan_factory, read_factory = _factories(builder, family)
-    with _forbid_python_execution(), patch(_native_factory(family), return_value=native):
-        scan, read = scan_factory(), read_factory()
+    native_plan = object()
+    with _forbid_python_execution(), patch(_native_factory(family), return_value=native), patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=native_plan) as convert:
+        scan, reader = scan_factory(), read_factory()
         plan = scan.scan()
-        results = read.read_batch_plan(plan) if family == 'batch' else [read.read_plan(plan)]
+        assert type(plan) is (FullTextScanPlan if family == 'text' else VectorSearchScanPlan)
+        assert not hasattr(plan, '_native_plan')
+        results = reader.read_batch_plan(plan) if family == 'batch' else [reader.read_plan(plan)]
         assert [list(result.results()) for result in results] == [[7]] * (2 if family == 'batch' else 1)
-        # Dropping live handles for transport must not create fallback readers.
-        assert pickle.loads(pickle.dumps(read))._native_reader._native is None
-        assert not pickle.loads(pickle.dumps(scan))._native_scan.available()
-    core_scan.scan.assert_called_once_with()
-    (core_read.read_batch_plan if family == 'batch' else core_read.read_plan).assert_called_once_with(plan._native_plan)
+        # The transported reader reconstructs only the selected Native backend.
+        transported = pickle.loads(pickle.dumps(reader))
+        assert transported._native_reader._native is None
+        copied_plan = pickle.loads(pickle.dumps(plan))
+        copied_results = (transported.read_batch_plan(copied_plan) if family == 'batch'
+                          else [transported.read_plan(copied_plan)])
+        assert [list(result.results()) for result in copied_results] == [[7]] * (2 if family == 'batch' else 1)
+        assert transported._python_executor is None
+        copied_scan = pickle.loads(pickle.dumps(scan))
+        assert copied_scan._native_scan.available()
+        assert copied_scan.scan().splits() == []
+        assert copied_scan._python_executor is None
+        assert convert.call_count == 2
+        assert convert.call_args[0][0].splits() == []
+    assert core_scan.scan.call_args_list == [((),), ((),)]
+    method = core_read.read_batch_plan if family == 'batch' else core_read.read_plan
+    assert method.call_args_list == [((native_plan,),), ((native_plan,),)]
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
@@ -127,25 +147,29 @@ def test_native_search_reader_introspection_does_not_select_python_execution(sea
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
-def test_native_search_split_read_selects_python_only_when_invoked(search_table, family):
+def test_native_search_split_read_delegates_to_native_without_python(search_table, family):
     builder = _builder(search_table, family)
-    native, _, _ = _native_builder(family)
+    native, _, core_read = _native_builder(family)
     _, read_factory = _factories(builder, family)
+    native_plan = object()
     method_name = 'read_batch' if family == 'batch' else 'read'
-    python_method = Mock(return_value='split fallback')
-    python = SimpleNamespace(**{method_name: python_method})
-    factory = ('_new_python_full_text_read' if family == 'text' else
-               '_new_python_batch_vector_read' if family == 'batch' else '_new_python_vector_read')
-    with patch(_native_factory(family), return_value=native), \
-            patch.object(type(builder), factory, return_value=python) as prepare:
+    with _forbid_python_execution(), patch(_native_factory(family), return_value=native), patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native',
+            return_value=native_plan) as convert, patch(
+            'pypaimon.snapshot.time_travel_util.TimeTravelUtil.resolve_snapshot',
+            return_value=None) as snapshot:
         reader = read_factory()
         split_read = getattr(reader, method_name)
-        prepare.assert_not_called()
-        splits = ['transported split']
-        assert split_read(splits) == 'split fallback'
-        assert split_read(splits) == 'split fallback'
-    prepare.assert_called_once_with()
-    assert python_method.call_args_list == [((splits,),), ((splits,),)]
+        splits = []
+        for _ in range(2):
+            results = split_read(splits) if family == 'batch' else [split_read(splits)]
+            assert [list(result.results()) for result in results] == [[7]] * (2 if family == 'batch' else 1)
+        assert reader._python_executor is None
+        assert snapshot.call_count == 2
+        assert convert.call_count == 2
+        assert all(call[0][0].splits() is splits and call[0][0].snapshot() is None for call in convert.call_args_list)
+    method = core_read.read_batch_plan if family == 'batch' else core_read.read_plan
+    assert method.call_args_list == [((native_plan,),), ((native_plan,),)]
 
 
 @pytest.mark.parametrize('phase', ['scan', 'read'])
@@ -153,7 +177,8 @@ def test_native_search_failure_never_creates_python_execution(search_table, phas
     builder = _builder(search_table, 'vector')
     native, core_scan, core_read = _native_builder('vector')
     failure = OSError('search may already have read remote state')
-    with _forbid_python_execution(), patch(_native_factory('vector'), return_value=native):
+    with _forbid_python_execution(), patch(_native_factory('vector'), return_value=native), patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=object()):
         scan, reader = builder.new_vector_search_scan(), builder.new_vector_search_read()
         if phase == 'scan':
             core_scan.scan.side_effect = failure
@@ -167,32 +192,39 @@ def test_native_search_failure_never_creates_python_execution(search_table, phas
         assert caught.value is failure
 
 
-def test_python_plan_fallback_is_created_once_when_actually_needed(search_table):
-    builder = _builder(search_table, 'vector')
-    native, _, _ = _native_builder('vector')
-    python = SimpleNamespace(_table=search_table, read_plan=Mock(return_value='fallback'))
-    with patch(_native_factory('vector'), return_value=native), \
-            patch.object(type(builder), '_new_python_vector_read', return_value=python) as prepare:
-        reader = builder.new_vector_search_read()
-        prepare.assert_not_called()
-        plan = VectorSearchScanPlan([], None)
-        assert reader.read_plan(plan) == 'fallback'
-        assert reader.read_plan(plan) == 'fallback'
-    prepare.assert_called_once_with()
-    assert python.read_plan.call_count == 2
+@pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
+def test_ordinary_python_plans_use_native_without_fallback(search_table, family):
+    builder = _builder(search_table, family)
+    native, _, core_read = _native_builder(family)
+    _, read_factory = _factories(builder, family)
+    native_plan = object()
+    with _forbid_python_execution(), patch(_native_factory(family), return_value=native), patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=native_plan) as convert:
+        reader = read_factory()
+        plan = _ordinary_plan(family)
+        results = reader.read_batch_plan(plan) if family == 'batch' else [reader.read_plan(plan)]
+        assert [list(result.results()) for result in results] == [[7]] * (2 if family == 'batch' else 1)
+        assert reader._python_executor is None
+        assert convert.call_args[0][0] is plan
+    method = core_read.read_batch_plan if family == 'batch' else core_read.read_plan
+    method.assert_called_once_with(native_plan)
 
 
-def test_native_reader_keeps_the_query_options_captured_at_construction(search_table):
+def test_native_reader_keeps_query_options_captured_before_transport(search_table):
     builder = _builder(search_table, 'vector').with_option('ivf-flat.metric', 'l2')
     native, _, _ = _native_builder('vector')
     with patch(_native_factory('vector'), return_value=native):
         reader = builder.new_vector_search_read()
     builder.with_option('ivf-flat.metric', 'cosine')
-    fallback = search_dispatch.python_search_reader(reader)
-    assert fallback._options == {'ivf-flat.metric': 'l2'}
+    transported = pickle.loads(pickle.dumps(reader))
+    with _forbid_python_execution(), patch(_native_factory('vector'), return_value=native) as prepare, patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=object()):
+        transported.read_plan(_ordinary_plan('vector'))
+    assert prepare.call_args[0][0]._options == {'ivf-flat.metric': 'l2'}
+    assert transported._python_executor is None
 
 
-def test_batch_reader_freezes_query_sequence_before_lazy_fallback(search_table):
+def test_batch_reader_freezes_query_sequence_before_transport(search_table):
     queries = [[1.0, 0.0]]
     builder = _builder(search_table, 'batch').with_query_vectors(queries)
     native, _, _ = _native_builder('batch')
@@ -201,8 +233,27 @@ def test_batch_reader_freezes_query_sequence_before_lazy_fallback(search_table):
     queries.append([0.0, 1.0])
     queries[0][:] = [3.0, 4.0]
     assert native.with_query_vectors.call_args[0][0] == [[1.0, 0.0]]
-    fallback = search_dispatch.python_search_reader(pickle.loads(pickle.dumps(reader)))
-    assert fallback._query_vectors == [[1.0, 0.0]]
+    transported = pickle.loads(pickle.dumps(reader))
+    with _forbid_python_execution(), patch(_native_factory('batch'), return_value=native), patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=object()):
+        transported.read_batch_plan(_ordinary_plan('batch'))
+    assert native.with_query_vectors.call_args[0][0] == [[1.0, 0.0]]
+    assert transported._python_executor is None
+
+
+def test_full_text_reader_keeps_query_and_limit_captured_before_transport(search_table):
+    builder = _builder(search_table, 'text')
+    native, _, _ = _native_builder('text')
+    with patch(_native_factory('text'), return_value=native):
+        reader = builder.new_full_text_read()
+    builder.with_query('body', 'changed').with_limit(99)
+    transported = pickle.loads(pickle.dumps(reader))
+    with _forbid_python_execution(), patch(_native_factory('text'), return_value=native) as prepare, patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=object()):
+        transported.read_plan(_ordinary_plan('text'))
+    captured = prepare.call_args[0][0]
+    assert (captured._field_name, captured._query, captured._limit) == ('body', 'needle', 2)
+    assert transported._python_executor is None
 
 
 @pytest.mark.parametrize('name', [
@@ -221,7 +272,7 @@ def test_vector_split_uses_its_shared_contract_module():
     assert pickle.loads(pickle.dumps(VectorSearchSplit)) is VectorSearchSplit
 
 
-def test_single_reader_freezes_query_values_before_transport_fallback(search_table):
+def test_single_reader_freezes_query_values_before_transport(search_table):
     query = [1.0, 0.0]
     builder = _builder(search_table, 'vector').with_query_vector(query)
     native, _, _ = _native_builder('vector')
@@ -229,5 +280,110 @@ def test_single_reader_freezes_query_values_before_transport_fallback(search_tab
         reader = builder.new_vector_search_read()
     query[:] = [3.0, 4.0]
     assert native.with_query_vector.call_args[0][0] == [1.0, 0.0]
-    fallback = search_dispatch.python_search_reader(pickle.loads(pickle.dumps(reader)))
-    assert fallback._query_vector == [1.0, 0.0]
+    transported = pickle.loads(pickle.dumps(reader))
+    with _forbid_python_execution(), patch(_native_factory('vector'), return_value=native), patch(
+            'pypaimon.execution.native.read.native_search_plan._plan_to_native', return_value=object()):
+        transported.read_plan(_ordinary_plan('vector'))
+    assert native.with_query_vector.call_args[0][0] == [1.0, 0.0]
+    assert transported._python_executor is None
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'text'])
+def test_python_source_metadata_round_trips_through_public_native_plan_constructor(search_table, family):
+    from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
+    from pypaimon.index.index_file_meta import IndexFileMeta
+    from pypaimon.snapshot.snapshot import Snapshot
+    from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
+    from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
+    from pypaimon.utils.range import Range
+
+    class Plan:
+        def __init__(self, snapshot_json, splits_json):
+            self.snapshot_json = snapshot_json
+            self.splits_json = splits_json
+
+        def metadata(self):
+            snapshot = None if self.snapshot_json is None else json.loads(self.snapshot_json)
+            return json.dumps({'snapshot': snapshot, 'snapshot_id': None if snapshot is None else snapshot['id'],
+                               'splits': json.loads(self.splits_json)})
+
+    sdk, datafusion = ModuleType('pypaimon_rust'), ModuleType('pypaimon_rust.datafusion')
+    datafusion.VectorScanPlan = Plan
+    datafusion.FullTextScanPlan = Plan
+    sdk.datafusion = datafusion
+    full_text = family == 'text'
+    snapshot = Snapshot(3, 7, 2, 'base', 'delta', 10, 10, 'writer', 1, 'APPEND', 0, next_row_id=10)
+    index = IndexFileMeta('full-text' if full_text else 'ivf-flat', 'index-1', 1024, 4,
+                          external_path='s3://bucket/index-1')
+    scalar = IndexFileMeta('btree', 'index-scalar', 128, 4)
+    splits = ([IndexFullTextSearchSplit('body', 0, 3, [index], [scalar]), RawFullTextSearchSplit([Range(4, 9)])]
+              if full_text else [IndexVectorSearchSplit(0, 3, [index], [scalar]),
+                                 RawVectorSearchSplit([Range(4, 9)], [scalar], 'ivf-flat')])
+    source = (FullTextScanPlan if full_text else VectorSearchScanPlan)(splits, snapshot)
+    with patch.dict('sys.modules', {'pypaimon_rust': sdk, 'pypaimon_rust.datafusion': datafusion}):
+        native = _plan_to_native(source, full_text, 'embedding')
+        restored = _plan_from_native(search_table, native, full_text, False)
+        copied = _plan_to_native(pickle.loads(pickle.dumps(restored)), full_text, 'embedding')
+        empty = _plan_to_native(_ordinary_plan(family), full_text, 'embedding')
+    assert json.loads(native.snapshot_json)['schemaId'] == 2
+    assert json.loads(native.splits_json)[0]['column'] == ('body' if full_text else 'embedding')
+    assert copied.metadata() == native.metadata()
+    assert restored.snapshot() == snapshot
+    restored_index = restored.splits()[0]
+    restored_files = restored_index.full_text_index_files if full_text else restored_index.vector_index_files
+    assert restored_files[0].external_path == index.external_path
+    assert restored_index.scalar_index_files == [scalar]
+    assert json.loads(empty.metadata()) == {'snapshot': None, 'snapshot_id': None, 'splits': []}
+    assert not hasattr(restored, '_native_plan')
+
+
+@pytest.mark.parametrize('full_text', [False, True])
+def test_primary_key_plan_with_only_snapshot_id_resolves_that_exact_snapshot(full_text):
+    from pypaimon.execution.native.read.native_search_plan import NativeSearchRead
+    from pypaimon.table.source.search_types import PrimaryKeyFullTextScanPlan, PrimaryKeyVectorScanPlan
+
+    snapshot = SimpleNamespace(id=7)
+    manager = SimpleNamespace(
+        get_snapshot_by_id=Mock(return_value=snapshot),
+        get_latest_snapshot=Mock(side_effect=AssertionError('Resolved latest instead of the requested snapshot')))
+    table = SimpleNamespace(snapshot_manager=Mock(return_value=manager))
+    core_result = SimpleNamespace(snapshot_id=lambda: 7, positions=lambda: [], splits=lambda: [])
+    core = SimpleNamespace(read_plan=Mock(return_value=core_result))
+    reader = NativeSearchRead(table, core, True, full_text=full_text)
+    sources = [object()]
+    requested = (PrimaryKeyFullTextScanPlan if full_text else PrimaryKeyVectorScanPlan)(7, sources)
+    native_plan = object()
+    with patch('pypaimon.execution.native.read.native_search_plan._plan_to_native',
+               return_value=native_plan) as convert, patch(
+            'pypaimon.snapshot.time_travel_util.TimeTravelUtil.resolve_snapshot',
+            side_effect=AssertionError('Resolved table time travel instead of the explicit plan snapshot')):
+        result = reader.read_plan(requested)
+    manager.get_snapshot_by_id.assert_called_once_with(7)
+    manager.get_latest_snapshot.assert_not_called()
+    converted = convert.call_args[0][0]
+    assert converted.snapshot() is snapshot
+    assert converted.splits() is sources
+    assert requested.snapshot() is None
+    assert result.snapshot_id == 7
+    core.read_plan.assert_called_once_with(native_plan)
+
+
+@pytest.mark.parametrize('full_text', [False, True])
+def test_missing_primary_key_plan_snapshot_does_not_fall_back_to_latest(full_text):
+    from pypaimon.execution.native.read.native_search_plan import NativeSearchRead
+    from pypaimon.table.source.search_types import PrimaryKeyFullTextScanPlan, PrimaryKeyVectorScanPlan
+
+    manager = SimpleNamespace(
+        get_snapshot_by_id=Mock(return_value=None),
+        get_latest_snapshot=Mock(side_effect=AssertionError('Expired plans cannot be rebound to latest')))
+    table = SimpleNamespace(snapshot_manager=Mock(return_value=manager))
+    core = SimpleNamespace(read_plan=Mock())
+    reader = NativeSearchRead(table, core, True, full_text=full_text)
+    requested = (PrimaryKeyFullTextScanPlan if full_text else PrimaryKeyVectorScanPlan)(7, [object()])
+    with patch('pypaimon.execution.native.read.native_search_plan._plan_to_native') as convert:
+        with pytest.raises(ValueError, match='7'):
+            reader.read_plan(requested)
+    manager.get_snapshot_by_id.assert_called_once_with(7)
+    manager.get_latest_snapshot.assert_not_called()
+    core.read_plan.assert_not_called()
+    convert.assert_not_called()

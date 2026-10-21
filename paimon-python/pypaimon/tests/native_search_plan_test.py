@@ -138,26 +138,22 @@ def test_explicit_native_plan_and_read_avoid_python_search(table, family, mode, 
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
-@pytest.mark.parametrize('transport', ['pickle-plan', 'pickle-reader', 'split-list'])
+@pytest.mark.parametrize('transport', ['pickle-plan', 'pickle-reader', 'pickle-both', 'python-plan'])
 def test_transported_plan_uses_captured_snapshot_without_replanning(table, family, transport):
     native = _builder(table, family, native=True, limit=20)
-    plan = _scan(native, family).scan()
+    planner = _builder(table, family, limit=20) if transport == 'python-plan' else native
+    plan = _scan(planner, family).scan()
     reader = _reader(native, family)
     expected = _read(reader, family, plan)
     snapshot = plan.snapshot().id
     captured = pickle.dumps(plan.splits())
     indexes._append(table, hybrid._rows(12, 4), hybrid.SCHEMA)
-    if transport == 'pickle-plan':
+    if transport in ('pickle-plan', 'pickle-both'):
         plan = pickle.loads(pickle.dumps(plan))
-    elif transport == 'pickle-reader':
+    if transport in ('pickle-reader', 'pickle-both'):
         reader = pickle.loads(pickle.dumps(reader))
-    with patch.object(DataEvolutionVectorScan, 'scan', side_effect=AssertionError('Replanned vector search')), \
-            patch.object(DataEvolutionFullTextScan, 'scan', side_effect=AssertionError('Replanned full-text search')):
-        if transport == 'split-list':
-            classic = _reader(_builder(table._copy_with_snapshot(plan.snapshot()), family, limit=20), family)
-            actual = classic.read_batch(plan.splits()) if family == 'batch' else [classic.read(plan.splits())]
-        else:
-            actual = _read(reader, family, plan)
+    with _native_only():
+        actual = _read(reader, family, plan)
     assert plan.snapshot().id == snapshot
     assert pickle.dumps(plan.splits()) == captured
     _assert_results(actual, expected)
@@ -169,17 +165,37 @@ def test_modified_plan_and_shallow_alias_observe_current_split_selection(table, 
     plan = _scan(builder, family).scan()
     alias = copy(plan)
     alias.splits().clear()
-    results = _read(_reader(builder, family), family, plan)
+    with _native_only():
+        results = _read(_reader(builder, family), family, plan)
     assert len(results) == (2 if family == 'batch' else 1)
     assert all(result.is_empty() for result in results)
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
-def test_read_plan_context_errors_do_not_retry_python(table, family):
-    plan = _scan(_builder(table, family, native=True), family).scan()
-    reader = _reader(_builder(table, family, native=True, filtered=True), family)
-    with _native_only(), pytest.raises(Exception, match='same table|same.*filter|different table|different.*filter'):
-        _read(reader, family, plan)
+def test_subset_of_python_sources_remains_authoritative_for_native(table, family):
+    classic = _builder(table, family, limit=20)
+    plan = _scan(classic, family).scan()
+    assert len(plan.splits()) > 1
+    plan.splits()[:] = plan.splits()[:1]
+    expected = _read(_reader(classic, family), family, plan)
+    sources = pickle.dumps(plan.splits())
+    reader = _reader(_builder(table, family, native=True, limit=20), family)
+    with _native_only():
+        actual = _read(pickle.loads(pickle.dumps(reader)), family, pickle.loads(pickle.dumps(plan)))
+    _assert_results(actual, expected)
+    assert pickle.dumps(plan.splits()) == sources
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
+def test_reader_filter_applies_to_explicit_sources_without_replanning(table, family):
+    plan = _scan(_builder(table, family, native=True, limit=20), family).scan()
+    captured_sources = pickle.dumps(plan.splits())
+    expected = _read(_reader(_builder(table, family, filtered=True, limit=20), family), family, plan)
+    reader = _reader(_builder(table, family, native=True, filtered=True, limit=20), family)
+    with _native_only():
+        actual = _read(reader, family, pickle.loads(pickle.dumps(plan)))
+    _assert_results(actual, expected)
+    assert pickle.dumps(plan.splits()) == captured_sources
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
@@ -282,7 +298,9 @@ def test_empty_native_plans_remain_transportable(rest_catalog, family):
     assert plan.snapshot() is None
     assert plan.splits() == []
     assert all(result.is_empty() for result in results)
-    _assert_results(_read(_reader(builder, family), family, pickle.loads(pickle.dumps(plan))), results)
+    with _native_only():
+        copied_reader = pickle.loads(pickle.dumps(_reader(builder, family)))
+        _assert_results(_read(copied_reader, family, pickle.loads(pickle.dumps(plan))), results)
 
 
 def test_vector_scan_does_not_require_query_or_limit(table):
@@ -306,11 +324,13 @@ def test_full_text_scan_does_not_require_limit(table):
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
-def test_native_plan_is_query_independent_and_pickle_keeps_original_handle(table, family):
+def test_native_plan_is_query_independent_and_pickle_keeps_plain_sources(table, family):
     builder = _builder(table, family, native=True, limit=1)
     plan = _scan(builder, family).scan()
-    pickle.dumps(plan)
-    assert plan._unchanged_native_plan() is not None
+    captured = pickle.dumps(plan)
+    assert not hasattr(plan, '_native_plan')
+    assert not hasattr(plan, '_native_fingerprint')
+    assert pickle.dumps(pickle.loads(captured)) == captured
     if family == 'full-text':
         builder.with_query('content', text.match_query('lake'))
     elif family == 'batch':
@@ -410,7 +430,9 @@ def test_pk_plan_retains_snapshot_and_sources_after_primary_key_update(source, p
     assert table.snapshot_manager().get_latest_snapshot().id > captured
     with _native_only():
         actual = _read(_reader(builder, family), family, plan)
-    transported = _read(_reader(builder, family), family, pickle.loads(pickle.dumps(plan)))
+    with _native_only():
+        transported = _read(pickle.loads(pickle.dumps(_reader(builder, family))), family,
+                            pickle.loads(pickle.dumps(plan)))
     _assert_results(actual, expected)
     _assert_results(transported, expected)
     assert vectors._rows(table, actual[0]).to_pylist() == expected_rows

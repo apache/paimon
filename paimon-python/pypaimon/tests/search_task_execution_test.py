@@ -32,6 +32,15 @@ from pypaimon.table.source.search_execution import SearchTaskExecutor
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
 
 
+@pytest.fixture(autouse=True)
+def _native_plan_conversion():
+    # These tests exercise callback ownership and cancellation. Source codec
+    # construction has dedicated tests and must not require an installed SDK.
+    with patch('pypaimon.execution.native.read.native_search_plan._plan_to_native',
+               side_effect=lambda plan, full_text=False, column=None: plan):
+        yield
+
+
 class InlineExecutor(SearchTaskExecutor):
     def __init__(self):
         self.tasks = []
@@ -76,9 +85,8 @@ def test_native_search_schedules_opaque_tasks_without_constructing_python_reader
         assert list(executor(b'shared-context', [b'index-task', b'raw-task'])) == [b'index-result', b'raw-result']
         return [result, result] if family == 'batch' else result
 
-    core_read = SimpleNamespace(read_plan=read, read_batch_plan=read)
-    native = NativeSearchRead(table, core_read, False, ())
-    native.resolve_plan = lambda requested: plan
+    core_read = SimpleNamespace(_read_plan_with_executor=read, _read_batch_plan_with_executor=read)
+    native = NativeSearchRead(table, core_read, False, full_text=family == 'full-text', batch=family == 'batch')
     python_factory = Mock(side_effect=AssertionError('Python executor was constructed'))
     reader = (_BatchSearchRead if family == 'batch' else _SplitSearchRead)(native, python_factory)
 
@@ -127,7 +135,7 @@ def test_scheduler_cancellation_is_not_replaced_by_cleanup_failure_or_python_rep
 
 def test_distributed_native_failure_does_not_start_python_search():
     failure = CancelledError('remote task failed')
-    native = SimpleNamespace(resolve_plan=lambda plan: plan, read_plan=Mock(side_effect=failure))
+    native = SimpleNamespace(read_plan=Mock(side_effect=failure))
     fallback = Mock(side_effect=AssertionError('Python search replayed'))
     reader = _SplitSearchRead(native, fallback)
     with pytest.raises(CancelledError) as caught:
@@ -146,7 +154,7 @@ def test_core_failure_prevents_additional_work_from_its_scheduler_callback():
         callbacks.append(executor)
         raise failure
 
-    reader = NativeSearchRead(table, SimpleNamespace(read_plan=read), False, ())
+    reader = NativeSearchRead(table, SimpleNamespace(_read_plan_with_executor=read), False)
     executor = InlineExecutor()
     with pytest.raises(ValueError) as caught:
         reader.read_plan(object(), executor=executor)
@@ -190,7 +198,7 @@ def test_sibling_cancellation_during_slow_cleanup_preserves_the_original_worker_
 
     table = SimpleNamespace(options=SimpleNamespace(
         options=SimpleNamespace(to_map=lambda: {}), data_evolution_enabled=lambda: True))
-    reader = NativeSearchRead(table, SimpleNamespace(read_plan=read), False, ())
+    reader = NativeSearchRead(table, SimpleNamespace(_read_plan_with_executor=read), False)
     with pytest.raises(ValueError) as caught:
         reader.read_plan(object(), executor=MapExecutor(lambda tasks, ordered: FailedResults()))
     assert caught.value is failure

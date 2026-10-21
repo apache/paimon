@@ -17,11 +17,9 @@
 
 """Coordinate search execution and transport without coupling the backends.
 
-A live compatible plan executes in Rust. Transported plans and explicit split
-reads select Python lazily. An execution error never triggers another search.
+The selected backend consumes ordinary snapshot-and-split plans, including
+transported plans. An execution error never triggers another search.
 """
-
-from copy import copy
 
 
 class _SearchScan:
@@ -49,37 +47,23 @@ class _SearchRead:
             self._python_executor = self._python_factory()
         return self._python_executor
 
-    def _reader_for_plan(self, plan):
-        reader = copy(self._python_reader())
-        if plan.snapshot() is not None:
-            reader._table = reader._table._copy_with_snapshot(plan.snapshot())
-        return reader
-
     def read_plan(self, plan, executor=None):
-        native = self._native_reader.resolve_plan(plan)
-        if native is not None:
-            return (self._native_reader.read_plan(native) if executor is None else
-                    self._native_reader.read_plan(native, executor=executor))
-        reader = self._reader_for_plan(plan)
-        return reader.read_plan(plan) if executor is None else reader.read_plan(plan, executor=executor)
+        return (self._native_reader.read_plan(plan) if executor is None else
+                self._native_reader.read_plan(plan, executor=executor))
 
     def read_batch_plan(self, plan, executor=None):
-        native = self._native_reader.resolve_plan(plan)
-        if native is not None:
-            return (self._native_reader.read_batch_plan(native) if executor is None else
-                    self._native_reader.read_batch_plan(native, executor=executor))
-        reader = self._reader_for_plan(plan)
-        return reader.read_batch_plan(plan) if executor is None else reader.read_batch_plan(plan, executor=executor)
+        return (self._native_reader.read_batch_plan(plan) if executor is None else
+                self._native_reader.read_batch_plan(plan, executor=executor))
 
 
 class _SplitSearchRead(_SearchRead):
     def read(self, splits):
-        return self._python_reader().read(splits)
+        return self._native_reader.read(splits)
 
 
 class _BatchSearchRead(_SearchRead):
     def read_batch(self, splits):
-        return self._python_reader().read_batch(splits)
+        return self._native_reader.read_batch(splits)
 
 
 def python_search_reader(reader):

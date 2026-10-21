@@ -154,6 +154,14 @@ opaque shared context and task bytes; Core owns both their interpretation and
 global query coordination. The global candidate limit is applied before
 refinement, and full-text raw fallback retains one corpus for BM25 statistics.
 
+Vector and full-text plans are snapshot-and-split data in both backends. Rust
+plans have public constructors and can be serialized; the Native adapter builds
+them from ordinary Python plans, including plans made by Python scans or sent
+to another process. Readers own the table, schema, query and filter. Native
+selection is retained after transport, and source subsets never add missing
+indexes or raw ranges. Shard callbacks use an internal binding bridge; they are
+not part of Rust's public Plan/Read API.
+
 ## Corresponding execution APIs
 
 Compare the operation's inputs, results and lifecycle when changing a backend.
