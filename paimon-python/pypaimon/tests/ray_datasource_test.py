@@ -56,14 +56,17 @@ def catalog_options(tmp_path):
 def test_task_metadata_matches_limited_rows(catalog_options, limit, task_limit, expected):
     source = RayDatasource(CatalogSplitProvider(
         "default.data", catalog_options, limit=limit))
-    task = source.get_read_tasks(
-        1, per_task_row_limit=task_limit, data_context=DataContext.get_current())[0]
-    task = ray.cloudpickle.loads(ray.cloudpickle.dumps(task))
-
-    rows = sum(block.num_rows for block in task())
+    tasks = source.get_read_tasks(
+        1, per_task_row_limit=task_limit, data_context=DataContext.get_current())
+    # The native planner can return no splits for a zero scan limit.
+    rows = 0
+    for task in tasks:
+        task = ray.cloudpickle.loads(ray.cloudpickle.dumps(task))
+        task_rows = sum(block.num_rows for block in task())
+        assert task.metadata.num_rows == task_rows
+        rows += task_rows
 
     assert rows == expected
-    assert task.metadata.num_rows == rows
 
 
 def test_filter_keeps_unknown_row_count_with_limit(catalog_options):
