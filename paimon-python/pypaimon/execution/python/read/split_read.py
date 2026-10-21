@@ -22,7 +22,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from pypaimon.execution.python.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.python.deletionvectors import (
     ApplyDeletionVectorReader,

@@ -778,7 +778,7 @@ def distributed_update_apply(
 def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
     """Result schema: each projected column's type plus int64 ``_ROW_ID``, in
     ``read_cols`` order. Shared by the empty-result paths so they can't drift."""
-    from pypaimon.casting.schema_evolution import read_arrow_schema
+    from pypaimon.schema.arrow_schema import read_arrow_schema
     from pypaimon.table.special_fields import SpecialFields
 
     full = read_arrow_schema(table.table_schema.fields + [SpecialFields.ROW_ID])

@@ -26,11 +26,8 @@ widening (e.g. INT -> BIGINT, any numeric -> DECIMAL/DOUBLE), while an
 applies the conversion leniently.
 """
 
-import pyarrow as pa
-
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataTypeParser,
-                                        MapType, MultisetType,
-                                        PyarrowFieldParser, RowType,
+                                        MapType, MultisetType, RowType,
                                         VectorType)
 
 # ---- Type roots --------------------------------------------------------------
@@ -192,11 +189,6 @@ def _equals_ignore_nullable(source_type, target_type) -> bool:
     return source_copy == target_copy
 
 
-# Caches the read-time cast probe per (source, target) pyarrow type so the
-# alter-time check stays cheap. Keyed by the pyarrow type strings.
-_EXECUTABLE_CAST_CACHE = {}
-
-
 def can_execute_cast(source_type, target_type) -> bool:
     """Whether the Python read path can actually *materialize* a stored
     ``source_type`` value as ``target_type`` when reading a file written before
@@ -232,30 +224,5 @@ def can_execute_cast(source_type, target_type) -> bool:
         return False
     # Leaf-to-leaf: probe the same executor used by old-file readers, including
     # Java conversions with no direct PyArrow kernel, such as INT -> TIMESTAMP.
-    return _schema_evolution_cast_supported(source_type, target_type)
-
-
-def _schema_evolution_cast_supported(source_type, target_type) -> bool:
-    from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
-
-    source_pa = PyarrowFieldParser.from_paimon_type(source_type)
-    target_pa = PyarrowFieldParser.from_paimon_type(target_type)
-    if source_pa == target_pa:
-        return True
-    cache_key = (str(source_pa), str(target_pa))
-    cached = _EXECUTABLE_CAST_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    # Probe a one-row (null-valued) array rather than an empty one. Some Arrow
-    # kernels validate target parameters only for a non-empty input. Using the
-    # read executor also includes Java's per-value overflow-to-NULL rules, such
-    # as integer-to-DECIMAL targets narrower than the source type's full range.
-    try:
-        cast_array_for_schema_evolution(
-            pa.nulls(1, type=source_pa), target_pa, source_type, target_type)
-        ok = True
-    except (pa.lib.ArrowNotImplementedError, pa.lib.ArrowInvalid,
-            pa.lib.ArrowTypeError, ValueError, NotImplementedError):
-        ok = False
-    _EXECUTABLE_CAST_CACHE[cache_key] = ok
-    return ok
+    from pypaimon.execution.python.casting.data_type_casts import schema_evolution_cast_supported
+    return schema_evolution_cast_supported(source_type, target_type)

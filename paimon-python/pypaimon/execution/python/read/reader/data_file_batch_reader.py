@@ -21,7 +21,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
-from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution, read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
+from pypaimon.execution.python.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.common.file_io import FileIO
 from pypaimon.utils.arrow_utils import zero_column_batch
 from pypaimon.data.map_shared_shredding import (

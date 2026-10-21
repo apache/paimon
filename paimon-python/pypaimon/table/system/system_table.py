@@ -43,13 +43,13 @@ if TYPE_CHECKING:  # pragma: no cover - import for type hints only
 
 def metadata_local_millis(millis):
     """Java DateTimeUtils.toLocalDateTime for an epoch-millisecond instant."""
-    from pypaimon.casting.temporal_utils import _local_offset, _signed
+    from pypaimon.utils.temporal_utils import _local_offset, _signed
     return _signed(int(millis) + _local_offset(int(millis) // 1000) * 1000, 64)
 
 
 def metadata_epoch_millis(millis):
     """Java DataFileMeta.creationTimeEpochMillis for a stored local TIMESTAMP."""
-    from pypaimon.casting.temporal_utils import _local_to_utc_seconds, _signed
+    from pypaimon.utils.temporal_utils import _local_to_utc_seconds, _signed
     seconds, fraction = divmod(int(millis), 1000)
     return _signed(_local_to_utc_seconds(seconds) * 1000 + fraction, 64)
 

@@ -285,7 +285,7 @@ def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array
     that representation directly, including DATE32 values which cannot be
     cast to an Arrow microsecond timestamp or a Python datetime.
     """
-    from pypaimon.casting.temporal_utils import _signed
+    from pypaimon.utils.temporal_utils import _signed
     stored = field_ref.get('type')
     if not isinstance(stored, str):
         raise ValueError("Calendar transform field needs a DATE or TIMESTAMP type")
@@ -333,7 +333,7 @@ def _date_extract(name: str, field_ref: dict, batch: pa.RecordBatch) -> pa.Array
 
 
 def _calendar_field(name, day, millis):
-    from pypaimon.casting.temporal_utils import _epoch_day_to_date
+    from pypaimon.utils.temporal_utils import _epoch_day_to_date
     year, month, date = _epoch_day_to_date(day)
     weekday = (day + 3) % 7
     if name == 'YEAR':

@@ -25,7 +25,8 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 
-from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution, read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
+from pypaimon.execution.python.casting.schema_evolution import cast_array_for_schema_evolution
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType, PyarrowFieldParser, RowType
 
 

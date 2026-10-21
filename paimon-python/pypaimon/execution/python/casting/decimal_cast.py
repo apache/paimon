@@ -22,7 +22,7 @@ import re
 
 import pyarrow as pa
 
-from pypaimon.casting.numeric_utils import java_double_decimal_text
+from pypaimon.utils.numeric_utils import java_double_decimal_text
 
 
 _DECIMAL_TEXT = re.compile(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z')

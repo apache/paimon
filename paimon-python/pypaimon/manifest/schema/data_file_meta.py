@@ -74,7 +74,7 @@ class DataFileMeta:
     def creation_time_epoch_millis(self) -> Optional[int]:
         if self.creation_time is None:
             return None
-        from pypaimon.casting.temporal_utils import _local_to_utc_seconds
+        from pypaimon.utils.temporal_utils import _local_to_utc_seconds
 
         # Java stores Timestamp.now() as local wall-clock fields, then resolves
         # LocalDateTime.atZone(systemDefault()) when an epoch instant is needed.

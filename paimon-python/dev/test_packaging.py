@@ -122,6 +122,18 @@ class PackagingTest(unittest.TestCase):
         for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
             self.assertIn(name, names)
         execution_files = (
+            "pypaimon/schema/data_type_casts.py",
+            "pypaimon/utils/numeric_utils.py",
+            "pypaimon/utils/temporal_utils.py",
+            "pypaimon/utils/temporal_string.py",
+            "pypaimon/utils/row_to_string.py",
+            "pypaimon/execution/python/casting/__init__.py",
+            "pypaimon/execution/python/casting/data_type_casts.py",
+            "pypaimon/execution/python/casting/schema_evolution.py",
+            "pypaimon/execution/python/casting/decimal_cast.py",
+            "pypaimon/execution/python/casting/temporal_cast.py",
+            "pypaimon/execution/python/casting/temporal_string.py",
+            "pypaimon/execution/python/write/partition_spec.py",
             "pypaimon/execution/python/deletionvectors/__init__.py",
             "pypaimon/execution/python/deletionvectors/deletion_vector.py",
             "pypaimon/execution/python/deletionvectors/bitmap_deletion_vector.py",
@@ -189,6 +201,16 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
+            "pypaimon/casting/__init__.py",
+            "pypaimon/casting/data_type_casts.py",
+            "pypaimon/casting/schema_evolution.py",
+            "pypaimon/casting/decimal_cast.py",
+            "pypaimon/casting/temporal_cast.py",
+            "pypaimon/casting/temporal_string.py",
+            "pypaimon/casting/numeric_utils.py",
+            "pypaimon/casting/temporal_utils.py",
+            "pypaimon/casting/row_to_string.py",
+            "pypaimon/write/partition_spec.py",
             "pypaimon/deletionvectors/__init__.py",
             "pypaimon/deletionvectors/deletion_vector.py",
             "pypaimon/deletionvectors/bitmap_deletion_vector.py",

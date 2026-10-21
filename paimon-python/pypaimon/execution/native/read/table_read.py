@@ -21,7 +21,7 @@ from typing import List, Optional
 
 import pyarrow
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.read_support import close_read_source
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate

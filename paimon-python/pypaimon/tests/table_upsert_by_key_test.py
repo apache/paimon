@@ -24,7 +24,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.execution.python.write.table_update_by_row_id import (

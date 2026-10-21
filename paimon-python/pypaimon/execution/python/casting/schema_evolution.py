@@ -21,10 +21,9 @@ import math
 
 import pyarrow as pa
 
-from pypaimon.casting.decimal_cast import cast_decimal
-from pypaimon.casting.temporal_cast import cast_temporal
-from pypaimon.casting.temporal_string import temporal_to_string
-from pypaimon.schema.data_types import ArrayType, MapType, PyarrowFieldParser, RowType
+from pypaimon.execution.python.casting.decimal_cast import cast_decimal
+from pypaimon.execution.python.casting.temporal_cast import cast_temporal
+from pypaimon.execution.python.casting.temporal_string import temporal_to_string
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 
@@ -120,27 +119,6 @@ def _integer_to_timestamp(array, target_type):
         value = millis // 1000 if target_type.unit == 's' else millis * (ticks // 1000)
         values.append(value if -(1 << 63) <= value < (1 << 63) else None)
     return pa.array(values, type=pa.int64()).cast(target_type)
-
-
-def _read_arrow_type(data_type):
-    if isinstance(data_type, RowType):
-        return pa.struct([pa.field(field.name, _read_arrow_type(field.type)) for field in data_type.fields])
-    if isinstance(data_type, ArrayType):
-        return pa.list_(pa.field('element', _read_arrow_type(data_type.element)))
-    if isinstance(data_type, MapType):
-        return pa.map_(pa.field('key', _read_arrow_type(data_type.key), nullable=False),
-                       pa.field('value', _read_arrow_type(data_type.value)))
-    return PyarrowFieldParser.from_paimon_type(data_type)
-
-
-def read_arrow_schema(fields):
-    """Keep runtime NULLs representable without changing logical write constraints.
-
-    Old files can lack a requested field, and Java casts can produce NULL on
-    overflow. ROW fields, ARRAY elements and MAP values therefore stay nullable
-    in read results, including declared NOT NULL children.
-    """
-    return pa.schema([pa.field(field.name, _read_arrow_type(field.type)) for field in fields])
 
 
 def cast_array_for_schema_evolution(array, target_type, source_paimon_type=None, target_paimon_type=None):

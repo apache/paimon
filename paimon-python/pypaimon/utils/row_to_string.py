@@ -38,7 +38,7 @@ it would have emitted anyway:
 
 from typing import Any, Optional
 
-from pypaimon.casting.temporal_string import format_time, format_timestamp
+from pypaimon.utils.temporal_string import format_time, format_timestamp
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 _UNSUPPORTED_TYPES = ("FLOAT", "REAL", "DOUBLE", "TIMESTAMP_LTZ",

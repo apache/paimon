@@ -64,6 +64,7 @@ pypaimon/
     vector_index_build.py       Ray index tasks, shard workers and failure draining
   execution/
     python/
+      casting/                  Old-file array casts and executable-cast probes
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
       deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
@@ -95,6 +96,14 @@ Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.
 `DeletionFile` and `DeletionVectorMeta` remain shared metadata in `table/source`
 and `index`; importing or transporting them does not load either backend.
+
+Arrow read schemas and logical type-change rules stay in `schema`. Shared
+numeric, calendar and metadata text helpers stay in `utils`; Native read and
+commit adapters use them without importing Python cast executors. Array value
+conversion and the local schema manager's executable-cast probe belong to
+Python execution. The schema manager delegates that probe lazily when validating
+a local type change. Python commit partition-spec parsing also belongs to its
+executor; Native commits pass the spec to Rust.
 
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.

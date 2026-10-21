@@ -22,7 +22,7 @@ from typing import Dict, Iterator, List, Optional
 
 import pyarrow
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 
 from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform, extract_referenced_fields)

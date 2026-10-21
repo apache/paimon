@@ -73,7 +73,7 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
                                                 TagAlreadyExistException)
-from pypaimon.casting import data_type_casts as casts
+from pypaimon.schema import data_type_casts as casts
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter

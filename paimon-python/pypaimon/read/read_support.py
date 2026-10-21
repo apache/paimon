@@ -23,7 +23,7 @@ from typing import List, Optional
 
 import pyarrow
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.constants import ROW_KIND_COLUMN
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema

@@ -19,7 +19,7 @@
 
 import pyarrow as pa
 
-from pypaimon.casting.temporal_utils import (
+from pypaimon.utils.temporal_utils import (
     _epoch_day_to_java_date, _java_date_to_epoch_day,
     _local_offset, _local_to_utc_seconds, _signed,
 )
