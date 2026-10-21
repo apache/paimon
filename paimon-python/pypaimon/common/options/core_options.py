@@ -1175,7 +1175,7 @@ class CoreOptions:
     READ_VIDEO_DECODE_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("read.video.decode-parallelism")
         .int_type()
-        .default_value(1)
+        .default_value(4)
         .with_description(
             "Maximum concurrent video payload decodes shared by all cameras in a "
             "PyPaimon LeRobot Dataset worker.")

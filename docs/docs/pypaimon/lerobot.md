@@ -252,8 +252,8 @@ Set `table = table.copy({"read.video.max-open-decoders": "8"})` before
 constructing the dataset to limit cached decoders per camera per worker (default: 16).
 Each open decoder uses memory and a file handle, so usage grows with cameras and workers.
 `read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
-Dataset worker (default: 1). Values above 1 enable parallel
-decoding for video windows without `image_transforms`, using more CPU and memory.
+Dataset worker (default: 4). Set it to 1 for serial decoding. Parallel decoding
+applies to video windows without `image_transforms` and uses more CPU and memory.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 

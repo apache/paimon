@@ -371,7 +371,9 @@ class VideoDecodeParallelismTest(unittest.TestCase):
         self.assertTrue(torch.equal(*outputs))
 
     def test_options(self):
-        self.assertEqual(CoreOptions(Options({})).read_video_decode_parallelism(), 1)
+        self.assertEqual(CoreOptions(Options({})).read_video_decode_parallelism(), 4)
+        self.assertEqual(CoreOptions(Options({"read.video.decode-parallelism": "1"}))
+                         .read_video_decode_parallelism(), 1)
         self.assertEqual(CoreOptions(Options({"read.video.decode-parallelism": "4"}))
                          .read_video_decode_parallelism(), 4)
         for value in (0, -1, True, 1.5, "no", "1.5"):
