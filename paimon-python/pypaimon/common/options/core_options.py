@@ -403,6 +403,15 @@ class CoreOptions:
         )
     )
 
+    VORTEX_COMPACT_ENCODINGS: ConfigOption[bool] = (
+        ConfigOptions.key("vortex.compact-encodings")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether Python writers use the compact Vortex encodings, which make files smaller "
+            "and reads somewhat slower. Java writers always use the default encodings.")
+    )
+
     MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
         ConfigOptions.key("mosaic.num-buckets")
         .int_type()
@@ -1394,6 +1403,9 @@ class CoreOptions:
         if isinstance(value, (list, set, tuple)):
             return [str(column).strip() for column in value if str(column).strip()]
         return []
+
+    def vortex_compact_encodings(self, default=None):
+        return self.options.get(CoreOptions.VORTEX_COMPACT_ENCODINGS, default)
 
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)

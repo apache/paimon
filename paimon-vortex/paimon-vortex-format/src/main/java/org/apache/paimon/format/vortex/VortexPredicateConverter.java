@@ -22,22 +22,34 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.Between;
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Contains;
+import org.apache.paimon.predicate.EndsWith;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
+import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LessOrEqual;
 import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.NotContains;
+import org.apache.paimon.predicate.NotEndsWith;
 import org.apache.paimon.predicate.NotEqual;
+import org.apache.paimon.predicate.NotIn;
+import org.apache.paimon.predicate.NotStartsWith;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
+import org.apache.paimon.predicate.StartsWith;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 
@@ -69,19 +81,36 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             return null;
         }
         FieldRef fieldRef = fieldRefOpt.get();
+        LeafFunction function = predicate.function();
+        List<Object> literals = predicate.literals();
+
         // Builders clone their inputs and leave freeing to the caller (see the vortex-jni
-        // expression.rs module doc), so the column and the literal are ours to release once
+        // expression.rs module doc), so the column and the literals are ours to release once
         // the call consuming them has returned.
         try (Expression field = Expression.column(fieldRef.name())) {
-            if (predicate.function() instanceof IsNull) {
+            if (function instanceof IsNull) {
                 return Expression.isNull(field);
             }
-            if (predicate.function() instanceof IsNotNull) {
+            if (function instanceof IsNotNull) {
                 return Expression.isNotNull(field);
             }
 
-            List<Object> literals = predicate.literals();
             if (literals == null || literals.isEmpty()) {
+                return null;
+            }
+
+            if (function instanceof In || function instanceof NotIn) {
+                return in(field, fieldRef.type(), literals, function instanceof NotIn);
+            }
+            if (function instanceof Between) {
+                return between(field, fieldRef.type(), literals);
+            }
+            if (isStringMatch(function)) {
+                return stringMatch(field, fieldRef.type(), function, literals.get(0));
+            }
+
+            Expression.BinaryOp op = binaryOp(function);
+            if (op == null || literals.get(0) == null) {
                 return null;
             }
 
@@ -89,22 +118,7 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
                 if (vortexLiteral == null) {
                     return null;
                 }
-
-                if (predicate.function() instanceof Equal) {
-                    return Expression.binary(Expression.BinaryOp.EQ, field, vortexLiteral);
-                } else if (predicate.function() instanceof NotEqual) {
-                    return Expression.binary(Expression.BinaryOp.NOT_EQ, field, vortexLiteral);
-                } else if (predicate.function() instanceof GreaterThan) {
-                    return Expression.binary(Expression.BinaryOp.GT, field, vortexLiteral);
-                } else if (predicate.function() instanceof GreaterOrEqual) {
-                    return Expression.binary(Expression.BinaryOp.GTE, field, vortexLiteral);
-                } else if (predicate.function() instanceof LessThan) {
-                    return Expression.binary(Expression.BinaryOp.LT, field, vortexLiteral);
-                } else if (predicate.function() instanceof LessOrEqual) {
-                    return Expression.binary(Expression.BinaryOp.LTE, field, vortexLiteral);
-                }
-
-                return null;
+                return Expression.binary(op, field, vortexLiteral);
             }
         }
     }
@@ -144,9 +158,180 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
     }
 
     @Nullable
+    private static Expression.BinaryOp binaryOp(LeafFunction function) {
+        if (function instanceof Equal) {
+            return Expression.BinaryOp.EQ;
+        } else if (function instanceof NotEqual) {
+            return Expression.BinaryOp.NOT_EQ;
+        } else if (function instanceof GreaterThan) {
+            return Expression.BinaryOp.GT;
+        } else if (function instanceof GreaterOrEqual) {
+            return Expression.BinaryOp.GTE;
+        } else if (function instanceof LessThan) {
+            return Expression.BinaryOp.LT;
+        } else if (function instanceof LessOrEqual) {
+            return Expression.BinaryOp.LTE;
+        }
+        return null;
+    }
+
+    /**
+     * {@code IN} and {@code NOT IN} with SQL null rules, which Paimon follows too: a null field
+     * never matches, and a null in the list makes {@code NOT IN} false for every row.
+     */
+    @Nullable
+    private static Expression in(
+            Expression field, DataType type, List<Object> literals, boolean negated) {
+        List<Expression> elements = new ArrayList<>();
+        Expression elementType = null;
+        Expression list = null;
+        try {
+            elementType = nullLiteral(type);
+            if (elementType == null) {
+                return null;
+            }
+
+            for (Object literal : literals) {
+                Expression element = literal == null ? nullLiteral(type) : toLiteral(type, literal);
+                if (element == null) {
+                    return null;
+                }
+                elements.add(element);
+            }
+
+            list = Expression.literalList(elementType, true, elements.toArray(new Expression[0]));
+            return negated ? Expression.notIn(field, list) : Expression.in(field, list);
+        } finally {
+            elements.forEach(Expression::close);
+            if (elementType != null) {
+                elementType.close();
+            }
+            if (list != null) {
+                list.close();
+            }
+        }
+    }
+
+    @Nullable
+    private static Expression between(Expression field, DataType type, List<Object> literals) {
+        if (literals.size() != 2 || literals.get(0) == null || literals.get(1) == null) {
+            return null;
+        }
+
+        try (Expression lower = toLiteral(type, literals.get(0));
+                Expression upper = toLiteral(type, literals.get(1))) {
+            if (lower == null || upper == null) {
+                return null;
+            }
+            return Expression.between(field, lower, upper, false, false);
+        }
+    }
+
+    private static boolean isStringMatch(LeafFunction function) {
+        return function instanceof StartsWith
+                || function instanceof NotStartsWith
+                || function instanceof EndsWith
+                || function instanceof NotEndsWith
+                || function instanceof Contains
+                || function instanceof NotContains;
+    }
+
+    /**
+     * Prefix, suffix and substring matches as {@code LIKE} patterns. Paimon tests them on non-null
+     * strings only, as {@code LIKE} and {@code NOT LIKE} do.
+     */
+    @Nullable
+    private static Expression stringMatch(
+            Expression field, DataType type, LeafFunction function, @Nullable Object literal) {
+        DataTypeRoot root = type.getTypeRoot();
+        if (literal == null || (root != DataTypeRoot.CHAR && root != DataTypeRoot.VARCHAR)) {
+            return null;
+        }
+
+        String escaped = escapeLike(literal.toString());
+        String pattern;
+        if (function instanceof StartsWith || function instanceof NotStartsWith) {
+            pattern = escaped + "%";
+        } else if (function instanceof EndsWith || function instanceof NotEndsWith) {
+            pattern = "%" + escaped;
+        } else {
+            pattern = "%" + escaped + "%";
+        }
+
+        boolean negated =
+                function instanceof NotStartsWith
+                        || function instanceof NotEndsWith
+                        || function instanceof NotContains;
+        try (Expression patternLiteral = Expression.literal(pattern)) {
+            return Expression.like(field, patternLiteral, negated, false);
+        }
+    }
+
+    private static String escapeLike(String value) {
+        StringBuilder escaped = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\\' || c == '%' || c == '_') {
+                escaped.append('\\');
+            }
+            escaped.append(c);
+        }
+        return escaped.toString();
+    }
+
+    /** A typed null literal, which also gives the element type of a list literal. */
+    @Nullable
+    private static Expression nullLiteral(DataType type) {
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+                return Expression.nullLiteral(Expression.DType.BOOL);
+            case TINYINT:
+                return Expression.nullLiteral(Expression.DType.I8);
+            case SMALLINT:
+                return Expression.nullLiteral(Expression.DType.I16);
+            case INTEGER:
+                return Expression.nullLiteral(Expression.DType.I32);
+            case BIGINT:
+                return Expression.nullLiteral(Expression.DType.I64);
+            case FLOAT:
+                return Expression.nullLiteral(Expression.DType.F32);
+            case DOUBLE:
+                return Expression.nullLiteral(Expression.DType.F64);
+            case CHAR:
+            case VARCHAR:
+                return Expression.nullLiteral(Expression.DType.UTF8);
+            case DATE:
+                return Expression.nullLiteralDate(Expression.TimeUnit.DAYS);
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                return Expression.nullLiteralDecimal(
+                        decimalType.getPrecision(), decimalType.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return Expression.nullLiteralTimestamp(
+                        timestampUnit(((TimestampType) type).getPrecision()), null);
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return Expression.nullLiteralTimestamp(
+                        timestampUnit(((LocalZonedTimestampType) type).getPrecision()), "UTC");
+            default:
+                return null;
+        }
+    }
+
+    private static Expression.TimeUnit timestampUnit(int precision) {
+        if (precision == 0) {
+            return Expression.TimeUnit.SECONDS;
+        } else if (precision <= 3) {
+            return Expression.TimeUnit.MILLISECONDS;
+        } else if (precision <= 6) {
+            return Expression.TimeUnit.MICROSECONDS;
+        }
+        return Expression.TimeUnit.NANOSECONDS;
+    }
+
+    @Nullable
     private static Expression toLiteral(DataType type, Object value) {
         if (value == null) {
-            return Expression.nullLiteral(Expression.DType.I32);
+            return nullLiteral(type);
         }
         switch (type.getTypeRoot()) {
             case BOOLEAN:

@@ -293,6 +293,17 @@ def _add_row_kind_column_to_batch(
     return pyarrow.RecordBatch.from_arrays(columns, schema=new_schema)
 
 
+def _declared_output_schema(self):
+    # Resolving the read schema probes for the native runtime, which costs a failed import
+    # when it is absent. The result only depends on the read type and the projection.
+    key = (id(self.read_type), id(self.output_projection))
+    cached = getattr(self, '_declared_output_schema_cache', None)
+    if cached is None or cached[0] != key:
+        cached = (key, output_schema(read_arrow_schema(self.read_type), self.output_projection))
+        self._declared_output_schema_cache = cached
+    return cached[1]
+
+
 def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
     if self.output_projection is not None:
         _, paths = self._reader_adapter()
@@ -301,7 +312,7 @@ def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.Record
         # Project the already masked schema, retaining captured nullability.
         adapted_projection = OutputProjection([(alias, path) for alias, path in outputs])
         actual = output_schema(batch.schema, adapted_projection)
-        declared = output_schema(read_arrow_schema(self.read_type), self.output_projection)
+        declared = _declared_output_schema(self)
         fields = [field.with_nullable(field.nullable or actual[i].nullable) for i, field in enumerate(declared)]
         if self.include_row_kind and self._row_kind_column in batch.schema.names:
             arrays.insert(0, batch.column(self._row_kind_column))

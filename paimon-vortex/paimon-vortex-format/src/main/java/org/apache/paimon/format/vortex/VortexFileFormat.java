@@ -23,7 +23,11 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -53,9 +57,26 @@ import org.apache.paimon.types.VectorType;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Optional;
 
 /** Vortex {@link FileFormat}. */
 public class VortexFileFormat extends FileFormat {
+
+    public static final ConfigOption<Integer> WORKER_THREADS =
+            ConfigOptions.key("vortex.worker-threads")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "Minimum number of native threads that decode and encode Vortex data "
+                                    + "in the background. The pool is shared by the whole JVM "
+                                    + "and only grows. With 0 threads, only the thread that "
+                                    + "reads or writes a file drives the native work for it.");
+
+    /**
+     * Each written batch becomes a native chunk and costs a native call, so small batches make
+     * writes slow. The write batch memory still bounds every batch.
+     */
+    private static final int MIN_WRITE_BATCH_ROWS = 8192;
 
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
@@ -73,7 +94,8 @@ public class VortexFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates) {
-        return new VortexReaderFactory(dataSchemaRowType, projectedRowType, predicates);
+        return new VortexReaderFactory(
+                dataSchemaRowType, projectedRowType, predicates, workerThreads());
     }
 
     @Override
@@ -82,10 +104,21 @@ public class VortexFileFormat extends FileFormat {
                 () ->
                         new ArrowFormatCWriter(
                                 type,
-                                formatContext.writeBatchSize(),
+                                Math.max(formatContext.writeBatchSize(), MIN_WRITE_BATCH_ROWS),
                                 true,
                                 formatContext.writeBatchMemory().getBytes(),
-                                null));
+                                null),
+                workerThreads());
+    }
+
+    @Override
+    public Optional<SimpleStatsExtractor> createStatsExtractor(
+            RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
+        return Optional.of(new VortexSimpleStatsExtractor(type, statsCollectors));
+    }
+
+    private int workerThreads() {
+        return formatContext.options().get(WORKER_THREADS);
     }
 
     @Override

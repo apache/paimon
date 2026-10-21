@@ -440,19 +440,8 @@ class LocalFileIO(FileIO):
 
     def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
         try:
-            import vortex
-            from vortex._lib.io import write as vortex_write
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            from pypaimon.execution.python.read.reader.vortex_utils import (to_vortex_specified)
-            _, store_kwargs = to_vortex_specified(self, path)
-
-            if store_kwargs:
-                from vortex import store
-                vortex_store = store.from_url(path, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                vortex_write(vortex.array(data), path)
+            from pypaimon.execution.python.read.reader.vortex_utils import write_vortex_file
+            write_vortex_file(self, path, data, compact=kwargs.get('compact', False))
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e

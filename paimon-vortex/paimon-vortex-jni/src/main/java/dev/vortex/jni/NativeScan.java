@@ -27,6 +27,13 @@ public final class NativeScan {
 
     private NativeScan() {}
 
+    /**
+     * Creates a lazy scan over a data source.
+     *
+     * <p>Selection codes: 0 = all rows, 1 = include {@code selectionIndices}, 2 = exclude {@code
+     * selectionIndices}, 3 = include {@code selectionRoaringBitmap}, 4 = exclude {@code
+     * selectionRoaringBitmap}. The bitmap is a portable serialized Roaring64 bitmap.
+     */
     public static native long create(
             long dataSourcePtr,
             long projectionExprPtr,
@@ -34,13 +41,14 @@ public final class NativeScan {
             long rowRangeBegin,
             long rowRangeEnd,
             long[] selectionIndices,
+            byte[] selectionRoaringBitmap,
             byte selectionModeCode,
             long limit,
             boolean ordered);
 
     public static native void free(long scanPtr);
 
-    public static native void arrowSchema(long scanPtr, long arrowSchemaOutAddr);
+    public static native void arrowSchema(long sessionPtr, long scanPtr, long arrowSchemaOutAddr);
 
     public static native void partitionCount(long scanPtr, long[] resultOut);
 

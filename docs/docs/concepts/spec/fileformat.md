@@ -262,8 +262,23 @@ Limitations:
 
 Key features:
 - **Adaptive Encoding**: Automatically selects the best encoding per column based on data distribution
-- **Native Predicate Pushdown**: Supports filter expressions pushed down to the scan layer
+- **Native Predicate Pushdown**: Comparisons, `IS [NOT] NULL`, `IN`, `NOT IN`, `BETWEEN`, and prefix, suffix and substring matches are evaluated in the scan
 - **Column Projection**: Only reads requested columns from disk
+- **File Statistics**: Min, max and null counts come from the native writer, so scans can skip files without the writer collecting statistics row by row
+- **Vectorized Reads**: Batches are returned as columnar vectors to the engine
+
+Local files and OSS files are read and written by a native storage client. All other file systems
+are reached through the Paimon `FileIO` of the table.
+
+Format Options:
+
+| Option | Default | Type | Description |
+|:---|:---|:---|:---|
+| `vortex.worker-threads` | 4 | Integer | Minimum number of native threads that decode and encode Vortex data in the background. The pool is shared by the whole JVM and only grows. With 0 threads, only the thread that reads or writes a file drives the native work for it. |
+| `vortex.compact-encodings` | false | Boolean | PyPaimon only. Write with the compact Vortex encodings, which make files smaller and reads somewhat slower. |
+
+Java writers hand at least 8192 rows to Vortex in each batch, because every batch costs a native
+call and becomes a separate chunk. `write-batch-memory` still limits the memory of each batch.
 
 Limitations:
 1. Vortex does not support `MAP`, `MULTISET` or `VARIANT` types.

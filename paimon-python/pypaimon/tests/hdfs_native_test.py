@@ -905,20 +905,20 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
         fake_vortex = types.ModuleType("vortex")
         fake_vortex.array = MagicMock(return_value="varr")
         fake_vortex.store = types.SimpleNamespace(from_url=MagicMock())
-        fake_io = types.ModuleType("vortex._lib.io")
-        fake_io.write = MagicMock()
-        fake_lib = types.ModuleType("vortex._lib")
-        fake_lib.io = fake_io
+        fake_io = types.ModuleType("vortex.io")
+        default_options = MagicMock()
+        fake_io.VortexWriteOptions = types.SimpleNamespace(
+            default=MagicMock(return_value=default_options), compact=MagicMock())
+        fake_vortex.io = fake_io
         fake_modules = {
             "vortex": fake_vortex,
-            "vortex._lib": fake_lib,
-            "vortex._lib.io": fake_io,
+            "vortex.io": fake_io,
         }
         with patch.dict(sys.modules, fake_modules), \
                 patch("pypaimon.execution.python.read.reader.vortex_utils.to_vortex_specified",
                       return_value=("hdfs://ns/x.vortex", None)):
             self.fio.write_vortex("hdfs://ns/x.vortex", table)
-        fake_io.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")
+        default_options.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")
 
 
 if __name__ == "__main__":

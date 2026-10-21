@@ -696,18 +696,8 @@ class HdfsNativeFileIO(FileIO):
 
     def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
         try:
-            import vortex
-            from vortex import store
-
-            from pypaimon.execution.python.read.reader.vortex_utils import (to_vortex_specified)
-            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
-
-            if store_kwargs:
-                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                from vortex._lib.io import write as vortex_write
-                vortex_write(vortex.array(data), file_path_for_vortex)
+            from pypaimon.execution.python.read.reader.vortex_utils import write_vortex_file
+            write_vortex_file(self, path, data, compact=kwargs.get('compact', False))
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
