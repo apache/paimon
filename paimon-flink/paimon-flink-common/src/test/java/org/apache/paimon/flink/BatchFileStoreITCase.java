@@ -141,14 +141,14 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(deletionVectors(table, snapshot)).hasSize(1);
         assertThat(batchSql("SELECT * FROM T1 WHERE a = 1")).containsExactly(Row.of(1, "22", "33"));
 
-        // second insert, producing no dv files
+        // Full compaction removes the old DV index without generating an empty DV file.
         batchSql("ALTER TABLE T1 SET ('compaction.total-size-threshold' = '1m')");
         batchSql("INSERT INTO T1 VALUES (1, '44', '55')");
         snapshot = table.latestSnapshot().get();
-        assertThat(deletionVectors(table, snapshot)).hasSize(0);
+        assertThat(table.indexManifestFileReader().read(snapshot.indexManifest())).isEmpty();
         assertThat(batchSql("SELECT * FROM T1 WHERE a = 1")).containsExactly(Row.of(1, "44", "55"));
 
-        // third insert, producing no dv files, same index manifest
+        // Another full compaction produces no DV files and reuses the empty index manifest.
         batchSql("INSERT INTO T1 VALUES (1, '66', '77')");
         assertThat(table.latestSnapshot().get().indexManifest())
                 .isEqualTo(snapshot.indexManifest());
