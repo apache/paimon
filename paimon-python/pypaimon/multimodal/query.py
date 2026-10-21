@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.schema.data_types import is_array_blob_type, is_blob_type, is_map_blob_type

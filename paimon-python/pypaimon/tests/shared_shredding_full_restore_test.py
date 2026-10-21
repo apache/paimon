@@ -19,7 +19,7 @@ import unittest
 
 import pyarrow as pa
 
-from pypaimon.data.map_shared_shredding import assemble_shared_shredding_map
+from pypaimon.execution.python.read.map_shared_shredding import assemble_shared_shredding_map
 
 
 class SharedShreddingFullRestoreTest(unittest.TestCase):

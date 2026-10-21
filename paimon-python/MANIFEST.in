@@ -22,4 +22,3 @@ include README.md
 recursive-include pypaimon *.py
 recursive-include pypaimon/sample/data *.jsonl
 recursive-exclude pypaimon/tests *
-recursive-exclude pypaimon/acceptance *

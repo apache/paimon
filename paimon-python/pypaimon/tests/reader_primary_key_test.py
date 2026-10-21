@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.options.core_options import CoreOptions
 
 

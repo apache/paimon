@@ -58,7 +58,7 @@ def test_fork_error_is_never_retried_by_python():
 
 def test_native_write_error_cannot_trigger_python_replay():
     failure = OSError('write may already have created a file')
-    native = SimpleNamespace(write_arrow_batch=Mock(side_effect=failure))
+    native = SimpleNamespace(stream=False, write_arrow_batch=Mock(side_effect=failure))
     table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True))
     with patch('pypaimon.read.merge_engine_support.check_sequence_field_supported'), \
             patch('pypaimon.execution.native.write.native_write.create_native_write', return_value=native), \
@@ -93,7 +93,7 @@ def test_merge_failure_never_replays_python(phase):
     native = SimpleNamespace(prepare_commit=Mock(side_effect=failure))
     with patch('pypaimon.execution.native.write.native_merge_into.create_native_merge_into',
                side_effect=failure if phase == 'prepare' else None, return_value=native), \
-            patch('pypaimon.execution.python.write.merge_into.merge_into') as python_merge:
+            patch('pypaimon.execution.python.write.merge_into.PythonTableMergeInto.prepare_commit') as python_merge:
         with pytest.raises(RuntimeError) as caught:
             merge_into(table, object(), on=['id'], commit_user='writer')
     assert caught.value is failure
@@ -145,8 +145,8 @@ class BlockNativeExtension(importlib.abc.MetaPathFinder):
             raise AssertionError('Python execution loaded the Native extension: ' + fullname)
 
 sys.meta_path.insert(0, BlockNativeExtension())
-from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
+from pypaimon.execution.python.read.table_read import PythonTableRead
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 from pypaimon.write.table_update import BatchTableUpdate, StreamTableUpdate

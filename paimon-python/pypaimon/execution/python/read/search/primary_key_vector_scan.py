@@ -27,7 +27,7 @@ from pypaimon.index.pk.primary_key_index_source_policy import (
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.execution.python.read.search.global_index_live_row_filter import table_at_snapshot
 from pypaimon.execution.python.read.search.vector_search_scan import VectorSearchScan

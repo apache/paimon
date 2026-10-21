@@ -338,10 +338,8 @@ class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
             )
             self._index_maintainer = None
         else:
-            from pypaimon.index.dynamic_bucket import (
-                DynamicBucketIndexMaintainer,
-                HashBucketAssigner,
-            )
+            from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketIndexMaintainer
+            from pypaimon.index.dynamic_bucket import HashBucketAssigner
 
             from pypaimon.index.dynamic_bucket import resolve_bucket_snapshot
             snapshot = resolve_bucket_snapshot(table, base_snapshot_id)

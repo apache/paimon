@@ -15,10 +15,33 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""STRING compatibility and canonical Arrow input for core writers."""
+"""Shared Arrow read schemas, STRING compatibility and canonical writer input."""
 
 import pyarrow as pa
 import pyarrow.compute as pc
+
+from pypaimon.schema.data_types import ArrayType, MapType, PyarrowFieldParser, RowType
+
+
+def _read_arrow_type(data_type):
+    if isinstance(data_type, RowType):
+        return pa.struct([pa.field(field.name, _read_arrow_type(field.type)) for field in data_type.fields])
+    if isinstance(data_type, ArrayType):
+        return pa.list_(pa.field('element', _read_arrow_type(data_type.element)))
+    if isinstance(data_type, MapType):
+        return pa.map_(pa.field('key', _read_arrow_type(data_type.key), nullable=False),
+                       pa.field('value', _read_arrow_type(data_type.value)))
+    return PyarrowFieldParser.from_paimon_type(data_type)
+
+
+def read_arrow_schema(fields):
+    """Keep runtime NULLs representable without changing logical write constraints.
+
+    Old files can lack a requested field, and Java casts can produce NULL on
+    overflow. ROW fields, ARRAY elements and MAP values therefore stay nullable
+    in read results, including declared NOT NULL children.
+    """
+    return pa.schema([pa.field(field.name, _read_arrow_type(field.type)) for field in fields])
 
 
 def _normalize_string_type(data_type, ignore_child_nullability=False):

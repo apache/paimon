@@ -61,21 +61,23 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_shredding import (
     VARIANT_ARROW_TYPE,
     VariantSchema,
-    _decompose_field_bytes,
-    _NULL_VALUE_BYTES,
     _build_array_value,
     _build_object_value,
-    _extract_overflow_fields,
     _encode_scalar_to_value_bytes,
-    assemble_shredded_column,
     build_variant_schema,
-    decompose_variant,
     is_shredded_variant,
     parse_metadata_dict,
     parse_shredding_schema_option,
+    shredding_schema_to_arrow_type,
+)
+from pypaimon.execution.python.read.variant_shredding import (
+    _decompose_field_bytes,
+    _NULL_VALUE_BYTES,
+    _extract_overflow_fields,
+    assemble_shredded_column,
+    decompose_variant,
     rebuild,
     rebuild_value,
-    shredding_schema_to_arrow_type,
 )
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import (
@@ -1193,7 +1195,7 @@ class TestShreddingWrite(unittest.TestCase):
                     gv = GenericVariant.from_python(value)
                     schema = VariantSchema(value_idx=0, typed_idx=1,
                                            scalar_arrow_type=arrow_type)
-                    with patch('pypaimon.data.variant_shredding.pa.scalar', wraps=pa.scalar) as scalar:
+                    with patch('pypaimon.execution.python.read.variant_shredding.pa.scalar', wraps=pa.scalar) as scalar:
                         row = _decompose_field_bytes(gv.value(), schema, gv.metadata())
                     if not (pa.types.is_decimal(arrow_type) or pa.types.is_timestamp(arrow_type)):
                         scalar.assert_not_called()

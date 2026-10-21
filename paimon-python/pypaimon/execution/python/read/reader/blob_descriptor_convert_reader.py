@@ -125,7 +125,7 @@ class BlobInlineConvertReader(RecordBatchReader):
         """Use a lightweight prescan reader (projecting only view columns) to
         collect all BlobViewStructs and bulk-preload their descriptors."""
         from pypaimon.table.row.blob import BlobViewStruct
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         all_view_structs = []
 

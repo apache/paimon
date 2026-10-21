@@ -320,7 +320,7 @@ def test_ltz_partition_strings_preserve_submicrosecond_fraction(value, monkeypat
     import pandas as pd
 
     # The precision regression must also run outside the timezone golden jobs.
-    monkeypatch.setattr('pypaimon.casting.temporal_utils._local_offset', lambda _seconds: 0)
+    monkeypatch.setattr('pypaimon.utils.temporal_utils._local_offset', lambda _seconds: 0)
     row = GenericRow([pd.Timestamp(value, tz='UTC')],
                      [DataField(0, 'pt', AtomicType('TIMESTAMP_LTZ(9)'))])
     assert _render_partition(row) == '{' + value + '}'

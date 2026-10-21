@@ -548,7 +548,7 @@ def test_streaming_overwrite_is_skipped_by_default_like_java(catalog):
 
 
 def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native, tmp_path):
-    from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+    from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
     from pypaimon.table.source.deletion_file import DeletionFile
     table = _table(catalog, 'explicit_dv', True, {'bucket': '1'})
     _write(table, 100, [{'k': key, 'v': str(key)} for key in (1, 2, 3)])

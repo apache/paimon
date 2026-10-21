@@ -21,7 +21,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
     DatabaseNotExistException, TableNotExistException
 from pypaimon.schema.data_types import AtomicType, DataField

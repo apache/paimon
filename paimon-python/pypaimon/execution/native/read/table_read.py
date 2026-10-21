@@ -17,12 +17,11 @@
 
 """Native reads and adaptation to the public Arrow and row contracts."""
 
-import logging
 from typing import List, Optional
 
 import pyarrow
 
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.read.read_support import close_read_source
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -31,10 +30,8 @@ from pypaimon.execution.native import table as native_table
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema
 from pypaimon.read.split import Split
-from pypaimon.read.variant_read_type import has_variant_extractions
 from pypaimon.schema.data_types import DataField
 
-logger = logging.getLogger(__name__)
 _NATIVE_READ_FILE_FORMATS = frozenset({
     CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC,
     CoreOptions.FILE_FORMAT_AVRO, CoreOptions.FILE_FORMAT_ROW,
@@ -92,57 +89,47 @@ def native_read(table, splits, predicate: Optional[Predicate] = None,
     return read_splits(splits, parallelism=parallelism, ordered=ordered)
 
 
-class NativeTableReadMixin:
-    def _native_fallback(
-        self,
-        reason: str,
-        error: Optional[Exception] = None,
-        log: bool = False,
-    ):
-        if has_variant_extractions(self.read_type):
-            raise RuntimeError(
-                "Variant extraction requires a compatible native reader: %s"
-                % reason) from error
-        if log:
-            logger.warning(
-                "Native read failed, falling back to the Python reader: %s",
-                reason)
-        return None
+class NativeTableRead:
+    """Adapt one configured read to Core without constructing Python readers."""
 
-    def _try_native_batches(
+    def __init__(self, read):
+        self._read = read
+
+    def read_batches(
             self,
             splits: List[Split],
             schema: pyarrow.Schema,
             parallelism: Optional[int] = None,
-            blob_parallelism: Optional[int] = None,
+            blob_parallelism=1,
             ordered: bool = False):
         """Return Rust-read batches, or ``None`` when this read must fall back."""
-        if not self.table.options.native_read_enabled():
-            return self._native_fallback("read.native.enabled is false")
-        if self.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
-            return self._native_fallback(
+        read = self._read
+        if not read.table.options.native_read_enabled():
+            return read._native_fallback("read.native.enabled is false")
+        if read.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
+            return read._native_fallback(
                 "the table file format is not supported")
         if not splits:
             return []
-        if not self._native_blob_view_supported():
-            return self._native_fallback(
+        if not read._native_blob_view_supported():
+            return read._native_fallback(
                 "the table uses an unsupported BLOB view")
         try:
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:
-            return self._native_fallback(str(e), e, log=True)
+            return read._native_fallback(str(e), e, log=True)
         rust_splits = []
         for split in splits:
-            if not self._native_split_files_supported(split):
-                return self._native_fallback(
+            if not read._native_split_files_supported(split):
+                return read._native_fallback(
                     "a split contains a file unsupported by the native reader")
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
                 try:
                     rust_split = native_split_from_python(split, ranges_use_row_ids=(
-                        self.table.options.row_tracking_enabled() or self.table.options.data_evolution_enabled()))
+                        read.table.options.row_tracking_enabled() or read.table.options.data_evolution_enabled()))
                 except Exception as e:
-                    return self._native_fallback(
+                    return read._native_fallback(
                         "native split conversion failed: %s" % e,
                         e,
                         log=True)
@@ -152,24 +139,25 @@ class NativeTableReadMixin:
         effective = 1 if parallelism is None else parallelism
         try:
             batches = native_read(
-                self.table, rust_splits,
+                read.table, rust_splits,
                 parallelism=effective,
                 ordered=ordered,
-                **self._native_read_kwargs(blob_parallelism))
+                **read._native_read_kwargs(blob_parallelism))
         except Exception as error:
             runtime._raise_if_native_fork_safety_error(error)
-            return self._native_fallback(str(error), error, log=True)
-        return self._convert_native_batches(batches, schema)
+            return read._native_fallback(str(error), error, log=True)
+        return read._convert_native_batches(batches, schema)
 
     def _native_read_kwargs(self, blob_parallelism=None):
+        read = self._read
         kwargs = {
-            'predicate': self.predicate,
-            'limit': self.limit,
+            'predicate': read.predicate,
+            'limit': read.limit,
         }
         if blob_parallelism is not None:
             kwargs['blob_parallelism'] = blob_parallelism
-        kwargs['read_type'] = self.read_type
-        if self.include_row_kind:
+        kwargs['read_type'] = read.read_type
+        if read.include_row_kind:
             kwargs['include_row_kind'] = True
         return kwargs
 
@@ -183,14 +171,15 @@ class NativeTableReadMixin:
         return True
 
     def _convert_native_batches(self, batches, schema):
+        read = self._read
         failure = None
         try:
             for batch in batches:
                 if batch.num_rows == 0:
                     continue
-                batch = self._prepare_native_batch(batch, schema)
-                batch = self._project_batch_to_output(batch)
-                yield self._try_to_pad_batch_by_schema(batch, schema)
+                batch = read._prepare_native_batch(batch, schema)
+                batch = read._project_batch_to_output(batch)
+                yield read._try_to_pad_batch_by_schema(batch, schema)
         except BaseException as error:
             failure = error
             raise
@@ -198,24 +187,26 @@ class NativeTableReadMixin:
             close_read_source(batches, failure)
 
     def _prepare_native_batch(self, batch, schema):
-        if self.include_row_kind and 'rowkind' in batch.schema.names:
+        read = self._read
+        if read.include_row_kind and 'rowkind' in batch.schema.names:
             index = batch.schema.get_field_index('rowkind')
             batch = batch.rename_columns([
-                self._row_kind_column if position == index else name
+                read._row_kind_column if position == index else name
                 for position, name in enumerate(batch.schema.names)
             ])
-        if self.nested_name_paths:
-            batch = self._flatten_native_nested_batch(batch, schema)
+        if read.nested_name_paths:
+            batch = read._flatten_native_nested_batch(batch, schema)
         return batch
 
     def _flatten_native_nested_batch(self, batch, schema):
-        _, paths = self._reader_adapter()
+        read = self._read
+        _, paths = read._reader_adapter()
         # Rust already evaluated the complete predicate and projected away
         # filter-only fields. Flatten just the user output dependencies; the
         # Python split reader retains the additional adapter inputs internally.
-        outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
+        outputs = adapter_output_paths(read.output_projection, read._adapter_read_type, paths)
         needed = {path[0] for _, path in outputs}
-        fields_and_paths = [(field, path) for field, path in zip(self._adapter_read_type, paths)
+        fields_and_paths = [(field, path) for field, path in zip(read._adapter_read_type, paths)
                             if field.name in needed]
         adapter_fields = [field for field, _ in fields_and_paths]
         paths = [path for _, path in fields_and_paths]
@@ -226,26 +217,28 @@ class NativeTableReadMixin:
         projected = output_schema(batch.schema, OutputProjection([
             (field.name, path) for field, path in zip(fields, paths)]))
         fields = [field.with_nullable(field.nullable or projected[i].nullable) for i, field in enumerate(fields)]
-        if self.include_row_kind:
-            arrays.insert(0, batch.column(self._row_kind_column))
-            fields.insert(0, batch.schema.field(self._row_kind_column))
+        if read.include_row_kind:
+            arrays.insert(0, batch.column(read._row_kind_column))
+            fields.insert(0, batch.schema.field(read._row_kind_column))
         return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
 
     def _native_blob_view_supported(self) -> bool:
+        read = self._read
         from pypaimon.execution.native.table import _native_blob_view_supported
-        return _native_blob_view_supported(self.table, (field.name for field in self._scan_read_type))
+        return _native_blob_view_supported(read.table, (field.name for field in read._scan_read_type))
 
-    def _try_native_rows(self, splits):
+    def read_rows(self, splits):
+        read = self._read
         from copy import copy
         from pypaimon.execution.native.read.row_iterator import native_rows
         from pypaimon.read.read_type import output_fields
 
         # InternalRow carries row kind separately from projected fields.
-        read = copy(self)
+        read = copy(read)
         read.include_row_kind = True
         read._row_kind_column = 'rowkind'
         schema = read._add_row_kind_to_schema(read._output_arrow_schema(splits), read._row_kind_column)
-        fields = output_fields(self.read_type, self.output_projection)
+        fields = output_fields(read.read_type, read.output_projection)
         batches = read._try_native_batches(splits, schema, parallelism=1, ordered=True)
         if batches is None:
             return None
@@ -253,7 +246,7 @@ class NativeTableReadMixin:
         def rows():
             failure = None
             try:
-                yield from native_rows(batches, self.table, fields)
+                yield from native_rows(batches, read.table, fields)
             except BaseException as error:
                 failure = error
                 raise

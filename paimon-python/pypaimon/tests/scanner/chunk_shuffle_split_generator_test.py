@@ -32,7 +32,7 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.execution.python.read.scanner.chunk_shuffle_split_generator import (

@@ -17,13 +17,24 @@
 
 """Writer backend selection and lifecycle, outside either execution backend."""
 
+from typing import List
+
 import pyarrow as pa
 
 from pypaimon.write.row_utils import validate_write_columns
+from pypaimon.write.commit_identifier import validate_commit_identifier
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.write.commit_message import CommitMessage
 
 
 class NativeTableWrite:
     """Keep one selected writer and allow explicit pre-mutation diagnostics."""
+
+    def __new__(cls, *args, **kwargs):
+        if cls is NativeTableWrite:
+            stream = kwargs.get('stream', args[3] if len(args) > 3 else False)
+            cls = NativeStreamTableWrite if stream else NativeBatchTableWrite
+        return object.__new__(cls)
 
     def __init__(self, table, commit_user, static_partition, stream, native_writer,
                  restore_snapshot_id=None):
@@ -39,8 +50,10 @@ class NativeTableWrite:
             NativePostponeFixedBucketTableWrite as NativePostponeWrite,
         )
 
-        selected = (NativePostponeFixedBucketTableWrite
-                    if isinstance(native, NativePostponeWrite) else cls)
+        if isinstance(native, NativePostponeWrite):
+            selected = NativePostponeFixedBucketTableWrite
+        else:
+            selected = NativeStreamTableWrite if native.stream else NativeBatchTableWrite
         result = object.__new__(selected)
         result._execution = native
         result._python_writer = None
@@ -198,15 +211,6 @@ class NativeTableWrite:
         execution = self._python_writer if self._python_writer is not None else self._execution
         return execution.roll_before_group_if_needed(row_count)
 
-    def prepare_commit(self, commit_identifier=None):
-        if not self.stream and commit_identifier is not None:
-            raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
-        if self._python_writer is not None:
-            if self.stream:
-                return self._python_writer.prepare_commit(commit_identifier)
-            return self._python_writer.prepare_commit()
-        return self._execution.prepare_commit(commit_identifier)
-
     def close(self):
         if self._python_writer is not None:
             self._python_writer.close()
@@ -218,7 +222,28 @@ class NativeTableWrite:
         return self._execution.abort()
 
 
-class NativePostponeFixedBucketTableWrite(NativeTableWrite):
+class NativeBatchTableWrite(NativeTableWrite):
+    """Batch facade with the same zero-argument prepare boundary as Python."""
+
+    def prepare_commit(self) -> List[CommitMessage]:
+        if self._python_writer is not None:
+            return self._python_writer.prepare_commit()
+        if self._batch_committed:
+            raise RuntimeError('BatchTableWrite only supports one-time committing.')
+        return self._execution.prepare_commit(BATCH_COMMIT_IDENTIFIER)
+
+
+class NativeStreamTableWrite(NativeTableWrite):
+    """Stream facade requiring an explicit signed commit identifier."""
+
+    def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        commit_identifier = validate_commit_identifier(commit_identifier)
+        if self._python_writer is not None:
+            return self._python_writer.prepare_commit(commit_identifier)
+        return self._execution.prepare_commit(commit_identifier)
+
+
+class NativePostponeFixedBucketTableWrite(NativeBatchTableWrite):
     """Share postpone planning without coupling either backend to the other."""
 
     def __init__(self, table, commit_user, static_partition, bucket_plan, native_writer):

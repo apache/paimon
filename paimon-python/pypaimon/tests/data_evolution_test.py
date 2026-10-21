@@ -28,7 +28,7 @@ import pyarrow.dataset as ds
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.table.row.offset_row import OffsetRow

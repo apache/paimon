@@ -19,7 +19,7 @@
 
 from typing import Optional
 
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit

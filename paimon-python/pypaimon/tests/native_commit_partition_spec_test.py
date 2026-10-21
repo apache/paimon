@@ -30,7 +30,7 @@ from pypaimon import Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.partition_spec import _partition_spec_value
+from pypaimon.execution.python.write.partition_spec import _partition_spec_value
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]

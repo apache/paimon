@@ -22,13 +22,13 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from pypaimon.execution.python.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.predicate import Predicate
-from pypaimon.deletionvectors import (
+from pypaimon.execution.python.deletionvectors import (
     ApplyDeletionVectorReader,
     PositionMappedDeletionVector,
 )
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.data.map_shared_shredding import (
     is_map_selected_keys_field,
     map_selected_keys,
@@ -37,7 +37,7 @@ from pypaimon.data.map_shared_shredding import (
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.blob_read_support import deferred_blob_field_names
-from pypaimon.read.interval_partition import IntervalPartition, SortedRun
+from pypaimon.execution.python.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
     predicate_field_names,

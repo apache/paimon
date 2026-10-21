@@ -24,7 +24,7 @@ try:
 except ImportError:
     import zlib as crc_backend
 
-from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
+from pypaimon.execution.python.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.schema.data_types import (
     MapType,
     is_array_blob_type,

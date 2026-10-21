@@ -125,6 +125,17 @@ Reads restore omitted partition columns from split metadata. Selected-schema
 inputs must include the routing columns they need; `write_arrow(data, bucket=...)`
 also accepts a bucket assigned upstream.
 
+Changing `with_write_type()` or `with_blob_consumer()` affects writers created
+for new partition/bucket pairs. Existing bucket writers retain their original
+columns and consumer, including across stream `prepare_commit(identifier)`
+calls. Full-schema inputs are projected to each target's captured columns by
+name. Selected-schema inputs must match the target's captured layout; missing
+columns are rejected before any group from the batch is written.
+
+Batch `prepare_commit()` accepts no arguments and can be called once. Stream
+`prepare_commit(identifier)` requires an integer-like value in the signed
+64-bit range. These call boundaries are the same for Python and Native writers.
+
 Native commit selection requires a standard REST catalog and a reconstructible
 built-in FileIO. Other catalogs and custom Python FileIO implementations retain
 the Python path. Binary partition keys require `partition.legacy-name=false` for

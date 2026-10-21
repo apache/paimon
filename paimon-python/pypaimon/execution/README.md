@@ -51,7 +51,7 @@ pypaimon/
     write_dispatch.py           Writer coordination and safe pre-write switching
     update_dispatch.py          Update/upsert/delete/MERGE coordination
     input_adapter.py            Pandas transport and distributed input conversion
-    merge_condition.py          Shared MERGE condition parsing/evaluation
+    merge_condition.py          Shared MERGE condition parsing and validation
     merge_transform.py          Shared Arrow assignments and callable inputs
     ray_datasink.py              Ray worker writes and coordinator commits
   globalindex/                  Public index contracts and backend coordination
@@ -64,9 +64,18 @@ pypaimon/
     vector_index_build.py       Ray index tasks, shard workers and failure draining
   execution/
     python/
+      casting/                  Old-file array casts and executable-cast probes
+      map_blob_key_serializer.py Physical MAP BLOB key encoding for readers/writers
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
+        blob_view_lookup.py     Upstream Blob descriptor planning, loading and resolution
+        interval_partition.py   Primary-key sorted-run grouping
+        predicate_json_parser.py Authorization row-filter and masking execution
+        map_shared_shredding.py Physical MAP decoding and selected-column pruning
+        variant_shredding.py    Physical VARIANT reconstruction and shredding
+      deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
       write/                    File writers, committers and update execution
+        external_path_provider.py Per-writer external file placement strategies
       globalindex/              Index file codecs, readers, writers and build algorithms
       merge_engine_dispatch.py  Python merge-function selection
     native/
@@ -90,6 +99,44 @@ independent options; shared plans and commit messages connect those stages.
 Explicit access to an existing Python scanner/router/committer property selects
 that implementation. Ordinary configuration and metadata inspection do not.
 
+Deletion-vector codecs, file loading and row filtering belong to Python
+execution, corresponding to Rust Core's deletion-vector implementation.
+`DeletionFile` and `DeletionVectorMeta` remain shared metadata in `table/source`
+and `index`; importing or transporting them does not load either backend.
+
+Arrow read schemas and logical type-change rules stay in `schema`. Shared
+numeric, calendar and metadata text helpers stay in `utils`; Native read and
+commit adapters use them without importing Python cast executors. Array value
+conversion and the local schema manager's executable-cast probe belong to
+Python execution. The schema manager delegates that probe lazily when validating
+a local type change. Python commit partition-spec parsing also belongs to its
+executor; Native commits pass the spec to Rust.
+
+Physical MAP/VARIANT codecs and Blob View resolution belong to Python
+execution. Public value objects, schema/spec parsing and selected-key metadata
+stay in `data`. MERGE condition evaluation and first-matching-clause selection
+also belong to Python execution; callable transport, SQL rewriting and shared
+Arrow assignment adapters stay in `write`.
+
+Dynamic bucket HASH index publication and writer-owned pending state belong
+to the Python writer. The shared input bucket assigner remains in `index`:
+distributed producers use it to route inputs before either backend writes.
+`input_routing` and `bucket_planning` similarly serve both backends' input
+protocols without retaining a file writer or publishing data.
+
+External-path round-robin, weighted selection and entropy directories belong
+to Python write execution. Shared path factories retain configuration and
+existing-file resolution, loading a provider only when Python allocates a new
+file. MAP BLOB key serializers implement the physical file format and are
+shared within the Python backend. Generic URI/FileIO contracts, resource
+caches and integer codecs stay in `common`; Native Blob inputs also use the
+URI reader contract.
+
+Authorization row-filter and column-mask evaluation belongs to Python read
+execution. JSON field-reference extraction and rule/schema validation remain
+shared. The public authorization result creates a Python filter lazily when
+explicitly requested; Native reads pass the original rules to Rust.
+
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.
 Local and Native MERGE use shared `write` helpers without importing the public
@@ -105,10 +152,10 @@ types at that boundary.
 
 | Operation | Python execution | Native execution / Rust Core |
 | --- | --- | --- |
-| Batch scan | `PythonTableScanMixin` | `NativeTableScanMixin` / `TableScan` |
-| Split read | `PythonTableReadMixin` | `NativeTableReadMixin` / `TableRead` |
+| Batch scan | `PythonTableScan` | `NativeTableScan` / `TableScan` |
+| Split read | `PythonTableRead` | `NativeTableRead` / `TableRead` |
 | Stream scan | `AsyncStreamingTableScan` | `StreamTableScan` / `StreamTableScan` |
-| Write | `PythonTableWriteMixin` | `NativeTableWrite` / `TableWrite` |
+| Write | `PythonTableWrite` | `NativeTableWrite` / `TableWrite` |
 | Commit | `PythonTableCommit` | `NativeTableCommit` / `TableCommit` |
 | Row ID / predicate update, delete and key upsert | Python update executors | Native update adapters / `TableUpdate` |
 | Shard update | `ShardTableUpdator` | `NativeShardTableUpdator` / `ShardTableUpdater` |
@@ -121,10 +168,29 @@ snapshot_properties=None)`, `abort(messages)`,
 Message conversion happens during preparation; publication uses the selected
 executor's prepared messages. Batch/stream binding details stay in the Native
 adapter, and overwrite details stay in each backend.
+
+Both batch scanners expose `plan(auth_result=None)`, `plan_all_files()` and
+`scan_with_stats(auth_result=None)`. Both readers expose `read_rows(splits)` and
+`read_batches(splits, schema, parallelism=None, blob_parallelism=1,
+ordered=False)`. Output materialization and Python parallel-read helpers are
+separate from this execution protocol.
+
+Writer executors take an explicit identifier in `prepare_commit(identifier)`.
+The public batch facade exposes only `prepare_commit()`, with a one-time guard;
+the public stream facade requires `prepare_commit(identifier)`. These signatures
+also apply to Native facades, including after an explicit switch to Python.
+Invalid call arguments fail before either executor prepares files.
 Public stream write, update and commit entry points normalize integer-like
 commit identifiers to Java `long` / Rust `i64` before execution starts.
 Write-column selections reject empty selections and duplicate names before
-replacing the current configuration. Index build/drop requests bind partition
+replacing the current configuration. Like Java, append writers capture their
+write columns and Blob consumer per partition/bucket. Reconfiguration affects
+future bucket writers; existing buckets retain their configuration across
+`prepare_commit` calls. Full-schema inputs project by column name, and batches
+are checked against every target's captured layout before staging any group.
+Native named-row conversion queries Rust for the target columns using only
+routing metadata, so Python does not duplicate bucket state or encode unused
+payloads. Index build/drop requests bind partition
 predicates to the partition layout and reject predicates containing
 non-partition fields.
 
@@ -141,8 +207,12 @@ Both shard updaters expose `arrow_reader()`, `update_by_arrow_batch(data)`,
 complete read/update cycle before preparation and preserve prepared files when
 closed. This matters when deletion vectors hide physical rows.
 
-Python mixins retain public instance hooks while Native adapters own Rust
-handles. Private helper structure follows each implementation's algorithms.
+Python executors bind an explicit public context and retain its instance hooks;
+Native adapters own Rust handles. The context is not copied or hidden behind a
+generic proxy. Predicate/row-ID operations use bound executors, and prepared
+upsert and MERGE requests expose `upsert()` and `prepare_commit()` respectively
+on either backend. Private helper structure follows each implementation's
+algorithms.
 
 The operation protocols do not imply identical backend capabilities. Python
 Data Evolution reads still reject nested ROW field projections supported by

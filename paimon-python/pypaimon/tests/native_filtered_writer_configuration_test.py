@@ -134,7 +134,7 @@ def test_core_rejection_does_not_change_live_blob_configuration(rest_catalog, se
 @pytest.mark.parametrize('native', _ENGINES)
 @pytest.mark.parametrize('kind', [None, '-D', '-U'])
 @pytest.mark.parametrize('stream', [False, True])
-def test_filtered_blob_batches_allow_configuration_and_real_writes_lock_it(rest_catalog, native, kind, stream):
+def test_filtered_blob_batches_allow_configuration_and_real_writes_capture_it(rest_catalog, native, kind, stream):
     catalog, _ = rest_catalog
     table = _blob_table(catalog, native)
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
@@ -162,13 +162,13 @@ def test_filtered_blob_batches_allow_configuration_and_real_writes_lock_it(rest_
             writer.write_arrow(pa.Table.from_pylist([
                 dict(id=2, op='+I', payload=BlobDescriptor('custom://source', 6, 7).serialize()),
             ], schema=schema))
-            for setter in (lambda: writer.with_blob_consumer(None),
-                           lambda: writer.with_blob_uri_reader_factory(None)):
-                with pytest.raises(RuntimeError, match='before.*writ'):
-                    setter()
+            # Java keeps the existing bucket's columns/consumer while allowing
+            # a new factory configuration for future buckets.
+            writer.with_blob_consumer(None)
+            writer.with_write_type(['id'])
+            with pytest.raises(RuntimeError, match='before.*writ'):
+                writer.with_blob_uri_reader_factory(None)
             if native:
-                with pytest.raises((ValueError, RuntimeError), match='before.*writ'):
-                    writer.with_write_type(['id'])
                 assert writer._blob_rows.fallback is factory
             messages = writer.prepare_commit(7) if stream else writer.prepare_commit()
             commit.commit(messages, 7) if stream else commit.commit(messages)

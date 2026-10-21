@@ -158,18 +158,30 @@ def _from_native_plan(table, rust_plan) -> Plan:
     return Plan(splits, snapshot_id=snapshot_id, _native_stats=rust_plan.stats())
 
 
-class NativeTableScanMixin:
-    def _native_requested(self) -> bool:
-        if self.table.options.native_plan_enabled():
-            return True
-        if not self.table.options.native_read_enabled():
-            return False
-        return runtime.native_runtime_available()
+class NativeTableScan:
+    """Adapt the public scan configuration to Core planning."""
+
+    def __init__(self, scan):
+        self._scan = scan
+
+    def plan(self, auth_result=None):
+        # Core requests and captures query authorization with its own plan.
+        return self._plan()
+
+    def plan_all_files(self):
+        return self._plan(all_files=True)
+
+    def scan_with_stats(self, auth_result=None):
+        # Preserve explicit facade hooks while Core records counters as part
+        # of the ordinary planning pass.
+        plan = self._scan._try_native_plan()
+        return None if plan is None else (plan, plan.stats())
 
     def _native_plan_supported(self) -> bool:
         # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
+        scan = self._scan
         try:
-            return self._native_plan_supported_impl()
+            return scan._native_plan_supported_impl()
         except Exception as e:
             logger.warning("Native-plan capability probe failed, falling back: %s", e)
             return False
@@ -181,17 +193,18 @@ class NativeTableScanMixin:
         custom authorization, a missing pypaimon-rust, or a catalog / identifier Rust
         cannot reconstruct. Keep this capability gate in sync when adding scan
         features."""
+        scan = self._scan
         from pypaimon.execution.native.table import _resolved_schema_file_io_options
         if not runtime.native_runtime_available():
             return False
-        request = self._scan_request()
-        if not self._native_global_index_result_supported(request):
+        request = scan._scan_request()
+        if not scan._native_global_index_result_supported(request):
             return False
         if request.chunk_shuffle is not None:
             request.validate_chunk_shuffle_compat()
-        if _resolved_schema_file_io_options(self.table) is None:
+        if _resolved_schema_file_io_options(scan.table) is None:
             loader = getattr(
-                getattr(self.table, 'catalog_environment', None),
+                getattr(scan.table, 'catalog_environment', None),
                 'catalog_loader',
                 None,
             )
@@ -205,29 +218,30 @@ class NativeTableScanMixin:
             catalog_options = getattr(context, 'options', None)
             if catalog_options is None:
                 return False
-            database_name = self.table.identifier.get_database_name()
+            database_name = scan.table.identifier.get_database_name()
             if not database_name or database_name == UNKNOWN_DATABASE:
                 return False
-        if self.table.options.query_auth_enabled:
+        if scan.table.options.query_auth_enabled:
             # The filesystem path has no catalog-issued authorization session.
-            loader = getattr(getattr(self.table, 'catalog_environment', None), 'catalog_loader', None)
+            loader = getattr(getattr(scan.table, 'catalog_environment', None), 'catalog_loader', None)
             from pypaimon.execution.native.table import _catalog_metastore
             if loader is None or _catalog_metastore(loader) != 'rest':
                 return False
             from pypaimon.execution.native.table import _native_query_auth_supported
-            if not _native_query_auth_supported(self.table):
+            if not _native_query_auth_supported(scan.table):
                 return False
         # Rust rejects schemas whose primary keys are all partition keys.
-        if getattr(self.table, 'is_primary_key_table', False) \
-                and not self.table.trimmed_primary_keys:
+        if getattr(scan.table, 'is_primary_key_table', False) \
+                and not scan.table.trimmed_primary_keys:
             return False
-        options = self.table.options.options
+        options = scan.table.options.options
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
         return not any(options.contains_key(k) for k in unsupported_scan_keys)
 
     def _native_global_index_result_supported(self, request: Optional[ScanRequest] = None) -> bool:
-        request = self._scan_request() if request is None else request
+        scan = self._scan
+        request = scan._scan_request() if request is None else request
         result = request.global_index_result
         if result is None:
             return True
@@ -240,10 +254,11 @@ class NativeTableScanMixin:
         return isinstance(result, GlobalIndexResult)
 
     def _native_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
-        row_ranges = self._scan_request().row_ranges
+        scan = self._scan
+        row_ranges = scan._scan_request().row_ranges
         return list(row_ranges) if row_ranges is not None else None
 
-    def _try_native_plan(self, all_files=False) -> Optional[Plan]:
+    def _plan(self, all_files=False) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
         Predicate and limit are pushed into Rust planning and are still enforced
@@ -251,16 +266,17 @@ class NativeTableScanMixin:
         every split.
         """
 
+        scan = self._scan
         try:
-            request = self._scan_request()
+            request = scan._scan_request()
             has_distribution = (request.idx_of_this_subtask is not None
                                 or request.start_pos_of_this_subtask is not None)
             extra_options = {}
-            if self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+            if scan.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 if request.incremental_snapshot_range is None:
                     return Plan([], _scan_stats=ScanStats.empty_native(request.read_limit))
                 extra_options['incremental_range'] = request.incremental_snapshot_range
-                if self.table.options.changelog_producer() != ChangelogProducer.NONE:
+                if scan.table.options.changelog_producer() != ChangelogProducer.NONE:
                     extra_options['incremental_mode'] = 'changelog'
             chunk_shuffle = request.chunk_shuffle
             if chunk_shuffle is not None:
@@ -291,7 +307,7 @@ class NativeTableScanMixin:
             if all_files:
                 extra_options['all_files'] = True
             plan = native_plan(
-                self.table,
+                scan.table,
                 predicate=request.read_predicate,
                 limit=None if defer_limit else request.read_limit,
                 projection=(

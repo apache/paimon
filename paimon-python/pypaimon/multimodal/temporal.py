@@ -28,10 +28,8 @@ import pyarrow.compute as pc
 
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.options.core_options import CoreOptions, StartupMode
-from pypaimon.common.predicate_json_parser import (
-    _apply_predicate_transform,
-    _collect_all_field_refs_from_transform,
-)
+from pypaimon.common.predicate_json_parser import _collect_all_field_refs_from_transform
+from pypaimon.execution.python.read.predicate_json_parser import _apply_predicate_transform
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result

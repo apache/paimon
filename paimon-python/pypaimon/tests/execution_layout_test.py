@@ -54,6 +54,15 @@ modules = [
     'pypaimon.write.merge_condition', 'pypaimon.write.merge_transform',
     'pypaimon.globalindex.index_dispatch', 'pypaimon.globalindex.vindex_input',
     'pypaimon.table.system.system_table_read',
+    'pypaimon.table.source.deletion_file', 'pypaimon.index.deletion_vector_meta',
+    'pypaimon.index.index_file_meta',
+    'pypaimon.index.dynamic_bucket', 'pypaimon.data.map_shared_shredding',
+    'pypaimon.data.variant_shredding', 'pypaimon.data.variant_path',
+    'pypaimon.schema.arrow_schema', 'pypaimon.schema.data_type_casts',
+    'pypaimon.schema.schema_manager', 'pypaimon.utils.file_store_path_factory',
+    'pypaimon.table.system.files_table', 'pypaimon.common.predicate_json_parser',
+    'pypaimon.common.uri_reader', 'pypaimon.common.blob_index_cache',
+    'pypaimon.common.delta_varint_compressor', 'pypaimon.common.file_io',
 ]
 for name in modules:
     importlib.import_module(name)

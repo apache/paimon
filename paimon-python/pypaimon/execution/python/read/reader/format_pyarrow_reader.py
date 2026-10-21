@@ -34,22 +34,24 @@ from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
 from pypaimon.data.map_shared_shredding import (
-    assemble_normal_map_selected_keys,
-    assemble_shared_shredding_map,
-    assemble_shared_shredding_selected_keys,
     is_map_selected_keys_field,
     is_shared_shredding,
     map_selected_keys,
     parse_shared_shredding_metadata,
     parse_shared_shredding_selection_metadata,
+)
+from pypaimon.execution.python.read.map_shared_shredding import (
+    assemble_normal_map_selected_keys,
+    assemble_shared_shredding_map,
+    assemble_shared_shredding_selected_keys,
     shared_shredding_selected_paths,
 )
 from pypaimon.data.variant_shredding import (
     VariantSchema,
-    assemble_shredded_column,
     build_variant_schema,
     is_shredded_variant,
 )
+from pypaimon.execution.python.read.variant_shredding import assemble_shredded_column
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (
     ArrayType,

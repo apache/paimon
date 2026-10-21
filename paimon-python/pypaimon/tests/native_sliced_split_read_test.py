@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.identifier import Identifier
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.execution.native.read.split_adapter import (_native_read_split)
 from pypaimon.execution.native.runtime import (native_runtime_available)

@@ -190,8 +190,8 @@ class TableScan:
         _validate_scan_mode(self.table)
 
     def _create_file_scanner(self) -> "FileScanner":
-        from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
-        return PythonTableScanMixin._create_file_scanner(self)
+        from pypaimon.execution.python.read.table_scan import PythonTableScan
+        return PythonTableScan(self)._create_file_scanner()
 
     def _native_requested(self) -> bool:
         from pypaimon.read.read_dispatch import native_plan_requested
@@ -199,8 +199,8 @@ class TableScan:
 
     def _native_plan_supported(self) -> bool:
         # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
-        from pypaimon.execution.native.read.plan import NativeTableScanMixin
-        return NativeTableScanMixin._native_plan_supported(self)
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        return NativeTableScan(self)._native_plan_supported()
 
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
@@ -209,16 +209,16 @@ class TableScan:
         custom authorization, a missing pypaimon-rust, or a catalog / identifier Rust
         cannot reconstruct. Keep this capability gate in sync when adding scan
         features."""
-        from pypaimon.execution.native.read.plan import NativeTableScanMixin
-        return NativeTableScanMixin._native_plan_supported_impl(self)
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        return NativeTableScan(self)._native_plan_supported_impl()
 
     def _native_global_index_result_supported(self, request: Optional[ScanRequest] = None) -> bool:
-        from pypaimon.execution.native.read.plan import NativeTableScanMixin
-        return NativeTableScanMixin._native_global_index_result_supported(self, request)
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        return NativeTableScan(self)._native_global_index_result_supported(request)
 
     def _native_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
-        from pypaimon.execution.native.read.plan import NativeTableScanMixin
-        return NativeTableScanMixin._native_row_ranges(self)
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        return NativeTableScan(self)._native_row_ranges()
 
     def _try_native_plan(self, all_files=False) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
@@ -227,8 +227,9 @@ class TableScan:
         by the reader. Snapshot metadata is preserved even when pruning removes
         every split.
         """
-        from pypaimon.execution.native.read.plan import NativeTableScanMixin
-        return NativeTableScanMixin._try_native_plan(self, all_files)
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        execution = NativeTableScan(self)
+        return execution.plan_all_files() if all_files else execution.plan()
 
 
 __all__ = [

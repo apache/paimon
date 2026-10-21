@@ -30,11 +30,9 @@ import pyarrow.fs as pafs
 import pyarrow.orc as orc
 import pyarrow.parquet as pq
 
-from pypaimon.data import map_shared_shredding
-from pypaimon.data.map_shared_shredding import (
-    assemble_shared_shredding_selected_keys,
-    map_selected_keys_field,
-)
+from pypaimon.execution.python.read import map_shared_shredding
+from pypaimon.data.map_shared_shredding import map_selected_keys_field
+from pypaimon.execution.python.read.map_shared_shredding import assemble_shared_shredding_selected_keys
 from pypaimon.execution.python.read.reader.format_pyarrow_reader import (FormatPyArrowReader)
 from pypaimon.schema.data_types import (
     ArrayType,

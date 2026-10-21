@@ -37,7 +37,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
+from pypaimon.schema.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, MapType, MultisetType,
                                         PyarrowFieldParser, RowType,

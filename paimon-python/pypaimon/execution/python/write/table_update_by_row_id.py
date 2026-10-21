@@ -185,35 +185,40 @@ class _RowIdUpdateFileWriter:
         self._data_writer.close()
 
 
-class PythonRowIdUpdateMixin:
+class PythonTableUpdateByRowId:
     FIRST_ROW_ID_COLUMN = '_FIRST_ROW_ID'
 
-    def __init__(
+    def __init__(self, context):
+        self._context = context
+
+    def initialize(
             self, table, commit_user: str, commit_identifier: int,
             _precomputed_files_info: Optional[RowIdFileIndex] = None,
     ):
+        context = self._context
         from pypaimon.table.file_store_table import FileStoreTable
 
-        self.table: FileStoreTable = table
-        self.commit_user = commit_user
-        self.commit_identifier = commit_identifier
+        context.table: FileStoreTable = table
+        context.commit_user = commit_user
+        context.commit_identifier = commit_identifier
 
-        info = _precomputed_files_info or self._load_existing_files_info()
-        self.snapshot_id = info.snapshot_id
-        self.first_row_ids = info.first_row_ids
-        self._first_row_id_index = info.first_row_id_index
-        self.valid_row_id_ranges = info.valid_row_id_ranges
+        info = _precomputed_files_info or context._load_existing_files_info()
+        context.snapshot_id = info.snapshot_id
+        context.first_row_ids = info.first_row_ids
+        context._first_row_id_index = info.first_row_id_index
+        context.valid_row_id_ranges = info.valid_row_id_ranges
 
-        self.commit_messages: List[CommitMessage] = []
-        self._updated_first_row_ids_by_column: Dict[str, Set[int]] = {}
+        context.commit_messages: List[CommitMessage] = []
+        context._updated_first_row_ids_by_column: Dict[str, Set[int]] = {}
 
     def _snapshot_files_info(self) -> RowIdFileIndex:
         """Return the already loaded snapshot file index for broadcast."""
+        context = self._context
         return RowIdFileIndex(
-            snapshot_id=self.snapshot_id,
-            first_row_ids=self.first_row_ids,
-            first_row_id_index=self._first_row_id_index,
-            valid_row_id_ranges=self.valid_row_id_ranges,
+            snapshot_id=context.snapshot_id,
+            first_row_ids=context.first_row_ids,
+            first_row_id_index=context._first_row_id_index,
+            valid_row_id_ranges=context.valid_row_id_ranges,
         )
 
     def _load_existing_files_info(self) -> RowIdFileIndex:
@@ -224,7 +229,8 @@ class PythonRowIdUpdateMixin:
         id (a single id may belong to multiple files when data evolution has
         split a logical row range).
         """
-        return RowIdFileIndex.from_table(self.table)
+        context = self._context
+        return RowIdFileIndex.from_table(context.table)
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """
@@ -237,6 +243,7 @@ class PythonRowIdUpdateMixin:
         Returns:
             List of commit messages
         """
+        context = self._context
 
         if not column_names:
             raise ValueError("column_names cannot be empty")
@@ -246,17 +253,17 @@ class PythonRowIdUpdateMixin:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
 
         for col_name in column_names:
-            if col_name not in self.table.field_names:
+            if col_name not in context.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
-        data_with_first_row_id = self._calculate_first_row_id(data)
+        data_with_first_row_id = context._calculate_first_row_id(data)
         first_row_ids = set(
-            data_with_first_row_id[self.FIRST_ROW_ID_COLUMN].to_pylist()
+            data_with_first_row_id[context.FIRST_ROW_ID_COLUMN].to_pylist()
         )
         overlapping = {}
         for col_name in column_names:
             ids = first_row_ids.intersection(
-                self._updated_first_row_ids_by_column.get(col_name, set()))
+                context._updated_first_row_ids_by_column.get(col_name, set()))
             if ids:
                 overlapping[col_name] = sorted(ids)
         if overlapping:
@@ -264,19 +271,20 @@ class PythonRowIdUpdateMixin:
                 "Input batches contain overlapping first_row_ids by column: "
                 f"{overlapping}"
             )
-        self._write_by_first_row_id(data_with_first_row_id, column_names)
+        context._write_by_first_row_id(data_with_first_row_id, column_names)
         for col_name in column_names:
-            self._updated_first_row_ids_by_column.setdefault(
+            context._updated_first_row_ids_by_column.setdefault(
                 col_name, set()).update(first_row_ids)
 
-        return self.commit_messages
+        return context.commit_messages
 
     def _write_row_columns(self, update_data, column_names, blob_object_columns):
-        data_with_first_row_id = self._calculate_first_row_id(update_data)
-        self._write_by_first_row_id(
+        context = self._context
+        data_with_first_row_id = context._calculate_first_row_id(update_data)
+        context._write_by_first_row_id(
             data_with_first_row_id, column_names, blob_object_columns)
 
-        return self.commit_messages
+        return context.commit_messages
 
     def _calculate_first_row_id(self, data: pa.Table) -> pa.Table:
         """Append ``_FIRST_ROW_ID`` to *data* by looking up each ``_ROW_ID``.
@@ -284,6 +292,7 @@ class PythonRowIdUpdateMixin:
         Validates that every input ``_ROW_ID`` is unique and belongs to
         a valid row_id range. Supports partial / non-consecutive updates.
         """
+        context = self._context
         row_id_arr = data[SpecialFields.ROW_ID.name]
         row_ids = row_id_arr.to_pylist()
 
@@ -292,27 +301,27 @@ class PythonRowIdUpdateMixin:
 
         if not row_ids:
             return data.append_column(
-                self.FIRST_ROW_ID_COLUMN, pa.array([], type=pa.int64()),
+                context.FIRST_ROW_ID_COLUMN, pa.array([], type=pa.int64()),
             )
 
         for row_id in row_ids:
-            if not any(r.contains(row_id) for r in self.valid_row_id_ranges):
+            if not any(r.contains(row_id) for r in context.valid_row_id_ranges):
                 raise ValueError(
                     f"Row ID {row_id} does not belong to any valid range "
-                    f"{[f'[{r.from_}, {r.to}]' for r in self.valid_row_id_ranges]}"
+                    f"{[f'[{r.from_}, {r.to}]' for r in context.valid_row_id_ranges]}"
                 )
 
-        if not self.first_row_ids:
+        if not context.first_row_ids:
             raise ValueError("The input sorted sequence is empty.")
 
-        sorted_seq = self.first_row_ids
+        sorted_seq = context.first_row_ids
         bisect_right = bisect.bisect_right
         first_row_id_values = [
             sorted_seq[bisect_right(sorted_seq, row_id) - 1]
             for row_id in row_ids
         ]
         return data.append_column(
-            self.FIRST_ROW_ID_COLUMN,
+            context.FIRST_ROW_ID_COLUMN,
             pa.array(first_row_id_values, type=pa.int64()),
         )
 
@@ -322,12 +331,13 @@ class PythonRowIdUpdateMixin:
             column_names: List[str],
             blob_object_columns: Optional[Dict[str, List[Any]]] = None):
         """Write data grouped by first_row_id."""
-        first_row_id_array = data[self.FIRST_ROW_ID_COLUMN]
+        context = self._context
+        first_row_id_array = data[context.FIRST_ROW_ID_COLUMN]
         unique_first_row_ids = pc.unique(first_row_id_array).to_pylist()
         first_row_id_values = first_row_id_array.to_pylist()
 
         for first_row_id in unique_first_row_ids:
-            entry = self._first_row_id_index.get(first_row_id)
+            entry = context._first_row_id_index.get(first_row_id)
             if entry is None:
                 raise ValueError(f"No existing file found for first_row_id {first_row_id}")
             split, _files = entry
@@ -343,7 +353,7 @@ class PythonRowIdUpdateMixin:
                     col_name: [values[i] for i in group_indices]
                     for col_name, values in blob_object_columns.items()
                 }
-            self._write_group(
+            context._write_group(
                 split.partition,
                 first_row_id,
                 group_data,
@@ -365,16 +375,18 @@ class PythonRowIdUpdateMixin:
         Returns:
             PyArrow Table containing the original values for the requested columns.
         """
-        table_read, origin_split = self._original_file_read(first_row_id, column_names)
+        context = self._context
+        table_read, origin_split = context._original_file_read(first_row_id, column_names)
         original = table_read.to_arrow([origin_split])
         return original.select(column_names)
 
     def _original_file_read(self, first_row_id, column_names):
+        context = self._context
         wanted = set(column_names)
         read_fields: List[DataField] = [
-            table_field for table_field in self.table.fields if table_field.name in wanted
+            table_field for table_field in context.table.fields if table_field.name in wanted
         ]
-        entry = self._first_row_id_index.get(first_row_id)
+        entry = context._first_row_id_index.get(first_row_id)
         if entry is None:
             raise ValueError(f"No file found for first_row_id {first_row_id}")
         owning_split, target_files = entry
@@ -389,9 +401,10 @@ class PythonRowIdUpdateMixin:
         # added after the original file was written, reading only those
         # missing columns can otherwise produce a zero-row table instead of
         # one null value per original row.
-        read_table = self.table
-        if wanted.intersection(self.table.options.blob_descriptor_fields() | self.table.options.blob_view_fields()):
-            read_table = self.table.copy({'blob-as-descriptor': 'true', 'blob-view.resolve.enabled': 'false'})
+        read_table = context.table
+        if wanted.intersection(
+                context.table.options.blob_descriptor_fields() | context.table.options.blob_view_fields()):
+            read_table = context.table.copy({'blob-as-descriptor': 'true', 'blob-view.resolve.enabled': 'false'})
         table_read = TableRead(
             read_table,
             predicate=None,
@@ -401,7 +414,8 @@ class PythonRowIdUpdateMixin:
 
     def _merged_batches(self, first_row_id, data, column_names):
         """Merge ordinary columns a batch at a time in physical row order."""
-        table_read, split = self._original_file_read(first_row_id, column_names)
+        context = self._context
+        table_read, split = context._original_file_read(first_row_id, column_names)
         updates = sorted(enumerate(data[SpecialFields.ROW_ID.name].to_pylist()),
                          key=lambda item: item[1])
         update_index = 0
@@ -430,7 +444,7 @@ class PythonRowIdUpdateMixin:
                     update_index += 1
                 original = pa.Table.from_batches([batch]).select(column_names)
                 if selected:
-                    merged, _ = self._merge_update_with_original(
+                    merged, _ = context._merge_update_with_original(
                         original, data.take(selected), column_names, offset)
                 else:
                     merged = original
@@ -441,17 +455,18 @@ class PythonRowIdUpdateMixin:
             raise ValueError('Update row IDs extend past the original file group')
 
     def _write_group_streaming(self, partition, first_row_id, data, column_names):
+        context = self._context
         writer = _RowIdUpdateFileWriter(
-            self.table, tuple(partition.values), column_names)
-        merged_batches = self._merged_batches(first_row_id, data, column_names)
-        batches = (self._normalize_write_data(batch) for batch in merged_batches)
+            context.table, tuple(partition.values), column_names)
+        merged_batches = context._merged_batches(first_row_id, data, column_names)
+        batches = (context._normalize_write_data(batch) for batch in merged_batches)
         try:
             files = writer.write_batches(batches)
-            self._assign_update_file_metadata(files, first_row_id, column_names, {})
+            context._assign_update_file_metadata(files, first_row_id, column_names, {})
             if files:
-                self.commit_messages.append(CommitMessage(
+                context.commit_messages.append(CommitMessage(
                     partition=tuple(partition.values), bucket=0, new_files=files,
-                    check_from_snapshot=self.snapshot_id))
+                    check_from_snapshot=context.snapshot_id))
         except Exception:
             writer.abort()
             raise
@@ -496,6 +511,7 @@ class PythonRowIdUpdateMixin:
             Blob value list lengths may differ when the updated columns do not
             all have physical baselines.
         """
+        context = self._context
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
         relative_indices = pc.subtract(
@@ -520,14 +536,14 @@ class PythonRowIdUpdateMixin:
         # non-empty group, so update_positions is non-empty here.
         blob_columns_with_baseline = blob_columns_with_baseline or set()
         for col_name in column_names:
-            if self._is_blob_column(col_name):
+            if context._is_blob_column(col_name):
                 has_baseline = col_name in blob_columns_with_baseline
                 blob_row_count = (
                     max(update_positions) + 1
                     if has_baseline else original_data.num_rows
                 )
                 missing_value = (
-                    self._blob_placeholder(col_name)
+                    context._blob_placeholder(col_name)
                     if has_baseline else None
                 )
                 if blob_object_columns and col_name in blob_object_columns:
@@ -557,7 +573,7 @@ class PythonRowIdUpdateMixin:
                         raise IndexError(
                             f"Update position {position} is outside column "
                             f"range [0, {row_count})")
-            merged_columns[col_name] = self._merge_chunked_column(
+            merged_columns[col_name] = context._merge_chunked_column(
                 original_col, update_col, sorted_updates)
 
         merged_table = None
@@ -573,14 +589,15 @@ class PythonRowIdUpdateMixin:
     def _normalize_write_data(self, data):
         # DE reads relax nested nullability. Restore and validate the declared
         # write types at the writer boundary, including untouched input batches.
+        context = self._context
         write_schema = PyarrowFieldParser.from_paimon_schema(
-            [self.table.field_dict[name] for name in data.schema.names])
+            [context.table.field_dict[name] for name in data.schema.names])
         normalized = normalize_arrow_write_nullability(data, write_schema)
         # Reads relax field nullability for schema evolution. A projected
         # update must still enforce the declared write type, as Java's
         # TableWrite.withWriteType does for every selected output column.
         for field, column in zip(write_schema, normalized.columns):
-            self._check_write_not_null(field.name, column.null_count > 0)
+            context._check_write_not_null(field.name, column.null_count > 0)
         if any(actual.nullable != expected.nullable
                for actual, expected in zip(normalized.schema, write_schema)):
             fields = [actual.with_nullable(expected.nullable)
@@ -592,7 +609,8 @@ class PythonRowIdUpdateMixin:
         return normalized
 
     def _check_write_not_null(self, column_name, has_null):
-        if not self.table.field_dict[column_name].type.nullable and has_null:
+        context = self._context
+        if not context.table.field_dict[column_name].type.nullable and has_null:
             raise ValueError('Cannot write null to non-null column(%s)' % column_name)
 
     @classmethod
@@ -771,7 +789,7 @@ class PythonRowIdUpdateMixin:
         try:
             return col.cast(target_type)
         except pa.lib.ArrowInvalid as error:
-            if PythonRowIdUpdateMixin._is_offset_overflow(error):
+            if PythonTableUpdateByRowId._is_offset_overflow(error):
                 raise
         except (pa.lib.ArrowNotImplementedError,
                 pa.lib.ArrowTypeError):
@@ -799,7 +817,8 @@ class PythonRowIdUpdateMixin:
         return pa.array(pylist, type=target_type)
 
     def _blob_placeholder(self, column_name: str):
-        for table_field in self.table.fields:
+        context = self._context
+        for table_field in context.table.fields:
             if table_field.name == column_name:
                 if is_map_blob_type(table_field.type):
                     return Blob.MAP_PLACE_HOLDER
@@ -822,19 +841,20 @@ class PythonRowIdUpdateMixin:
         Reads the original file data, merges in the update values, and
         writes a single output file (rolling disabled) for the group.
         """
+        context = self._context
         # Specialized writers still own their sidecars and physical encoding.
-        if _RowIdUpdateFileWriter.supports_table(self.table):
-            self._write_group_streaming(partition, first_row_id, data, column_names)
+        if _RowIdUpdateFileWriter.supports_table(context.table):
+            context._write_group_streaming(partition, first_row_id, data, column_names)
             return
-        original_data = self._read_original_file_data(first_row_id, column_names)
-        _, target_files = self._first_row_id_index[first_row_id]
+        original_data = context._read_original_file_data(first_row_id, column_names)
+        _, target_files = context._first_row_id_index[first_row_id]
         blob_columns_with_baseline = {
             column_name
             for file in target_files
             if DataFileMeta.is_blob_file(file.file_name)
             for column_name in (file.write_cols or [])
         }
-        merged_data, blob_columns = self._merge_update_with_original(
+        merged_data, blob_columns = context._merge_update_with_original(
             original_data,
             data,
             column_names,
@@ -847,7 +867,7 @@ class PythonRowIdUpdateMixin:
         # the merged values that will be written, including row-based inputs,
         # while placeholders and NULL children of non-NULL containers remain valid.
         for column_name, values in blob_columns.items():
-            self._check_write_not_null(column_name, any(value is None for value in values))
+            context._check_write_not_null(column_name, any(value is None for value in values))
 
         partition_tuple = tuple(partition.values)
         new_files = []
@@ -856,25 +876,25 @@ class PythonRowIdUpdateMixin:
         success = False
         try:
             if merged_data is not None:
-                merged_data = self._normalize_write_data(merged_data)
-                file_store_write = FileStoreWrite(self.table, self.commit_user)
+                merged_data = context._normalize_write_data(merged_data)
+                file_store_write = FileStoreWrite(context.table, context.commit_user)
                 file_store_write.disable_rolling()
                 file_store_write.write_cols = list(merged_data.column_names)
                 for batch in merged_data.to_batches():
                     file_store_write.write(partition_tuple, 0, batch)
-                new_messages = file_store_write.prepare_commit(self.commit_identifier)
+                new_messages = file_store_write.prepare_commit(context.commit_identifier)
                 for msg in new_messages:
                     new_files.extend(msg.new_files)
 
             for column_name, values in blob_columns.items():
                 blob_writer = BlobWriter(
-                    self.table,
+                    context.table,
                     partition_tuple,
                     0,
                     0,
                     column_name,
-                    self.table.options,
-                    video=column_name in self.table.options.video_frame_fields(),
+                    context.table.options,
+                    video=column_name in context.table.options.video_frame_fields(),
                 )
                 blob_writers.append(blob_writer)
                 arrow_type = original_data.schema.field(column_name).type
@@ -884,14 +904,14 @@ class PythonRowIdUpdateMixin:
                 blob_writer._release_prepared_files()
 
             if new_files:
-                self._assign_update_file_metadata(
+                context._assign_update_file_metadata(
                     new_files, first_row_id, column_names, blob_columns)
-                self.commit_messages.append(
+                context.commit_messages.append(
                     CommitMessage(
                         partition=partition_tuple,
                         bucket=0,
                         new_files=new_files,
-                        check_from_snapshot=self.snapshot_id,
+                        check_from_snapshot=context.snapshot_id,
                     )
                 )
             success = True

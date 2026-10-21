@@ -3187,7 +3187,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         from pypaimon import Schema
         from pypaimon.table.row.blob import BlobViewStruct
-        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+        from pypaimon.execution.python.read.blob_view_lookup import BlobViewLookup
 
         source_schema = pa.schema([
             ('id', pa.int32()),

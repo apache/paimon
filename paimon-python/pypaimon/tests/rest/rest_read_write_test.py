@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon import CatalogFactory
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog

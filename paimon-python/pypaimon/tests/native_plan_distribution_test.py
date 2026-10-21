@@ -27,7 +27,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.table.row.generic_row import GenericRow

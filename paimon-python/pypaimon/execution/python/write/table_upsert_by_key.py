@@ -33,38 +33,47 @@ _KeyTuple = Tuple[Any, ...]
 logger = logging.getLogger(__name__)
 
 
-class PythonTableUpsertMixin:
+class PythonTableUpsert:
     """Python partition matching, deduplication and file rewriting."""
 
+    def __init__(self, context, data=None, upsert_keys=None, update_cols=None, *, rows=False):
+        self._context = context
+        self._data = data
+        self._upsert_keys = upsert_keys
+        self._update_cols = update_cols
+        self._rows = rows
+
+    def upsert(self):
+        context = self._context
+        if self._rows:
+            return context._upsert_rows(self._data, self._upsert_keys, self._update_cols)
+        return context._upsert_arrow(self._data, self._upsert_keys, self._update_cols)
+
     def _new_row_id_updater(self):
+        context = self._context
         from pypaimon.write.write_builder import _new_update_by_row_id
 
         return _new_update_by_row_id(
-            self.table, self.commit_user, self.commit_identifier)
-
-    @staticmethod
-    def _normalize_rows(rows) -> List:
-        from pypaimon.write.update_validation import _normalize_rows
-
-        return _normalize_rows(rows)
+            context.table, context.commit_user, context.commit_identifier)
 
     def _group_rows_by_partition(
             self,
             row_items: List[Tuple[Any, Dict[str, Any]]],
     ) -> List[Tuple[Dict[str, Any], List[Tuple[Any, Dict[str, Any]]]]]:
-        if not self.table.partition_keys:
+        context = self._context
+        if not context.table.partition_keys:
             return [({}, row_items)]
 
         partition_to_items: Dict[Tuple[Any, ...], List[Tuple[Any, Dict[str, Any]]]] = {}
         for item in row_items:
             _, values_by_name = item
             part_tuple = tuple(
-                values_by_name[key] for key in self.table.partition_keys
+                values_by_name[key] for key in context.table.partition_keys
             )
             partition_to_items.setdefault(part_tuple, []).append(item)
 
         return [
-            (dict(zip(self.table.partition_keys, part_tuple)), items)
+            (dict(zip(context.table.partition_keys, part_tuple)), items)
             for part_tuple, items in partition_to_items.items()
         ]
 
@@ -75,7 +84,8 @@ class PythonTableUpsertMixin:
             partition_spec: Dict[str, Any],
             update_cols: Optional[List[str]],
     ) -> List[CommitMessage]:
-        partition_key_set = set(self.table.partition_keys)
+        context = self._context
+        partition_key_set = set(context.table.partition_keys)
         match_keys = [k for k in upsert_keys if k not in partition_key_set]
         input_key_tuples = [
             tuple(values_by_name[k] for k in match_keys)
@@ -86,10 +96,10 @@ class PythonTableUpsertMixin:
                 if isinstance(value, Blob):
                     raise ValueError("Blob values are not supported as upsert keys.")
 
-        row_items, input_key_tuples = self._dedup_row_items_last_write_wins(
+        row_items, input_key_tuples = context._dedup_row_items_last_write_wins(
             row_items, input_key_tuples, partition_spec)
 
-        key_to_row_ids = self._build_key_to_row_ids_map(
+        key_to_row_ids = context._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples)
         )
 
@@ -108,18 +118,18 @@ class PythonTableUpsertMixin:
             cols_to_update = (
                 list(update_cols)
                 if update_cols is not None
-                else list(self.table.field_names)
+                else list(context.table.field_names)
             )
             for _, values_by_name in matched_items:
                 require_columns(values_by_name, cols_to_update, "upsert_by_key")
-            commit_messages.extend(self._new_row_id_updater().update_rows_columns(
+            commit_messages.extend(context._new_row_id_updater().update_rows_columns(
                 [row for row, _ in matched_items],
                 matched_row_ids,
                 cols_to_update,
             ))
 
         if new_items:
-            commit_messages.extend(self._append_rows(new_items))
+            commit_messages.extend(context._append_rows(new_items))
 
         return commit_messages
 
@@ -158,7 +168,8 @@ class PythonTableUpsertMixin:
         Iteration order matches first-appearance order of each partition value
         in the input — dict preserves insertion order on Python 3.7+.
         """
-        partition_keys = self.table.partition_keys
+        context = self._context
+        partition_keys = context.table.partition_keys
         if not partition_keys:
             return [({}, data)]
 
@@ -194,9 +205,10 @@ class PythonTableUpsertMixin:
         key set on-the-fly, so only matching key → _ROW_ID pairs are kept in
         memory (instead of the entire partition's key set).
         """
+        context = self._context
         # Partition columns are constant inside one partition – drop them
         # from the key set used for matching.
-        partition_key_set = set(self.table.partition_keys)
+        partition_key_set = set(context.table.partition_keys)
         match_keys = [k for k in upsert_keys if k not in partition_key_set]
 
         # 1. Build the composite key tuple for every input row.
@@ -207,14 +219,14 @@ class PythonTableUpsertMixin:
         ]
 
         # 2. Deduplicate – keep the LAST occurrence of every repeated key.
-        partition_data, input_key_tuples = self._dedup_last_write_wins(
+        partition_data, input_key_tuples = context._dedup_last_write_wins(
             partition_data, input_key_tuples, partition_spec,
         )
 
         # 3. Scan partition once, keeping key → [_ROW_ID, ...] for keys that
         #    appear in the input (memory ∝ matched existing rows, not the
         #    whole partition).
-        key_to_row_ids = self._build_key_to_row_ids_map(
+        key_to_row_ids = context._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
 
@@ -239,12 +251,12 @@ class PythonTableUpsertMixin:
 
         commit_messages: List[CommitMessage] = []
         if matched_indices:
-            commit_messages.extend(self._do_updates(
+            commit_messages.extend(context._do_updates(
                 partition_data, matched_indices,
                 input_key_tuples, key_to_row_ids, update_cols,
             ))
         if new_indices:
-            commit_messages.extend(self._do_appends(partition_data, new_indices))
+            commit_messages.extend(context._do_appends(partition_data, new_indices))
         return commit_messages
 
     @staticmethod
@@ -275,21 +287,6 @@ class PythonTableUpsertMixin:
             [input_key_tuples[i] for i in dedup_indices],
         )
 
-    def _validate_inputs(self, data: pa.Table, upsert_keys: List[str],
-                         update_cols: Optional[List[str]]):
-        from pypaimon.write.update_validation import _validate_inputs
-
-        return _validate_inputs(self, data, upsert_keys, update_cols)
-
-    def _validate_row_inputs(
-            self,
-            values_by_name: Dict[str, Any],
-            upsert_keys: List[str],
-            update_cols: Optional[List[str]]):
-        from pypaimon.write.update_validation import _validate_row_inputs
-
-        return _validate_row_inputs(self, values_by_name, upsert_keys, update_cols)
-
     def _build_key_to_row_ids_map(
             self,
             match_keys: List[str],
@@ -313,7 +310,8 @@ class PythonTableUpsertMixin:
                              Pass an empty dict (or None) for non-partitioned tables.
             input_key_set:   Set of composite key tuples from the input data.
         """
-        read_builder = self.table.new_read_builder()
+        context = self._context
+        read_builder = context.table.new_read_builder()
 
         if partition_spec:
             predicate_builder = read_builder.new_predicate_builder()
@@ -331,11 +329,11 @@ class PythonTableUpsertMixin:
             return {}
 
         # Read only the key columns + _ROW_ID
-        key_fields = [self.table.field_dict[k] for k in match_keys]
+        key_fields = [context.table.field_dict[k] for k in match_keys]
         read_type = key_fields + [SpecialFields.ROW_ID]
 
         table_read = TableRead(
-            table=self.table, predicate=None, read_type=read_type
+            table=context.table, predicate=None, read_type=read_type
         )
 
         # Stream batches and filter against input_key_set on-the-fly
@@ -360,6 +358,7 @@ class PythonTableUpsertMixin:
             update_cols: Optional[List[str]]
     ) -> List[CommitMessage]:
         """Update matched rows in-place via :class:`TableUpdateByRowId`."""
+        context = self._context
         expanded_input_indices: List[int] = []
         row_ids: List[int] = []
         for i in matched_indices:
@@ -371,8 +370,8 @@ class PythonTableUpsertMixin:
             SpecialFields.ROW_ID.name, pa.array(row_ids, type=pa.int64()),
         )
 
-        cols_to_update = list(update_cols) if update_cols else list(self.table.field_names)
-        return self._new_row_id_updater().update_columns(
+        cols_to_update = list(update_cols) if update_cols else list(context.table.field_names)
+        return context._new_row_id_updater().update_columns(
             update_data, cols_to_update)
 
     def _do_appends(
@@ -391,17 +390,18 @@ class PythonTableUpsertMixin:
         identifier is :data:`BATCH_COMMIT_IDENTIFIER`, so the on-disk
         result is identical to using :class:`BatchTableWrite`.
         """
+        context = self._context
         new_data = data.take(new_indices)
 
         # Reorder columns to match table schema order
-        all_ordered_cols = [c for c in self.table.field_names if c in new_data.column_names]
+        all_ordered_cols = [c for c in context.table.field_names if c in new_data.column_names]
         new_data = new_data.select(all_ordered_cols)
 
-        table_write = StreamTableWrite(self.table, self.commit_user)
+        table_write = StreamTableWrite(context.table, context.commit_user)
         try:
             table_write.with_write_type(all_ordered_cols)
             table_write.write_arrow(new_data)
-            return table_write.prepare_commit(self.commit_identifier)
+            return table_write.prepare_commit(context.commit_identifier)
         finally:
             table_write.close()
 
@@ -409,14 +409,15 @@ class PythonTableUpsertMixin:
             self,
             row_items: List[Tuple[Any, Dict[str, Any]]],
     ) -> List[CommitMessage]:
-        all_ordered_cols = self._append_row_column_names(row_items)
+        context = self._context
+        all_ordered_cols = context._append_row_column_names(row_items)
 
-        table_write = StreamTableWrite(self.table, self.commit_user)
+        table_write = StreamTableWrite(context.table, context.commit_user)
         try:
             table_write.with_write_type(all_ordered_cols)
             for row, _ in row_items:
                 table_write.write_row(row)
-            return table_write.prepare_commit(self.commit_identifier)
+            return table_write.prepare_commit(context.commit_identifier)
         finally:
             table_write.close()
 
@@ -424,6 +425,7 @@ class PythonTableUpsertMixin:
             self,
             row_items: List[Tuple[Any, Dict[str, Any]]],
     ) -> List[str]:
+        context = self._context
         first_field_names = set(row_items[0][1])
         for _, values_by_name in row_items[1:]:
             field_names = set(values_by_name)
@@ -431,11 +433,11 @@ class PythonTableUpsertMixin:
                 continue
 
             missing_fields = [
-                name for name in self.table.field_names
+                name for name in context.table.field_names
                 if name in first_field_names and name not in field_names
             ]
             extra_fields = [
-                name for name in self.table.field_names
+                name for name in context.table.field_names
                 if name in field_names and name not in first_field_names
             ]
             raise ValueError(
@@ -445,15 +447,16 @@ class PythonTableUpsertMixin:
                 f"extra fields: {extra_fields}."
             )
         return [
-            name for name in self.table.field_names if name in first_field_names
+            name for name in context.table.field_names if name in first_field_names
         ]
 
     def _upsert_arrow(self, data, upsert_keys, effective_update_cols):
+        context = self._context
         all_commit_messages: List[CommitMessage] = []
 
         # Process each partition independently
-        for partition_spec, partition_data in self._group_by_partition(data):
-            msgs = self._upsert_partition(
+        for partition_spec, partition_data in context._group_by_partition(data):
+            msgs = context._upsert_partition(
                 partition_data, upsert_keys, partition_spec, effective_update_cols
             )
             all_commit_messages.extend(msgs)
@@ -461,10 +464,11 @@ class PythonTableUpsertMixin:
         return all_commit_messages
 
     def _upsert_rows(self, row_items, upsert_keys, effective_update_cols):
+        context = self._context
         commit_messages: List[CommitMessage] = []
-        for partition_spec, partition_items in self._group_rows_by_partition(row_items):
+        for partition_spec, partition_items in context._group_rows_by_partition(row_items):
             commit_messages.extend(
-                self._upsert_row_partition(
+                context._upsert_row_partition(
                     partition_items,
                     upsert_keys,
                     partition_spec,

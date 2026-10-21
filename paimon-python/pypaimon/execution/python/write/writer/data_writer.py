@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
-from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.execution.python.write.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -448,7 +448,7 @@ class DataWriter(ABC):
         ``VariantUtils.variantFileType``) can read ``parquetType.getId().intValue()``
         without a NullPointerException.
         """
-        from pypaimon.data.variant_shredding import shred_variant_column
+        from pypaimon.execution.python.read.variant_shredding import shred_variant_column
         columns = list(data.columns)
         fields = list(data.schema)
         changed = False

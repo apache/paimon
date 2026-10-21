@@ -28,7 +28,7 @@ from pypaimon.execution.python.read.search.vector_search_read import (
     _iter_arrow_scores)
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 

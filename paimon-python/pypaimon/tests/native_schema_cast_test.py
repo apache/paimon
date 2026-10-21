@@ -115,7 +115,7 @@ def test_empty_chunked_input_retains_the_requested_type():
 
 
 def test_time_precision_changes_are_not_executable():
-    from pypaimon.casting.data_type_casts import can_execute_cast
+    from pypaimon.schema.data_type_casts import can_execute_cast
     assert not can_execute_cast(AtomicType('TIME(3)'), AtomicType('TIME(1)'))
     with pytest.raises(NotImplementedError):
         _cast_in_rust(
@@ -124,7 +124,7 @@ def test_time_precision_changes_are_not_executable():
 
 @pytest.mark.parametrize('source,target', [('TIME', 'TIME(0)'), ('TIME(3)', 'TIME( 3 )'), ('TIME(3)', 'TIME(03)')])
 def test_time_equivalent_precision_spellings_are_identity(source, target):
-    from pypaimon.casting.data_type_casts import can_execute_cast
+    from pypaimon.schema.data_type_casts import can_execute_cast
     assert can_execute_cast(AtomicType(source), AtomicType(target))
     data = pa.array([100, None], type=pa.time32('ms'))
     assert _cast_in_rust(data, AtomicType(source), AtomicType(target)).equals(data)

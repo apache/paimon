@@ -50,7 +50,7 @@ from pypaimon.execution.python.write.commit.overwrite_changes_provider import Ov
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.partition_spec import _UNREPRESENTABLE_PARTITION_VALUE, _partition_spec_value
+from pypaimon.execution.python.write.partition_spec import _UNREPRESENTABLE_PARTITION_VALUE, _partition_spec_value
 
 logger = logging.getLogger(__name__)
 

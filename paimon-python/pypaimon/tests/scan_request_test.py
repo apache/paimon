@@ -26,7 +26,7 @@ import pytest
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
-from pypaimon.execution.native.read.plan import NativeTableScanMixin
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon.read.plan import Plan
 from pypaimon.read.scan_request import ScanRequest
 from pypaimon.read.table_scan import TableScan
@@ -102,7 +102,7 @@ def test_native_prepare_observes_the_latest_public_scanner_configuration():
 
 
 def test_native_planner_and_metadata_limit_only_consume_a_shared_request():
-    class NativeScan(NativeTableScanMixin):
+    class Scan:
         table = SimpleNamespace(options=CoreOptions(Options({})))
 
         @property
@@ -114,7 +114,7 @@ def test_native_planner_and_metadata_limit_only_consume_a_shared_request():
 
     splits = [_Split(2), _Split(8)]
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan(splits, 7)) as native:
-        plan = NativeScan()._try_native_plan()
+        plan = NativeTableScan(Scan()).plan()
     assert plan.splits() == splits[:1]
     assert plan.snapshot_id == 7 and plan._stats_limit == 2
     assert native.call_args[1]['limit'] is None
