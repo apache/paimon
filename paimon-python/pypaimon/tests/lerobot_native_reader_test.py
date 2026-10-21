@@ -24,7 +24,8 @@ import pytest
 
 import pypaimon.multimodal as pm
 from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
-from pypaimon.read.native_plan import native_runtime_available, native_plan
+from pypaimon.execution.native.runtime import native_runtime_available
+from pypaimon.execution.native.read.plan import native_plan
 
 pytest.importorskip("torch")
 
@@ -73,7 +74,7 @@ def test_native_frame_lookup_keeps_residual_and_snapshot(frames, option):
     try:
         with patch.object(current._locator, "locate",
                           side_effect=AssertionError("Python frame lookup")), \
-                patch("pypaimon.read.native_plan.native_plan", side_effect=checked_plan):
+                patch("pypaimon.execution.native.read.plan.native_plan", side_effect=checked_plan):
             for indices, expected in [([40, 20, 40], [20, 40]),
                                       ([60, 99], []), ([], [])]:
                 result = current.read_indices(indices, ["value", "index"])
@@ -125,7 +126,7 @@ def test_native_frame_lookup_in_spawn_worker(frames):
 def test_missing_native_runtime_keeps_cached_python_lookup(frames):
     current = reader(frames, **{"read.native.enabled": "true"})
     try:
-        with patch("pypaimon.read.native_plan.native_runtime_available", return_value=False), \
+        with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=False), \
                 patch.object(current._locator, "locate", wraps=current._locator.locate) as locate:
             assert current.read_indices([30], ["value"])["value"].to_pylist() == [3]
             locate.assert_called_once_with([30])
@@ -137,7 +138,7 @@ def test_missing_native_runtime_keeps_cached_python_lookup(frames):
 def test_native_plan_failure_keeps_predicate(frames):
     current = reader(frames, **{"read.native.enabled": "true"})
     try:
-        with patch("pypaimon.read.native_plan.native_plan", side_effect=RuntimeError("unavailable")):
+        with patch("pypaimon.execution.native.read.plan.native_plan", side_effect=RuntimeError("unavailable")):
             assert current.read_indices([20], ["value"])["value"].to_pylist() == [2]
     finally:
         current.close()

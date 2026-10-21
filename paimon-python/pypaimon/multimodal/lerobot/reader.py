@@ -41,7 +41,7 @@ class _PaimonTableFrameReader:
         builder = self._table.new_read_builder().with_projection(columns)
         if (self._table.options.native_plan_enabled()
                 or self._table.options.native_read_enabled()):
-            from pypaimon.read.native_plan import native_runtime_available
+            from pypaimon.execution.native.runtime import native_runtime_available
             if native_runtime_available():
                 # Keep lookup predicates in the native plan and residual read.
                 builder.with_filter(_index_predicate(self._table, indices))
