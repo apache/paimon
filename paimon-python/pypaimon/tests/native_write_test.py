@@ -24,7 +24,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 
 requires_native = pytest.mark.native_plan
@@ -84,7 +84,7 @@ def test_sequence_validation_precedes_native_selection(tmp_path, streaming, sequ
     (pa.float64(), 'ascending', True),
 ])
 def test_native_sequence_write_capabilities(tmp_path, type_, order, supported):
-    from pypaimon.execution.native.write.native_write import create_native_write
+    from pypaimon.execution.native.write.native_write import NativeTableWrite as RawNativeWrite, create_native_write
 
     table = _table(tmp_path, primary_key=True, id_type=type_, table_options={
         'sequence.field': 'id', 'sequence.field.sort-order': order,
@@ -93,7 +93,7 @@ def test_native_sequence_write_capabilities(tmp_path, type_, order, supported):
             patch('pypaimon.execution.native.write.native_write.create_native_write_table') as native:
         writer = create_native_write(table, 'test')
         if supported:
-            assert isinstance(writer, NativeTableWrite)
+            assert isinstance(writer, RawNativeWrite)
             native.assert_called_once()
             writer.close()
         else:

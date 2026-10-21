@@ -39,7 +39,7 @@ class ShardUpdateValidationTest(unittest.TestCase):
                         field_names=['value'],
                         options=SimpleNamespace(native_write_enabled=lambda: native))
                     update = update_type(table, 'writer').with_update_type([])
-                    with patch('pypaimon.write.table_update.prepare_native_write_operation',
+                    with patch('pypaimon.execution.update_dispatch.prepare_native_write_operation',
                                side_effect=AssertionError('Prepared a backend for invalid columns')) as prepare, \
                             patch.object(update, '_new_python_shard_updator',
                                          side_effect=AssertionError('Created a Python shard updater')) as python:

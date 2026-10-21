@@ -133,7 +133,7 @@ class NativeShardTableUpdator:
         self.read = read
 
     def arrow_reader(self):
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        from pypaimon.execution.read_support import _ClosableArrowBatchReader
         schema = self.read._output_arrow_schema()
         batches = self.read._convert_native_batches(self.writer.arrow_reader(), schema)
         return _ClosableArrowBatchReader(pa.ipc.RecordBatchReader.from_batches(schema, batches), batches)
@@ -403,24 +403,6 @@ def create_native_predicate_update(table, commit_user, predicate, columns=None):
     writer = (native_table.new_batch_write_builder()
               ._with_commit_user(commit_user).new_update())
     return NativePredicateTableUpdate(table, writer, native_predicate)
-
-
-def native_predicate_row_ids(scan_table, predicate, splits):
-    """Match a batch delete predicate in Rust and return its row IDs."""
-    from pypaimon.execution.native.read.table_read import _prepare_native_read
-    from pypaimon.execution.native.read.split_adapter import native_split_from_python
-    if not native_runtime_available():
-        return None
-    reader = _prepare_native_read(
-        scan_table, predicate=predicate, projection=['_ROW_ID']
-    )
-    row_ids = []
-    ranges_use_row_ids = scan_table.options.row_tracking_enabled() or scan_table.options.data_evolution_enabled()
-    for split in splits:
-        for batch in reader([native_split_from_python(
-                split, ranges_use_row_ids=ranges_use_row_ids)]):
-            row_ids.extend(batch.column('_ROW_ID').to_pylist())
-    return row_ids
 
 
 def create_native_predicate_delete(table, commit_user, predicate):

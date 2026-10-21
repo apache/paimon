@@ -27,7 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]

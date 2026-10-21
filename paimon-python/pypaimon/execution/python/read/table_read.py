@@ -18,7 +18,7 @@
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 import pyarrow
 
@@ -45,6 +45,7 @@ from pypaimon.schema.data_types import DataField, MapType, is_map_blob_type
 from pypaimon.table.row.offset_row import OffsetRow
 
 from pypaimon.read.constants import ROW_KIND_COLUMN, _DEFAULT_PREDICATE
+from pypaimon.utils.arrow_utils import zero_column_batch
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,46 @@ class _RemainingRows:
 
 
 class PythonTableReadMixin:
+    @staticmethod
+    def _emit_overflow_safe_batches(
+        pydict: Dict[str, list],
+        row_count: int,
+        schema: pyarrow.Schema,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        """Yield RecordBatches from a ``{column: list}`` dict, keeping every column
+        within pyarrow's per-column size limit.
+
+        A STRING/BYTES column maps to ``pyarrow.string()``/``binary()`` which use
+        32-bit offsets (max 2GB per column). A chunk of large values can overflow
+        that, in which case ``pyarrow.array()`` returns a ``ChunkedArray`` that a
+        single ``RecordBatch`` cannot hold. When that happens we split the rows in
+        half and recurse so every emitted batch keeps each column under the limit.
+        """
+        if not schema:
+            yield zero_column_batch(row_count, schema.metadata)
+            return
+        arrays = []
+        for field in schema:
+            arr = pyarrow.array(pydict[field.name], type=field.type)
+            if isinstance(arr, pyarrow.ChunkedArray):
+                # A column overflowed the 2GB limit and was auto-chunked; split.
+                break
+            arrays.append(arr)
+        else:
+            yield pyarrow.RecordBatch.from_arrays(arrays, schema=schema)
+            return
+
+        if row_count <= 1:
+            raise ValueError(
+                "A single row exceeds the 2GB per-column limit of "
+                "pyarrow.string()/binary(); cannot build a RecordBatch for this row."
+            )
+        mid = row_count // 2
+        left = {name: column[:mid] for name, column in pydict.items()}
+        right = {name: column[mid:] for name, column in pydict.items()}
+        yield from PythonTableReadMixin._emit_overflow_safe_batches(left, mid, schema)
+        yield from PythonTableReadMixin._emit_overflow_safe_batches(right, row_count - mid, schema)
+
     def _python_row_iterator(self, splits, limit):
         self._check_python_merge_supported()
         count = 0
@@ -347,7 +388,7 @@ class PythonTableReadMixin:
             pydict = {ROW_KIND_COLUMN: row_kinds}
             for name, column in zip(data_field_names, columns_data):
                 pydict[name] = list(column)
-        yield from self._emit_overflow_safe_batches(pydict, len(row_tuples), schema)
+        yield from PythonTableReadMixin._emit_overflow_safe_batches(pydict, len(row_tuples), schema)
 
     def _create_split_read(self, split: Split, blob_parallelism: int = 1,
                            read_type=None, limit: Optional[int] = None,

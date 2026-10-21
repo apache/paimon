@@ -34,7 +34,6 @@ from pypaimon.common.options.config import HdfsOptions, SecurityOptions
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem import _kerberos
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
-from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
 class _HdfsFileInfo:
@@ -634,6 +633,8 @@ class HdfsNativeFileIO(FileIO):
             raise RuntimeError(f"Failed to write row file {path}: {e}") from e
 
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
+        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
+
         try:
             if data.num_columns != 1:
                 raise RuntimeError(

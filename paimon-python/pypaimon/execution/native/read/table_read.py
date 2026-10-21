@@ -23,6 +23,7 @@ from typing import List, Optional
 import pyarrow
 
 from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.execution.read_support import close_read_source
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
@@ -31,7 +32,7 @@ from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.read_type import OutputProjection, adapter_output_paths, extract_array, output_schema
 from pypaimon.read.split import Split
 from pypaimon.read.variant_read_type import has_variant_extractions
-from pypaimon.schema.data_types import DataField, is_blob_file_field
+from pypaimon.schema.data_types import DataField
 
 logger = logging.getLogger(__name__)
 _NATIVE_READ_FILE_FORMATS = frozenset({
@@ -182,6 +183,7 @@ class NativeTableReadMixin:
         return True
 
     def _convert_native_batches(self, batches, schema):
+        failure = None
         try:
             for batch in batches:
                 if batch.num_rows == 0:
@@ -189,10 +191,11 @@ class NativeTableReadMixin:
                 batch = self._prepare_native_batch(batch, schema)
                 batch = self._project_batch_to_output(batch)
                 yield self._try_to_pad_batch_by_schema(batch, schema)
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            close = getattr(batches, 'close', None)
-            if close is not None:
-                close()
+            close_read_source(batches, failure)
 
     def _prepare_native_batch(self, batch, schema):
         if self.include_row_kind and 'rowkind' in batch.schema.names:
@@ -232,23 +235,6 @@ class NativeTableReadMixin:
         from pypaimon.execution.native.table import _native_blob_view_supported
         return _native_blob_view_supported(self.table, (field.name for field in self._scan_read_type))
 
-    def _native_resolved_blob_fields(self) -> set:
-        """BLOB fields Rust resolves before emitting a batch."""
-        options = self.table.options
-        if options.blob_as_descriptor():
-            return set()
-        if self.table.is_primary_key_table:
-            return {field.name for field in self._scan_read_type if is_blob_file_field(field)}
-        inline_fields = (
-            options.blob_descriptor_fields()
-            | options.blob_view_fields()
-        )
-        read_names = {
-            field.name
-            for field in getattr(self, '_scan_read_type', self._adapter_read_type)
-        }
-        return inline_fields & read_names
-
     def _try_native_rows(self, splits):
         from copy import copy
         from pypaimon.execution.native.read.row_iterator import native_rows
@@ -265,11 +251,13 @@ class NativeTableReadMixin:
             return None
 
         def rows():
+            failure = None
             try:
                 yield from native_rows(batches, self.table, fields)
+            except BaseException as error:
+                failure = error
+                raise
             finally:
-                close = getattr(batches, 'close', None)
-                if close is not None:
-                    close()
+                close_read_source(batches, failure)
 
         return rows()

@@ -15,11 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
 from pypaimon.write.bucket_plan import PostponeBucketPlan
+from pypaimon.write.bucket_planning import PostponeBucketPlanning
 
 __all__ = ["PostponeBucketPlan", "PostponeBucketPlanner"]
 
 
-class PostponeBucketPlanner(PythonPostponeBucketPlanner):
+class PostponeBucketPlanner(PostponeBucketPlanning):
     """Plan fixed bucket counts for postpone batch writes."""
+
+    @staticmethod
+    def _load_bucket_metadata(table):
+        from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
+        return PythonPostponeBucketPlanner._load_bucket_metadata(table)

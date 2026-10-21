@@ -29,7 +29,7 @@ from pypaimon.execution.native.read.plan import (native_plan)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('large', pa.large_binary()), ('small', pa.large_binary())])

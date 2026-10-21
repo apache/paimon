@@ -59,7 +59,10 @@ def test_native_system_scan_never_materializes_the_python_provider():
     from pypaimon.table.system.system_table_scan import SystemSplit, SystemTableScan
 
     rows = pa.table({'id': [7, 11]})
-    provider = SimpleNamespace(_build_arrow_table=Mock(side_effect=AssertionError('Python provider')))
+    provider = SimpleNamespace(
+        _build_arrow_table=Mock(side_effect=AssertionError('Python provider')),
+        base_table=SimpleNamespace(options=SimpleNamespace(native_read_enabled=lambda: True)),
+    )
     with patch('pypaimon.execution.native.read.system_table.try_read_native_system_table', return_value=rows), \
             patch.dict(sys.modules, {'pypaimon.execution.python.read.system_table_scan': None}):
         plan = SystemTableScan(provider).plan()

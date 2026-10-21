@@ -1551,7 +1551,7 @@ class MultimodalTableTest(unittest.TestCase):
         with patch(
                 "pypaimon.read.table_read.TableRead._arrow_batch_generator",
                 new=batches), patch(
-                    "pypaimon.read.table_read."
+                    "pypaimon.execution.read_support."
                     "_RECORD_BATCH_READER_FROM_STREAM", None):
             reader = users.scan().select("id").to_arrow_batch_reader()
             reader.read_next_batch()
@@ -1570,7 +1570,7 @@ class MultimodalTableTest(unittest.TestCase):
         read_builder = users.raw_table.new_read_builder()
         splits = read_builder.new_scan().plan().splits()
         with patch(
-                "pypaimon.read.table_read."
+                "pypaimon.execution.read_support."
                 "_RECORD_BATCH_READER_FROM_STREAM", None):
             reader = read_builder.new_read().to_arrow_batch_reader(splits)
         self.assertIsInstance(reader, pa.RecordBatchReader)

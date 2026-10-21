@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Set
+from typing import List, Optional, Set, TYPE_CHECKING
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.file_io import FileIO
@@ -28,14 +28,10 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.execution.python.write.row_key_extractor import (
-    DynamicBucketRowKeyExtractor,
-    FixedBucketRowKeyExtractor,
-    PostponeBucketRowKeyExtractor,
-    RowKeyExtractor,
-    UnawareBucketRowKeyExtractor,
-)
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
+
+if TYPE_CHECKING:
+    from pypaimon.execution.python.write.row_key_extractor import RowKeyExtractor
 
 
 class FileStoreTable(Table):
@@ -492,7 +488,11 @@ class FileStoreTable(Table):
 
     def create_row_key_extractor(
         self, ignore_existing: bool = False
-    ) -> RowKeyExtractor:
+    ) -> 'RowKeyExtractor':
+        from pypaimon.execution.python.write.row_key_extractor import (
+            DynamicBucketRowKeyExtractor, FixedBucketRowKeyExtractor,
+            PostponeBucketRowKeyExtractor, UnawareBucketRowKeyExtractor)
+
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:
             return FixedBucketRowKeyExtractor(self.table_schema)

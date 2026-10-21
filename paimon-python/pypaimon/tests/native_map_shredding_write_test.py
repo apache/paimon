@@ -26,7 +26,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.data.map_shared_shredding import is_shared_shredding, parse_shared_shredding_metadata
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 from pypaimon.table.row.generic_row import GenericRow
 
 pytestmark = pytest.mark.native_plan

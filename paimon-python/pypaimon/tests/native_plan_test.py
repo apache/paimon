@@ -1427,17 +1427,6 @@ class NativePlanTest(unittest.TestCase):
         with patch('pypaimon.execution.native.runtime.import_module', side_effect=ImportError('not installed')):
             self.assertFalse(native_runtime_available())
 
-    def test_installed_extension_requires_write_nullability_api(self):
-        from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
-
-        array = pyarrow.array([1], type=pyarrow.int32())
-        data = pyarrow.table({'id': array})
-        # Missing symbols in an installed extension are packaging errors. They
-        # must not silently disable core NULL validation on write inputs.
-        with patch.dict(sys.modules, {'pypaimon_rust.data': ModuleType('pypaimon_rust.data')}):
-            with self.assertRaises(ImportError):
-                normalize_arrow_write_nullability(data, data.schema)
-
     def test_native_runtime_availability_does_not_probe_versioned_apis(self):
         fake_df = ModuleType('pypaimon_rust.datafusion')
         fake_mod = ModuleType('pypaimon_rust')

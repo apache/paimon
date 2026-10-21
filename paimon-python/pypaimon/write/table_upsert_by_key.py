@@ -19,13 +19,10 @@ from typing import List, Optional
 
 import pyarrow as pa
 
-from pypaimon.execution.dispatch import prepare_native_write_operation
-from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.row_utils import row_to_named_values
 
 
-class TableUpsertByKey(PythonTableUpsertMixin):
+class TableUpsertByKey:
     """Upsert append-table rows using one or more user-selected key columns."""
 
     def __init__(self, table, commit_user: str, commit_identifier: int):
@@ -62,49 +59,85 @@ class TableUpsertByKey(PythonTableUpsertMixin):
         Returns:
             List of CommitMessages to be committed.
         """
-        self._validate_inputs(data, upsert_keys, update_cols)
+        from pypaimon.execution.update_dispatch import UpsertOperations
+        return UpsertOperations.upsert(self, data, upsert_keys, update_cols)
 
-        # Determine which columns to update
-        if update_cols is None or len(update_cols) == len(self.table.field_names):
-            effective_update_cols = None  # means all columns
-        else:
-            effective_update_cols = update_cols
-
-        columns = (list(effective_update_cols) if effective_update_cols
-                   else list(self.table.field_names))
-        native = self._create_native_upsert(data, upsert_keys, columns)
-        if native is not None:
-            return native.upsert()
-
-        return self._upsert_arrow(data, upsert_keys, effective_update_cols)
-
-    def upsert_rows(self, rows, upsert_keys: List[str],
-                    update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
-        row_list = self._normalize_rows(rows)
-        if not row_list:
-            raise ValueError("rows must not be empty.")
-
-        row_items = [
-            (row, row_to_named_values(row, self.table.table_schema.fields))
-            for row in row_list
-        ]
-        for _, values_by_name in row_items:
-            self._validate_row_inputs(values_by_name, upsert_keys, update_cols)
-
-        if update_cols is None or len(update_cols) == len(self.table.field_names):
-            effective_update_cols = None
-        else:
-            effective_update_cols = update_cols
-
-        columns = (list(effective_update_cols) if effective_update_cols is not None
-                   else list(self.table.field_names))
-        native = self._create_native_upsert(
-            [values for _, values in row_items], upsert_keys, columns)
-        if native is not None:
-            return native.upsert()
-
-        return self._upsert_rows(row_items, upsert_keys, effective_update_cols)
+    def upsert_rows(self, rows, upsert_keys: List[str], update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
+        from pypaimon.execution.update_dispatch import UpsertOperations
+        return UpsertOperations.upsert_rows(self, rows, upsert_keys, update_cols)
 
     def _create_native_upsert(self, data, upsert_keys, columns):
-        return prepare_native_write_operation(
-            'upsert', self.table, self.commit_user, data, upsert_keys, columns)
+        from pypaimon.execution.update_dispatch import UpsertOperations
+        return UpsertOperations._create_native_upsert(self, data, upsert_keys, columns)
+
+    def _new_row_id_updater(self):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._new_row_id_updater(self)
+
+    @staticmethod
+    def _normalize_rows(rows):
+        from pypaimon.write.update_validation import _normalize_rows
+        return _normalize_rows(rows)
+
+    def _group_rows_by_partition(self, row_items):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._group_rows_by_partition(self, row_items)
+
+    def _upsert_row_partition(self, row_items, upsert_keys, partition_spec, update_cols):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._upsert_row_partition(self, row_items, upsert_keys, partition_spec, update_cols)
+
+    @staticmethod
+    def _dedup_row_items_last_write_wins(row_items, input_key_tuples, partition_spec):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._dedup_row_items_last_write_wins(row_items, input_key_tuples, partition_spec)
+
+    def _group_by_partition(self, data):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._group_by_partition(self, data)
+
+    def _upsert_partition(self, partition_data, upsert_keys, partition_spec, update_cols):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._upsert_partition(self, partition_data, upsert_keys, partition_spec, update_cols)
+
+    @staticmethod
+    def _dedup_last_write_wins(partition_data, input_key_tuples, partition_spec):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._dedup_last_write_wins(partition_data, input_key_tuples, partition_spec)
+
+    def _validate_inputs(self, data, upsert_keys, update_cols):
+        from pypaimon.write.update_validation import _validate_inputs
+        return _validate_inputs(self, data, upsert_keys, update_cols)
+
+    def _validate_row_inputs(self, values_by_name, upsert_keys, update_cols):
+        from pypaimon.write.update_validation import _validate_row_inputs
+        return _validate_row_inputs(self, values_by_name, upsert_keys, update_cols)
+
+    def _build_key_to_row_ids_map(self, match_keys, partition_spec, input_key_set):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._build_key_to_row_ids_map(self, match_keys, partition_spec, input_key_set)
+
+    def _do_updates(self, data, matched_indices, input_key_tuples, key_to_row_ids, update_cols):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._do_updates(
+            self, data, matched_indices, input_key_tuples, key_to_row_ids, update_cols)
+
+    def _do_appends(self, data, new_indices):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._do_appends(self, data, new_indices)
+
+    def _append_rows(self, row_items):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._append_rows(self, row_items)
+
+    def _append_row_column_names(self, row_items):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._append_row_column_names(self, row_items)
+
+    def _upsert_arrow(self, data, upsert_keys, effective_update_cols):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._upsert_arrow(self, data, upsert_keys, effective_update_cols)
+
+    def _upsert_rows(self, row_items, upsert_keys, effective_update_cols):
+        from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsertMixin
+        return PythonTableUpsertMixin._upsert_rows(self, row_items, upsert_keys, effective_update_cols)

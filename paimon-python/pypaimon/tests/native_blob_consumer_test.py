@@ -27,7 +27,7 @@ from pypaimon.schema.data_types import AtomicType, ArrayType, DataField, MapType
 from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests.native_blob_write_test import _table, _data, _read
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 

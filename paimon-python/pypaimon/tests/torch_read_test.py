@@ -398,6 +398,8 @@ class TorchDistributedShardingTest(unittest.TestCase):
                     "-m",
                     "torch.distributed.run",
                     "--standalone",
+                    # Bootstrap locally without resolving the host's FQDN.
+                    "--local-addr=127.0.0.1",
                     "--nproc-per-node=2",
                     script,
                     output_dir,

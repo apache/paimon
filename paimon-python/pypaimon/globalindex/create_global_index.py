@@ -19,12 +19,6 @@
 
 from typing import Dict, List, Optional, Sequence, Union
 
-import pyarrow as pa
-
-from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
-from pypaimon.utils.range import Range
-
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
@@ -137,60 +131,14 @@ class GlobalIndexBuilder:
         if execution == "local" and (concurrency is not None or ray_remote_args is not None):
             raise ValueError("Ray options require execution='ray'.")
         if execution == "ray":
-            from pypaimon.ray.vector_index_build import validate_build_options
+            from pypaimon.execution.python.globalindex.ray_build import validate_build_options
             concurrency, ray_remote_args = validate_build_options(
                 self, concurrency, ray_remote_args)
         partition_filter = self._resolve_partition_filter()
-        if execution == "local":
-            from pypaimon.execution.native.write.native_index_build import build_native_global_index
-            messages = build_native_global_index(self, partition_filter)
-            if messages is not None:
-                return messages
-        from pypaimon.execution.python.globalindex.create_global_index import build_global_index
+        from pypaimon.execution.index_dispatch import build_global_index
         return build_global_index(
             self, partition_filter, execution=execution, concurrency=concurrency,
             ray_remote_args=ray_remote_args)
-
-    def _snapshot_for_plan(self, plan):
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._snapshot_for_plan(self, plan)
-
-    def _build_sorted_index(
-        self, splits, unindexed_ranges, index_field, table_read, index_path: str
-    ) -> List[CommitMessage]:
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._build_sorted_index(
-            self, splits, unindexed_ranges, index_field, table_read, index_path)
-
-    def _create_sorted_index_writer(self, index_path: str, key_serializer):
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._create_sorted_index_writer(self, index_path, key_serializer)
-
-    def _build_generic_index(
-        self, splits, unindexed_ranges, index_field, table_read, index_path: str
-    ) -> List[CommitMessage]:
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._build_generic_index(
-            self, splits, unindexed_ranges, index_field, table_read, index_path)
-
-    def _build_generic_shard(
-        self, index_split, index_range, index_field, table_read, index_path: str, file_name=None
-    ) -> Optional[CommitMessage]:
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._build_generic_shard(
-            self, index_split, index_range, index_field, table_read, index_path, file_name)
-
-    def _delete_writer_output(self, writer, index_path: str) -> None:
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._delete_writer_output(self, writer, index_path)
-
-    def _delete_uncommitted_indexes(self, messages) -> None:
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._delete_uncommitted_indexes(self, messages)
-
-    def _create_generic_index_writer(self, index_path: str, index_field):
-        from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
-        return PythonGlobalIndexBuilder._create_generic_index_writer(self, index_path, index_field)
 
     def _validate_unaware_bucket_table(self) -> None:
         # Global index files live in bucket 0 and are keyed by the table-wide
@@ -256,46 +204,3 @@ def _merged_options(table, options: Optional[Dict[str, object]]) -> Options:
     if options:
         merged.update(options)
     return Options(merged)
-
-
-def _extract_sorted_rows(
-    table: pa.Table,
-    index_column: str,
-    row_id_column: str,
-    key_serializer,
-    row_range: Optional[Range] = None,
-):
-    from pypaimon.execution.python.globalindex.create_global_index import _extract_sorted_rows as execute
-    return execute(table, index_column, row_id_column, key_serializer, row_range)
-
-
-def _write_vector_batch(writer, batch, index_column, row_range):
-    from pypaimon.execution.python.globalindex.create_global_index import _write_vector_batch as execute
-    return execute(writer, batch, index_column, row_range)
-
-
-def _extract_index_rows(
-    table: Union[pa.Table, pa.RecordBatch],
-    index_column: str,
-    row_id_column: str,
-    row_range: Optional[Range] = None,
-):
-    from pypaimon.execution.python.globalindex.create_global_index import _extract_index_rows as execute
-    return execute(table, index_column, row_id_column, row_range)
-
-
-def _chunks(rows, size):
-    from pypaimon.execution.python.globalindex.create_global_index import _chunks as execute
-    return execute(rows, size)
-
-
-def _to_index_manifest_entries(
-    table,
-    partition: GenericRow,
-    row_range: Range,
-    index_field_id: int,
-    index_type: str,
-    result_entries,
-) -> List[IndexManifestEntry]:
-    from pypaimon.execution.python.globalindex.create_global_index import _to_index_manifest_entries as execute
-    return execute(table, partition, row_range, index_field_id, index_type, result_entries)

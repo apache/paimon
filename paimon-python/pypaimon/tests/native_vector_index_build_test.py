@@ -23,6 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.vindex_input import (
     PaimonVindexInput,
 )
@@ -51,7 +52,7 @@ def _table(catalog, vectors, options=None, partitioned=False):
 
 
 def _build(table, kind, options=None, **kwargs):
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                       side_effect=AssertionError('Python vector rows were materialized')):
         return GlobalIndexBuilder(table, 'embedding', index_type=kind, options=options, **kwargs).build()
 

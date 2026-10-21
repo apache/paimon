@@ -109,9 +109,30 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         table = self._create_with_options(
             "db.t_native_write", {"data-file.path-directory": "data",
                                   "write.native.enabled": "true"})
-        sentinel = object()
-        with mock.patch("pypaimon.execution.native.write.native_write.create_native_write", return_value=sentinel):
-            self.assertIs(table.new_batch_write_builder().new_write(), sentinel)
+        from pypaimon.execution.write_dispatch import NativeTableWrite
+
+        adapter = mock.Mock(spec=['write_arrow_batch', 'prepare_commit', 'close'])
+        messages = []
+        adapter.prepare_commit.return_value = messages
+        builder = table.new_batch_write_builder()
+        with mock.patch("pypaimon.execution.native.write.native_write.create_native_write",
+                        return_value=adapter) as prepare:
+            writer = builder.new_write()
+        self.assertIsInstance(writer, NativeTableWrite)
+        prepare.assert_called_once_with(
+            table, builder.commit_user, None, False,
+            restore_snapshot_id=None, fixed_bucket=False, bucket_plan=None)
+        self.assertEqual(prepare.call_args[0][0].options.options.to_map()['data-file.path-directory'], 'data')
+        batch = pa.record_batch(
+            [pa.array([1], type=pa.int32()), ['a']], names=['id', 'v'])
+        try:
+            writer.write_arrow_batch(batch)
+            adapter.write_arrow_batch.assert_called_once_with(batch, None)
+            self.assertIs(writer.prepare_commit(), messages)
+            adapter.prepare_commit.assert_called_once_with(None)
+        finally:
+            writer.close()
+        adapter.close.assert_called_once_with()
 
     def test_native_commit_dispatches_with_configured_directory(self):
         table = self._create_with_options(

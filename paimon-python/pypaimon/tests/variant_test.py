@@ -1563,7 +1563,6 @@ class TestVariantPaimonTable(unittest.TestCase):
     def test_native_writer_preserves_shredded_variant_types(self):
         try:
             import pypaimon_rust  # noqa: F401
-            from pypaimon.execution.native.write.native_write import NativeTableWrite  # noqa: F401
         except ImportError:
             self.skipTest('native writer is not available')
         self._check_shredding_type_preservation(native=True)

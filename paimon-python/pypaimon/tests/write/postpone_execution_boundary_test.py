@@ -17,18 +17,72 @@
 
 """Ray input grouping must not allocate a Python file execution backend."""
 
+from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
+from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.bucket_plan import PostponeBucketPlan
+
+
+def test_public_postpone_input_planning_does_not_load_either_backend(tmp_path):
+    source = r'''
+import importlib.abc
+import sys
+
+class BlockExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(('pypaimon.execution.python', 'pypaimon.execution.native', 'pypaimon_rust')):
+            raise AssertionError('Input planning loaded an execution backend: ' + fullname)
+
+sys.meta_path.insert(0, BlockExecution())
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+from pypaimon.write.postpone_bucket import PostponeBucketPlan, PostponeBucketPlanner
+
+catalog = CatalogFactory.create({'warehouse': sys.argv[1]})
+catalog.create_database('default', True)
+catalog.create_table('default.data', Schema.from_pyarrow_schema(
+    pa.schema([('id', pa.int32()), ('p', pa.string()), ('value', pa.int64())]),
+    primary_keys=['id', 'p'], partition_keys=['p'], options={
+        'bucket': '-2', 'postpone.target-row-num-per-bucket': '2',
+        'postpone.batch-write-fixed-bucket.max-parallelism': '8',
+    }), False)
+table = catalog.get_table('default.data')
+data = pa.record_batch([
+    pa.array(range(7), pa.int32()), ['first'] * 5 + ['second'] * 2,
+    pa.array(range(7), pa.int64()),
+], names=['id', 'p', 'value'])
+planner = PostponeBucketPlanner(table, known_num_buckets={})
+assert planner.current_plan().as_dict() == {}
+stats = planner.input_partition_stats(data)
+assert stats == {('first',): (5, 0), ('second',): (2, 0)}
+plan = planner.plan(stats)
+assert isinstance(plan, PostponeBucketPlan)
+assert plan.as_dict() == {('first',): 4, ('second',): 1}
+assert planner.current_plan().as_dict() == plan.as_dict()
+
+existing = PostponeBucketPlanner(table, known_num_buckets={('first',): 3})
+assert existing.input_partition_stats(data) == {('second',): (2, 0)}
+assert existing.plan(existing.input_partition_stats(data)).as_dict() == {
+    ('first',): 3, ('second',): 1}
+assert not any(name.startswith(('pypaimon.execution.python', 'pypaimon.execution.native', 'pypaimon_rust'))
+               for name in sys.modules)
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', source, str(tmp_path / 'warehouse')],
+        cwd=str(Path(__file__).resolve().parents[3]),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _table(tmp_path):

@@ -112,10 +112,10 @@ class PythonTableScanMixin:
         return scanner
 
     def _python_plan(self, auth_result):
-        return wrap_plan_with_auth(auth_result, self._python_scanner(auth_result).scan())
+        return wrap_plan_with_auth(auth_result, PythonTableScanMixin._python_scanner(self, auth_result).scan())
 
     def _python_plan_all_files(self):
-        scanner = self._python_scanner(None)
+        scanner = PythonTableScanMixin._python_scanner(self, None)
         # Writer restore/overwrite must see L0 even when batch reads hide it.
         skip_level0 = scanner.skip_level0
         try:
@@ -125,5 +125,5 @@ class PythonTableScanMixin:
             scanner.skip_level0 = skip_level0
 
     def _python_scan_with_stats(self, auth_result):
-        plan, stats = self._python_scanner(auth_result).scan_with_stats()
+        plan, stats = PythonTableScanMixin._python_scanner(self, auth_result).scan_with_stats()
         return wrap_plan_with_auth(auth_result, plan), stats

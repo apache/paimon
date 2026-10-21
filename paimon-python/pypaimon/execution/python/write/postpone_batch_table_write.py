@@ -22,6 +22,7 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.execution.python.write.file_store_write import PostponeFixedBucketFileStoreWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
 from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 from pypaimon.write.row_utils import (
     require_columns,
@@ -54,7 +55,7 @@ class PythonPostponeFixedBucketWriteMixin:
         )
         self._plan_provided = bucket_plan is not None
         self._pending_inputs = []
-        super().__init__(table, commit_user, static_partition)
+        PythonTableWriteMixin.__init__(self, table, commit_user, static_partition)
 
     def _create_file_store_write(self, commit_user):
         return PostponeFixedBucketFileStoreWrite(self.table, commit_user)
@@ -95,7 +96,7 @@ class PythonPostponeFixedBucketWriteMixin:
             raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         table = self._prepare_arrow_data(table)
         if not self._buffer_input(table):
-            return super().write_arrow(table)
+            return PythonTableWriteMixin.write_arrow(self, table)
         self._pending_inputs.extend(
             ("batch", batch) for batch in table.to_batches())
 
@@ -104,12 +105,12 @@ class PythonPostponeFixedBucketWriteMixin:
             raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         data = self._prepare_arrow_data(data)
         if not self._buffer_input(data):
-            return super().write_arrow_batch(data)
+            return PythonTableWriteMixin.write_arrow_batch(self, data)
         self._pending_inputs.append(("batch", data))
 
     def write_row(self, row):
         if self._plan_provided:
-            return super().write_row(row)
+            return PythonTableWriteMixin.write_row(self, row)
 
         values_by_name = row_to_named_values(
             row, self.table.table_schema.fields)
@@ -127,7 +128,7 @@ class PythonPostponeFixedBucketWriteMixin:
         partition = tuple(
             values_by_name[key] for key in self.table.partition_keys)
         if self._bucket_plan.contains(partition):
-            return super().write_row(row)
+            return PythonTableWriteMixin.write_row(self, row)
 
         arrow_row = row_values_to_arrow_table(
             values_by_name, self.table.table_schema.fields, column_names)
@@ -160,9 +161,9 @@ class PythonPostponeFixedBucketWriteMixin:
         self._pending_inputs = []
         for input_type, value in inputs:
             if input_type == "batch":
-                super().write_arrow_batch(value)
+                PythonTableWriteMixin.write_arrow_batch(self, value)
             else:
-                super().write_row(value[0])
+                PythonTableWriteMixin.write_row(self, value[0])
 
     def prepare_commit(self) -> List[CommitMessage]:
         if self.batch_committed:
@@ -179,8 +180,8 @@ class PythonPostponeFixedBucketWriteMixin:
 
     def close(self):
         self._pending_inputs = []
-        super().close()
+        PythonTableWriteMixin.close(self)
 
     def abort(self):
         self._pending_inputs = []
-        super().abort()
+        PythonTableWriteMixin.abort(self)

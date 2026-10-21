@@ -31,7 +31,7 @@ from pypaimon.tests import native_plan_rest_test
 from pypaimon.tests.native_authorized_update_test import (
     _ROWS, _SCHEMA, _expected, _files, _native_only, _operate, _restricted, _rows, _table,
 )
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]

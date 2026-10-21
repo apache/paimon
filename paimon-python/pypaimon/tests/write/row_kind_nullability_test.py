@@ -27,7 +27,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.execution.native.write.native_write import NativeTableWrite
+from pypaimon.execution.write_dispatch import NativeTableWrite
 from pypaimon.write.row_kind import skip_write_row
 
 
@@ -233,6 +233,8 @@ def test_internal_row_kinds_check_required_nulls_before_filtering(tmp_path, kind
 
 
 def test_native_bridge_leaves_nested_value_validation_to_core(tmp_path):
+    from pypaimon.execution.native.write.native_write import NativeTableWrite
+
     transport = pa.schema([('items', pa.list_(pa.int32()))])
     declared = pa.schema([('items', pa.list_(pa.field('element', pa.int32(), nullable=False)))])
     data = pa.RecordBatch.from_arrays([pa.array([[None]], type=transport.field(0).type)], schema=transport)

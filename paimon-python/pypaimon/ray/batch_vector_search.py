@@ -31,7 +31,7 @@ from pypaimon.execution.python.read.search.vector_search_read import (
 
 def _execute_batch_vector_search(builder, *, concurrency=None, ray_remote_args=None):
     concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
-    from pypaimon.execution.native.read.native_search_plan import python_search_reader
+    from pypaimon.execution.search_dispatch import python_search_reader
     reader = python_search_reader(builder.new_batch_vector_search_read())
     if (type(reader) is not BatchVectorSearchReadImpl
             or not reader._table.options.data_evolution_enabled()):
@@ -130,7 +130,7 @@ def _search_batch_index_split(context, split, scalar_filter=None):
 
 
 def _search_batch_raw_split(context, split):
-    from pypaimon.read.table_read import _ClosableArrowBatchReader
+    from pypaimon.execution.read_support import _ClosableArrowBatchReader
 
     table_read, column, queries, limit, metric = context
     scorer = BatchVectorSearchReadImpl(table_read.table, limit, column, queries)

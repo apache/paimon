@@ -270,6 +270,9 @@ def test_string_filter_applies_to_all_outputs(table, output):
 
 
 def test_native_result_handoff_uses_string_filter(table):
+    from types import SimpleNamespace
+
+    table.base_table.options = SimpleNamespace(native_read_enabled=lambda: True)
     builder = table.new_read_builder()
     predicate = builder.new_predicate_builder().contains("name", "parquet")
     rows = table._build_arrow_table()

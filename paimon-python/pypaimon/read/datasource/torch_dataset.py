@@ -35,7 +35,7 @@ from torch.utils.data import Dataset, IterableDataset
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.execution.python.read.reader.concat_batch_reader import (_MAX_ARROW_OFFSET, _batch_offset_usage)
+from pypaimon.execution.read_support import _MAX_ARROW_OFFSET, _batch_offset_usage
 from pypaimon.read.split import DataSplit, Split
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields

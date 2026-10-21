@@ -22,7 +22,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pyarrow as pa
 
-from pypaimon.globalindex.create_global_index import GlobalIndexBuilder, _write_vector_batch
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder, _write_vector_batch
 from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import VindexVectorIndexWriter
 from pypaimon.schema.data_types import ArrayType, AtomicType
 from pypaimon.utils.range import Range
@@ -168,7 +168,7 @@ class VindexBatchWriteTest(unittest.TestCase):
             _write_vector_batch(self._writer(), batch, 'embedding', Range(10, 19))
 
     def test_null_row_ids_are_rejected_before_writing_source_batch(self):
-        builder = object.__new__(GlobalIndexBuilder)
+        builder = object.__new__(PythonGlobalIndexBuilder)
         builder._table = Mock()
         builder._core_options = Mock()
         builder._core_options.global_index_row_count_per_shard.return_value = 10

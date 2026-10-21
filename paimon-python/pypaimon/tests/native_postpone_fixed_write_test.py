@@ -24,7 +24,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.execution.native.write.native_write import NativePostponeFixedBucketTableWrite
+from pypaimon.execution.write_dispatch import NativePostponeFixedBucketTableWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlan, PostponeBucketPlanner
 
 pytestmark = pytest.mark.native_plan

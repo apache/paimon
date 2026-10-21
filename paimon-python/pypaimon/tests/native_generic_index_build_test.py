@@ -24,6 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
@@ -82,8 +83,9 @@ def test_native_build_requires_row_tracking_not_read_optimization_options(rest_c
                              'global-index.enabled': str(enabled).lower()})
     column = 'id' if kind in ('btree', 'bitmap') else 'name' if kind == 'full-text' else 'embedding'
     options = ({'sorted-index.records-per-file': 100} if kind in ('btree', 'bitmap') else _options(kind))
-    with patch.object(GlobalIndexBuilder, '_build_sorted_index', side_effect=AssertionError('Python sorted build ran')):
-        with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_sorted_index',
+                      side_effect=AssertionError('Python sorted build ran')):
+        with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                           side_effect=AssertionError('Python generic build ran')):
             messages = GlobalIndexBuilder(table, column, index_type=kind, options=options).build()
     files = index_tests._message_files(messages)
@@ -173,7 +175,7 @@ def test_python_full_text_build_delegates_to_common_native_entry(rest_catalog):
     catalog, _ = rest_catalog
     table = _table(catalog)
     predicate = table.new_read_builder().new_predicate_builder().equal('pt', 1)
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                       side_effect=AssertionError('Python index build ran')):
         messages = GlobalIndexBuilder(table, 'name', index_type='full-text',
                                       partition_filter=predicate, options=_options('full-text', 4)).build()

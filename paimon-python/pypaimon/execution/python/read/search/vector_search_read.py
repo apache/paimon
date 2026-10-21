@@ -623,7 +623,7 @@ class AbstractVectorSearchReadImpl:
         return [_scored_result(heap) for heap in heaps]
 
     def _score_refine_splits(self, table_read, splits, queries_by_row, query_vectors, metric):
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        from pypaimon.execution.read_support import _ClosableArrowBatchReader
 
         heaps = [[] for _ in query_vectors]
         reader, batches = table_read._new_arrow_batch_reader(splits)
@@ -792,7 +792,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         return [_scored_result(heap) for heap in heaps]
 
     def _score_raw_splits(self, table_read, splits, metric):
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
+        from pypaimon.execution.read_support import _ClosableArrowBatchReader
 
         reader, batches = table_read._new_arrow_batch_reader(splits)
         # Close the underlying iterator as well if scoring fails mid-batch.
@@ -832,13 +832,14 @@ def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, o
         LuminaVectorGlobalIndexReader,
     )
     from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
-    from pypaimon.globalindex.vindex_reader import VindexVectorGlobalIndexReader
+    from pypaimon.execution.python.globalindex.vindex.vindex_vector_global_index_reader import (
+        PythonVindexVectorGlobalIndexReader)
     if index_type in LUMINA_IDENTIFIERS:
         return LuminaVectorGlobalIndexReader(
             file_io, index_path, index_io_meta_list, options
         )
     if index_type in VINDEX_IDENTIFIERS:
-        return VindexVectorGlobalIndexReader(
+        return PythonVindexVectorGlobalIndexReader(
             file_io, index_path, index_io_meta_list, options
         )
     raise ValueError("Unsupported vector index type: '%s'" % index_type)
