@@ -266,7 +266,7 @@ class LeRobotValidationTest(unittest.TestCase):
             0: {"camera_%d" % index: index for index in range(9)},
         }
         with patch(
-                "pypaimon.multimodal.lerobot.dataset.ThreadPoolExecutor",
+                "pypaimon.multimodal.video.ThreadPoolExecutor",
                 side_effect=executor):
             _decode_video_rows(
                 [rows], [Collator(index) for index in range(9)])

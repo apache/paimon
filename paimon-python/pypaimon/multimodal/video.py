@@ -19,13 +19,44 @@
 
 import io
 import os
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from fractions import Fraction
 from itertools import chain
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+
+class _VideoDecodePool:
+    """One lazily created decode pool per dataset and worker process."""
+
+    def __init__(self):
+        self._executor = None
+        self._parallelism = 0
+        self._pid = os.getpid()
+
+    def get(self, parallelism):
+        if self._pid != os.getpid():
+            # Never join threads inherited from the parent process.
+            self._executor = None
+            self._pid = os.getpid()
+        if self._executor is not None and self._parallelism != parallelism:
+            self.close()
+        if parallelism > 1 and self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=parallelism)
+        self._parallelism = parallelism
+        return self._executor
+
+    def close(self):
+        executor, self._executor = self._executor, None
+        if executor is not None and self._pid == os.getpid():
+            executor.shutdown(wait=True)
+
+    def __getstate__(self):
+        return {"_executor": None, "_parallelism": 0, "_pid": None}
 
 
 def _encode_images_to_video(
@@ -224,6 +255,45 @@ class VideoFrameCollator:
         state["_decoders"] = OrderedDict()
         state["_owner_pid"] = None
         return state
+
+    @contextmanager
+    def _map_decoders(self, requests, decode, parallelism, executor=None):
+        self._ensure_process_local_cache()
+        limit = min(parallelism, self.max_open_videos, len(requests))
+        if executor is None:
+            yield (decode(self._decoder(*key), value)
+                   for key, value in requests.items())
+            return
+        items = iter(requests.items())
+        pending = deque()
+
+        def submit():
+            try:
+                key, value = next(items)
+            except StopIteration:
+                return
+            # Keep cache mutations ordered; pending decoders remain most recent.
+            decoder = self._decoder(*key)
+            pending.append(executor.submit(decode, decoder, value))
+
+        def results():
+            while pending:
+                future = pending[0]
+                value = future.result()
+                pending.popleft()
+                yield value
+                del value, future
+                submit()
+
+        try:
+            for _ in range(limit):
+                submit()
+            yield results()
+        finally:
+            for future in pending:
+                future.cancel()
+            # A failed or abandoned batch must finish before cache reuse/close.
+            wait(pending)
 
     def _decode_rows(self, rows):
         decoded = [None] * len(rows)

@@ -1172,6 +1172,15 @@ class CoreOptions:
             "LeRobot DataLoader worker.")
     )
 
+    READ_VIDEO_DECODE_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("read.video.decode-parallelism")
+        .int_type()
+        .default_value(16)
+        .with_description(
+            "Maximum concurrent video payload decodes shared by all cameras in a "
+            "PyPaimon LeRobot Dataset worker.")
+    )
+
     PARQUET_COLUMN_INDEX_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("parquet.filter.columnindex.enabled")
         .boolean_type()
@@ -1937,7 +1946,12 @@ class CoreOptions:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
     def read_video_max_open_decoders(self) -> int:
-        option = CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS
+        return self._positive_video_option(CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS)
+
+    def read_video_decode_parallelism(self) -> int:
+        return self._positive_video_option(CoreOptions.READ_VIDEO_DECODE_PARALLELISM)
+
+    def _positive_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())
         if isinstance(raw, (bool, float)):
             raise ValueError("%s must be a positive integer." % option.key())
