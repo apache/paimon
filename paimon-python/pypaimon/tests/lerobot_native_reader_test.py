@@ -258,11 +258,13 @@ def test_native_lookup_preserves_query_authorization(frames, denied):
         current.close()
 
 
-def test_pickled_native_locator_rebuilds_pinned_fallback_once(frames):
+@pytest.mark.parametrize("option", ["scan.native-plan.enabled", "read.native.enabled"])
+def test_pickled_native_locator_rebuilds_pinned_fallback_once(frames, option):
     from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
     frames.add(pa.table({"index": [40], "value": [4]}))
     current = reader(frames, **{
-        "scan.native-plan.enabled": "true", "read.native.enabled": "false"})
+        "scan.native-plan.enabled": "false", "read.native.enabled": "false",
+        option: "true"})
     restored = pickle.loads(pickle.dumps(current))
     assert restored._locator._splits is None
     frames.add(pa.table({"index": [60], "value": [6]}))
@@ -278,6 +280,18 @@ def test_pickled_native_locator_rebuilds_pinned_fallback_once(frames):
                 assert sorted(result["value"].to_pylist()) == [1, 4]
             assert create.call_count == 1
             assert restored._locator._splits is not None
+    finally:
+        current.close()
+        restored.close()
+
+
+def test_pickled_python_locator_keeps_fallback_splits(frames):
+    current = reader(frames, **{
+        "scan.native-plan.enabled": "false", "read.native.enabled": "false"})
+    restored = pickle.loads(pickle.dumps(current))
+    try:
+        assert restored._locator._splits is not None
+        assert restored.read_indices([20], ["value"])["value"].to_pylist() == [2]
     finally:
         current.close()
         restored.close()
