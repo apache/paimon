@@ -266,3 +266,124 @@ def test_native_row_conversion_keeps_its_failure_when_closing_batches_also_fails
             next(rows)
     assert caught.value is primary
     source.close.assert_called_once_with()
+
+
+def _python_read_source(primary=None, cleanup=None):
+    from types import SimpleNamespace
+    import pyarrow as pa
+    from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+    from pypaimon.schema.data_types import AtomicType, DataField
+    from pypaimon.table.row.offset_row import OffsetRow
+
+    schema = pa.schema([('id', pa.int32())])
+
+    class Source(RecordBatchReader):
+        close_count = 0
+        read_count = 0
+
+        def read_arrow_batch(self):
+            self.read_count += 1
+            if primary is not None:
+                raise primary
+            if self.read_count == 1:
+                return pa.record_batch([pa.array([1], type=pa.int32())], schema=schema)
+            return None
+
+        def read_batch(self):
+            self.read_count += 1
+            if primary is not None:
+                raise primary
+            if self.read_count != 1:
+                return None
+            rows = iter([OffsetRow((1,), 0, 1)])
+            return SimpleNamespace(next=lambda: next(rows, None))
+
+        def close(self):
+            self.close_count += 1
+            if cleanup is not None:
+                raise cleanup
+
+    source = Source()
+    read = SimpleNamespace(
+        _check_python_merge_supported=lambda: None,
+        _TableRead__create_reader_for_split=lambda *args, **kwargs: source,
+        _begin_auth_read=lambda splits: None,
+        _serialize_blob_views_as_descriptors=lambda batch, reader: batch,
+        _project_batch_to_output=lambda batch: batch,
+        output_projection=None,
+        _adapter_read_type=[DataField(0, 'id', AtomicType('INT'))],
+        include_row_kind=False,
+        limit=None,
+    )
+    return read, source, schema
+
+
+def _consume_python_read_path(path, read, schema):
+    from concurrent.futures import ThreadPoolExecutor
+    from pypaimon.execution.python.read.table_read import PythonTableReadMixin, _RemainingRows
+
+    if path == 'rows':
+        return list(PythonTableReadMixin._python_row_iterator(read, [object()], None))
+    if path == 'serial':
+        return list(PythonTableReadMixin._arrow_batch_generator(read, [object()], schema))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(
+            PythonTableReadMixin._read_one_split_to_batches,
+            read, object(), schema, _RemainingRows(None),
+        ).result(timeout=5)
+
+
+@pytest.mark.parametrize('path', ['rows', 'serial', 'parallel-worker'])
+@pytest.mark.parametrize('read_error', [False, True])
+@pytest.mark.parametrize('close_error', [False, True])
+def test_python_reader_preserves_primary_failure_and_closes_on_eof(path, read_error, close_error):
+    primary = ValueError('primary Python read failure') if read_error else None
+    cleanup = OSError('secondary Python close failure') if close_error else None
+    read, source, schema = _python_read_source(primary, cleanup)
+    expected = primary if primary is not None else cleanup
+    if expected is not None:
+        with pytest.raises(type(expected)) as caught:
+            _consume_python_read_path(path, read, schema)
+        assert caught.value is expected
+    else:
+        result = _consume_python_read_path(path, read, schema)
+        assert len(result) == 1
+        if path == 'rows':
+            assert result[0].get_field(0) == 1
+        else:
+            assert result[0].column('id').to_pylist() == [1]
+    # The source remains reachable, so close must be deterministic, not GC-driven.
+    assert source.close_count == 1
+
+
+@pytest.mark.parametrize('path', ['serial', 'parallel-worker'])
+def test_python_batch_conversion_keeps_primary_failure_when_close_also_fails(path):
+    primary = ValueError('invalid Python batch conversion')
+    read, source, schema = _python_read_source(cleanup=OSError('secondary close failure'))
+    read._serialize_blob_views_as_descriptors = Mock(side_effect=primary)
+    with pytest.raises(ValueError) as caught:
+        _consume_python_read_path(path, read, schema)
+    assert caught.value is primary
+    assert source.close_count == 1
+
+
+@pytest.mark.parametrize('path', ['rows', 'serial'])
+@pytest.mark.parametrize('close_error', [False, True])
+def test_python_read_explicit_generator_close_keeps_cleanup_error_visible(path, close_error):
+    from pypaimon.execution.python.read.table_read import PythonTableReadMixin
+
+    cleanup = OSError('explicit close failure') if close_error else None
+    read, source, schema = _python_read_source(cleanup=cleanup)
+    if path == 'rows':
+        iterator = PythonTableReadMixin._python_row_iterator(read, [object()], None)
+    else:
+        iterator = PythonTableReadMixin._arrow_batch_generator(read, [object()], schema)
+    next(iterator)
+    if close_error:
+        with pytest.raises(OSError) as caught:
+            iterator.close()
+        assert caught.value is cleanup
+    else:
+        iterator.close()
+    assert source.close_count == 1
+    assert iterator.gi_frame is None

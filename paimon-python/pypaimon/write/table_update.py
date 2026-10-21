@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.update_validation import predicate_fields
 
@@ -297,6 +298,7 @@ class StreamTableUpdate(TableUpdate):
             self, commit_identifier: int,
             _precomputed_files_info=None) -> TableUpdateByRowId:
         """Create a row-id updater for a stream commit identifier."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._new_row_id_updater(
             commit_identifier, _precomputed_files_info)
 
@@ -305,6 +307,7 @@ class StreamTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Apply column updates keyed by ``_ROW_ID`` to existing rows,
         tagging the produced commit messages with ``commit_identifier``."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._update_by_arrow_with_row_id(table, commit_identifier)
 
     def upsert_by_arrow_with_key(
@@ -315,6 +318,7 @@ class StreamTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Upsert rows into an append-only table by one or more key columns,
         tagging the produced commit messages with ``commit_identifier``."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._upsert_by_arrow_with_key(
             table, upsert_keys, commit_identifier
         )
@@ -327,6 +331,7 @@ class StreamTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Upsert rows into an append-only table by key columns,
         tagging the produced commit messages with ``commit_identifier``."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._upsert_by_key(
             rows, upsert_keys, commit_identifier
         )
@@ -340,6 +345,7 @@ class StreamTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Update rows using literal or Arrow callable assignments,
         tagging the produced commit messages with ``commit_identifier``."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._update_by_predicate(
             predicate, assignments, commit_identifier, read_columns
         )
@@ -351,6 +357,7 @@ class StreamTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Delete rows matching ``predicate`` using deletion vectors,
         tagging the produced commit messages with ``commit_identifier``."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._delete_by_predicate(predicate, commit_identifier)
 
     def delete_by_row_id(
@@ -360,6 +367,7 @@ class StreamTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Delete rows by ``_ROW_ID`` using deletion vectors,
         tagging the produced commit messages with ``commit_identifier``."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._delete_by_row_id(row_ids, commit_identifier)
 
     def merge_into(
@@ -372,6 +380,7 @@ class StreamTableUpdate(TableUpdate):
             commit_identifier: int,
     ) -> List[CommitMessage]:
         """Prepare stream MERGE INTO commit messages."""
+        commit_identifier = validate_commit_identifier(commit_identifier)
         return self._merge_into(
             source,
             on,

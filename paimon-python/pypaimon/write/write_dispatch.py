@@ -19,6 +19,8 @@
 
 import pyarrow as pa
 
+from pypaimon.write.row_utils import validate_write_columns
+
 
 class NativeTableWrite:
     """Keep one selected writer and allow explicit pre-mutation diagnostics."""
@@ -132,9 +134,9 @@ class NativeTableWrite:
         self._switch_to_python().batch_committed = value
 
     def with_write_type(self, write_cols):
+        names = validate_write_columns(write_cols)
         if self._python_writer is not None:
-            return self._python_writer.with_write_type(write_cols)
-        names = list(write_cols)
+            return self._python_writer.with_write_type(names)
         full_names = self._table_schema.names
         if (self.table.is_primary_key_table
                 and not (len(names) == len(full_names) and set(names) == set(full_names))):
@@ -197,6 +199,8 @@ class NativeTableWrite:
         return execution.roll_before_group_if_needed(row_count)
 
     def prepare_commit(self, commit_identifier=None):
+        if not self.stream and commit_identifier is not None:
+            raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
         if self._python_writer is not None:
             if self.stream:
                 return self._python_writer.prepare_commit(commit_identifier)

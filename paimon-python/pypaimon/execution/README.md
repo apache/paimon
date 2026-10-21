@@ -121,6 +121,12 @@ snapshot_properties=None)`, `abort(messages)`,
 Message conversion happens during preparation; publication uses the selected
 executor's prepared messages. Batch/stream binding details stay in the Native
 adapter, and overwrite details stay in each backend.
+Public stream write, update and commit entry points normalize integer-like
+commit identifiers to Java `long` / Rust `i64` before execution starts.
+Write-column selections reject empty selections and duplicate names before
+replacing the current configuration. Index build/drop requests bind partition
+predicates to the partition layout and reject predicates containing
+non-partition fields.
 
 Both stream scans expose `plan()`, `checkpoint()`,
 `restore(next_snapshot_id=None)`, `watermark()`,
@@ -137,6 +143,13 @@ closed. This matters when deletion vectors hide physical rows.
 
 Python mixins retain public instance hooks while Native adapters own Rust
 handles. Private helper structure follows each implementation's algorithms.
+
+The operation protocols do not imply identical backend capabilities. Python
+Data Evolution reads still reject nested ROW field projections supported by
+Rust. `Plan.stats()` is optional: ordinary Python planning returns no counters,
+while Native planning always records lightweight counters. Python's explicit
+`scan_with_stats()` / explain pass collects additional bookkeeping and can
+change planning concurrency, so it is not enabled by ordinary `plan()` calls.
 
 ## Failure and resource boundaries
 

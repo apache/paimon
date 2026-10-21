@@ -25,6 +25,8 @@ The independent plan/read/write/commit options keep their existing meaning.
 import logging
 import sys
 
+from pypaimon.write.commit_identifier import validate_commit_identifier
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,6 +178,7 @@ def commit_table_messages(
         commit_identifier,
         snapshot_properties=None):
     """Publish prepared messages while preserving files on any failure."""
+    commit_identifier = validate_commit_identifier(commit_identifier)
     non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
     # Never abort files in response to a commit exception. Preserving
     # possible orphan files is safer than deleting files which another

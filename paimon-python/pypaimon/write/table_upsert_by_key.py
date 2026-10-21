@@ -20,12 +20,14 @@ from typing import List, Optional
 import pyarrow as pa
 
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_identifier import validate_commit_identifier
 
 
 class TableUpsertByKey:
     """Upsert append-table rows using one or more user-selected key columns."""
 
     def __init__(self, table, commit_user: str, commit_identifier: int):
+        commit_identifier = validate_commit_identifier(commit_identifier)
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table

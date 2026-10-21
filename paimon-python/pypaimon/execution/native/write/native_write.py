@@ -23,10 +23,13 @@ from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.execution.native.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.row_utils import require_columns, row_to_named_values, row_values_to_arrow_table
+from pypaimon.write.row_utils import (
+    require_columns, row_to_named_values, row_values_to_arrow_table, validate_write_columns,
+)
 
 
 def create_native_write(table, commit_user, static_partition=None, stream=False,
@@ -96,7 +99,7 @@ class NativeTableWrite:
             self._native_writer.with_blob_uri_reader_factory(self._blob_rows)
 
     def with_write_type(self, write_cols):
-        names = list(write_cols)
+        names = validate_write_columns(write_cols)
         if self.table.is_primary_key_table:
             if len(names) == len(self._table_schema.names) and set(names) == set(self._table_schema.names):
                 # Python treats a complete PK write type as the unchanged table
@@ -236,6 +239,7 @@ class NativeTableWrite:
         if self.stream:
             if commit_identifier is None:
                 raise TypeError('StreamTableWrite.prepare_commit requires an identifier')
+            commit_identifier = validate_commit_identifier(commit_identifier)
             messages = self._native_writer.prepare_commit(True, commit_identifier)
         else:
             if commit_identifier is not None:
