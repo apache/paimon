@@ -32,7 +32,9 @@ pytest.importorskip("torch")
 
 def _read_in_worker(reader, output):
     try:
-        output.put(reader.read_indices([10, 40], ["index"])["index"].to_pylist())
+        assert reader._table.options.native_read_enabled()
+        with patch.object(reader._locator, "locate", side_effect=AssertionError("Python frame lookup")):
+            output.put(reader.read_indices([10, 40], ["index"])["index"].to_pylist())
     finally:
         reader.close()
 
@@ -58,11 +60,13 @@ def reader(table, **options):
 
 
 @pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
-@pytest.mark.parametrize("option", ["read.native.enabled", "scan.native-plan.enabled"])
+@pytest.mark.parametrize("option", [None, "read.native.enabled", "scan.native-plan.enabled"])
 def test_native_frame_lookup_keeps_residual_and_snapshot(frames, option):
     # The index covers the original rows, not this append.
     frames.add(pa.table({"index": [40, 50], "value": [4, 5]}))
-    current = reader(frames, **{option: "true"})
+    current = reader(frames, **({option: "true"} if option else {}))
+    if option is None:
+        assert current._table.options.native_read_enabled()
     frames.add(pa.table({"index": [60], "value": [6]}))
     native_plans = []
 
@@ -90,7 +94,7 @@ def test_native_frame_lookup_keeps_residual_and_snapshot(frames, option):
 def test_native_frame_lookup_preserves_tag_after_pickle(frames):
     frames.raw_table.create_tag("training")
     current = reader(frames, **{
-        "read.native.enabled": "true", "scan.tag-name": "training",
+        "scan.tag-name": "training",
     })
     restored = pickle.loads(pickle.dumps(current))
     frames.add(pa.table({"index": [40], "value": [4]}))
@@ -105,7 +109,7 @@ def test_native_frame_lookup_preserves_tag_after_pickle(frames):
 
 @pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
 def test_native_frame_lookup_in_spawn_worker(frames):
-    current = reader(frames, **{"read.native.enabled": "true"})
+    current = reader(frames)
     frames.add(pa.table({"index": [40], "value": [4]}))
     context = multiprocessing.get_context("spawn")
     output = context.Queue()
@@ -136,9 +140,44 @@ def test_missing_native_runtime_keeps_cached_python_lookup(frames):
 
 @pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
 def test_native_plan_failure_keeps_predicate(frames):
-    current = reader(frames, **{"read.native.enabled": "true"})
+    current = reader(frames)
     try:
         with patch("pypaimon.execution.native.read.plan.native_plan", side_effect=RuntimeError("unavailable")):
             assert current.read_indices([20], ["value"])["value"].to_pylist() == [2]
+    finally:
+        current.close()
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.parametrize("options", [
+    {"read.native.enabled": "false"},
+    {"scan.native-plan.enabled": "false"},
+])
+def test_explicit_python_lookup_is_preserved(frames, options):
+    current = reader(frames, **options)
+    try:
+        assert not current._table.options.native_read_enabled()
+        with patch.object(current._locator, "locate", wraps=current._locator.locate) as locate:
+            assert current.read_indices([20], ["value"])["value"].to_pylist() == [2]
+            locate.assert_called_once_with([20])
+    finally:
+        current.close()
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.parametrize("available", [False, True])
+def test_auto_native_uses_private_table_copy(frames, available):
+    original = dict(frames.raw_table.options.options.to_map())
+    with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=available):
+        current = reader(frames)
+    try:
+        assert current._table.options.native_read_enabled() == available
+        assert frames.raw_table.options.options.to_map() == original
+        if not available:
+            with patch.object(current._locator, "locate", wraps=current._locator.locate) as locate:
+                assert current.read_indices([30], ["value"])["value"].to_pylist() == [3]
+                locate.assert_called_once_with([30])
     finally:
         current.close()

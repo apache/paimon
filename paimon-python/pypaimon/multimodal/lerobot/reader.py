@@ -30,6 +30,13 @@ class _PaimonTableFrameReader:
     def __init__(self, frames_table, *, columns):
         self._table, self.snapshot_id, splits = _indexed_read_table(
             frames_table, columns)
+        options = self._table.options.options
+        if not any(options.contains(option) for option in (
+                CoreOptions.READ_NATIVE_ENABLED, CoreOptions.SCAN_NATIVE_PLAN_ENABLED)):
+            from pypaimon.execution.native.runtime import native_runtime_available
+            if native_runtime_available():
+                self._table = self._table.copy_without_time_travel({
+                    CoreOptions.READ_NATIVE_ENABLED.key(): "true"})
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
         self._table = self._table._copy_with_snapshot(snapshot)
