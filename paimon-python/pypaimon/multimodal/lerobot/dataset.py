@@ -1580,10 +1580,20 @@ def _decode_video_windows_with_pool(
                     shape = ((len(plans), window_size)
                              + tuple(frames.shape[1:]))
                     if output is None:
-                        output = torch.empty(
-                            shape, dtype=output_dtype, device=frames.device)
-                        if share_memory:
-                            output.share_memory_()
+                        if share_memory and frames.device.type == "cpu":
+                            empty = torch.empty(0, dtype=output_dtype)
+                            numel = 1
+                            for size in shape:
+                                numel *= size
+                            # Match DataLoader collation: allocate shared storage directly.
+                            storage = empty._typed_storage()._new_shared(
+                                numel, device=empty.device)
+                            output = empty.new(storage).resize_(shape)
+                        else:
+                            output = torch.empty(
+                                shape, dtype=output_dtype, device=frames.device)
+                            if share_memory:
+                                output.share_memory_()
                     elif tuple(output.shape) != shape \
                             or output.dtype != output_dtype:
                         raise ValueError(
