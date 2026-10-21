@@ -273,6 +273,35 @@ class LeRobotValidationTest(unittest.TestCase):
 
         self.assertEqual([8], worker_counts)
 
+    def test_video_row_fallback_preserves_torch_mode(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.video import _VideoDecodePool
+
+        class Collator:
+            video_column = "camera"
+            output_column = "frame"
+
+            def __call__(self, rows):
+                mode = (torch.is_grad_enabled(),
+                        torch.is_inference_mode_enabled())
+                return [dict(row, frame=mode) for row in rows]
+
+        pool = _VideoDecodePool()
+        try:
+            for context, expected in (
+                    (torch.enable_grad(), (True, False)),
+                    (torch.no_grad(), (False, False)),
+                    (torch.inference_mode(), (False, True))):
+                with self.subTest(expected=expected), context:
+                    rows = {0: {"camera": 1}}
+                    _decode_video_rows([rows], [Collator()], decode_pool=pool)
+                    self.assertEqual(expected, rows[0]["frame"])
+        finally:
+            pool.close()
+
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
         "PyAV and Torch are required for video decoding",
