@@ -123,6 +123,10 @@ class PackagingTest(unittest.TestCase):
                      "pypaimon/benchmark/act/default_experiment.json"):
             self.assertIn(name, names)
         execution_files = (
+            "pypaimon/execution/python/deletionvectors/__init__.py",
+            "pypaimon/execution/python/deletionvectors/deletion_vector.py",
+            "pypaimon/execution/python/deletionvectors/bitmap_deletion_vector.py",
+            "pypaimon/execution/python/deletionvectors/apply_deletion_vector_reader.py",
             "pypaimon/write/backend_dispatch.py",
             "pypaimon/read/read_dispatch.py",
             "pypaimon/read/read_support.py",
@@ -186,6 +190,10 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
+            "pypaimon/deletionvectors/__init__.py",
+            "pypaimon/deletionvectors/deletion_vector.py",
+            "pypaimon/deletionvectors/bitmap_deletion_vector.py",
+            "pypaimon/deletionvectors/apply_deletion_vector_reader.py",
             "pypaimon/execution/python/globalindex/ray_build.py",
             "pypaimon/execution/python/read/system_table_read.py",
             "pypaimon/execution/python/read/system_table_scan.py",

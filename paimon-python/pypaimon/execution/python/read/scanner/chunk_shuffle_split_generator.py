@@ -21,7 +21,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Iterator, List, Optional, Tuple
 
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry

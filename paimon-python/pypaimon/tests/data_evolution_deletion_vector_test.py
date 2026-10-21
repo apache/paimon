@@ -20,11 +20,11 @@ from unittest.mock import Mock
 
 import pyarrow as pa
 
-from pypaimon.deletionvectors.apply_deletion_vector_reader import (
+from pypaimon.execution.python.deletionvectors.apply_deletion_vector_reader import (
     ApplyDeletionVectorReader,
     PositionMappedDeletionVector,
 )
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.globalindex.indexed_split import IndexedSplit

@@ -54,6 +54,8 @@ modules = [
     'pypaimon.write.merge_condition', 'pypaimon.write.merge_transform',
     'pypaimon.globalindex.index_dispatch', 'pypaimon.globalindex.vindex_input',
     'pypaimon.table.system.system_table_read',
+    'pypaimon.table.source.deletion_file', 'pypaimon.index.deletion_vector_meta',
+    'pypaimon.index.index_file_meta',
 ]
 for name in modules:
     importlib.import_module(name)

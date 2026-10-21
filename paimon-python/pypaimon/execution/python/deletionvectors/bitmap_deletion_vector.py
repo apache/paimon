@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 import struct
 import zlib
 from pypaimon.utils.roaring_bitmap import RoaringBitmap

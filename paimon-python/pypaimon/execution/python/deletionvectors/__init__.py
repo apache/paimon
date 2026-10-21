@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.deletionvectors.apply_deletion_vector_reader import (
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.python.deletionvectors.apply_deletion_vector_reader import (
     ApplyDeletionVectorReader,
     ApplyDeletionRecordIterator,
     PositionMappedDeletionVector,

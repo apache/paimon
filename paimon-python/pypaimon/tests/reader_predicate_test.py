@@ -35,7 +35,7 @@ from pypaimon.schema.data_types import AtomicType, DataField
 @pytest.mark.parametrize('batch_size', [1, 1024])
 def test_predicate_preserves_deletion_vector_positions(tmp_path, mode, batch_size):
     from dataclasses import replace
-    from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+    from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.commit_message import CommitMessage
     from pypaimon.write.table_delete import TableDeleteByRowId

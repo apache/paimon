@@ -66,6 +66,7 @@ pypaimon/
     python/
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
+      deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
       write/                    File writers, committers and update execution
       globalindex/              Index file codecs, readers, writers and build algorithms
       merge_engine_dispatch.py  Python merge-function selection
@@ -89,6 +90,11 @@ just because it is installed. Planning, reading, writing and committing retain
 independent options; shared plans and commit messages connect those stages.
 Explicit access to an existing Python scanner/router/committer property selects
 that implementation. Ordinary configuration and metadata inspection do not.
+
+Deletion-vector codecs, file loading and row filtering belong to Python
+execution, corresponding to Rust Core's deletion-vector implementation.
+`DeletionFile` and `DeletionVectorMeta` remain shared metadata in `table/source`
+and `index`; importing or transporting them does not load either backend.
 
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.

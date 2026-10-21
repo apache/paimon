@@ -1177,7 +1177,7 @@ def _validate_live_row_ids(table, info, first_row_id, row_ids):
     The writer must still merge physical rows, including tombstones, to preserve
     row-id offsets. Filtering the writer's original data would shift those offsets.
     """
-    from pypaimon.deletionvectors.deletion_vector import DeletionVector
+    from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 
     split, files = info.first_row_id_index[first_row_id]
     if split.data_deletion_files is None:

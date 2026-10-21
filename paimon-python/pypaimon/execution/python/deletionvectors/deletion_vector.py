@@ -109,7 +109,7 @@ class DeletionVector(ABC):
         """
         Read a DeletionVector from a file.
         """
-        from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+        from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 
         with file_io.new_input_stream(deletion_file.dv_index_path) as f:
             f.seek(deletion_file.offset)
