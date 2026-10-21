@@ -216,6 +216,8 @@ class PythonTableWriteMixin:
         return self
 
     def with_blob_consumer(self, blob_consumer: BlobConsumer):
+        if blob_consumer is not None and not callable(blob_consumer):
+            raise TypeError('blob_consumer must be callable')
         if self.file_store_write.data_writers:
             raise RuntimeError(
                 "with_blob_consumer must be called before any write operation."
@@ -224,6 +226,8 @@ class PythonTableWriteMixin:
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
+            raise TypeError('URI reader factory must provide callable create')
         if self.file_store_write.data_writers:
             raise RuntimeError(
                 "with_blob_uri_reader_factory must be called before any "

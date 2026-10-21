@@ -15,14 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from collections import defaultdict
+from bisect import bisect_right
+from collections import deque
+from itertools import islice
 import logging
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow
 import pyarrow as pa
 
-from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options.core_options import (
     CoreOptions,
     GlobalIndexSearchMode,
@@ -37,14 +38,19 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.execution.python.read.scanner.data_evolution_split_generator import (DataEvolutionSplitGenerator)
 from pypaimon.read.split import DataSplit
+from pypaimon.read.read_type import OutputProjection
+from pypaimon.read.read_support import _ClosableArrowBatchReader, close_read_source
+from pypaimon.read.table_read import TableRead
+from pypaimon.schema.arrow_schema import normalize_arrow_write_nullability
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.execution.python.write.writer.data_writer import DataWriter
-from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.utils.arrow_utils import zero_column_batch
 
 from pypaimon.write.update_validation import _authorize_update
 
@@ -55,7 +61,8 @@ def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total
     list_ranges = []
     for split in splits:
         for file in split.files:
-            list_ranges.append(file.row_id_range())
+            if not (DataFileMeta.is_blob_file(file.file_name) or DataFileMeta.is_vector_file(file.file_name)):
+                list_ranges.append(file.row_id_range())
 
     sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
 
@@ -426,6 +433,35 @@ class PythonTableUpdateMixin:
         return TableDeleteByRowId(self.table).delete(list(row_ids))
 
 
+class _ShardBatchIterator:
+    """Own a shard source even before its lazy batch generator starts."""
+
+    def __init__(self, batches, source):
+        self._batches = batches
+        self._source = source
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._batches)
+
+    def close_source(self, primary_error=None):
+        source, self._source = self._source, None
+        if source is not None:
+            close_read_source(source, primary_error)
+
+    def close(self):
+        error = None
+        try:
+            self._batches.close()
+        except BaseException as failure:
+            error = failure
+            raise
+        finally:
+            self.close_source(error)
+
+
 class ShardTableUpdator:
 
     def __init__(
@@ -438,32 +474,35 @@ class ShardTableUpdator:
             total_shard_count: int,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
-        self.table: FileStoreTable = table
+        snapshot = TimeTravelUtil.resolve_snapshot(table)
+        self.table: FileStoreTable = table.copy_without_time_travel({
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
+        })._copy_with_snapshot(snapshot)
         self.projection = projection
-        self.write_cols = write_cols
+        self.write_cols = list(write_cols) if write_cols is not None else list(table.field_names)
         self.commit_user = commit_user
         self.total_shard_count = total_shard_count
         self.shard_num = shard_num
-
-        self.write_pos = 0
-        self.writer: Optional[SingleWriter] = None
-        self.dict = defaultdict(list)
-
         scanner = self.table.new_read_builder().new_scan()
         plan = scanner.plan_all_files()
         self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
         self.splits = splits
-
-        self.row_ranges: List[(Tuple, Range)] = []
-        for split in self.splits:
-            if not isinstance(split, DataSplit):
-                raise ValueError(f"Split {split} is not DataSplit.")
-            files = split.files
-            ranges = self.compute_from_files(files)
-            for row_range in ranges:
-                self.row_ranges.append((tuple(split.partition.values), row_range))
+        self._files_info = RowIdFileIndex.from_splits(self.snapshot_id, splits)
+        self._write_schema = PyarrowFieldParser.from_paimon_schema(
+            [table.field_dict[name] for name in self.write_cols])
+        self.writer = None
+        self._pending_row_ids = deque()
+        self._group_batches = []
+        self._current_group = None
+        self._reader = None
+        self._reader_started = False
+        self._read_complete = not splits
+        self._read_failed = False
+        self._failed = False
+        self._closed = False
+        self._messages = None
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
@@ -471,57 +510,136 @@ class ShardTableUpdator:
         return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
+        ShardTableUpdator._ensure_active(self)
+        if self._reader_started:
+            raise ValueError('Shard reader can only be opened once')
         read_builder = self.table.new_read_builder()
         read_builder.with_projection(self.projection)
-        # Updates consume row ranges in split order. Parallel native readers
-        # return batches in completion order, which would assign values to other rows.
-        return read_builder.new_read().to_arrow_batch_reader(self.splits, parallelism=1)
+        requested_read = read_builder.new_read()
+        output_schema = requested_read._output_arrow_schema()
+        read_type = list(read_builder.read_type())
+        if not any(field.name == SpecialFields.ROW_ID.name for field in read_type):
+            read_type.append(SpecialFields.ROW_ID)
+        projection = requested_read.output_projection
+        if projection is None:
+            row_id_column = next(i for i, field in enumerate(read_type) if field.name == SpecialFields.ROW_ID.name)
+        else:
+            name = '__paimon_shard_row_id'
+            while name in output_schema.names:
+                name += '_'
+            row_id_column = len(projection.columns)
+            projection = OutputProjection(
+                list(projection.columns) + [(name, [SpecialFields.ROW_ID.name])], projection.named)
+        read = TableRead(self.table, predicate=None, read_type=read_type, output_projection=projection)
+        source = read._to_managed_arrow_batch_reader(self.splits, parallelism=1)
+        self._reader_started = True
+
+        def batches():
+            error = None
+            try:
+                for batch in source:
+                    ShardTableUpdator._ensure_active(self)
+                    row_ids = batch.column(row_id_column)
+                    if row_ids.null_count:
+                        raise ValueError('Shard reader returned null _ROW_ID values')
+                    self._pending_row_ids.extend(row_ids.to_pylist())
+                    arrays = [batch.column(i) for i in range(len(output_schema))]
+                    yield (pa.RecordBatch.from_arrays(arrays, schema=output_schema) if arrays else
+                           zero_column_batch(batch.num_rows, output_schema.metadata))
+                self._read_complete = True
+            except BaseException as failure:
+                error = failure
+                if not isinstance(failure, GeneratorExit):
+                    self._read_failed = True
+                raise
+            finally:
+                try:
+                    iterator.close_source(error)
+                except BaseException:
+                    self._read_failed = True
+                    raise
+
+        iterator = _ShardBatchIterator(batches(), source)
+        reader = pa.ipc.RecordBatchReader.from_batches(output_schema, iterator)
+        self._reader = _ClosableArrowBatchReader(reader, iterator)
+        return self._reader
 
     def prepare_commit(self) -> List[CommitMessage]:
-        commit_messages = []
-        for (partition, files) in self.dict.items():
-            commit_messages.append(CommitMessage(partition, 0, files, self.snapshot_id))
-        return commit_messages
+        if self._messages is not None:
+            return list(self._messages)
+        ShardTableUpdator._ensure_active(self)
+        if not self._read_complete or self._pending_row_ids:
+            raise ValueError('Read and update exactly the same number of rows from this shard before preparing')
+        ShardTableUpdator._flush_group(self)
+        self._messages = [] if self.writer is None else list(self.writer.commit_messages)
+        return list(self._messages)
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):
-        self._init_writer()
+        from pypaimon.execution.python.write.table_update_by_row_id import PythonRowIdUpdateMixin
 
-        capacity = self.writer.capacity()
-        if capacity <= 0:
-            raise RuntimeError("Writer has no remaining capacity.")
-
-        # Split the batch across writers.
-        first, rest = (data, None) if capacity >= data.num_rows else (data.slice(0, capacity), data.slice(capacity))
-
-        self.writer.write(first)
-        if self.writer.capacity() == 0:
-            self.dict[self.writer.partition()].append(self.writer.end())
-            self.writer = None
-
-        if rest is not None:
-            if self.writer is not None:
-                raise RuntimeError("Should not get here, rest and current writer exist in the same time.")
-            self.update_by_arrow_batch(rest)
+        ShardTableUpdator._ensure_active(self)
+        if len(data.schema.names) != len(self.write_cols) or set(data.schema.names) != set(self.write_cols):
+            raise ValueError('Shard input must contain exactly the configured update columns')
+        arrays = [PythonRowIdUpdateMixin._coerce_column(data.column(name), field.type)
+                  for name, field in zip(self.write_cols, self._write_schema)]
+        normalized = normalize_arrow_write_nullability(pa.RecordBatch.from_arrays(arrays, schema=self._write_schema),
+                                                       self._write_schema)
+        for field, column in zip(self._write_schema, normalized.columns):
+            if not field.nullable and column.null_count:
+                raise ValueError('Cannot write null to non-null column(%s)' % field.name)
+        if data.num_rows > len(self._pending_row_ids):
+            raise ValueError('Shard update contains more rows than have been read')
+        row_ids = list(islice(self._pending_row_ids, data.num_rows))
+        groups = [self._files_info.first_row_ids[bisect_right(self._files_info.first_row_ids, row_id) - 1]
+                  for row_id in row_ids]
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(row_ids, type=pa.int64())] + list(normalized.columns),
+            names=[SpecialFields.ROW_ID.name] + self.write_cols)
+        try:
+            start = 0
+            while start < len(groups):
+                group = groups[start]
+                if self._current_group is not None and self._current_group != group:
+                    ShardTableUpdator._flush_group(self)
+                self._current_group = group
+                end = start + 1
+                while end < len(groups) and groups[end] == group:
+                    end += 1
+                self._group_batches.append(batch.slice(start, end - start))
+                start = end
+        except BaseException:
+            self._failed = True
+            raise
+        for _ in row_ids:
+            self._pending_row_ids.popleft()
 
     def _init_writer(self):
-        from pypaimon.write.table_update import SingleWriter
         if self.writer is None:
-            if self.write_pos >= len(self.row_ranges):
-                raise RuntimeError(
-                    "No more row ranges to write. "
-                    "Ensure you write exactly the same number of rows as read from this shard."
-                )
-            item = self.row_ranges[self.write_pos]
-            self.write_pos += 1
-            partition = item[0]
-            row_range = item[1]
-            writer = AppendOnlyDataWriter(self.table, partition, 0, 0, self.table.options, self.write_cols)
-            # A shard maps to exactly one output file, so disable both size- and
-            # row-count based rolling; otherwise target-file-row-num would split
-            # the shard and SingleWriter.end() fails with "Should have one file."
-            writer.target_file_size = MemorySize.of_mebi_bytes(999999999).get_bytes()
-            writer.target_file_row_num = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
-            self.writer = SingleWriter(writer, partition, row_range.from_, row_range.to - row_range.from_ + 1)
+            from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+            self.writer = TableUpdateByRowId(
+                self.table, self.commit_user, BATCH_COMMIT_IDENTIFIER, _precomputed_files_info=self._files_info)
+
+    def _flush_group(self):
+        if self._group_batches:
+            self._init_writer()
+            # Preserve staged messages if writing fails; they may already have
+            # been published. A failed operation cannot later prepare success.
+            self._failed = True
+            self.writer.update_columns(pa.Table.from_batches(self._group_batches), self.write_cols)
+            self._failed = False
+            self._group_batches = []
+        self._current_group = None
+
+    def _ensure_active(self):
+        if self._closed or self._failed or self._read_failed or self._messages is not None:
+            raise ValueError('Shard updater is closed, failed or already prepared')
+
+    def close(self):
+        self._closed = True
+        self._pending_row_ids.clear()
+        self._group_batches = []
+        if self._reader is not None:
+            self._reader.close()
 
 
 class SingleWriter:

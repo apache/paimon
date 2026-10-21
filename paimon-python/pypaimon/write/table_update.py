@@ -402,6 +402,10 @@ class ShardTableUpdator:
         from pypaimon.execution.python.write.table_update import ShardTableUpdator
         return ShardTableUpdator.prepare_commit(self)
 
+    def close(self):
+        from pypaimon.execution.python.write.table_update import ShardTableUpdator
+        return ShardTableUpdator.close(self)
+
     def update_by_arrow_batch(self, data: pa.RecordBatch):
         from pypaimon.execution.python.write.table_update import ShardTableUpdator
         return ShardTableUpdator.update_by_arrow_batch(self, data)

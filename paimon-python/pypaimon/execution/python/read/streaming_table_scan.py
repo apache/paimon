@@ -16,8 +16,8 @@
 # under the License.
 
 import asyncio
-import logging
 import os
+import operator
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import AsyncGenerator, Callable, Iterator, List, Optional
 
@@ -26,7 +26,6 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.consumer.consumer import Consumer
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.write.backend_dispatch import propagate_fork_safety_error as _raise_if_native_fork_safety_error
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.execution.python.read.scanner.append_table_split_generator import \
@@ -36,8 +35,6 @@ from pypaimon.execution.python.read.scanner.changelog_follow_up_scanner import \
 from pypaimon.execution.python.read.scanner.delta_follow_up_scanner import DeltaFollowUpScanner
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
 from pypaimon.execution.python.read.scanner.follow_up_scanner import FollowUpScanner
-from pypaimon.execution.python.read.scanner.incremental_diff_scanner import \
-    IncrementalDiffScanner
 from pypaimon.execution.python.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.snapshot.snapshot import Snapshot
@@ -83,9 +80,9 @@ class AsyncStreamingTableScan:
         # Bucket filter for parallel consumption
         self._bucket_filter = bucket_filter
 
-        # Diff-based catch-up configuration
+        # Retain the constructor argument without replacing physical stream
+        # events with a net snapshot diff when a consumer falls behind.
         self._diff_threshold = diff_threshold
-        self._catch_up_in_progress = False
 
         # Prefetching configuration
         self._prefetch_enabled = prefetch_enabled
@@ -115,140 +112,207 @@ class AsyncStreamingTableScan:
         self.follow_up_scanner = follow_up_scanner or self._create_follow_up_scanner()
 
         # State tracking
-        self.next_snapshot_id: Optional[int] = None
+        self._next_snapshot_id: Optional[int] = None
         self._pending_consumer_snapshot: Optional[int] = None
+        self._pending_consumer_owner = None
+        self._consumer_restored = False
+        self._watermark: Optional[int] = None
+        self._closed = False
+        self._generation = 0
+        self._missing_snapshot_polls = 0
+
+    @property
+    def next_snapshot_id(self):
+        return self.checkpoint()
+
+    @next_snapshot_id.setter
+    def next_snapshot_id(self, next_snapshot_id):
+        self.restore(next_snapshot_id)
+
+    def checkpoint(self):
+        """Return the next snapshot to consume, without acknowledging it."""
+        return self._next_snapshot_id
+
+    def watermark(self):
+        """Return the watermark of the last successfully planned frame."""
+        return self._watermark
+
+    def restore(self, next_snapshot_id=None):
+        """Restore a checkpoint, or reset to the initial/consumer position."""
+        self._require_open()
+        next_snapshot_id = self._snapshot_id(next_snapshot_id)
+        if next_snapshot_id is not None and next_snapshot_id < 1:
+            raise ValueError("next snapshot id must be positive")
+        self._generation += 1
+        self._discard_prefetch()
+        self._next_snapshot_id = next_snapshot_id
+        self._consumer_restored = next_snapshot_id is not None
+        self._pending_consumer_snapshot = None
+        self._pending_consumer_owner = None
+        self._lookahead_skips = 0
+        self._missing_snapshot_polls = 0
+
+    def notify_checkpoint_complete(self, next_snapshot):
+        """Persist progress only after the caller has processed its plan."""
+        self._require_open()
+        next_snapshot = self._snapshot_id(next_snapshot)
+        if self._consumer_manager and self._consumer_id and next_snapshot is not None:
+            if next_snapshot < 1:
+                raise ValueError("consumer next snapshot must be positive")
+            self._consumer_manager.reset_consumer(
+                self._consumer_id, Consumer(next_snapshot=next_snapshot))
+
+    def plan(self):
+        """Plan one available frame; return None instead of waiting for data.
+
+        Initial state may be empty. Empty follow-up frames and irrelevant
+        commits advance the checkpoint without emitting a frame, as in Java
+        and Rust. A planning failure leaves the selected snapshot retryable.
+        """
+        self._require_open()
+        if self._next_snapshot_id is None and not self._consumer_restored:
+            if self._consumer_manager:
+                consumer = self._consumer_manager.consumer(self._consumer_id)
+                if consumer is not None:
+                    self.restore(consumer.next_snapshot)
+            self._consumer_restored = True
+        if self._next_snapshot_id is None:
+            generation = self._generation
+            latest = self._snapshot_manager.get_latest_snapshot()
+            if latest is None:
+                self.__auth_query()
+                return None
+            plan = self._create_initial_plan(latest)
+            self._check_generation(generation)
+            self._next_snapshot_id = latest.id + 1
+            self._watermark = latest.watermark
+            return plan
+
+        while True:
+            generation = self._generation
+            if self._prefetch_future is not None:
+                future = self._prefetch_future
+                self._prefetch_future = None
+                self._prefetch_snapshot_id = None
+                result = future.result()
+            else:
+                result = self._fetch_plan_with_lookahead(self._next_snapshot_id)
+            self._check_generation(generation)
+            plan, next_id, skipped, watermark = result
+            self._lookahead_skips += skipped
+            self._next_snapshot_id = next_id
+            if plan is not None:
+                self._missing_snapshot_polls = 0
+                self._watermark = watermark
+                if plan.splits():
+                    if self._prefetch_enabled:
+                        self._start_prefetch(next_id)
+                    return plan
+            elif skipped == 0:
+                self.__auth_query()
+                self._check_missing_snapshot()
+                return None
+            else:
+                self._missing_snapshot_polls = 0
 
     async def stream(self) -> AsyncGenerator[Plan, None]:
-        """Yield Plans as new snapshots appear.
-
-        On first call, performs an initial full scan of the latest snapshot.
-        Subsequent iterations poll for new snapshots and yield delta Plans.
-
-        Yields:
-            Plan objects containing splits for reading
-        """
-        # Restore from consumer if available
-        if self.next_snapshot_id is None and self._consumer_manager:
-            consumer = self._consumer_manager.consumer(self._consumer_id)
-            if consumer:
-                self.next_snapshot_id = consumer.next_snapshot
-
-        # Initial scan
-        if self.next_snapshot_id is None:
-            latest_snapshot = self._snapshot_manager.get_latest_snapshot()
-            if latest_snapshot:
-                plan = self._create_initial_plan(latest_snapshot)
-                self.next_snapshot_id = latest_snapshot.id + 1
-                self._stage_consumer()
-                yield plan
-                # Resumes here when caller calls __anext__() — after caller processed the plan.
+        """Poll plan(), acknowledging each yielded frame on iterator resume."""
+        owner = object()
+        try:
+            while True:
                 self._flush_pending_consumer()
-
-        # Check for catch-up scenario: starting from earlier snapshot with large gap.
-        # This block only executes once per stream() call (before the while True loop).
-        # Handles --from snapshot:X with many snapshots to process.
-        if self._should_use_diff_catch_up():
-            self._catch_up_in_progress = True
-            try:
-                latest_snapshot = self._snapshot_manager.get_latest_snapshot()
-                if latest_snapshot and self.next_snapshot_id:
-                    catch_up_plan = self._create_catch_up_plan(
-                        self.next_snapshot_id,
-                        latest_snapshot
-                    )
-                    self.next_snapshot_id = latest_snapshot.id + 1
-                    self._stage_consumer()
-                    yield catch_up_plan
-                    # Resumes here when caller calls __anext__().
-                    self._flush_pending_consumer()
-            finally:
-                self._catch_up_in_progress = False
-
-        # Follow-up polling loop with lookahead and optional prefetching
-        while True:
-            # Flush any consumer position staged by the previous yield before doing more work.
-            self._flush_pending_consumer()
-            plan = None
-            snapshot_processed = False  # Track if we processed (or skipped) a snapshot
-
-            # Check if we have a prefetched result ready
-            prefetch_used = False
-            if self._prefetch_future is not None:
-                try:
-                    # Wait for the prefetch thread to complete
-                    # Returns (plan, next_id, skipped_count) tuple
-                    prefetch_result = self._prefetch_future.result(timeout=30)
-                    prefetch_used = True
-
-                    if prefetch_result is not None:
-                        prefetch_plan, next_id, skipped_count = prefetch_result
-                        self._lookahead_skips += skipped_count
-                        self.next_snapshot_id = next_id
-                        snapshot_processed = skipped_count > 0 or prefetch_plan is not None
-
-                        if prefetch_plan is not None:
-                            plan = prefetch_plan
-                except Exception as error:
-                    _raise_if_native_fork_safety_error(error)
-                    # Prefetch failed, fall back to synchronous
-                    prefetch_used = False
-                finally:
-                    self._prefetch_future = None
-                    self._prefetch_snapshot_id = None
-
-            # If prefetch wasn't available or failed, use lookahead to find next scannable
-            if not prefetch_used:
-                # Use batch lookahead to find the next scannable snapshot
-                snapshot, next_id, skipped_count = self._snapshot_manager.find_next_scannable(
-                    self.next_snapshot_id,
-                    self.follow_up_scanner.should_scan,
-                    lookahead_size=self._lookahead_size
-                )
-                # Check if we found a scannable snapshot or skipped some
-                snapshot_processed = skipped_count > 0 or snapshot is not None
-
-                if snapshot is not None:
-                    plan = self._create_follow_up_plan(snapshot)
-                # Advance only after constructing the selected frame. A failed
-                # callback/read must leave that snapshot available for retry.
-                self._lookahead_skips += skipped_count
-                self.next_snapshot_id = next_id
-
-            if plan is not None:
-                # Start prefetching next scannable snapshot before yielding
-                if self._prefetch_enabled:
-                    self._start_prefetch(self.next_snapshot_id)
-                self._stage_consumer()
+                checkpoint = self.checkpoint()
+                plan = self.plan()
+                if plan is None:
+                    next_snapshot = self.checkpoint()
+                    if next_snapshot is not None and next_snapshot != checkpoint:
+                        self._stage_consumer(owner)
+                        self._flush_pending_consumer()
+                    await asyncio.sleep(self.poll_interval)
+                    continue
+                self._stage_consumer(owner)
                 yield plan
-                # _flush_pending_consumer() is called at the top of the next iteration.
-            elif not snapshot_processed:
-                # No snapshot available yet, wait and poll again
-                await asyncio.sleep(self.poll_interval)
-            # If snapshots were processed but plan is None (all skipped), continue loop immediately
+        except (GeneratorExit, asyncio.CancelledError):
+            if self._pending_consumer_owner is owner:
+                self._pending_consumer_snapshot = None
+                self._pending_consumer_owner = None
+                self._discard_prefetch()
+            raise
 
     def stream_sync(self) -> Iterator[Plan]:
-        """
-        Synchronous wrapper for stream().
-
-        Provides a blocking iterator for use in non-async code.
-
-        Yields:
-            Plan objects containing splits for reading
-        """
+        """Synchronously poll the same scan, closing its async iterator."""
         loop = asyncio.new_event_loop()
+        iterator = self.stream()
         try:
-            async_gen = self.stream()
             while True:
-                try:
-                    plan = loop.run_until_complete(async_gen.__anext__())
-                    yield plan
-                except StopAsyncIteration:
-                    break
+                yield loop.run_until_complete(iterator.__anext__())
         finally:
-            loop.close()
+            try:
+                loop.run_until_complete(iterator.aclose())
+            finally:
+                loop.close()
 
-    def _stage_consumer(self) -> None:
+    def _require_open(self):
+        if self._closed:
+            raise RuntimeError("stream scan is closed")
+
+    @staticmethod
+    def _snapshot_id(value):
+        if value is None:
+            return None
+        value = operator.index(value)
+        if not -(1 << 63) <= value < (1 << 63):
+            raise OverflowError("snapshot id is outside the signed 64-bit range")
+        return value
+
+    def _check_generation(self, generation):
+        self._require_open()
+        if generation != self._generation:
+            raise RuntimeError("stream scan was restored during planning")
+
+    def _check_missing_snapshot(self):
+        # Java NextSnapshotFetcher and Rust periodically distinguish delayed
+        # publication from an expired checkpoint or a recreated table.
+        self._missing_snapshot_polls += 1
+        if self._missing_snapshot_polls % 16:
+            return
+        latest = self._snapshot_manager.get_latest_snapshot()
+        earliest = (self._snapshot_manager.try_get_earliest_snapshot(latest.id)
+                    if latest is not None else None)
+        checkpoint = self._next_snapshot_id
+        if ((earliest is not None and earliest.id > checkpoint)
+                or (latest is not None and checkpoint > latest.id + 1)
+                or (latest is None and checkpoint > 1)):
+            raise ValueError("stream checkpoint %s is outside the available snapshots %s..%s" % (
+                checkpoint, earliest.id if earliest is not None else None,
+                latest.id if latest is not None else None))
+
+    def _discard_prefetch(self):
+        future = self._prefetch_future
+        self._prefetch_future = None
+        self._prefetch_snapshot_id = None
+        if future is not None:
+            future.cancel()
+
+    def close(self):
+        """Discard speculative work without acknowledging pending rows.
+
+        Running Python I/O cannot be interrupted. Its detached result cannot
+        advance the checkpoint or be reused after close/restore.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._generation += 1
+        self._discard_prefetch()
+        self._pending_consumer_snapshot = None
+        self._pending_consumer_owner = None
+        if self._prefetch_executor is not None:
+            self._prefetch_executor.shutdown(wait=False)
+
+    def _stage_consumer(self, owner) -> None:
         """Stage next_snapshot_id to be written to disk on the next generator resume."""
+        self._pending_consumer_owner = owner
         if self._consumer_manager and self._consumer_id and self.next_snapshot_id is not None:
             self._pending_consumer_snapshot = self.next_snapshot_id
 
@@ -261,11 +325,9 @@ class AsyncStreamingTableScan:
         the consumer file is only advanced after the caller has processed the prior plan.
         """
         if self._consumer_manager and self._consumer_id and self._pending_consumer_snapshot is not None:
-            self._consumer_manager.reset_consumer(
-                self._consumer_id,
-                Consumer(next_snapshot=self._pending_consumer_snapshot)
-            )
+            self.notify_checkpoint_complete(self._pending_consumer_snapshot)
             self._pending_consumer_snapshot = None
+            self._pending_consumer_owner = None
 
     def __apply_auth(self, plan) -> Plan:
         return wrap_plan_with_auth(self.__auth_query(), plan)
@@ -286,24 +348,15 @@ class AsyncStreamingTableScan:
             snapshot_id
         )
 
-    def _fetch_plan_with_lookahead(self, start_id: int) -> Optional[tuple]:
-        """Find next scannable snapshot via lookahead and create a plan. Runs in thread pool."""
-        try:
-            snapshot, next_id, skipped_count = self._snapshot_manager.find_next_scannable(
-                start_id,
-                self.follow_up_scanner.should_scan,
-                lookahead_size=self._lookahead_size
-            )
-
-            if snapshot is None:
-                return (None, next_id, skipped_count)
-
-            plan = self._create_follow_up_plan(snapshot)
-            return (plan, next_id, skipped_count)
-        except Exception as error:
-            _raise_if_native_fork_safety_error(error)
-            logging.exception("Prefetch failed for snapshot_id=%d; falling back to synchronous", start_id)
-            return None
+    def _fetch_plan_with_lookahead(self, start_id: int) -> tuple:
+        """Plan without mutating progress; the caller owns checkpoint updates."""
+        snapshot, next_id, skipped = self._snapshot_manager.find_next_scannable(
+            start_id, self.follow_up_scanner.should_scan,
+            lookahead_size=self._lookahead_size)
+        if snapshot is None:
+            return None, next_id, skipped, None
+        plan = self._create_follow_up_plan(snapshot)
+        return plan, next_id, skipped, snapshot.watermark
 
     def _create_follow_up_plan(self, snapshot: Snapshot) -> Plan:
         """Route to changelog or delta plan based on scanner type."""
@@ -345,6 +398,20 @@ class AsyncStreamingTableScan:
             limit=None
         )
         starting_scanner.only_read_real_buckets = self._only_read_real_buckets()
+        producer = self.table.options.changelog_producer()
+        if producer == ChangelogProducer.LOOKUP:
+            # L0 will produce its changelog after lookup compaction, so the
+            # initial state must contain only the already compacted levels.
+            starting_scanner.level_filter = lambda level: level > 0
+        elif producer == ChangelogProducer.FULL_COMPACTION:
+            options = self.table.options.options.to_map()
+            levels = options.get('num-levels')
+            if levels is None:
+                # Java CoreOptions.numLevels uses incrementSafely(trigger).
+                trigger = int(options.get('num-sorted-run.compaction-trigger', 5))
+                levels = min(trigger + 1, (1 << 31) - 1)
+            last_level = int(levels) - 1
+            starting_scanner.level_filter = lambda level: level == last_level
         if auth_result is not None:
             from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
             prune_scanner_by_auth(self.table, starting_scanner, auth_result)
@@ -424,31 +491,3 @@ class AsyncStreamingTableScan:
         for split in splits:
             split.is_streaming = True
         return Plan(splits, snapshot_id=snapshot_id)
-
-    def _should_use_diff_catch_up(self) -> bool:
-        """Check if diff-based catch-up should be used (large gap to latest)."""
-        if self._catch_up_in_progress:
-            return False
-
-        if self.next_snapshot_id is None:
-            return False
-
-        latest = self._snapshot_manager.get_latest_snapshot()
-        if latest is None:
-            return False
-
-        gap = latest.id - self.next_snapshot_id
-        return gap > self._diff_threshold
-
-    def _create_catch_up_plan(self, start_id: int, end_snapshot: Snapshot) -> Plan:
-        """Create a catch-up plan using diff-based scanning between start and end snapshots."""
-        start_snapshot = None
-        if start_id > 1:
-            start_snapshot = self._snapshot_manager.get_snapshot_by_id(start_id - 1)
-
-        auth_result = self.__auth_query()
-        if start_snapshot is None:
-            plan = self.__create_initial_plan_raw(end_snapshot, auth_result)
-        else:
-            plan = IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
-        return wrap_plan_with_auth(auth_result, plan)

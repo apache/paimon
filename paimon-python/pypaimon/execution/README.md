@@ -97,6 +97,47 @@ Ray package. Public Ray helper entry points delegate to those same helpers.
 System-table output applies common Arrow filtering/projection to `SystemSplit`
 results from either metadata provider without creating a Python file reader.
 
+## Corresponding execution APIs
+
+Compare the operation's inputs, results and lifecycle when changing a backend.
+The public facade and the Native bridge normalize Python objects and Rust FFI
+types at that boundary.
+
+| Operation | Python execution | Native execution / Rust Core |
+| --- | --- | --- |
+| Batch scan | `PythonTableScanMixin` | `NativeTableScanMixin` / `TableScan` |
+| Split read | `PythonTableReadMixin` | `NativeTableReadMixin` / `TableRead` |
+| Stream scan | `AsyncStreamingTableScan` | `StreamTableScan` / `StreamTableScan` |
+| Write | `PythonTableWriteMixin` | `NativeTableWrite` / `TableWrite` |
+| Commit | `PythonTableCommit` | `NativeTableCommit` / `TableCommit` |
+| Row ID / predicate update, delete and key upsert | Python update executors | Native update adapters / `TableUpdate` |
+| Shard update | `ShardTableUpdator` | `NativeShardTableUpdator` / `ShardTableUpdater` |
+| Index build, drop and search | Python index/search executors | Native index/search adapters / Core index builders and readers |
+
+Both commit adapters expose `commit(messages, commit_identifier,
+snapshot_properties=None)`, `abort(messages)`,
+`truncate_table(commit_identifier)`,
+`truncate_partitions(partitions, commit_identifier)` and `close()`.
+Message conversion happens during preparation; publication uses the selected
+executor's prepared messages. Batch/stream binding details stay in the Native
+adapter, and overwrite details stay in each backend.
+
+Both stream scans expose `plan()`, `checkpoint()`,
+`restore(next_snapshot_id=None)`, `watermark()`,
+`notify_checkpoint_complete(next_snapshot)`, `stream()`, `stream_sync()` and
+`close()`. A plan call checks available snapshots once. Consumer progress is
+persisted explicitly or after the caller resumes a yielded plan. Cancelling a
+yielded plan preserves its unacknowledged consumer position. Snapshot gaps must
+preserve the configured changelog sequence.
+
+Both shard updaters expose `arrow_reader()`, `update_by_arrow_batch(data)`,
+`prepare_commit()` and `close()`. They track actual visible row IDs, require a
+complete read/update cycle before preparation and preserve prepared files when
+closed. This matters when deletion vectors hide physical rows.
+
+Python mixins retain public instance hooks while Native adapters own Rust
+handles. Private helper structure follows each implementation's algorithms.
+
 ## Failure and resource boundaries
 
 Only preparation can select a fallback backend. Reads fail without replaying

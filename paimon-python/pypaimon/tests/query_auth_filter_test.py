@@ -100,17 +100,15 @@ def read(table, predicate, projection=None, limit=None, method='arrow'):
 
 def stream_read(table, builder, phase, follow_up_snapshot=2):
     scan = builder.new_streaming_scan()
-    snapshots = table.snapshot_manager()
     try:
         if phase == 'initial':
-            plan = scan._create_initial_plan(snapshots.get_latest_snapshot())
-        elif phase == 'follow_up':
-            plan = scan._create_follow_up_plan(snapshots.get_snapshot_by_id(follow_up_snapshot))
+            plan = scan.plan()
         else:
-            plan = scan._create_catch_up_plan(follow_up_snapshot, snapshots.get_latest_snapshot())
-        return arrow_rows(builder.new_read().to_arrow(plan.splits()))
+            scan.restore(follow_up_snapshot)
+            plan = scan.plan()
+        return arrow_rows(builder.new_read().to_arrow(plan.splits() if plan is not None else []))
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 def selection_sensitive(table, masked_rules):

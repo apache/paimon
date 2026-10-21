@@ -15,15 +15,52 @@
 # specific language governing permissions and limitations
 # under the License.
 
+class NativeTableCommit:
+    """Adapt prepared Rust messages to the common commit execution protocol."""
+
+    def __init__(self, native_commit, is_batch=False):
+        self._native_commit = native_commit
+        self._is_batch = is_batch
+        self._callbacks_registered = False
+
+    def commit(self, messages, commit_identifier, snapshot_properties=None):
+        kwargs = ({} if snapshot_properties is None else
+                  {'snapshot_properties': snapshot_properties})
+        if self._is_batch:
+            return self._native_commit.commit(messages, **kwargs)
+        return self._native_commit.commit(commit_identifier, messages, **kwargs)
+
+    def abort(self, messages):
+        return self._native_commit.abort(messages)
+
+    def truncate_table(self, commit_identifier):
+        # The public batch API supplies the batch identifier. The Rust batch
+        # binding owns that same identifier for both truncate operations.
+        return self._native_commit.truncate_table()
+
+    def truncate_partitions(self, partitions, commit_identifier):
+        return self._native_commit.truncate_partitions(partitions)
+
+    def close(self):
+        return self._native_commit.close()
+
+    def _register_callbacks(self, table, callbacks):
+        if callbacks and not self._callbacks_registered:
+            from pypaimon.execution.native.write.native_commit import native_commit_callback
+
+            self._native_commit.add_commit_callback(native_commit_callback(table, callbacks))
+            self._callbacks_registered = True
+
+
 def prepare_native_commit(owner, messages, *, batch=False):
     """Prepare the wire bridge before any snapshot mutation starts."""
     from pypaimon.execution.native.write.native_commit import (
-        create_native_commit, native_commit_callback, native_messages_supported,
+        create_native_commit, native_messages_supported,
         to_native_commit_messages,
     )
     if not native_messages_supported(owner.table, messages):
         return None
-    if owner._native_commit is None or (batch and not owner._native_commit_is_batch):
+    if owner._native_commit is None or (batch and not owner._native_commit._is_batch):
         native = create_native_commit(
             owner.table, owner.commit_user, owner.overwrite_partition,
             **({'batch': True} if batch else {}))
@@ -31,15 +68,12 @@ def prepare_native_commit(owner, messages, *, batch=False):
             return None
         if owner._native_commit is not None:
             owner._native_commit.close()
-        owner._native_commit = native
-        owner._native_commit_is_batch = batch or owner.overwrite_partition is not None
-        owner._native_callbacks_registered = False
+        owner._native_commit = NativeTableCommit(
+            native, is_batch=batch or owner.overwrite_partition is not None)
     if owner._native_commit is None:
         return None
     native_messages = to_native_commit_messages(owner.table, messages)
     # Callbacks may be registered after the native committer is created.
     # The public commit lifecycle owns callback closure in either execution path.
-    if owner._commit_callbacks and not owner._native_callbacks_registered:
-        owner._native_commit.add_commit_callback(native_commit_callback(owner.table, owner._commit_callbacks))
-        owner._native_callbacks_registered = True
+    owner._native_commit._register_callbacks(owner.table, owner._commit_callbacks)
     return owner._native_commit, native_messages

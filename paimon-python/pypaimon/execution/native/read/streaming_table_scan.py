@@ -18,8 +18,11 @@
 """Polling adapters for Native stateful streaming scans."""
 
 import asyncio
+from copy import copy
+from typing import AsyncGenerator, Iterator
 
 from pypaimon.execution.native.read.plan import native_stream_scan, _from_native_plan
+from pypaimon.read.plan import Plan
 
 
 class StreamTableScan:
@@ -38,6 +41,9 @@ class StreamTableScan:
             table, predicate=predicate, read_type=read_type,
             bucket_filter=bucket_filter, consumer_id=consumer_id)
         self._pending_consumer_snapshot = None
+        self._pending_consumer_owner = None
+        self._closed = False
+        self._generation = 0
 
     @property
     def next_snapshot_id(self):
@@ -54,52 +60,90 @@ class StreamTableScan:
         return self._scan.watermark()
 
     def restore(self, next_snapshot_id=None):
+        self._require_open()
         self._scan.restore(next_snapshot_id)
+        self._generation += 1
         self._pending_consumer_snapshot = None
+        self._pending_consumer_owner = None
 
     def notify_checkpoint_complete(self, next_snapshot):
+        self._require_open()
         self._scan.notify_checkpoint_complete(next_snapshot)
 
     def plan(self):
+        self._require_open()
         # Decode before returning or acknowledging progress. A failed conversion
         # must leave the selected frame available for retry.
-        checkpoint = self.checkpoint()
+        previous = copy(self._scan)
+        generation = self._generation
         native_plan = self._scan.plan()
+        self._check_generation(generation)
         if native_plan is None:
             return None
         try:
-            return _from_native_plan(self.table, native_plan)
+            plan = _from_native_plan(self.table, native_plan)
+            self._check_generation(generation)
+            return plan
         except Exception:
-            self._scan.restore(checkpoint)
+            if not self._closed and generation == self._generation:
+                self._scan = previous
             raise
 
     def _flush_pending_consumer(self):
         if self._pending_consumer_snapshot is not None:
             self.notify_checkpoint_complete(self._pending_consumer_snapshot)
             self._pending_consumer_snapshot = None
+            self._pending_consumer_owner = None
 
-    async def stream(self):
-        while True:
-            self._flush_pending_consumer()
-            checkpoint = self.checkpoint()
-            plan = self.plan()
-            if plan is None:
-                next_snapshot = self.checkpoint()
-                if next_snapshot is not None and next_snapshot != checkpoint:
-                    # Skipped frames have no rows awaiting caller processing.
-                    self._pending_consumer_snapshot = next_snapshot
-                    self._flush_pending_consumer()
-                await asyncio.sleep(self.poll_interval)
-                continue
-            self._pending_consumer_snapshot = self.checkpoint()
-            yield plan
+    async def stream(self) -> AsyncGenerator[Plan, None]:
+        owner = object()
+        try:
+            while True:
+                self._flush_pending_consumer()
+                checkpoint = self.checkpoint()
+                plan = self.plan()
+                if plan is None:
+                    next_snapshot = self.checkpoint()
+                    if next_snapshot is not None and next_snapshot != checkpoint:
+                        # Skipped frames have no rows awaiting caller processing.
+                        self._pending_consumer_snapshot = next_snapshot
+                        self._pending_consumer_owner = owner
+                        self._flush_pending_consumer()
+                    await asyncio.sleep(self.poll_interval)
+                    continue
+                self._pending_consumer_snapshot = self.checkpoint()
+                self._pending_consumer_owner = owner
+                yield plan
+        except (GeneratorExit, asyncio.CancelledError):
+            if self._pending_consumer_owner is owner:
+                self._pending_consumer_snapshot = None
+                self._pending_consumer_owner = None
+            raise
 
-    def stream_sync(self):
+    def stream_sync(self) -> Iterator[Plan]:
         loop = asyncio.new_event_loop()
         iterator = self.stream()
         try:
             while True:
                 yield loop.run_until_complete(iterator.__anext__())
         finally:
-            loop.run_until_complete(iterator.aclose())
-            loop.close()
+            try:
+                loop.run_until_complete(iterator.aclose())
+            finally:
+                loop.close()
+
+    def _require_open(self):
+        if self._closed:
+            raise RuntimeError("stream scan is closed")
+
+    def _check_generation(self, generation):
+        self._require_open()
+        if generation != self._generation:
+            raise RuntimeError("stream scan was restored during planning")
+
+    def close(self):
+        """Stop polling without acknowledging a plan still owned by the caller."""
+        self._closed = True
+        self._generation += 1
+        self._pending_consumer_snapshot = None
+        self._pending_consumer_owner = None

@@ -88,6 +88,28 @@ def test_native_adapter_owns_only_one_backend(tmp_path):
     core.close.assert_called_once_with()
 
 
+def test_invalid_blob_configuration_keeps_the_configured_consumer(tmp_path):
+    table = _table(tmp_path)
+    writer = table.new_batch_write_builder().new_write()
+    consumer = Mock()
+    factory = Mock()
+    try:
+        assert writer.with_blob_consumer(consumer) is writer
+        assert writer.with_blob_uri_reader_factory(factory) is writer
+        with pytest.raises(TypeError, match='blob_consumer must be callable'):
+            writer.with_blob_consumer(42)
+        with pytest.raises(TypeError, match='factory must provide callable create'):
+            writer.with_blob_uri_reader_factory(42)
+        assert writer.file_store_write.blob_consumer is consumer
+        assert writer.file_store_write.blob_uri_reader_factory is factory
+        assert writer.with_blob_consumer(None) is writer
+        assert writer.with_blob_uri_reader_factory(None) is writer
+        assert writer.file_store_write.blob_consumer is None
+        assert writer.file_store_write.blob_uri_reader_factory is None
+    finally:
+        writer.close()
+
+
 def test_python_delete_matching_respects_independent_read_backend(tmp_path):
     table = _table(tmp_path, {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
                               'deletion-vectors.enabled': 'true'})

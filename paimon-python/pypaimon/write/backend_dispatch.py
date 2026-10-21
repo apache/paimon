@@ -177,15 +177,6 @@ def commit_table_messages(
         snapshot_properties=None):
     """Publish prepared messages while preserving files on any failure."""
     non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
-    commit_kwargs = {
-        "commit_messages": non_empty_messages,
-        "commit_identifier": commit_identifier,
-    }
-    if snapshot_properties is not None:
-        commit_kwargs["snapshot_properties"] = snapshot_properties
-    native_kwargs = ({} if snapshot_properties is None else
-                     {"snapshot_properties": snapshot_properties})
-
     # Never abort files in response to a commit exception. Preserving
     # possible orphan files is safer than deleting files which another
     # attempt may still commit or which a snapshot may already reference.
@@ -197,15 +188,6 @@ def commit_table_messages(
             "Committing overwrite to table %s, %d non-empty messages",
             owner.table.identifier, len(non_empty_messages)
         )
-        prepared = owner._prepare_native_commit(non_empty_messages)
-        if prepared is not None:
-            native, messages = prepared
-            # Keep publication failures outside the preparation fallback.
-            native.commit(messages, **native_kwargs)
-            return
-        python_commit(owner).overwrite(
-            overwrite_partition=owner.overwrite_partition,
-            **commit_kwargs)
     else:
         if (not non_empty_messages
                 and owner.table.options.snapshot_ignore_empty_commit()):
@@ -214,17 +196,14 @@ def commit_table_messages(
             "Committing table %s, %d non-empty messages",
             owner.table.identifier, len(non_empty_messages)
         )
-        prepared = owner._prepare_native_commit(non_empty_messages)
-        if prepared is not None:
-            native, messages = prepared
-            # Mutation is deliberately outside the fallback boundary:
-            # an exception can mean the snapshot was already published.
-            if owner._native_commit_is_batch:
-                native.commit(messages, **native_kwargs)
-            else:
-                native.commit(commit_identifier, messages, **native_kwargs)
-            return
-        python_commit(owner).commit(**commit_kwargs)
+    prepared = owner._prepare_native_commit(non_empty_messages)
+    if prepared is None:
+        execution, messages = python_commit(owner), non_empty_messages
+    else:
+        execution, messages = prepared
+    # Mutation is deliberately outside the preparation fallback boundary:
+    # an exception can mean the snapshot was already published.
+    return execution.commit(messages, commit_identifier, snapshot_properties=snapshot_properties)
 
 
 def abort_table_commit(owner, messages):
@@ -239,7 +218,7 @@ def abort_table_commit(owner, messages):
 def truncate_table_commit(owner, commit_identifier):
     prepared = owner._prepare_native_commit([], batch=True)
     if prepared is not None:
-        prepared[0].truncate_table()
+        prepared[0].truncate_table(commit_identifier)
         return
     python_commit(owner).truncate_table(commit_identifier)
 
@@ -247,9 +226,9 @@ def truncate_table_commit(owner, commit_identifier):
 def truncate_partitions_commit(owner, partitions, commit_identifier):
     prepared = owner._prepare_native_commit([], batch=True)
     if prepared is not None:
-        prepared[0].truncate_partitions(partitions)
+        prepared[0].truncate_partitions(partitions, commit_identifier)
         return
-    python_commit(owner).drop_partitions(partitions, commit_identifier)
+    python_commit(owner).truncate_partitions(partitions, commit_identifier)
 
 
 def close_table_commit(owner):

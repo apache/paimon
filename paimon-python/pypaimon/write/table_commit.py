@@ -50,8 +50,6 @@ class TableCommit:
 
         self._commit_callbacks: List[CommitCallback] = []
         self._native_commit = None
-        self._native_commit_is_batch = False
-        self._native_callbacks_registered = False
         self._python_commit = None
         self._closed = False
 
@@ -85,11 +83,14 @@ class TableCommit:
     @property
     def file_store_commit(self):
         """Access the Python committer explicitly, creating it on first use."""
-        return python_commit(self)
+        return python_commit(self).file_store_commit
 
     @file_store_commit.setter
     def file_store_commit(self, commit):
-        self._python_commit = commit
+        from pypaimon.execution.python.write.table_commit import PythonTableCommit
+
+        self._python_commit = (None if commit is None else
+                               PythonTableCommit(commit, self.overwrite_partition))
 
 
 class BatchTableCommit(TableCommit):
