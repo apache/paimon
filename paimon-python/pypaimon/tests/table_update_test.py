@@ -555,6 +555,27 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             rows,
         )
 
+    def test_update_by_predicate_accepts_struct_subset_assignment(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.struct([('a', pa.int64())])),
+        ])
+        source_type = pa.struct([('a', pa.int32()), ('b', pa.int32())])
+        for chunked in (False, True):
+            with self.subTest(chunked=chunked):
+                table = self._create_table(pa_schema=schema)
+                self._write_arrow(table, pa.Table.from_pylist(
+                    [{'id': 1, 'payload': {'a': 0}}], schema=schema))
+                values = pa.array([{'a': 7, 'b': 99}], type=source_type)
+                if chunked:
+                    values = pa.chunked_array([values])
+                predicate = table.new_read_builder().new_predicate_builder().equal('id', 1)
+
+                self._do_update_by_predicate(table, predicate, {'payload': values})
+
+                self.assertEqual(
+                    [{'a': 7}], self._read_all(table)['payload'].to_pylist())
+
     def test_update_by_predicate_accepts_callable_assignments(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()

@@ -37,22 +37,32 @@ WRAPPERS = [
 
 @pytest.mark.parametrize("wrap_type,wrap_value", WRAPPERS)
 @pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("reordered", [False, True])
-def test_predicate_assignment_struct_cast(wrap_type, wrap_value, chunked, reordered):
+@pytest.mark.parametrize("projection", [
+    "same", "subset-first", "subset-last", "add-field", "reordered",
+])
+def test_predicate_assignment_struct_cast(wrap_type, wrap_value, chunked, projection):
     source = wrap_type(pa.struct([('a', pa.int32()), ('b', pa.int32())]))
     fields = [('a', pa.int64()), ('b', pa.int64())]
-    target = wrap_type(pa.struct(fields[::-1] if reordered else fields))
+    if projection == "subset-first":
+        fields = fields[:1]
+    elif projection == "subset-last":
+        fields = fields[1:]
+    elif projection == "add-field":
+        fields.append(('c', pa.int64()))
+    elif projection == "reordered":
+        fields.reverse()
+    target = wrap_type(pa.struct(fields))
     value = wrap_value({'a': 1, 'b': 2})
     values = pa.array([value, None], type=source)
     if chunked:
         values = pa.chunked_array([values.slice(0, 1), values.slice(1)])
 
-    if reordered:
+    if projection == "reordered":
         with pytest.raises(ValueError, match="struct fields must match in order"):
             BatchTableUpdate._assignment_to_array(values, target, 2)
     else:
         try:
-            values.cast(target)
+            expected = values.cast(target).to_pylist()
         except pa.ArrowNotImplementedError:
             # Older Arrow versions do not implement STRUCT casts.
             with pytest.raises(pa.ArrowNotImplementedError):
@@ -60,4 +70,4 @@ def test_predicate_assignment_struct_cast(wrap_type, wrap_value, chunked, reorde
             return
         result = BatchTableUpdate._assignment_to_array(values, target, 2)
         assert result.type == target
-        assert result.to_pylist() == [value, None]
+        assert result.to_pylist() == expected

@@ -267,11 +267,17 @@ class PythonTableUpdateMixin:
     @staticmethod
     def _validate_assignment_struct_fields(source, target):
         if pa.types.is_struct(source) and pa.types.is_struct(target):
-            if [field.name for field in source] != [field.name for field in target]:
+            source_fields = {field.name: field for field in source}
+            target_names = {field.name for field in target}
+            shared_names = source_fields.keys() & target_names
+            if ([field.name for field in source if field.name in shared_names]
+                    != [field.name for field in target if field.name in shared_names]):
                 raise ValueError("Assignment struct fields must match in order.")
-            for source_field, target_field in zip(source, target):
-                PythonTableUpdateMixin._validate_assignment_struct_fields(
-                    source_field.type, target_field.type)
+            for target_field in target:
+                source_field = source_fields.get(target_field.name)
+                if source_field is not None:
+                    PythonTableUpdateMixin._validate_assignment_struct_fields(
+                        source_field.type, target_field.type)
         elif pa.types.is_map(source) and pa.types.is_map(target):
             PythonTableUpdateMixin._validate_assignment_struct_fields(
                 source.key_type, target.key_type)
