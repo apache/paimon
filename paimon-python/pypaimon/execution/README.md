@@ -105,10 +105,10 @@ types at that boundary.
 
 | Operation | Python execution | Native execution / Rust Core |
 | --- | --- | --- |
-| Batch scan | `PythonTableScanMixin` | `NativeTableScanMixin` / `TableScan` |
-| Split read | `PythonTableReadMixin` | `NativeTableReadMixin` / `TableRead` |
+| Batch scan | `PythonTableScan` | `NativeTableScan` / `TableScan` |
+| Split read | `PythonTableRead` | `NativeTableRead` / `TableRead` |
 | Stream scan | `AsyncStreamingTableScan` | `StreamTableScan` / `StreamTableScan` |
-| Write | `PythonTableWriteMixin` | `NativeTableWrite` / `TableWrite` |
+| Write | `PythonTableWrite` | `NativeTableWrite` / `TableWrite` |
 | Commit | `PythonTableCommit` | `NativeTableCommit` / `TableCommit` |
 | Row ID / predicate update, delete and key upsert | Python update executors | Native update adapters / `TableUpdate` |
 | Shard update | `ShardTableUpdator` | `NativeShardTableUpdator` / `ShardTableUpdater` |
@@ -121,10 +121,29 @@ snapshot_properties=None)`, `abort(messages)`,
 Message conversion happens during preparation; publication uses the selected
 executor's prepared messages. Batch/stream binding details stay in the Native
 adapter, and overwrite details stay in each backend.
+
+Both batch scanners expose `plan(auth_result=None)`, `plan_all_files()` and
+`scan_with_stats(auth_result=None)`. Both readers expose `read_rows(splits)` and
+`read_batches(splits, schema, parallelism=None, blob_parallelism=1,
+ordered=False)`. Output materialization and Python parallel-read helpers are
+separate from this execution protocol.
+
+Writer executors take an explicit identifier in `prepare_commit(identifier)`.
+The public batch facade exposes only `prepare_commit()`, with a one-time guard;
+the public stream facade requires `prepare_commit(identifier)`. These signatures
+also apply to Native facades, including after an explicit switch to Python.
+Invalid call arguments fail before either executor prepares files.
 Public stream write, update and commit entry points normalize integer-like
 commit identifiers to Java `long` / Rust `i64` before execution starts.
 Write-column selections reject empty selections and duplicate names before
-replacing the current configuration. Index build/drop requests bind partition
+replacing the current configuration. Like Java, append writers capture their
+write columns and Blob consumer per partition/bucket. Reconfiguration affects
+future bucket writers; existing buckets retain their configuration across
+`prepare_commit` calls. Full-schema inputs project by column name, and batches
+are checked against every target's captured layout before staging any group.
+Native named-row conversion queries Rust for the target columns using only
+routing metadata, so Python does not duplicate bucket state or encode unused
+payloads. Index build/drop requests bind partition
 predicates to the partition layout and reject predicates containing
 non-partition fields.
 
@@ -141,8 +160,12 @@ Both shard updaters expose `arrow_reader()`, `update_by_arrow_batch(data)`,
 complete read/update cycle before preparation and preserve prepared files when
 closed. This matters when deletion vectors hide physical rows.
 
-Python mixins retain public instance hooks while Native adapters own Rust
-handles. Private helper structure follows each implementation's algorithms.
+Python executors bind an explicit public context and retain its instance hooks;
+Native adapters own Rust handles. The context is not copied or hidden behind a
+generic proxy. Predicate/row-ID operations use bound executors, and prepared
+upsert and MERGE requests expose `upsert()` and `prepare_commit()` respectively
+on either backend. Private helper structure follows each implementation's
+algorithms.
 
 The operation protocols do not imply identical backend capabilities. Python
 Data Evolution reads still reject nested ROW field projections supported by

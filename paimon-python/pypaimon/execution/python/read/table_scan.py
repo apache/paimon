@@ -24,27 +24,33 @@ from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
 
 
-class PythonTableScanMixin:
+class PythonTableScan:
+    """Plan with Python's file scanner and the public scan configuration."""
+
+    def __init__(self, scan):
+        self._scan = scan
+
     def _create_file_scanner(self) -> FileScanner:
-        options = self.table.options.options
-        snapshot_manager = self.table.snapshot_manager()
-        manifest_list_manager = ManifestListManager(self.table)
+        scan = self._scan
+        options = scan.table.options.options
+        snapshot_manager = scan.table.snapshot_manager()
+        manifest_list_manager = ManifestListManager(scan.table)
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil, SCAN_KEYS
         has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
         has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
 
         if has_incremental:
-            if self._incremental_snapshot_range is None:
+            if scan._incremental_snapshot_range is None:
                 return FileScanner(
-                    self.table,
+                    scan.table,
                     lambda: ([], None),
-                    partition_predicate=self.partition_predicate,
+                    partition_predicate=scan.partition_predicate,
                 )
-            start_id, end_id = self._incremental_snapshot_range
+            start_id, end_id = scan._incremental_snapshot_range
             # Java's AUTO mode uses physical changelogs when a producer is
             # configured, and APPEND deltas otherwise.
-            changelog = self.table.options.changelog_producer() != ChangelogProducer.NONE
+            changelog = scan.table.options.changelog_producer() != ChangelogProducer.NONE
 
             def incremental_manifest():
                 snapshots_in_range = []
@@ -65,18 +71,18 @@ class PythonTableScanMixin:
                 return manifests, end_snapshot
 
             return FileScanner(
-                self.table,
+                scan.table,
                 incremental_manifest,
-                self.predicate,
-                self.limit,
-                partition_predicate=self.partition_predicate,
+                scan.predicate,
+                scan.limit,
+                partition_predicate=scan.partition_predicate,
                 skip_level0=False,
                 is_streaming=True,
             )
 
         if has_time_travel:
             def time_travel_manifest_scanner():
-                snapshot = TimeTravelUtil.resolve_snapshot(self.table)
+                snapshot = TimeTravelUtil.resolve_snapshot(scan.table)
                 if snapshot is None:
                     raise ValueError(
                         "Could not resolve time travel snapshot from scan options."
@@ -84,38 +90,39 @@ class PythonTableScanMixin:
                 return manifest_list_manager.read_all(snapshot), snapshot
 
             return FileScanner(
-                self.table,
+                scan.table,
                 time_travel_manifest_scanner,
-                self.predicate,
-                self.limit,
-                partition_predicate=self.partition_predicate,
-                skip_level0=self.table.options.batch_scan_skip_level0(),
+                scan.predicate,
+                scan.limit,
+                partition_predicate=scan.partition_predicate,
+                skip_level0=scan.table.options.batch_scan_skip_level0(),
             )
 
         def all_manifests():
-            snapshot = TimeTravelUtil.resolve_snapshot(self.table)
+            snapshot = TimeTravelUtil.resolve_snapshot(scan.table)
             return manifest_list_manager.read_all(snapshot), snapshot
 
         return FileScanner(
-            self.table,
+            scan.table,
             all_manifests,
-            self.predicate,
-            self.limit,
-            partition_predicate=self.partition_predicate,
-            skip_level0=self.table.options.batch_scan_skip_level0(),
+            scan.predicate,
+            scan.limit,
+            partition_predicate=scan.partition_predicate,
+            skip_level0=scan.table.options.batch_scan_skip_level0(),
         )
 
-    def _python_scanner(self, auth_result):
-        scanner = self.file_scanner
-        if self._query_auth_fn is not None:
-            prune_scanner_by_auth(self.table, scanner, auth_result)
+    def _scanner(self, auth_result):
+        scan = self._scan
+        scanner = scan.file_scanner
+        if scan._query_auth_fn is not None:
+            prune_scanner_by_auth(scan.table, scanner, auth_result)
         return scanner
 
-    def _python_plan(self, auth_result):
-        return wrap_plan_with_auth(auth_result, PythonTableScanMixin._python_scanner(self, auth_result).scan())
+    def plan(self, auth_result=None):
+        return wrap_plan_with_auth(auth_result, self._scanner(auth_result).scan())
 
-    def _python_plan_all_files(self):
-        scanner = PythonTableScanMixin._python_scanner(self, None)
+    def plan_all_files(self):
+        scanner = self._scanner(None)
         # Writer restore/overwrite must see L0 even when batch reads hide it.
         skip_level0 = scanner.skip_level0
         try:
@@ -124,6 +131,6 @@ class PythonTableScanMixin:
         finally:
             scanner.skip_level0 = skip_level0
 
-    def _python_scan_with_stats(self, auth_result):
-        plan, stats = PythonTableScanMixin._python_scanner(self, auth_result).scan_with_stats()
+    def scan_with_stats(self, auth_result=None):
+        plan, stats = self._scanner(auth_result).scan_with_stats()
         return wrap_plan_with_auth(auth_result, plan), stats

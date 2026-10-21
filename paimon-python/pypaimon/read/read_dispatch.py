@@ -53,8 +53,8 @@ def to_iterator(self, splits: List[Split]) -> Iterator:
                 rows.close()
             return
 
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        yield from PythonTableReadMixin._python_row_iterator(self, splits, limit)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        yield from PythonTableRead(self).read_rows(splits)
 
     return _record_generator()
 
@@ -79,9 +79,9 @@ def _new_arrow_batch_reader(
     if native_batches is not None:
         batch_iterator = iter(native_batches)
     else:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        batch_iterator = PythonTableReadMixin._python_batch_iterator(
-            self, splits, schema, parallelism, effective_bp)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        batch_iterator = PythonTableRead(self).read_batches(
+            splits, schema, parallelism, effective_bp)
     reader_type = pyarrow.ipc.RecordBatchReader
     reader = reader_type.from_batches(schema, batch_iterator)
     return reader, batch_iterator
@@ -135,8 +135,8 @@ def to_arrow(
     if native_batches is not None:
         return self._batches_to_arrow(native_batches, schema)
 
-    from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-    return PythonTableReadMixin._python_to_arrow(self, splits, schema, parallelism, effective_bp)
+    from pypaimon.execution.python.read.table_read import PythonTableRead
+    return PythonTableRead(self)._materialize(splits, schema, parallelism, effective_bp)
 
 
 def plan_scan(self) -> Plan:
@@ -159,8 +159,8 @@ def plan_scan(self) -> Plan:
         native = self._try_native_plan()
         if native is not None:
             return native
-    from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
-    return PythonTableScanMixin._python_plan(self, auth_result)
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    return PythonTableScan(self).plan(auth_result)
 
 
 def plan_all_files(self) -> Plan:
@@ -180,8 +180,8 @@ def plan_all_files(self) -> Plan:
             return plan
     if self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
-    from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
-    return PythonTableScanMixin._python_plan_all_files(self)
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    return PythonTableScan(self).plan_all_files()
 
 
 def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
@@ -194,20 +194,22 @@ def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
     native_auth = (self.table.options.query_auth_enabled
                    and self._native_requested() and self._native_plan_supported())
     if native_auth:
-        native = self._try_native_plan()
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        native = NativeTableScan(self).scan_with_stats()
         if native is not None:
-            return native, native.stats()
+            return native
     auth_result = self._TableScan__auth_query()
     if self._query_auth_fn is not None and self._file_scanner is not None:
         from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
         prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
     if (not native_auth and auth_result is None and self._native_requested()
             and self._native_plan_supported()):
-        native = self._try_native_plan()
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        native = NativeTableScan(self).scan_with_stats()
         if native is not None:
-            return native, native.stats()
-    from pypaimon.execution.python.read.table_scan import PythonTableScanMixin
-    return PythonTableScanMixin._python_scan_with_stats(self, auth_result)
+            return native
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    return PythonTableScan(self).scan_with_stats(auth_result)
 
 
 def new_streaming_scan(self):

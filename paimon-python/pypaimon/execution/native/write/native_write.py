@@ -19,6 +19,7 @@
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible
 from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_file_field
@@ -177,16 +178,17 @@ class NativeTableWrite:
         # payload values. This facade checks only the logical Arrow schema.
         compatible = dict(check_top_level_nullability=False, allow_binary_compatibility=True,
                           check_nested_nullability=False)
-        if not (arrow_schemas_compatible(data.schema, self._schema, **compatible)
-                or (self._write_cols is not None
-                    and arrow_schemas_compatible(data.schema, self._table_schema, **compatible))):
-            raise ValueError(
-                "Input schema isn't consistent with table schema and write cols. "
-                f"Input schema is: {data.schema} Table schema is: {self._schema} "
-                f"Write cols is: {self._write_cols}")
-        # Full input can carry routing columns outside the physical write type.
-        # Core routes rows first and writes only the selected columns.
-        return data
+        names = data.schema.names
+        if len(set(names)) == len(names) and all(name in self._table_schema.names for name in names):
+            expected = pa.schema([self._table_schema.field(name) for name in names])
+            if arrow_schemas_compatible(data.schema, expected, **compatible):
+                # Core validates the destination's current or captured layout.
+                # Python checks only the declared types of transported fields.
+                return data
+        raise ValueError(
+            "Input schema isn't consistent with table schema and write cols. "
+            f"Input schema is: {data.schema} Table schema is: {self._schema} "
+            f"Write cols is: {self._write_cols}")
 
     def write_pandas(self, dataframe):
         from pypaimon.write.input_adapter import _pandas_write_batch
@@ -201,26 +203,47 @@ class NativeTableWrite:
     def write_row(self, row):
         values = row_to_named_values(row, self.table.table_schema.fields)
         names = self._schema.names
-        require_columns(values, names, 'write_row')
+        full_row = set(values) == set(self._table_schema.names)
         require_columns(values, self.table.partition_keys, 'write_row')
         from pypaimon.write.row_kind import skip_write_row, with_row_kind
-        if skip_write_row(self.table, values, row.get_row_kind(), self._write_cols):
+        logical_columns = self._write_cols if full_row else list(values)
+        if skip_write_row(self.table, values, row.get_row_kind(), logical_columns):
             return
-        if self._write_cols is not None:
+        if self._write_cols is not None or (self._written and not self.table.is_primary_key_table):
             routing = list(self.table.partition_keys)
             if ((self.table.bucket_mode() == BucketMode.HASH_FIXED and self.table.options.bucket() > 1)
                     or isinstance(self, NativePostponeFixedBucketTableWrite)):
                 routing.extend(self.table.table_schema.bucket_keys)
+            routing = list(dict.fromkeys(routing))
+            require_columns(values, routing, 'write_row')
+            captured = names
+            if self._written and not self.table.is_primary_key_table:
+                if routing:
+                    metadata = row_values_to_arrow_table(
+                        values, self.table.table_schema.fields, routing).to_batches()[0]
+                else:
+                    from pypaimon.utils.arrow_utils import zero_column_batch
+                    metadata = zero_column_batch(1)
+                captured = self._native_writer._row_write_columns(metadata)
+            require_columns(values, captured, 'write_row')
             row_kind_field = self.table.options.options.to_map().get('rowkind.field')
             if row_kind_field is not None:
                 routing.append(row_kind_field)
             require_columns(values, routing, 'write_row')
-            if not set(routing).issubset(names):
-                retained = set(names) | set(routing)
+            if captured != names:
+                # A historical named row carries its captured columns plus
+                # routing metadata. Preserve its declared column order even if
+                # routing adds no extra fields. Current-type NOT NULL checks
+                # have already run above; unused payloads need no encoding.
+                names = list(captured) + [name for name in self._table_schema.names
+                                          if name in routing and name not in captured]
+            elif full_row or not set(routing).issubset(names):
+                retained = set(captured) | set(routing)
                 names = self._table_schema.names
-                # Only routing and written values need transport. In particular,
-                # an unwritten Blob object must not be opened or encoded.
+                # Unwritten payloads remain untouched, including live Blobs.
                 values = {name: values.get(name) if name in retained else None for name in names}
+        else:
+            require_columns(values, names, 'write_row')
         try:
             data = (self._blob_rows.to_batch(self.table, [values], names)
                     if self._blob_rows is not None else
@@ -235,15 +258,13 @@ class NativeTableWrite:
                 if not self._defer_blob_input:
                     self._blob_rows.clear()
 
-    def prepare_commit(self, commit_identifier=None):
+    def prepare_commit(self, commit_identifier):
+        commit_identifier = validate_commit_identifier(commit_identifier)
         if self.stream:
-            if commit_identifier is None:
-                raise TypeError('StreamTableWrite.prepare_commit requires an identifier')
-            commit_identifier = validate_commit_identifier(commit_identifier)
             messages = self._native_writer.prepare_commit(True, commit_identifier)
         else:
-            if commit_identifier is not None:
-                raise TypeError('BatchTableWrite.prepare_commit accepts no identifier')
+            if commit_identifier != BATCH_COMMIT_IDENTIFIER:
+                raise ValueError('Batch writer execution requires the batch commit identifier')
             self._batch_committed = True
             try:
                 messages = self._native_writer.prepare_commit()

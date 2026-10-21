@@ -19,7 +19,7 @@ from bisect import bisect_right
 from collections import deque
 from itertools import islice
 import logging
-from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Tuple
 
 import pyarrow
 import pyarrow as pa
@@ -112,12 +112,41 @@ def _divide_ranges(
     return sorted_ranges[start_idx], sorted_ranges[end_idx]
 
 
-class PythonTableUpdateMixin:
-    """Python scan and file rewrite algorithms for the public update API."""
+class PythonTableUpdate:
+    """Execute an update using the facade's configuration and legacy hooks."""
+
+    def __init__(self, context, commit_identifier=BATCH_COMMIT_IDENTIFIER, predicate=None,
+                 *, has_callable=False, has_array=False):
+        self._context = context
+        self._commit_identifier = commit_identifier
+        self._predicate = predicate
+        self._has_callable = has_callable
+        self._has_array = has_array
+
+    def update_by_arrow_with_row_id(self, data):
+        context = self._context
+        columns = context.update_cols if context.update_cols is not None else [
+            name for name in data.column_names if name != SpecialFields.ROW_ID.name]
+        return context._new_row_id_updater(self._commit_identifier).update_columns(data, columns)
+
+    def update_by_arrow_batches_with_row_id(self, tables):
+        return self._context._update_by_arrow_batches_with_row_id(tables, self._commit_identifier)
+
+    def delete_by_row_id(self, row_ids):
+        return self._context._delete_rows_with_python(row_ids)
+
+    def update(self, assignments, read_columns):
+        return self._context._execute_predicate_update(
+            self._predicate, assignments, self._commit_identifier, read_columns,
+            self._has_callable, self._has_array)
+
+    def delete(self):
+        return self._context._execute_predicate_delete(self._predicate, self._commit_identifier)
 
     def _matched_delete_row_ids(
             self, predicate: Optional[Predicate]) -> List[int]:
-        scan_table = self._matched_update_scan_table()
+        context = self._context
+        scan_table = context._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
@@ -137,15 +166,16 @@ class PythonTableUpdateMixin:
     def _update_by_arrow_batches_with_row_id(
             self, tables: Iterable[pa.Table], commit_identifier: int
     ) -> List[CommitMessage]:
+        context = self._context
         updater = None
         try:
             for table in tables:
-                cols = self.update_cols if self.update_cols is not None else [
+                cols = context.update_cols if context.update_cols is not None else [
                     c for c in table.column_names
                     if c != SpecialFields.ROW_ID.name
                 ]
                 if updater is None:
-                    updater = self._new_row_id_updater(commit_identifier)
+                    updater = context._new_row_id_updater(commit_identifier)
                 updater.update_columns(table, cols)
             return [] if updater is None else updater.commit_messages
         except Exception:
@@ -198,30 +228,21 @@ class PythonTableUpdateMixin:
                 yield group
 
     def _matched_update_scan_table(self):
-        snapshot = TimeTravelUtil.resolve_snapshot(self.table)
-        return self.table.copy_without_time_travel({
+        context = self._context
+        snapshot = TimeTravelUtil.resolve_snapshot(context.table)
+        return context.table.copy_without_time_travel({
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
                 GlobalIndexSearchMode.FULL.value,
         })._copy_with_snapshot(snapshot)
-
-    def _validate_predicate_update(
-            self,
-            assignments: Mapping[str, Any],
-            read_columns: Optional[Sequence[str]],
-            has_callable: bool,
-            has_array: bool,
-    ):
-        from pypaimon.write.update_validation import _validate_predicate_update
-
-        return _validate_predicate_update(self, assignments, read_columns, has_callable, has_array)
 
     def _build_predicate_update_table(
             self,
             assignments: Mapping[str, Any],
             matched: pa.Table,
     ) -> pa.Table:
+        context = self._context
         table_schema = PyarrowFieldParser.from_paimon_schema(
-            self.table.table_schema.fields
+            context.table.table_schema.fields
         )
         arrays = [matched[SpecialFields.ROW_ID.name]]
         fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
@@ -235,7 +256,7 @@ class PythonTableUpdateMixin:
                     )
             target_field = table_schema.field(col)
             arrays.append(
-                self._assignment_to_array(
+                context._assignment_to_array(
                     value, target_field.type, matched.num_rows
                 )
             )
@@ -260,7 +281,7 @@ class PythonTableUpdateMixin:
                 f"{len(array)} != {row_count}."
             )
         if array.type != data_type:
-            PythonTableUpdateMixin._validate_assignment_struct_fields(
+            PythonTableUpdate._validate_assignment_struct_fields(
                 array.type, data_type)
             if isinstance(array, pa.ChunkedArray):
                 array = pa.chunked_array(
@@ -283,38 +304,39 @@ class PythonTableUpdateMixin:
             for target_field in target:
                 source_field = source_fields.get(target_field.name)
                 if source_field is not None:
-                    PythonTableUpdateMixin._validate_assignment_struct_fields(
+                    PythonTableUpdate._validate_assignment_struct_fields(
                         source_field.type, target_field.type)
         elif pa.types.is_map(source) and pa.types.is_map(target):
-            PythonTableUpdateMixin._validate_assignment_struct_fields(
+            PythonTableUpdate._validate_assignment_struct_fields(
                 source.key_type, target.key_type)
-            PythonTableUpdateMixin._validate_assignment_struct_fields(
+            PythonTableUpdate._validate_assignment_struct_fields(
                 source.item_type, target.item_type)
         else:
             list_types = (pa.types.is_list, pa.types.is_large_list,
                           pa.types.is_fixed_size_list)
             if (any(check(source) for check in list_types)
                     and any(check(target) for check in list_types)):
-                PythonTableUpdateMixin._validate_assignment_struct_fields(
+                PythonTableUpdate._validate_assignment_struct_fields(
                     source.value_type, target.value_type)
 
     def _delete_by_partition_filter(
             self, partition_filter: Predicate) -> List[CommitMessage]:
-        _authorize_update(self.table)
-        snapshot = TimeTravelUtil.resolve_snapshot(self.table)
+        context = self._context
+        _authorize_update(context.table)
+        snapshot = TimeTravelUtil.resolve_snapshot(context.table)
         if snapshot is None:
             return []
 
         messages = {}
-        manifest_list_manager = ManifestListManager(self.table)
+        manifest_list_manager = ManifestListManager(context.table)
         data_entries = FileScanner(
-            self.table,
+            context.table,
             lambda: ([], None),
             partition_predicate=partition_filter,
         ).with_all_buckets().read_manifest_entries(manifest_list_manager.read_all(snapshot))
 
         for entry in data_entries:
-            message = self._partition_delete_message(
+            message = context._partition_delete_message(
                 messages,
                 tuple(entry.partition.values),
                 entry.bucket,
@@ -322,8 +344,8 @@ class PythonTableUpdateMixin:
             )
             message.deleted_files.append(entry.file)
 
-        for entry in self._partition_index_entries(snapshot, partition_filter):
-            message = self._partition_delete_message(
+        for entry in context._partition_index_entries(snapshot, partition_filter):
+            message = context._partition_delete_message(
                 messages,
                 tuple(entry.partition.values),
                 entry.bucket,
@@ -351,28 +373,30 @@ class PythonTableUpdateMixin:
         return messages[key]
 
     def _partition_index_entries(self, snapshot, partition_filter: Predicate):
+        context = self._context
         if snapshot.index_manifest is None:
             return []
         return [
-            entry for entry in IndexManifestFile(self.table).read(
+            entry for entry in IndexManifestFile(context.table).read(
                 snapshot.index_manifest)
             if partition_filter.test(entry.partition)
         ]
 
     def _partition_only_delete_filter(
             self, predicate: Optional[Predicate]) -> Optional[Predicate]:
-        if predicate is None or not self.table.partition_keys:
+        context = self._context
+        if predicate is None or not context.table.partition_keys:
             return None
-        predicate_fields = self._predicate_fields(predicate)
+        predicate_fields = context._predicate_fields(predicate)
         if not predicate_fields:
             return None
-        partition_keys = set(self.table.partition_keys)
+        partition_keys = set(context.table.partition_keys)
         if not predicate_fields.issubset(partition_keys):
             return None
         partition_index = {
-            name: index for index, name in enumerate(self.table.partition_keys)
+            name: index for index, name in enumerate(context.table.partition_keys)
         }
-        return self._rewrite_predicate_to_partition_indices(
+        return context._rewrite_predicate_to_partition_indices(
             predicate, partition_index
         )
 
@@ -381,9 +405,10 @@ class PythonTableUpdateMixin:
             predicate: Predicate,
             partition_index: Mapping[str, int],
     ) -> Predicate:
+        context = self._context
         if predicate.method in ('and', 'or'):
             return predicate.new_literals([
-                self._rewrite_predicate_to_partition_indices(
+                context._rewrite_predicate_to_partition_indices(
                     child, partition_index,
                 )
                 for child in (predicate.literals or [])
@@ -397,7 +422,8 @@ class PythonTableUpdateMixin:
 
     def _execute_predicate_update(
             self, predicate, assignments, commit_identifier, read_columns, has_callable, has_array):
-        scan_table = self._matched_update_scan_table()
+        context = self._context
+        scan_table = context._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
@@ -415,12 +441,12 @@ class PythonTableUpdateMixin:
             snapshot_id, splits
         )
         table_read = read_builder.new_read()
-        updater = self._new_row_id_updater(commit_identifier, files_info)
+        updater = context._new_row_id_updater(commit_identifier, files_info)
         try:
             if has_array:
                 matched = table_read.to_arrow(splits)
                 if matched.num_rows > 0:
-                    update_table = self._build_predicate_update_table(
+                    update_table = context._build_predicate_update_table(
                         assignments,
                         matched,
                     )
@@ -428,11 +454,11 @@ class PythonTableUpdateMixin:
                         update_table, list(assignments.keys())
                     )
             else:
-                for split in self._predicate_update_file_groups(splits):
+                for split in context._predicate_update_file_groups(splits):
                     matched = table_read.to_arrow([split], parallelism=1)
                     if matched.num_rows == 0:
                         continue
-                    update_table = self._build_predicate_update_table(
+                    update_table = context._build_predicate_update_table(
                         assignments,
                         matched,
                     )
@@ -446,20 +472,23 @@ class PythonTableUpdateMixin:
         return updater.commit_messages
 
     def _execute_predicate_delete(self, predicate, commit_identifier):
-        partition_filter = self._partition_only_delete_filter(predicate)
+        context = self._context
+        partition_filter = context._partition_only_delete_filter(predicate)
         if partition_filter is not None:
-            return self._delete_by_partition_filter(partition_filter)
+            return context._delete_by_partition_filter(partition_filter)
 
-        row_ids = self._matched_delete_row_ids(predicate)
-        return self._delete_by_row_id(row_ids, commit_identifier)
+        row_ids = context._matched_delete_row_ids(predicate)
+        return context._delete_by_row_id(row_ids, commit_identifier)
 
     def _new_python_shard_updator(self, shard_num, total_shard_count):
+        context = self._context
         from pypaimon.write.table_update import ShardTableUpdator
-        return ShardTableUpdator(self.table, self.projection, self.update_cols,
-                                 self.commit_user, shard_num, total_shard_count)
+        return ShardTableUpdator(context.table, context.projection, context.update_cols,
+                                 context.commit_user, shard_num, total_shard_count)
 
     def _delete_rows_with_python(self, row_ids):
-        return TableDeleteByRowId(self.table).delete(list(row_ids))
+        context = self._context
+        return TableDeleteByRowId(context.table).delete(list(row_ids))
 
 
 class _ShardBatchIterator:
@@ -493,7 +522,10 @@ class _ShardBatchIterator:
 
 class ShardTableUpdator:
 
-    def __init__(
+    def __init__(self, context):
+        self._context = context
+
+    def initialize(
             self,
             table,
             projection: Optional[List[str]],
@@ -502,36 +534,37 @@ class ShardTableUpdator:
             shard_num: int,
             total_shard_count: int,
     ):
+        context = self._context
         from pypaimon.table.file_store_table import FileStoreTable
         snapshot = TimeTravelUtil.resolve_snapshot(table)
-        self.table: FileStoreTable = table.copy_without_time_travel({
+        context.table: FileStoreTable = table.copy_without_time_travel({
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
         })._copy_with_snapshot(snapshot)
-        self.projection = projection
-        self.write_cols = list(write_cols) if write_cols is not None else list(table.field_names)
-        self.commit_user = commit_user
-        self.total_shard_count = total_shard_count
-        self.shard_num = shard_num
-        scanner = self.table.new_read_builder().new_scan()
+        context.projection = projection
+        context.write_cols = list(write_cols) if write_cols is not None else list(table.field_names)
+        context.commit_user = commit_user
+        context.total_shard_count = total_shard_count
+        context.shard_num = shard_num
+        scanner = context.table.new_read_builder().new_scan()
         plan = scanner.plan_all_files()
-        self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        context.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
-        self.splits = splits
-        self._files_info = RowIdFileIndex.from_splits(self.snapshot_id, splits)
-        self._write_schema = PyarrowFieldParser.from_paimon_schema(
-            [table.field_dict[name] for name in self.write_cols])
-        self.writer = None
-        self._pending_row_ids = deque()
-        self._group_batches = []
-        self._current_group = None
-        self._reader = None
-        self._reader_started = False
-        self._read_complete = not splits
-        self._read_failed = False
-        self._failed = False
-        self._closed = False
-        self._messages = None
+        context.splits = splits
+        context._files_info = RowIdFileIndex.from_splits(context.snapshot_id, splits)
+        context._write_schema = PyarrowFieldParser.from_paimon_schema(
+            [table.field_dict[name] for name in context.write_cols])
+        context.writer = None
+        context._pending_row_ids = deque()
+        context._group_batches = []
+        context._current_group = None
+        context._reader = None
+        context._reader_started = False
+        context._read_complete = not splits
+        context._read_failed = False
+        context._failed = False
+        context._closed = False
+        context._messages = None
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
@@ -539,11 +572,12 @@ class ShardTableUpdator:
         return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
-        ShardTableUpdator._ensure_active(self)
-        if self._reader_started:
+        context = self._context
+        self._ensure_active()
+        if context._reader_started:
             raise ValueError('Shard reader can only be opened once')
-        read_builder = self.table.new_read_builder()
-        read_builder.with_projection(self.projection)
+        read_builder = context.table.new_read_builder()
+        read_builder.with_projection(context.projection)
         requested_read = read_builder.new_read()
         output_schema = requested_read._output_arrow_schema()
         read_type = list(read_builder.read_type())
@@ -559,148 +593,163 @@ class ShardTableUpdator:
             row_id_column = len(projection.columns)
             projection = OutputProjection(
                 list(projection.columns) + [(name, [SpecialFields.ROW_ID.name])], projection.named)
-        read = TableRead(self.table, predicate=None, read_type=read_type, output_projection=projection)
-        source = read._to_managed_arrow_batch_reader(self.splits, parallelism=1)
-        self._reader_started = True
+        read = TableRead(context.table, predicate=None, read_type=read_type, output_projection=projection)
+        source = read._to_managed_arrow_batch_reader(context.splits, parallelism=1)
+        context._reader_started = True
 
         def batches():
             error = None
             try:
                 for batch in source:
-                    ShardTableUpdator._ensure_active(self)
+                    self._ensure_active()
                     row_ids = batch.column(row_id_column)
                     if row_ids.null_count:
                         raise ValueError('Shard reader returned null _ROW_ID values')
-                    self._pending_row_ids.extend(row_ids.to_pylist())
+                    context._pending_row_ids.extend(row_ids.to_pylist())
                     arrays = [batch.column(i) for i in range(len(output_schema))]
                     yield (pa.RecordBatch.from_arrays(arrays, schema=output_schema) if arrays else
                            zero_column_batch(batch.num_rows, output_schema.metadata))
-                self._read_complete = True
+                context._read_complete = True
             except BaseException as failure:
                 error = failure
                 if not isinstance(failure, GeneratorExit):
-                    self._read_failed = True
+                    context._read_failed = True
                 raise
             finally:
                 try:
                     iterator.close_source(error)
                 except BaseException:
-                    self._read_failed = True
+                    context._read_failed = True
                     raise
 
         iterator = _ShardBatchIterator(batches(), source)
         reader = pa.ipc.RecordBatchReader.from_batches(output_schema, iterator)
-        self._reader = _ClosableArrowBatchReader(reader, iterator)
-        return self._reader
+        context._reader = _ClosableArrowBatchReader(reader, iterator)
+        return context._reader
 
     def prepare_commit(self) -> List[CommitMessage]:
-        if self._messages is not None:
-            return list(self._messages)
-        ShardTableUpdator._ensure_active(self)
-        if not self._read_complete or self._pending_row_ids:
+        context = self._context
+        if context._messages is not None:
+            return list(context._messages)
+        self._ensure_active()
+        if not context._read_complete or context._pending_row_ids:
             raise ValueError('Read and update exactly the same number of rows from this shard before preparing')
-        ShardTableUpdator._flush_group(self)
-        self._messages = [] if self.writer is None else list(self.writer.commit_messages)
-        return list(self._messages)
+        self._flush_group()
+        context._messages = [] if context.writer is None else list(context.writer.commit_messages)
+        return list(context._messages)
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):
-        from pypaimon.execution.python.write.table_update_by_row_id import PythonRowIdUpdateMixin
+        context = self._context
+        from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 
-        ShardTableUpdator._ensure_active(self)
-        if len(data.schema.names) != len(self.write_cols) or set(data.schema.names) != set(self.write_cols):
+        self._ensure_active()
+        if len(data.schema.names) != len(context.write_cols) or set(data.schema.names) != set(context.write_cols):
             raise ValueError('Shard input must contain exactly the configured update columns')
-        arrays = [PythonRowIdUpdateMixin._coerce_column(data.column(name), field.type)
-                  for name, field in zip(self.write_cols, self._write_schema)]
-        normalized = normalize_arrow_write_nullability(pa.RecordBatch.from_arrays(arrays, schema=self._write_schema),
-                                                       self._write_schema)
-        for field, column in zip(self._write_schema, normalized.columns):
+        arrays = [PythonTableUpdateByRowId._coerce_column(data.column(name), field.type)
+                  for name, field in zip(context.write_cols, context._write_schema)]
+        normalized = normalize_arrow_write_nullability(pa.RecordBatch.from_arrays(arrays, schema=context._write_schema),
+                                                       context._write_schema)
+        for field, column in zip(context._write_schema, normalized.columns):
             if not field.nullable and column.null_count:
                 raise ValueError('Cannot write null to non-null column(%s)' % field.name)
-        if data.num_rows > len(self._pending_row_ids):
+        if data.num_rows > len(context._pending_row_ids):
             raise ValueError('Shard update contains more rows than have been read')
-        row_ids = list(islice(self._pending_row_ids, data.num_rows))
-        groups = [self._files_info.first_row_ids[bisect_right(self._files_info.first_row_ids, row_id) - 1]
+        row_ids = list(islice(context._pending_row_ids, data.num_rows))
+        groups = [context._files_info.first_row_ids[bisect_right(context._files_info.first_row_ids, row_id) - 1]
                   for row_id in row_ids]
         batch = pa.RecordBatch.from_arrays(
             [pa.array(row_ids, type=pa.int64())] + list(normalized.columns),
-            names=[SpecialFields.ROW_ID.name] + self.write_cols)
+            names=[SpecialFields.ROW_ID.name] + context.write_cols)
         try:
             start = 0
             while start < len(groups):
                 group = groups[start]
-                if self._current_group is not None and self._current_group != group:
-                    ShardTableUpdator._flush_group(self)
-                self._current_group = group
+                if context._current_group is not None and context._current_group != group:
+                    self._flush_group()
+                context._current_group = group
                 end = start + 1
                 while end < len(groups) and groups[end] == group:
                     end += 1
-                self._group_batches.append(batch.slice(start, end - start))
+                context._group_batches.append(batch.slice(start, end - start))
                 start = end
         except BaseException:
-            self._failed = True
+            context._failed = True
             raise
         for _ in row_ids:
-            self._pending_row_ids.popleft()
+            context._pending_row_ids.popleft()
 
     def _init_writer(self):
-        if self.writer is None:
+        context = self._context
+        if context.writer is None:
             from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-            self.writer = TableUpdateByRowId(
-                self.table, self.commit_user, BATCH_COMMIT_IDENTIFIER, _precomputed_files_info=self._files_info)
+            context.writer = TableUpdateByRowId(
+                context.table, context.commit_user, BATCH_COMMIT_IDENTIFIER,
+                _precomputed_files_info=context._files_info)
 
     def _flush_group(self):
-        if self._group_batches:
-            self._init_writer()
+        context = self._context
+        if context._group_batches:
+            context._init_writer()
             # Preserve staged messages if writing fails; they may already have
             # been published. A failed operation cannot later prepare success.
-            self._failed = True
-            self.writer.update_columns(pa.Table.from_batches(self._group_batches), self.write_cols)
-            self._failed = False
-            self._group_batches = []
-        self._current_group = None
+            context._failed = True
+            context.writer.update_columns(pa.Table.from_batches(context._group_batches), context.write_cols)
+            context._failed = False
+            context._group_batches = []
+        context._current_group = None
 
     def _ensure_active(self):
-        if self._closed or self._failed or self._read_failed or self._messages is not None:
+        context = self._context
+        if context._closed or context._failed or context._read_failed or context._messages is not None:
             raise ValueError('Shard updater is closed, failed or already prepared')
 
     def close(self):
-        self._closed = True
-        self._pending_row_ids.clear()
-        self._group_batches = []
-        if self._reader is not None:
-            self._reader.close()
+        context = self._context
+        context._closed = True
+        context._pending_row_ids.clear()
+        context._group_batches = []
+        if context._reader is not None:
+            context._reader.close()
 
 
 class SingleWriter:
 
-    def __init__(self, writer: DataWriter, partition, first_row_id: int, row_count: int):
-        self.writer: DataWriter = writer
-        self._partition = partition
-        self.first_row_id = first_row_id
-        self.row_count = row_count
-        self.written_records_count = 0
+    def __init__(self, context):
+        self._context = context
+
+    def initialize(self, writer: DataWriter, partition, first_row_id: int, row_count: int):
+        context = self._context
+        context.writer: DataWriter = writer
+        context._partition = partition
+        context.first_row_id = first_row_id
+        context.row_count = row_count
+        context.written_records_count = 0
 
     def capacity(self) -> int:
-        return self.row_count - self.written_records_count
+        context = self._context
+        return context.row_count - context.written_records_count
 
     def write(self, data: pa.RecordBatch):
-        if data.num_rows > self.capacity():
+        context = self._context
+        if data.num_rows > context.capacity():
             raise Exception("Data num size exceeds capacity.")
-        self.written_records_count += data.num_rows
-        self.writer.write(data)
+        context.written_records_count += data.num_rows
+        context.writer.write(data)
         return
 
     def partition(self) -> Tuple:
-        return self._partition
+        context = self._context
+        return context._partition
 
     def end(self) -> DataFileMeta:
-        if self.capacity() != 0:
+        context = self._context
+        if context.capacity() != 0:
             raise Exception("There still capacity left in the writer.")
-        files = self.writer.prepare_commit()
+        files = context.writer.prepare_commit()
         if len(files) != 1:
             raise Exception("Should have one file.")
         file = files[0]
-        if file.row_count != self.row_count:
+        if file.row_count != context.row_count:
             raise Exception("File row count mismatch.")
-        file = file.assign_first_row_id(self.first_row_id)
+        file = file.assign_first_row_id(context.first_row_id)
         return file

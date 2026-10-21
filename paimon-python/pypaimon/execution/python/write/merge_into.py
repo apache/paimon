@@ -51,70 +51,84 @@ from pypaimon.write.merge_inputs import (
 from pypaimon.write.merge_types import OnSpec, SourceColumnRef, WhenMatched, WhenNotMatched, _NormalizedClause
 
 
-def merge_into(
-    target_table,
-    source: Any,
-    *,
-    on: OnSpec,
-    when_matched: Sequence[WhenMatched] = (),
-    when_not_matched: Sequence[WhenNotMatched] = (),
-    commit_user: str,
-    commit_identifier: int = BATCH_COMMIT_IDENTIFIER,
-) -> List[CommitMessage]:
-    """Prepare MERGE INTO commit messages in the current Python process.
+class PythonTableMergeInto:
+    """Execute one prepared MERGE request using the Python backend."""
 
-    The returned messages must be committed by the caller's matching
-    ``TableCommit``.
+    def __init__(
+            self, target_table, source: Any, *, on: OnSpec,
+            when_matched: Sequence[WhenMatched] = (),
+            when_not_matched: Sequence[WhenNotMatched] = (),
+            commit_user: str, commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
+        self._target_table = target_table
+        self._source = source
+        self._on = on
+        self._when_matched = when_matched
+        self._when_not_matched = when_not_matched
+        self._commit_user = commit_user
+        self._commit_identifier = commit_identifier
 
-    SET and INSERT mappings may contain callables accepting an Arrow table
-    with qualified ``t.`` target and ``s.`` source columns (INSERT has only
-    source columns). Each callable evaluates the rows selected by its clause
-    and returns an Arrow Array or ChunkedArray of the same length. Empty
-    clauses do not invoke callbacks; callback errors propagate to the caller.
-    """
-    # Empty-target INSERT skips the target scan, but still needs the same
-    # unrestricted whole-table grant before any user callback or staging.
-    from pypaimon.write.update_validation import _authorize_update
-    _authorize_update(target_table)
-    if any(clause.condition is not None
-           for clauses in (when_matched, when_not_matched) for clause in clauses):
-        from pypaimon.write.merge_condition import _load_datafusion
-        _load_datafusion()
-    target_on, source_on = _normalize_on(on)
-    self_merge = _is_self_merge(target_table, source, target_on, source_on)
-    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-    base_snapshot = TimeTravelUtil.resolve_snapshot(target_table)
-    target_table = target_table._copy_with_snapshot(base_snapshot)
-    if self_merge:
-        source = target_table
-    source_table, matched_specs, not_matched_specs, ctx = _prepare(
-        target_table,
-        source,
-        list(when_matched),
-        list(when_not_matched),
-        on,
-        source_loader=_normalize_source,
-    )
+    def prepare_commit(self) -> List[CommitMessage]:
+        """Prepare MERGE INTO commit messages in the current Python process.
 
-    update_table, delete_table, insert_table, update_cols_union = _build_tables(
-        target_table,
-        source_table,
-        matched_specs,
-        not_matched_specs,
-        ctx,
-        base_snapshot,
-    )
+        The returned messages must be committed by the caller's matching
+        ``TableCommit``.
 
-    return _prepare_commit_messages(
-        target_table,
-        update_table,
-        delete_table,
-        insert_table,
-        update_cols_union,
-        base_snapshot,
-        commit_user,
-        commit_identifier,
-    )
+        SET and INSERT mappings may contain callables accepting an Arrow table
+        with qualified ``t.`` target and ``s.`` source columns (INSERT has only
+        source columns). Each callable evaluates the rows selected by its clause
+        and returns an Arrow Array or ChunkedArray of the same length. Empty
+        clauses do not invoke callbacks; callback errors propagate to the caller.
+        """
+        target_table = self._target_table
+        source = self._source
+        on = self._on
+        when_matched = self._when_matched
+        when_not_matched = self._when_not_matched
+        commit_user = self._commit_user
+        commit_identifier = self._commit_identifier
+        # Empty-target INSERT skips the target scan, but still needs the same
+        # unrestricted whole-table grant before any user callback or staging.
+        from pypaimon.write.update_validation import _authorize_update
+        _authorize_update(target_table)
+        if any(clause.condition is not None
+               for clauses in (when_matched, when_not_matched) for clause in clauses):
+            from pypaimon.write.merge_condition import _load_datafusion
+            _load_datafusion()
+        target_on, source_on = _normalize_on(on)
+        self_merge = _is_self_merge(target_table, source, target_on, source_on)
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        base_snapshot = TimeTravelUtil.resolve_snapshot(target_table)
+        target_table = target_table._copy_with_snapshot(base_snapshot)
+        if self_merge:
+            source = target_table
+        source_table, matched_specs, not_matched_specs, ctx = _prepare(
+            target_table,
+            source,
+            list(when_matched),
+            list(when_not_matched),
+            on,
+            source_loader=_normalize_source,
+        )
+
+        update_table, delete_table, insert_table, update_cols_union = _build_tables(
+            target_table,
+            source_table,
+            matched_specs,
+            not_matched_specs,
+            ctx,
+            base_snapshot,
+        )
+
+        return _prepare_commit_messages(
+            target_table,
+            update_table,
+            delete_table,
+            insert_table,
+            update_cols_union,
+            base_snapshot,
+            commit_user,
+            commit_identifier,
+        )
 
 
 def _build_tables(

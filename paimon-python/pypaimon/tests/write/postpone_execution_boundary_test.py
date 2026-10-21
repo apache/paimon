@@ -119,7 +119,7 @@ def forbid_python_execution():
                   side_effect=AssertionError('Python row-key extractor was constructed')), \
             patch('pypaimon.execution.python.read.scanner.file_scanner.FileScanner.__init__',
                   side_effect=AssertionError('Python file scanner was constructed')), \
-            patch('pypaimon.execution.python.write.table_write.PythonTableWriteMixin.__init__',
+            patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
                   side_effect=AssertionError('Python data writer was constructed')):
         yield
 

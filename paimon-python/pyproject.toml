@@ -219,7 +219,7 @@ license-files = ["LICENSE", "NOTICE"]
 
 [tool.setuptools.packages.find]
 include = ["pypaimon*"]
-exclude = ["pypaimon.tests*", "pypaimon.acceptance*"]
+exclude = ["pypaimon.tests*"]
 
 [tool.setuptools.package-data]
 pypaimon = ["_full_version", "benchmark/act/default_experiment.json"]

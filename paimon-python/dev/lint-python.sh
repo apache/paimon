@@ -201,7 +201,7 @@ function pytest_check() {
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py pypaimon/tests/arrow_schema_test.py pypaimon/tests/table_update_arrow_compatibility_test.py"
         echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
     else
-        TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
+        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
         echo "Running tests for Python $PYTHON_VERSION (excluding py36): $TEST_DIR"
     fi
 

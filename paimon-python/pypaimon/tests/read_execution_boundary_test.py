@@ -320,16 +320,16 @@ def _python_read_source(primary=None, cleanup=None):
 
 def _consume_python_read_path(path, read, schema):
     from concurrent.futures import ThreadPoolExecutor
-    from pypaimon.execution.python.read.table_read import PythonTableReadMixin, _RemainingRows
+    from pypaimon.execution.python.read.table_read import PythonTableRead, _RemainingRows
 
     if path == 'rows':
-        return list(PythonTableReadMixin._python_row_iterator(read, [object()], None))
+        return list(PythonTableRead(read).read_rows([object()]))
     if path == 'serial':
-        return list(PythonTableReadMixin._arrow_batch_generator(read, [object()], schema))
+        return list(PythonTableRead(read)._arrow_batch_generator([object()], schema))
     with ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(
-            PythonTableReadMixin._read_one_split_to_batches,
-            read, object(), schema, _RemainingRows(None),
+            PythonTableRead(read)._read_one_split_to_batches,
+            object(), schema, _RemainingRows(None),
         ).result(timeout=5)
 
 
@@ -370,14 +370,14 @@ def test_python_batch_conversion_keeps_primary_failure_when_close_also_fails(pat
 @pytest.mark.parametrize('path', ['rows', 'serial'])
 @pytest.mark.parametrize('close_error', [False, True])
 def test_python_read_explicit_generator_close_keeps_cleanup_error_visible(path, close_error):
-    from pypaimon.execution.python.read.table_read import PythonTableReadMixin
+    from pypaimon.execution.python.read.table_read import PythonTableRead
 
     cleanup = OSError('explicit close failure') if close_error else None
     read, source, schema = _python_read_source(cleanup=cleanup)
     if path == 'rows':
-        iterator = PythonTableReadMixin._python_row_iterator(read, [object()], None)
+        iterator = PythonTableRead(read).read_rows([object()])
     else:
-        iterator = PythonTableReadMixin._arrow_batch_generator(read, [object()], schema)
+        iterator = PythonTableRead(read)._arrow_batch_generator([object()], schema)
     next(iterator)
     if close_error:
         with pytest.raises(OSError) as caught:

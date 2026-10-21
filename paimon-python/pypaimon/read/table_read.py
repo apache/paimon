@@ -647,8 +647,8 @@ class TableRead:
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        yield from PythonTableReadMixin._arrow_batch_generator(self, splits, schema, blob_parallelism)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        yield from PythonTableRead(self)._arrow_batch_generator(splits, schema, blob_parallelism)
 
     def _to_arrow_parallel(
         self,
@@ -665,8 +665,8 @@ class TableRead:
         by submission index, so the merged table preserves the order of the
         input ``splits`` list.
         """
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._to_arrow_parallel(self, splits, schema, effective, blob_parallelism)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._to_arrow_parallel(splits, schema, effective, blob_parallelism)
 
     def _read_one_split_to_batches(
         self,
@@ -681,8 +681,8 @@ class TableRead:
         request returns 0, the worker stops emitting further batches. The
         reader is always closed via ``finally``.
         """
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._read_one_split_to_batches(self, split, schema, remaining_state, blob_parallelism)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._read_one_split_to_batches(split, schema, remaining_state, blob_parallelism)
 
     def _convert_rows_to_output_batches(
         self,
@@ -690,8 +690,8 @@ class TableRead:
         row_kinds: List[str],
         schema: pyarrow.Schema,
     ) -> Iterator[pyarrow.RecordBatch]:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        yield from PythonTableReadMixin._convert_rows_to_output_batches(self, row_tuples, row_kinds, schema)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        yield from PythonTableRead(self)._convert_rows_to_output_batches(row_tuples, row_kinds, schema)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -705,9 +705,8 @@ class TableRead:
         per-column limit (see ``_emit_overflow_safe_batches``); otherwise a single
         batch is produced as before.
         """
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        yield from PythonTableReadMixin._convert_rows_to_arrow_batches_with_row_kind(
-            self,
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        yield from PythonTableRead(self)._convert_rows_to_arrow_batches_with_row_kind(
             row_tuples,
             row_kinds,
             schema,
@@ -721,9 +720,8 @@ class TableRead:
                            post_filter_after_inline: bool = False,
                            predicate=_DEFAULT_PREDICATE,
                            defer_blob_resolution: bool = False) -> "SplitRead":
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._create_split_read(
-            self,
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._create_split_read(
             split,
             blob_parallelism,
             read_type,
@@ -744,9 +742,8 @@ class TableRead:
                           post_filter_after_inline: bool = False,
                           predicate=_DEFAULT_PREDICATE,
                           defer_blob_resolution: bool = False) -> "SplitRead":
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._build_split_read(
-            self,
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._build_split_read(
             split,
             read_type,
             limit,
@@ -759,29 +756,29 @@ class TableRead:
         )
 
     def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._serialize_blob_views_as_descriptors(self, batch, reader)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._serialize_blob_views_as_descriptors(batch, reader)
 
     def _serialize_blob_view_row_tuple(self, row: "OffsetRow", reader) -> tuple:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._serialize_blob_view_row_tuple(self, row, reader)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._serialize_blob_view_row_tuple(row, reader)
 
     def _widen_to_top_level_for_merge(self, name_paths=None) -> List[DataField]:
         """Unique top-level fields from ``name_paths``, in path order."""
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._widen_to_top_level_for_merge(self, name_paths)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._widen_to_top_level_for_merge(name_paths)
 
     def _only_map_key_nested_paths(self) -> bool:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._only_map_key_nested_paths(self)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._only_map_key_nested_paths()
 
     def _has_map_key_projection(self) -> bool:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._has_map_key_projection(self)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._has_map_key_projection()
 
     def _map_has_aggregator(self, field_name: str) -> bool:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._map_has_aggregator(self, field_name)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._map_has_aggregator(field_name)
 
     def _check_python_merge_supported(self):
         if getattr(self, '_python_merge_validation_pending', False):
@@ -793,18 +790,18 @@ class TableRead:
             self, split, blob_parallelism=1, limit: Optional[int] = None):
         # Raw-convertible splits skip MergeFileSplitRead, so validate before
         # dispatch, including when native setup failed or bindings are absent.
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._TableRead__create_reader_for_split(self, split, blob_parallelism, limit)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._TableRead__create_reader_for_split(split, blob_parallelism, limit)
 
     def _TableRead__authed_reader(
             self, split, auth_result, blob_parallelism=1, limit: Optional[int] = None):
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._TableRead__authed_reader(self, split, auth_result, blob_parallelism, limit)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead(self)._TableRead__authed_reader(split, auth_result, blob_parallelism, limit)
 
     @staticmethod
     def _auth_filter_field_names(auth_result, read_fields) -> set:
-        from pypaimon.execution.python.read.table_read import PythonTableReadMixin
-        return PythonTableReadMixin._auth_filter_field_names(auth_result, read_fields)
+        from pypaimon.execution.python.read.table_read import PythonTableRead
+        return PythonTableRead._auth_filter_field_names(auth_result, read_fields)
 
     def _native_fallback(
         self,
@@ -825,33 +822,33 @@ class TableRead:
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         if not self.table.options.native_read_enabled():
             return self._native_fallback('read.native.enabled is false')
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._try_native_batches(self, splits, schema, parallelism, blob_parallelism, ordered)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead(self).read_batches(splits, schema, parallelism, blob_parallelism, ordered)
 
     def _native_read_kwargs(self, blob_parallelism=None):
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._native_read_kwargs(self, blob_parallelism)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead(self)._native_read_kwargs(blob_parallelism)
 
     @staticmethod
     def _native_split_files_supported(split):
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._native_split_files_supported(split)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead._native_split_files_supported(split)
 
     def _convert_native_batches(self, batches, schema):
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        yield from NativeTableReadMixin._convert_native_batches(self, batches, schema)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        yield from NativeTableRead(self)._convert_native_batches(batches, schema)
 
     def _prepare_native_batch(self, batch, schema):
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._prepare_native_batch(self, batch, schema)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead(self)._prepare_native_batch(batch, schema)
 
     def _flatten_native_nested_batch(self, batch, schema):
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._flatten_native_nested_batch(self, batch, schema)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead(self)._flatten_native_nested_batch(batch, schema)
 
     def _native_blob_view_supported(self) -> bool:
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._native_blob_view_supported(self)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead(self)._native_blob_view_supported()
 
     def _native_resolved_blob_fields(self) -> set:
         """BLOB fields Rust resolves before emitting a batch."""
@@ -861,8 +858,8 @@ class TableRead:
     def _try_native_rows(self, splits):
         if not self.table.options.native_read_enabled():
             return self._native_fallback('read.native.enabled is false')
-        from pypaimon.execution.native.read.table_read import NativeTableReadMixin
-        return NativeTableReadMixin._try_native_rows(self, splits)
+        from pypaimon.execution.native.read.table_read import NativeTableRead
+        return NativeTableRead(self).read_rows(splits)
 
 
 __all__ = ["TableRead", "ROW_KIND_COLUMN"]

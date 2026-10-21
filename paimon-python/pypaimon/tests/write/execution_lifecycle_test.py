@@ -226,7 +226,7 @@ def test_native_writer_does_not_construct_python_writer_or_file_index(
             patch('pypaimon.execution.native.write.native_write.create_native_write_table',
                   return_value=native_table), \
             patch('pypaimon.execution.native.write.native_write.from_native_commit_messages', return_value=expected), \
-            patch('pypaimon.execution.python.write.table_write.PythonTableWriteMixin.__init__',
+            patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
                   side_effect=AssertionError('Python data writer was constructed')), \
             patch('pypaimon.execution.python.write.row_id_file_index.RowIdFileIndex.from_table',
                   side_effect=AssertionError('Python file index was built')):
@@ -248,7 +248,7 @@ def test_native_row_id_updater_does_not_construct_python_updater_or_file_index(t
     expected = [_message()]
     with patch('pypaimon.execution.native.write.native_update._native_row_id_table', return_value=native_table), \
             patch('pypaimon.execution.native.write.native_update.from_native_commit_messages', return_value=expected), \
-            patch('pypaimon.execution.python.write.table_update_by_row_id.PythonRowIdUpdateMixin.__init__',
+            patch('pypaimon.execution.python.write.table_update_by_row_id.PythonTableUpdateByRowId.initialize',
                   side_effect=AssertionError('Python row-id updater was constructed')), \
             patch('pypaimon.execution.python.write.row_id_file_index.RowIdFileIndex.from_table',
                   side_effect=AssertionError('Python file index was built')):
@@ -270,7 +270,7 @@ def test_native_merge_does_not_construct_python_writer_or_file_index(tmp_path):
     with patch('pypaimon.execution.native.write.native_merge_into._native_row_id_table', return_value=native_table), \
             patch('pypaimon.execution.native.write.native_merge_into.from_native_commit_messages',
                   return_value=expected), \
-            patch('pypaimon.execution.python.write.table_write.PythonTableWriteMixin.__init__',
+            patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
                   side_effect=AssertionError('Python writer was constructed')), \
             patch('pypaimon.execution.python.write.row_id_file_index.RowIdFileIndex.from_table',
                   side_effect=AssertionError('Python file index was built')):
@@ -383,7 +383,7 @@ def test_native_writer_attribute_queries_never_select_python(tmp_path, stream, w
     table = _data_evolution_table(tmp_path)
     core = Mock()
     writer = NativeTableWrite(table, 'user', None, stream, core, 7)
-    with patch('pypaimon.execution.python.write.table_write.PythonTableWriteMixin.__init__',
+    with patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
                side_effect=AssertionError('attribute query constructed Python writer')):
         if written:
             writer.write_arrow_batch(pa.record_batch([[1], [2]], names=['id', 'value']))
@@ -462,7 +462,7 @@ def test_native_batch_preparation_failure_retains_public_lifecycle_state_without
     failure = OSError('batch preparation failed')
     core.prepare_commit.side_effect = failure
     writer = NativeTableWrite(_data_evolution_table(tmp_path), 'user', None, False, core)
-    with patch('pypaimon.execution.python.write.table_write.PythonTableWriteMixin.__init__',
+    with patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
                side_effect=AssertionError('lifecycle query constructed Python writer')):
         assert writer.batch_committed is False
         with pytest.raises(OSError) as raised:

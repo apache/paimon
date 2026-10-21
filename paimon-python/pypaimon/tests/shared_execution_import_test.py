@@ -91,6 +91,7 @@ import importlib.abc
 import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
+import pytest
 
 class BlockNative(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -101,10 +102,13 @@ sys.meta_path.insert(0, BlockNative())
 from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 
 scan = object.__new__(AsyncStreamingTableScan)
-scan._snapshot_manager = SimpleNamespace(find_next_scannable=Mock(side_effect=OSError('prefetch unavailable')))
+failure = OSError('prefetch unavailable')
+scan._snapshot_manager = SimpleNamespace(find_next_scannable=Mock(side_effect=failure))
 scan.follow_up_scanner = SimpleNamespace(should_scan=Mock())
 scan._lookahead_size = 4
-assert scan._fetch_plan_with_lookahead(1) is None
+with pytest.raises(OSError) as caught:
+    scan._fetch_plan_with_lookahead(1)
+assert caught.value is failure
 scan._snapshot_manager.find_next_scannable.assert_called_once_with(
     1, scan.follow_up_scanner.should_scan, lookahead_size=4)
 assert not any(name.startswith(('pypaimon.execution.native', 'pypaimon_rust')) for name in sys.modules)

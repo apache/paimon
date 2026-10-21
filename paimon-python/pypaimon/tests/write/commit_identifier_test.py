@@ -31,7 +31,7 @@ from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_commit import StreamTableCommit
 from pypaimon.write.table_write import StreamTableWrite
-from pypaimon.write.write_dispatch import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeBatchTableWrite
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 
@@ -120,7 +120,7 @@ def test_native_stream_prepare_transports_the_normalized_index_value():
 
 
 def test_batch_writer_keeps_its_signature_when_explicit_diagnostics_select_python():
-    writer = object.__new__(NativeTableWrite)
+    writer = object.__new__(NativeBatchTableWrite)
     writer._execution = SimpleNamespace(stream=False)
     writer._python_writer = Mock()
     with pytest.raises(TypeError):

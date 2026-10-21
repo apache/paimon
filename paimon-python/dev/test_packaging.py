@@ -116,7 +116,7 @@ class PackagingTest(unittest.TestCase):
     def test_distribution_contents(self):
         names, metadata, _ = wheel_contents(self.wheel)
         self.assertEqual(">=3.6", metadata["Requires-Python"])
-        self.assertFalse(any(name.startswith(("pypaimon/tests/", "pypaimon/acceptance/"))
+        self.assertFalse(any(name.startswith("pypaimon/tests/")
                              for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
         for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py",
@@ -221,8 +221,7 @@ class PackagingTest(unittest.TestCase):
             for name in internal_aliases:
                 self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
-                                 or name.startswith((prefix + "pypaimon/tests/",
-                                                     prefix + "pypaimon/acceptance/"))
+                                 or name.startswith(prefix + "pypaimon/tests/")
                                  for name in names))
 
     @staticmethod

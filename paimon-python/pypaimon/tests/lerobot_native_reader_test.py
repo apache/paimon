@@ -206,7 +206,7 @@ def test_unsupported_native_plan_reuses_python_index_scanner(frames):
     try:
         assert current._table.options.native_read_enabled()
         with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True), \
-                patch("pypaimon.execution.native.read.plan.NativeTableScanMixin._native_plan_supported",
+                patch("pypaimon.execution.native.read.plan.NativeTableScan._native_plan_supported",
                       return_value=False), \
                 patch("pypaimon.execution.native.read.plan.native_plan",
                       side_effect=AssertionError("unsupported native plan")), \

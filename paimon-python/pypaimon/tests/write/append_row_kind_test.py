@@ -344,9 +344,8 @@ def test_pandas_partial_write_keeps_selected_named_index(tmp_path, native):
 
 @pytest.mark.parametrize('columns', [['payload', 'id'], []])
 def test_partial_batch_projection_uses_columns_and_preserves_schema_metadata(columns):
-    from types import SimpleNamespace
     from unittest.mock import Mock
-    from pypaimon.write.table_write import TableWrite
+    from pypaimon.execution.python.write.file_store_write import FileStoreWrite
     schema = pa.schema([pa.field('id', pa.int32()),
                         pa.field('payload', pa.string(), metadata={'role': 'value'})],
                        metadata={'source': 'batch'})
@@ -360,10 +359,17 @@ def test_partial_batch_projection_uses_columns_and_preserves_schema_metadata(col
         def column(self, index):
             return batch.column(index)
 
-    writer = object.__new__(TableWrite)
-    writer.file_store_write = SimpleNamespace(write_cols=columns, write=Mock())
-    writer._write_partition_bucket_batch((), 0, ColumnBatch())
-    actual = writer.file_store_write.write.call_args[0][2]
+    writer = object.__new__(FileStoreWrite)
+    writer.table = Mock(field_names=schema.names)
+    writer.write_cols = columns
+    writer.data_writers = {}
+    writer._write_columns_by_bucket = {}
+    writer._runtime_total_buckets = {}
+    writer.options = object()
+    target = Mock()
+    writer._create_data_writer = Mock(return_value=target)
+    writer.write((), 0, ColumnBatch())
+    actual = target.write.call_args[0][0]
     assert actual.num_rows == batch.num_rows
     assert actual.to_pydict() == {name: batch.column(name).to_pylist() for name in columns}
     assert actual.schema.metadata == schema.metadata

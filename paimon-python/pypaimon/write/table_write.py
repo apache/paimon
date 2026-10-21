@@ -33,44 +33,42 @@ class TableWrite:
     """Public writer API backed by the selected execution implementation."""
 
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None, *, restore_snapshot_id=None):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.__init__(
-            self, table, commit_user, static_partition, restore_snapshot_id=restore_snapshot_id)
+        return self._python_execution().initialize(
+            table, commit_user, static_partition, restore_snapshot_id=restore_snapshot_id)
+
+    def _python_execution(self):
+        from pypaimon.execution.python.write.table_write import PythonTableWrite
+        return PythonTableWrite(self)
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.write_arrow(self, data, bucket)
+        return self._python_execution().write_arrow(data, bucket)
 
     def write_arrow_batch(self, data: pa.RecordBatch, bucket: Optional[int] = None):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.write_arrow_batch(self, data, bucket)
+        return self._python_execution().write_arrow_batch(data, bucket)
 
     def roll_before_group_if_needed(self, row_count: int):
         """Roll current files before the next logical write group if needed."""
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.roll_before_group_if_needed(self, row_count)
+        return self._python_execution().roll_before_group_if_needed(row_count)
 
     def write_row(self, row):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.write_row(self, row)
+        return self._python_execution().write_row(row)
 
     def write_pandas(self, dataframe):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.write_pandas(self, dataframe)
+        return self._python_execution().write_pandas(dataframe)
 
     def with_write_type(self, write_cols: List[str]):
         write_cols = validate_write_columns(write_cols)
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.with_write_type(self, write_cols)
+        self._python_execution().with_write_type(write_cols)
+        return self
 
     def with_blob_consumer(self, blob_consumer: BlobConsumer):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.with_blob_consumer(self, blob_consumer)
+        self._python_execution().with_blob_consumer(blob_consumer)
+        return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.with_blob_uri_reader_factory(self, uri_reader_factory)
+        self._python_execution().with_blob_uri_reader_factory(uri_reader_factory)
+        return self
 
     def write_ray(
         self,
@@ -100,79 +98,62 @@ class TableWrite:
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
         """
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.write_ray(self, dataset, overwrite, concurrency,
-                                               ray_remote_args, hash_fixed_precluster, static_partition)
+        from pypaimon.write.input_adapter import _write_ray
+        return _write_ray(self, dataset, overwrite, concurrency, ray_remote_args,
+                          hash_fixed_precluster, static_partition)
 
     def close(self):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.close(self)
+        return self._python_execution().close()
 
     def abort(self):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin.abort(self)
+        return self._python_execution().abort()
 
     def _create_file_store_write(self, commit_user):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._create_file_store_write(self, commit_user)
+        return self._python_execution()._create_file_store_write(commit_user)
 
     def _create_row_key_extractor(self, static_partition):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._create_row_key_extractor(self, static_partition)
+        return self._python_execution()._create_row_key_extractor(static_partition)
 
     def _write_partition_bucket_batch(self, partition, bucket, data):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._write_partition_bucket_batch(self, partition, bucket, data)
+        return self._python_execution()._write_partition_bucket_batch(partition, bucket, data)
 
     def _write_precomputed_bucket(self, data, bucket):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._write_precomputed_bucket(self, data, bucket)
+        return self._python_execution()._write_precomputed_bucket(data, bucket)
 
     def _write_partition_bucket_row(self, partition, bucket, row, values_by_name):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._write_partition_bucket_row(self, partition, bucket, row, values_by_name)
+        return self._python_execution()._write_partition_bucket_row(partition, bucket, row, values_by_name)
 
     def _distributed_write_options(self, *, overwrite=False):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._distributed_write_options(self, overwrite=overwrite)
+        return {}
 
     def _prepare_commit(self, commit_identifier):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._prepare_commit(self, commit_identifier)
+        return self._python_execution().prepare_commit(commit_identifier)
 
     def _release_prepared_indexes(self):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._release_prepared_indexes(self)
+        return self._python_execution()._release_prepared_indexes()
 
     def _prepare_arrow_data(self, data):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._prepare_arrow_data(self, data)
+        return self._python_execution()._prepare_arrow_data(data)
 
     def _prepare_arrow_schema(self, data):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._prepare_arrow_schema(self, data)
+        return self._python_execution()._prepare_arrow_schema(data)
 
     def _normalize_arrow_write_schema(self, data):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._normalize_arrow_write_schema(self, data)
+        return self._python_execution()._normalize_arrow_write_schema(data)
 
     def _validate_pyarrow_schema(self, data_schema, *, check_nested_nullability=True):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._validate_pyarrow_schema(
-            self, data_schema, check_nested_nullability=check_nested_nullability)
+        return self._python_execution()._validate_pyarrow_schema(
+            data_schema, check_nested_nullability=check_nested_nullability)
 
     def _is_compatible_pyarrow_schema(self, data_schema, expected_schema, *, check_nested_nullability=True):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._is_compatible_pyarrow_schema(
-            self, data_schema, expected_schema, check_nested_nullability=check_nested_nullability)
+        return self._python_execution()._is_compatible_pyarrow_schema(
+            data_schema, expected_schema, check_nested_nullability=check_nested_nullability)
 
     def _write_cols_pyarrow_schema(self, write_cols):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._write_cols_pyarrow_schema(self, write_cols)
+        return self._python_execution()._write_cols_pyarrow_schema(write_cols)
 
     def _raise_inconsistent_schema(self, data_schema):
-        from pypaimon.execution.python.write.table_write import PythonTableWriteMixin
-        return PythonTableWriteMixin._raise_inconsistent_schema(self, data_schema)
+        return self._python_execution()._raise_inconsistent_schema(data_schema)
 
 
 class BatchTableWrite(TableWrite):

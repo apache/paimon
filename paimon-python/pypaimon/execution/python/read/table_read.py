@@ -86,7 +86,12 @@ class _RemainingRows:
             return self._remaining <= 0
 
 
-class PythonTableReadMixin:
+class PythonTableRead:
+    """Read splits through Python readers with the facade's live configuration."""
+
+    def __init__(self, read):
+        self._read = read
+
     @staticmethod
     def _emit_overflow_safe_batches(
         pydict: Dict[str, list],
@@ -124,26 +129,28 @@ class PythonTableReadMixin:
         mid = row_count // 2
         left = {name: column[:mid] for name, column in pydict.items()}
         right = {name: column[mid:] for name, column in pydict.items()}
-        yield from PythonTableReadMixin._emit_overflow_safe_batches(left, mid, schema)
-        yield from PythonTableReadMixin._emit_overflow_safe_batches(right, row_count - mid, schema)
+        yield from PythonTableRead._emit_overflow_safe_batches(left, mid, schema)
+        yield from PythonTableRead._emit_overflow_safe_batches(right, row_count - mid, schema)
 
-    def _python_row_iterator(self, splits, limit):
-        self._check_python_merge_supported()
+    def read_rows(self, splits):
+        read = self._read
+        read._check_python_merge_supported()
+        limit = read.limit
         count = 0
         for split in splits:
             if limit is not None and count >= limit:
                 return
             remaining = None if limit is None else limit - count
-            reader = self._TableRead__create_reader_for_split(split, limit=remaining)
+            reader = read._TableRead__create_reader_for_split(split, limit=remaining)
             failure = None
             try:
-                if self.output_projection is not None or not self._adapter_read_type:
+                if read.output_projection is not None or not read._adapter_read_type:
                     from pypaimon.execution.python.read.reader.outer_projection_record_reader import (
                         OuterProjectionRecordReader)
-                    _, paths = self._reader_adapter()
-                    outputs = adapter_output_paths(self.output_projection, self._adapter_read_type, paths)
+                    _, paths = read._reader_adapter()
+                    outputs = adapter_output_paths(read.output_projection, read._adapter_read_type, paths)
                     reader = OuterProjectionRecordReader(
-                        reader, [field.name for field in self._adapter_read_type],
+                        reader, [field.name for field in read._adapter_read_type],
                         [path for _, path in outputs], file_io=getattr(reader, 'file_io', None),
                         blob_field_indices=getattr(reader, 'blob_field_indices', None),
                         descriptor_field_indices=getattr(reader, 'descriptor_field_indices', None),
@@ -162,16 +169,17 @@ class PythonTableReadMixin:
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
                                blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
-        self._begin_auth_read(splits)
+        read = self._read
+        read._begin_auth_read(splits)
         chunk_size = 65536
         # ``remaining`` tracks how many rows we are still allowed to emit
         # across all splits. ``None`` means unlimited.
-        remaining = self.limit
+        remaining = read.limit
 
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = self._TableRead__create_reader_for_split(
+            reader = read._TableRead__create_reader_for_split(
                 split, blob_parallelism, limit=remaining)
             failure = None
             try:
@@ -181,12 +189,12 @@ class PythonTableReadMixin:
                             continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
-                        batch = self._serialize_blob_views_as_descriptors(
+                        batch = read._serialize_blob_views_as_descriptors(
                             batch, reader)
-                        batch = self._project_batch_to_output(batch)
-                        if self.include_row_kind:
+                        batch = read._project_batch_to_output(batch)
+                        if read.include_row_kind:
                             if "_row_kind" not in batch.schema.names:
-                                batch = self._add_row_kind_column_to_batch(batch, "+I")
+                                batch = read._add_row_kind_column_to_batch(batch, "+I")
                         yield batch
                         if remaining is not None:
                             remaining -= batch.num_rows
@@ -204,8 +212,8 @@ class PythonTableReadMixin:
                             if not isinstance(row, OffsetRow):
                                 raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
                             row_tuple_chunk.append(
-                                self._serialize_blob_view_row_tuple(row, reader))
-                            if self.include_row_kind:
+                                read._serialize_blob_view_row_tuple(row, reader))
+                            if read.include_row_kind:
                                 row_kind_chunk.append(row.get_row_kind().to_string())
 
                             if remaining is not None:
@@ -215,7 +223,7 @@ class PythonTableReadMixin:
                                     break
 
                             if len(row_tuple_chunk) >= chunk_size:
-                                yield from self._convert_rows_to_output_batches(
+                                yield from read._convert_rows_to_output_batches(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
                                 row_tuple_chunk = []
@@ -224,7 +232,7 @@ class PythonTableReadMixin:
                             break
 
                     if row_tuple_chunk:
-                        yield from self._convert_rows_to_output_batches(
+                        yield from read._convert_rows_to_output_batches(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
             except BaseException as error:
@@ -248,18 +256,19 @@ class PythonTableReadMixin:
         by submission index, so the merged table preserves the order of the
         input ``splits`` list.
         """
-        self._begin_auth_read(splits)
-        remaining_state = _RemainingRows(self.limit)
+        read = self._read
+        read._begin_auth_read(splits)
+        remaining_state = _RemainingRows(read.limit)
         results: List[Optional[List[pyarrow.RecordBatch]]] = [None] * len(splits)
         workers = min(effective, len(splits))
-        blob_parallelism = self._cap_blob_parallelism(workers, blob_parallelism)
+        blob_parallelism = read._cap_blob_parallelism(workers, blob_parallelism)
         with ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix="pypaimon-read",
         ) as executor:
             futures = {
                 executor.submit(
-                    self._read_one_split_to_batches,
+                    read._read_one_split_to_batches,
                     split,
                     schema,
                     remaining_state,
@@ -277,7 +286,7 @@ class PythonTableReadMixin:
             for batch in split_batches:
                 if batch.num_rows == 0:
                     continue
-                table_list.append(self._try_to_pad_batch_by_schema(
+                table_list.append(read._try_to_pad_batch_by_schema(
                     batch, schema, allow_type_cast=True))
 
         if not table_list:
@@ -300,9 +309,10 @@ class PythonTableReadMixin:
         request returns 0, the worker stops emitting further batches. The
         reader is always closed via ``finally``.
         """
+        read = self._read
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        reader = self._TableRead__create_reader_for_split(split, blob_parallelism)
+        reader = read._TableRead__create_reader_for_split(split, blob_parallelism)
         failure = None
         try:
             if isinstance(reader, RecordBatchReader):
@@ -314,12 +324,12 @@ class PythonTableReadMixin:
                         break
                     if allowed < batch.num_rows:
                         batch = batch.slice(0, allowed)
-                    batch = self._serialize_blob_views_as_descriptors(
+                    batch = read._serialize_blob_views_as_descriptors(
                         batch, reader)
-                    batch = self._project_batch_to_output(batch)
-                    if self.include_row_kind:
+                    batch = read._project_batch_to_output(batch)
+                    if read.include_row_kind:
                         if "_row_kind" not in batch.schema.names:
-                            batch = self._add_row_kind_column_to_batch(batch, "+I")
+                            batch = read._add_row_kind_column_to_batch(batch, "+I")
                     out.append(batch)
                     if remaining_state.exhausted():
                         break
@@ -339,17 +349,17 @@ class PythonTableReadMixin:
                             stop = True
                             break
                         row_tuple_chunk.append(
-                            self._serialize_blob_view_row_tuple(row, reader))
-                        if self.include_row_kind:
+                            read._serialize_blob_view_row_tuple(row, reader))
+                        if read.include_row_kind:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
                         if len(row_tuple_chunk) >= chunk_size:
-                            out.extend(self._convert_rows_to_output_batches(
+                            out.extend(read._convert_rows_to_output_batches(
                                 row_tuple_chunk, row_kind_chunk, schema))
                             row_tuple_chunk = []
                             row_kind_chunk = []
                 if row_tuple_chunk:
-                    out.extend(self._convert_rows_to_output_batches(
+                    out.extend(read._convert_rows_to_output_batches(
                         row_tuple_chunk, row_kind_chunk, schema))
         except BaseException as error:
             failure = error
@@ -364,17 +374,18 @@ class PythonTableReadMixin:
         row_kinds: List[str],
         schema: pyarrow.Schema,
     ) -> Iterator[pyarrow.RecordBatch]:
-        if self.output_projection is None:
-            yield from self._convert_rows_to_arrow_batches_with_row_kind(
+        read = self._read
+        if read.output_projection is None:
+            yield from read._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, schema)
             return
-        physical_schema = read_arrow_schema(self._adapter_read_type)
-        if self.include_row_kind:
-            physical_schema = self._add_row_kind_to_schema(physical_schema)
-        for batch in self._convert_rows_to_arrow_batches_with_row_kind(
+        physical_schema = read_arrow_schema(read._adapter_read_type)
+        if read.include_row_kind:
+            physical_schema = read._add_row_kind_to_schema(physical_schema)
+        for batch in read._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, physical_schema):
-            yield self._try_to_pad_batch_by_schema(
-                self._project_batch_to_output(batch), schema, allow_type_cast=True)
+            yield read._try_to_pad_batch_by_schema(
+                read._project_batch_to_output(batch), schema, allow_type_cast=True)
 
     def _convert_rows_to_arrow_batches_with_row_kind(
         self,
@@ -388,7 +399,8 @@ class PythonTableReadMixin:
         per-column limit (see ``_emit_overflow_safe_batches``); otherwise a single
         batch is produced as before.
         """
-        if not self.include_row_kind or not row_kinds:
+        read = self._read
+        if not read.include_row_kind or not row_kinds:
             # No row kind - use original schema (without _row_kind column)
             data_schema = schema
             columns_data = zip(*row_tuples)
@@ -401,7 +413,7 @@ class PythonTableReadMixin:
             pydict = {ROW_KIND_COLUMN: row_kinds}
             for name, column in zip(data_field_names, columns_data):
                 pydict[name] = list(column)
-        yield from PythonTableReadMixin._emit_overflow_safe_batches(pydict, len(row_tuples), schema)
+        yield from PythonTableRead._emit_overflow_safe_batches(pydict, len(row_tuples), schema)
 
     def _create_split_read(self, split: Split, blob_parallelism: int = 1,
                            read_type=None, limit: Optional[int] = None,
@@ -411,7 +423,8 @@ class PythonTableReadMixin:
                            post_filter_after_inline: bool = False,
                            predicate=_DEFAULT_PREDICATE,
                            defer_blob_resolution: bool = False) -> SplitRead:
-        sr = self._build_split_read(
+        read = self._read
+        sr = read._build_split_read(
             split,
             read_type,
             limit,
@@ -423,7 +436,7 @@ class PythonTableReadMixin:
             defer_blob_resolution,
         )
         sr._blob_parallelism = blob_parallelism
-        sr._parquet_row_group_cache = self._parquet_row_group_cache
+        sr._parquet_row_group_cache = read._parquet_row_group_cache
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,
@@ -434,19 +447,20 @@ class PythonTableReadMixin:
                           post_filter_after_inline: bool = False,
                           predicate=_DEFAULT_PREDICATE,
                           defer_blob_resolution: bool = False) -> SplitRead:
-        predicate = self.predicate if predicate is _DEFAULT_PREDICATE else predicate
+        read = self._read
+        predicate = read.predicate if predicate is _DEFAULT_PREDICATE else predicate
         effective_limit = (
-            self.limit if limit is None else limit
+            read.limit if limit is None else limit
         ) if push_down_limit else None
-        effective_read_type = read_type if read_type is not None else self._adapter_read_type
-        scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
+        effective_read_type = read_type if read_type is not None else read._adapter_read_type
+        scan_read_type = read._with_predicate_extra_fields(read_type) if read_type is not None else read._scan_read_type
         # the columns authorization widens the read with are plain top-level ones, so each
         # gets a one-segment path; without them the outer extraction sees fewer paths than fields
-        nested_name_paths = self.nested_name_paths
+        nested_name_paths = read.nested_name_paths
         if nested_name_paths and len(nested_name_paths) < len(effective_read_type):
             nested_name_paths = list(nested_name_paths) + [
                 [f.name] for f in effective_read_type[len(nested_name_paths):]]
-        if self.table.is_primary_key_table and (
+        if read.table.is_primary_key_table and (
                 getattr(split, 'is_streaming', False) or not split.raw_convertible):
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
@@ -454,8 +468,8 @@ class PythonTableReadMixin:
                     len(p) > 1 for p in nested_name_paths):
                 # Inner: full ROW for the merge function. Outer: extract
                 # the requested sub-paths back to the user's flat schema.
-                inner_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge(nested_name_paths))
+                inner_read_type = read._with_predicate_extra_fields(
+                    read._widen_to_top_level_for_merge(nested_name_paths))
                 outer_extract_name_paths = nested_name_paths
 
             # When the user's projection drops a ``sequence.field``, the merge
@@ -463,12 +477,12 @@ class PythonTableReadMixin:
             # the value row so the comparator resolves, then project them back
             # out after merging (mirrors Java MergeFileSplitRead.withReadType +
             # projectOuter). Reuses the OuterProjectionRecordReader machinery.
-            seq_fields = self.table.options.sequence_field()
+            seq_fields = read.table.options.sequence_field()
             if seq_fields:
                 present = {f.name for f in inner_read_type}
                 missing = [name for name in seq_fields if name not in present]
                 if missing:
-                    table_fields_by_name = {f.name: f for f in self.table.fields}
+                    table_fields_by_name = {f.name: f for f in read.table.fields}
                     extra = []
                     for name in missing:
                         field = table_fields_by_name.get(name)
@@ -483,10 +497,10 @@ class PythonTableReadMixin:
                         # user's requested (flat) columns in order.
                         outer_extract_name_paths = [
                             [f.name] for f in effective_read_type]
-            if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
-                outer_extract_name_paths = self._output_extract_name_paths()
+            if read_type is None and outer_extract_name_paths is None and read._needs_output_projection():
+                outer_extract_name_paths = read._output_extract_name_paths()
             return MergeFileSplitRead(
-                table=self.table,
+                table=read.table,
                 predicate=predicate,
                 read_type=inner_read_type,
                 split=split,
@@ -496,24 +510,24 @@ class PythonTableReadMixin:
                     effective_read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
             )
-        elif self.table.options.data_evolution_enabled():
+        elif read.table.options.data_evolution_enabled():
             if nested_name_paths and any(
                     len(p) > 1 for p in nested_name_paths):
-                if not self._only_map_key_nested_paths():
+                if not read._only_map_key_nested_paths():
                     raise NotImplementedError(
                         "ROW nested-field projection on data-evolution tables "
                         "is not yet supported")
-                scan_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge(nested_name_paths))
+                scan_read_type = read._with_predicate_extra_fields(
+                    read._widen_to_top_level_for_merge(nested_name_paths))
                 outer_extract_name_paths = nested_name_paths
             else:
                 outer_extract_name_paths = None
             if (outer_extract_name_paths is None
                     and read_type is None
-                    and self._needs_output_projection()):
-                outer_extract_name_paths = self._output_extract_name_paths()
+                    and read._needs_output_projection()):
+                outer_extract_name_paths = read._output_extract_name_paths()
             return DataEvolutionSplitRead(
-                table=self.table,
+                table=read.table,
                 predicate=predicate,
                 read_type=scan_read_type,
                 split=split,
@@ -523,7 +537,7 @@ class PythonTableReadMixin:
                     else nested_name_paths),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
-                    self._adapter_read_type if outer_extract_name_paths else None),
+                    read._adapter_read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
                 post_merge_filter=post_merge_filter,
                 eager_blob_fields=eager_blob_fields,
@@ -540,17 +554,17 @@ class PythonTableReadMixin:
                 # only valid against the latest schema, not each file's own
                 # names/types), then extract the requested sub-paths back to
                 # the user's flat schema.
-                inner_read_type = self._with_predicate_extra_fields(
-                    self._widen_to_top_level_for_merge(nested_name_paths))
+                inner_read_type = read._with_predicate_extra_fields(
+                    read._widen_to_top_level_for_merge(nested_name_paths))
                 outer_extract_name_paths = nested_name_paths
-            if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
-                outer_extract_name_paths = self._output_extract_name_paths()
+            if read_type is None and outer_extract_name_paths is None and read._needs_output_projection():
+                outer_extract_name_paths = read._output_extract_name_paths()
             return RawFileSplitRead(
-                table=self.table,
+                table=read.table,
                 predicate=predicate,
                 read_type=inner_read_type,
                 split=split,
-                row_tracking_enabled=self.table.options.row_tracking_enabled(),
+                row_tracking_enabled=read.table.options.row_tracking_enabled(),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     effective_read_type if outer_extract_name_paths else None),
@@ -558,13 +572,14 @@ class PythonTableReadMixin:
             )
 
     def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
-        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+        read = self._read
+        if not read._blob_as_descriptor or not read._blob_view_output_indices:
             return batch
         lookup = getattr(reader, 'blob_view_lookup', None)
         if lookup is None:
             return batch
-        for index in self._blob_view_output_indices:
-            field_name = self._adapter_read_type[index].name
+        for index in read._blob_view_output_indices:
+            field_name = read._adapter_read_type[index].name
             if field_name not in batch.schema.names:
                 continue
             converted = [
@@ -580,21 +595,23 @@ class PythonTableReadMixin:
         return batch
 
     def _serialize_blob_view_row_tuple(self, row: OffsetRow, reader) -> tuple:
+        read = self._read
         values = row.row_tuple[row.offset: row.offset + row.arity]
-        if not self._blob_as_descriptor or not self._blob_view_output_indices:
+        if not read._blob_as_descriptor or not read._blob_view_output_indices:
             return values
         lookup = getattr(reader, 'blob_view_lookup', None)
         if lookup is None:
             return values
         converted = list(values)
-        for index in self._blob_view_output_indices:
+        for index in read._blob_view_output_indices:
             converted[index] = lookup.serialize_view_field_value(converted[index])
         return tuple(converted)
 
     def _widen_to_top_level_for_merge(self, name_paths=None) -> List[DataField]:
         """Unique top-level fields from ``name_paths``, in path order."""
-        paths = self.nested_name_paths if name_paths is None else name_paths
-        table_fields_by_name = {f.name: f for f in self._table_read_fields()}
+        read = self._read
+        paths = read.nested_name_paths if name_paths is None else name_paths
+        table_fields_by_name = {f.name: f for f in read._table_read_fields()}
         paths_by_top = {}
         for path in paths or []:
             paths_by_top.setdefault(path[0], []).append(path)
@@ -614,7 +631,7 @@ class PythonTableReadMixin:
             if (isinstance(field.type, MapType)
                     and all(len(path) > 1 for path in paths)
                     and not is_map_blob_type(field.type)
-                    and not self._map_has_aggregator(top_name)):
+                    and not read._map_has_aggregator(top_name)):
                 keys = []
                 for path in paths:
                     if path[1] not in keys:
@@ -629,8 +646,9 @@ class PythonTableReadMixin:
         return widened
 
     def _only_map_key_nested_paths(self) -> bool:
-        table_fields = {field.name: field for field in self.table.fields}
-        for path in self.nested_name_paths or []:
+        read = self._read
+        table_fields = {field.name: field for field in read.table.fields}
+        for path in read.nested_name_paths or []:
             if len(path) == 1:
                 continue
             field = table_fields.get(path[0])
@@ -640,8 +658,9 @@ class PythonTableReadMixin:
         return True
 
     def _has_map_key_projection(self) -> bool:
-        table_fields = {field.name: field for field in self.table.fields}
-        for path in self.nested_name_paths or []:
+        read = self._read
+        table_fields = {field.name: field for field in read.table.fields}
+        for path in read.nested_name_paths or []:
             field = table_fields.get(path[0])
             if len(path) == 2 and field is not None \
                     and isinstance(field.type, MapType):
@@ -649,35 +668,31 @@ class PythonTableReadMixin:
         return False
 
     def _map_has_aggregator(self, field_name: str) -> bool:
-        options = self.table.options.options.data
+        read = self._read
+        options = read.table.options.options.data
         return (
             "fields.{}.aggregate-function".format(field_name) in options
             or "fields.default-aggregate-function" in options
         )
 
-    def _check_python_merge_supported(self):
-        if getattr(self, '_python_merge_validation_pending', False):
-            from pypaimon.execution.python.read.merge_engine_support import check_supported
-            check_supported(self.table)
-            self._python_merge_validation_pending = False
-
     def _TableRead__create_reader_for_split(
             self, split, blob_parallelism=1, limit: Optional[int] = None):
         # Raw-convertible splits skip MergeFileSplitRead, so validate before
         # dispatch, including when native setup failed or bindings are absent.
-        self._check_python_merge_supported()
+        read = self._read
+        read._check_python_merge_supported()
         auth_result = None
         if isinstance(split, QueryAuthSplit):
             auth_result = split.auth_result
             split = split.split
 
         if auth_result is not None:
-            return self._TableRead__authed_reader(
+            return read._TableRead__authed_reader(
                 split, auth_result, blob_parallelism, limit)
         if limit is None:
-            return self._create_split_read(
+            return read._create_split_read(
                 split, blob_parallelism=blob_parallelism).create_reader()
-        return self._create_split_read(
+        return read._create_split_read(
             split,
             blob_parallelism=blob_parallelism,
             limit=limit,
@@ -685,33 +700,34 @@ class PythonTableReadMixin:
 
     def _TableRead__authed_reader(
             self, split, auth_result, blob_parallelism=1, limit: Optional[int] = None):
-        if self._has_map_key_projection():
+        read = self._read
+        if read._has_map_key_projection():
             raise NotImplementedError(
                 "MAP-key projection with query authorization is not supported")
-        table_fields = self.table.fields
-        read_fields = self._adapter_read_type
+        table_fields = read.table.fields
+        read_fields = read._adapter_read_type
         masks = auth_result.column_masking or {}
         masked_fields = set(masks)
         # Split reads may filter loosely (merged rows, nested leaves), so filter exactly before LIMIT.
-        post_filter = self.predicate
-        filter_read_fields = self._with_predicate_extra_fields(read_fields) if post_filter is not None else read_fields
+        post_filter = read.predicate
+        filter_read_fields = read._with_predicate_extra_fields(read_fields) if post_filter is not None else read_fields
         from pypaimon.read.auth_support import latest_auth_fields, validate_auth_rules
         # a split can carry rules without having been planned by a validating scan
-        snapshot = getattr(self, "_auth_schema", None)
+        snapshot = getattr(read, "_auth_schema", None)
         if snapshot is None:
-            snapshot = self._auth_schema = latest_auth_fields(self.table)
-        latest_fields = validate_auth_rules(self.table, auth_result, snapshot)
+            snapshot = read._auth_schema = latest_auth_fields(read.table)
+        latest_fields = validate_auth_rules(read.table, auth_result, snapshot)
         # bind to the latest schema: a generated alias may since have become a real column
         auth_result.validate_read_type(
-            latest_fields, filter_read_fields, self.nested_name_paths, table_fields)
+            latest_fields, filter_read_fields, read.nested_name_paths, table_fields)
 
         extra_fields = auth_result.get_extra_fields(filter_read_fields, table_fields)
         effective_read_type = filter_read_fields + extra_fields
 
         filter_fn = auth_result.extract_row_filter()
-        effective_limit = self.limit if limit is None else limit
+        effective_limit = read.limit if limit is None else limit
         auth_fields = (
-            self._auth_filter_field_names(auth_result, effective_read_type)
+            read._auth_filter_field_names(auth_result, effective_read_type)
             if filter_fn is not None else set()
         )
         eager_blob_fields = set(auth_fields)
@@ -725,17 +741,17 @@ class PythonTableReadMixin:
             for transform in filter_masks.values():
                 eager_blob_fields.update(_collect_all_field_refs_from_transform(transform))
         inline_blob_fields = (
-            self.table.options.blob_descriptor_fields()
-            | self.table.options.blob_view_fields()
+            read.table.options.blob_descriptor_fields()
+            | read.table.options.blob_view_fields()
         )
         embed_filter = (
             filter_fn is not None
-            and self.table.options.data_evolution_enabled()
+            and read.table.options.data_evolution_enabled()
         )
         # If the auth filter references an inline BLOB, run it after inline resolution (in
         # the split read) so it sees resolved payloads while scalar BLOBs still defer.
         post_filter_after_inline = embed_filter and bool(auth_fields & inline_blob_fields)
-        split_read = self._create_split_read(
+        split_read = read._create_split_read(
             split,
             blob_parallelism=blob_parallelism,
             read_type=effective_read_type,
@@ -753,15 +769,15 @@ class PythonTableReadMixin:
         needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):
             schema = read_arrow_schema(effective_read_type)
-            reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+            reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=read.include_row_kind)
             if getattr(reader, 'blob_field_indices', None) is None:
                 from pypaimon.read.reader.field_indices import (
                     blob_field_indices, descriptor_field_indices_for_table,
                     vector_field_indices)
-                reader.file_io = self.table.file_io
+                reader.file_io = read.table.file_io
                 reader.blob_field_indices = blob_field_indices(effective_read_type)
                 reader.descriptor_field_indices = descriptor_field_indices_for_table(
-                    self.table, effective_read_type)
+                    read.table, effective_read_type)
                 reader.vector_field_indices = vector_field_indices(effective_read_type)
             needs_convert_back = True
 
@@ -808,14 +824,15 @@ class PythonTableReadMixin:
             names.update(extract_referenced_fields(filter_json))
         return names
 
-    def _python_to_arrow(self, splits, schema, parallelism, effective_bp):
-        self._check_python_merge_supported()
-        effective = self._effective_parallelism(parallelism, len(splits))
-        if self._should_run_parallel(splits, effective):
-            return self._to_arrow_parallel(splits, schema, effective, effective_bp)
+    def _materialize(self, splits, schema, parallelism=None, blob_parallelism=1):
+        read = self._read
+        read._check_python_merge_supported()
+        effective = read._effective_parallelism(parallelism, len(splits))
+        if read._should_run_parallel(splits, effective):
+            return read._to_arrow_parallel(splits, schema, effective, blob_parallelism)
 
-        batch_iterator = self._arrow_batch_generator(
-            splits, schema, effective_bp)
+        batch_iterator = read._arrow_batch_generator(
+            splits, schema, blob_parallelism)
         batch_reader = pyarrow.ipc.RecordBatchReader.from_batches(
             schema, batch_iterator)
 
@@ -823,17 +840,25 @@ class PythonTableReadMixin:
         for batch in iter(batch_reader.read_next_batch, None):
             if batch.num_rows == 0:
                 continue
-            table_list.append(self._try_to_pad_batch_by_schema(
+            table_list.append(read._try_to_pad_batch_by_schema(
                 batch, schema, allow_type_cast=True))
 
-        return self._batches_to_arrow(
+        return read._batches_to_arrow(
             table_list, schema, allow_type_cast=True)
 
-    def _python_batch_iterator(self, splits, schema, parallelism, effective_bp):
-        self._check_python_merge_supported()
-        effective = self._effective_parallelism(parallelism, len(splits))
-        if self._should_run_parallel(splits, effective):
-            effective_bp = self._cap_blob_parallelism(
-                min(effective, len(splits)), effective_bp)
-        return self._arrow_batch_generator(
-            splits, schema, effective_bp)
+    def read_batches(
+            self,
+            splits: List[Split],
+            schema: pyarrow.Schema,
+            parallelism: Optional[int] = None,
+            blob_parallelism=1,
+            ordered: bool = False):
+        """Read lazily in split order; Python fallback readers remain serial."""
+        read = self._read
+        read._check_python_merge_supported()
+        effective = read._effective_parallelism(parallelism, len(splits))
+        if read._should_run_parallel(splits, effective):
+            blob_parallelism = read._cap_blob_parallelism(
+                min(effective, len(splits)), blob_parallelism)
+        return read._arrow_batch_generator(
+            splits, schema, blob_parallelism)
