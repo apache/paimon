@@ -36,6 +36,12 @@ pypaimon/
     write_dispatch.py         Writer selection, diagnostics and safe switching
     update_dispatch.py        Update, delete, upsert and MERGE coordination
     index_dispatch.py         Index build/drop selection
+                              Vindex query backend ownership and lazy loading
+    merge_condition.py        Shared MERGE parsing and condition evaluation
+    merge_transform.py        Shared Arrow assignments and clause transforms
+    write_input.py            Shared Pandas transport and distributed input
+    datasource/               Shared Ray tasks, split providers and Torch datasets
+    datasink/                 Shared Ray worker writes and coordinator commits
     python/
       read/                   Python scanning, file readers and merge execution
                               Format/object file I/O and system-table filtering
@@ -105,6 +111,19 @@ implementation is used.
 The public postpone planner uses this shared input planning directly. Supplied
 bucket metadata avoids loading either backend; its Python metadata loader is
 imported only when existing bucket layouts are requested.
+
+Ray and Torch public dataset classes retain their original module paths, bases,
+configuration, validation and serialization. Task scheduling, iteration, shuffle,
+prefetch, Arrow conversion and resource ownership execute in the shared
+`datasource` and `datasink` modules. They call the configured public table APIs,
+so each plan/read/write/commit stage still selects its own backend. Public
+delegates pass their existing instance to preserve subclass and instance hooks.
+Neither dataset integration imports a Paimon execution backend directly.
+
+Local MERGE and Native MERGE adapt conditions and callable inputs through shared
+execution helpers. They do not import the public Ray package or its distributed
+operators. The public Ray condition and transform helper functions delegate to
+the same implementations; MERGE clause/reference classes remain shared inputs.
 
 ## Selection and failure boundaries
 

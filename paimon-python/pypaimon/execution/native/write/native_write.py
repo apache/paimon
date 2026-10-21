@@ -186,7 +186,7 @@ class NativeTableWrite:
         return data
 
     def write_pandas(self, dataframe):
-        from pypaimon.write.input_adapter import _pandas_write_batch
+        from pypaimon.execution.write_input import _pandas_write_batch
         self.write_arrow_batch(_pandas_write_batch(self.table, dataframe, self._schema, self._table_schema))
 
     def roll_before_group_if_needed(self, row_count):

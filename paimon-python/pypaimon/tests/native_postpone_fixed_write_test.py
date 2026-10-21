@@ -503,9 +503,9 @@ def test_ray_coordinator_uses_new_default_for_overwrite(
     _write(table, [(1, 'a', 10)])
     changed = table.copy({'postpone.default-bucket-num': '5'})
     dataset = Mock()
-    with patch('pypaimon.write.ray_datasink._collect_partition_stats',
+    with patch('pypaimon.execution.datasink.ray_datasink._collect_partition_stats',
                return_value=(dataset, {('a',): (1, 0)})), \
-            patch('pypaimon.write.ray_datasink._write_primary_key_groups') as write:
+            patch('pypaimon.execution.datasink.ray_datasink._write_primary_key_groups') as write:
         write_paimon_dataset(dataset, changed, overwrite=overwrite, static_partition=static_partition)
     assert write.call_args.kwargs['postpone_bucket_plan'].as_dict() == {('a',): expected}
 

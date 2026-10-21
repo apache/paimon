@@ -27,6 +27,8 @@ from ray.data._internal.execution.interfaces import TaskContext
 from pypaimon import CatalogFactory, Schema
 from pypaimon.write.ray_datasink import (
     PaimonDatasink,
+)
+from pypaimon.execution.datasink.ray_datasink import (
     _consume_write_results,
     _cast_binary_to_table_schema,
 )
@@ -555,7 +557,7 @@ class RaySinkTest(unittest.TestCase):
         table_write.static_partition = {'dt': '2024-01-01'}
 
         with patch('pypaimon.ray.shuffle.maybe_apply_repartition') as mock_repartition, \
-                patch('pypaimon.write.ray_datasink.PaimonDatasink') as mock_datasink_cls:
+                patch('pypaimon.execution.datasink.ray_datasink.PaimonDatasink') as mock_datasink_cls:
             mock_repartition.return_value = dataset
             datasink = mock_datasink_cls.return_value
 
@@ -580,7 +582,7 @@ class RaySinkTest(unittest.TestCase):
         table_write.static_partition = {'dt': '2024-01-01'}
 
         with patch('pypaimon.ray.shuffle.maybe_apply_repartition') as mock_repartition, \
-                patch('pypaimon.write.ray_datasink.PaimonDatasink') as mock_datasink_cls:
+                patch('pypaimon.execution.datasink.ray_datasink.PaimonDatasink') as mock_datasink_cls:
             mock_repartition.return_value = dataset
 
             table_write.write_ray(

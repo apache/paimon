@@ -134,9 +134,9 @@ def test_native_ray_planning_uses_native_metadata_and_shared_input_routing(
     dataset = Mock()
     with patch('pypaimon.execution.native.write.postpone_bucket.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.postpone_bucket.native_plan', return_value=_plan(table)) as plan, \
-            patch('pypaimon.write.ray_datasink._collect_partition_stats', return_value=(
+            patch('pypaimon.execution.datasink.ray_datasink._collect_partition_stats', return_value=(
                 dataset, {('existing',): (2, 0), ('new',): (9, 0), ('pending',): (1, 0)})), \
-            patch('pypaimon.write.ray_datasink._write_primary_key_groups') as write:
+            patch('pypaimon.execution.datasink.ray_datasink._write_primary_key_groups') as write:
         writer.write_ray(dataset, overwrite=overwrite)
         args = write.call_args[1]
         expected = {('existing',): 1 if overwrite else 3, ('new',): 8, ('pending',): 1}
@@ -164,8 +164,8 @@ def test_native_ray_explicit_plan_does_not_load_metadata(tmp_path, forbid_python
     with patch('pypaimon.execution.native.write.postpone_bucket.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.postpone_bucket.native_plan',
                   side_effect=AssertionError('explicit bucket plan must not read metadata')), \
-            patch('pypaimon.write.ray_datasink._collect_partition_stats', return_value=(dataset, {})), \
-            patch('pypaimon.write.ray_datasink._write_primary_key_groups') as write:
+            patch('pypaimon.execution.datasink.ray_datasink._collect_partition_stats', return_value=(dataset, {})), \
+            patch('pypaimon.execution.datasink.ray_datasink._write_primary_key_groups') as write:
         writer.write_ray(dataset)
         assert write.call_args[1]['postpone_bucket_plan'].as_dict() == explicit.as_dict()
     writer.close()
@@ -196,8 +196,8 @@ def test_native_ray_execution_failure_does_not_replay_python_planning(tmp_path, 
     failure = TimeoutError('Ray task may have written files')
     with patch('pypaimon.execution.native.write.postpone_bucket.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.postpone_bucket.native_plan', return_value=_plan(table)), \
-            patch('pypaimon.write.ray_datasink._collect_partition_stats', return_value=(dataset, {})), \
-            patch('pypaimon.write.ray_datasink._write_primary_key_groups', side_effect=failure) as write:
+            patch('pypaimon.execution.datasink.ray_datasink._collect_partition_stats', return_value=(dataset, {})), \
+            patch('pypaimon.execution.datasink.ray_datasink._write_primary_key_groups', side_effect=failure) as write:
         with pytest.raises(TimeoutError) as raised:
             writer.write_ray(dataset)
         assert raised.value is failure

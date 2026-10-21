@@ -34,7 +34,7 @@ from pypaimon.ray.data_evolution_merge_into import (
     _require_ray_join,
 )
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
-from pypaimon.ray.data_evolution_merge_transform import build_update_schema
+from pypaimon.execution.merge_transform import build_update_schema
 from pypaimon.ray.partitioning import (
     _estimate_dataset_num_rows,
     _estimate_dataset_size_bytes,

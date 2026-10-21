@@ -21,15 +21,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
-from pypaimon.ray.data_evolution_merge_transform import (
+from pypaimon.execution.merge_transform import (
     SourceColumnRef,
     _NormalizedClause,
     build_delete_schema,
     build_update_schema,
     cast_to_schema,
-    vectorized_delete_transform,
     vectorized_insert_transform,
-    vectorized_matched_transform,
 )
 from pypaimon.ray.partitioning import (
     _default_hash_shuffle_parallelism,
@@ -118,7 +116,7 @@ def _resolve_source_projection(
             if isinstance(value, SourceColumnRef):
                 needed.add(value.column)
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
+            from pypaimon.execution.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in source_set:
@@ -136,64 +134,8 @@ def _build_matched_transform(
     update_schema: pa.Schema,
     callable_input_columns: Optional[Sequence[str]] = None,
 ):
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import (
-                remap_source_on_keys, rewrite_condition,
-            )
-            rewritten = remap_source_on_keys(
-                rewrite_condition(clause.condition), on_map,
-            )
-        prepared_clauses.append((clause.spec, rewritten, clause.delete))
-
-    _filter_batch = None
-    if any(r is not None for _, r, _ in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten, is_delete in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-            else:
-                matched = remaining
-            if matched.num_rows == 0:
-                continue
-            if not is_delete:
-                callable_input = None
-                if (callable_input_columns is not None
-                        and any(callable(value) and not isinstance(value, type)
-                                for value in spec.values())):
-                    callable_input = pa.Table.from_arrays(
-                        [matched.column(f"t.{col}")
-                         for col in callable_input_columns],
-                        names=list(callable_input_columns),
-                    )
-                parts.append(vectorized_matched_transform(
-                    matched, spec, on_pairs,
-                    update_cols, row_id_name,
-                    update_schema,
-                    callable_input=callable_input,
-                ))
-            if rewritten is not None and matched.num_rows < remaining.num_rows:
-                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                remaining = _filter_batch(
-                    remaining, not_cond, _pre_rewritten=True,
-                )
-            else:
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return update_schema.empty_table()
-        return pa.concat_tables(parts)
-
-    return _transform
+    from pypaimon.execution.merge_transform import _build_matched_transform as execute
+    return execute(clauses, on_map, on_pairs, update_cols, row_id_name, update_schema, callable_input_columns)
 
 
 def _build_matched_delete_transform(
@@ -202,52 +144,8 @@ def _build_matched_delete_transform(
     row_id_name: str,
     delete_schema: pa.Schema,
 ):
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import (
-                remap_source_on_keys, rewrite_condition,
-            )
-            rewritten = remap_source_on_keys(
-                rewrite_condition(clause.condition), on_map,
-            )
-        prepared_clauses.append((rewritten, clause.delete))
-
-    _filter_batch = None
-    if any(r is not None for r, _ in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for rewritten, is_delete in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-            else:
-                matched = remaining
-            if matched.num_rows > 0 and is_delete:
-                parts.append(
-                    vectorized_delete_transform(
-                        matched, row_id_name, delete_schema,
-                    )
-                )
-            if rewritten is not None and matched.num_rows < remaining.num_rows:
-                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                remaining = _filter_batch(
-                    remaining, not_cond, _pre_rewritten=True,
-                )
-            else:
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return delete_schema.empty_table()
-        return pa.concat_tables(parts)
-
-    return _transform
+    from pypaimon.execution.merge_transform import _build_matched_delete_transform as execute
+    return execute(clauses, on_map, row_id_name, delete_schema)
 
 
 def build_self_merge_update_plan(
@@ -281,7 +179,7 @@ def build_self_merge_update_plan(
     target_set = set(target_field_names)
     for clause in clauses:
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
+            from pypaimon.execution.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in target_set:
@@ -496,7 +394,7 @@ def build_self_merge_delete_ds(
     target_set = set(target_field_names)
     for clause in clauses:
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import extract_columns
+            from pypaimon.execution.merge_condition import extract_columns
             for ref in extract_columns(clause.condition):
                 prefix, col = ref.split(".", 1)
                 if prefix == "s" and col in target_set:
@@ -1198,13 +1096,13 @@ def build_not_matched_insert_ds(
     for clause in clauses:
         rewritten = None
         if clause.condition is not None:
-            from pypaimon.ray.merge_condition import rewrite_condition
+            from pypaimon.execution.merge_condition import rewrite_condition
             rewritten = rewrite_condition(clause.condition)
         prepared_clauses.append((clause.spec, rewritten))
 
     _filter_batch_nm = None
     if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch_nm
+        from pypaimon.execution.merge_condition import filter_batch as _filter_batch_nm
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch
