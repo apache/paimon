@@ -80,7 +80,7 @@ def _plan_from_native(table, native, full_text, primary_key):
     return (FullTextScanPlan if full_text else VectorSearchScanPlan)(splits, snapshot)
 
 
-def _split_to_native(split, full_text):
+def _split_to_native(split, full_text, snapshot=None):
     from pypaimon_rust import datafusion as sdk
     from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit, RawFullTextSearchSplit
     from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit, RawVectorSearchSplit
@@ -99,7 +99,11 @@ def _split_to_native(split, full_text):
 
     if isinstance(split, (PrimaryKeyVectorSearchSplit, PrimaryKeyFullTextSearchSplit)):
         cls = sdk.PrimaryKeyFullTextSearchSplit if full_text else sdk.PrimaryKeyVectorSearchSplit
-        return cls(sdk.Split.deserialize(serialize_split_v1(split.data_split)), files(split.payloads),
+        data_split = split.data_split
+        if data_split.snapshot_id is None and snapshot is not None:
+            data_split = copy(data_split)
+            data_split.snapshot_id = snapshot.id
+        return cls(sdk.Split.deserialize(serialize_split_v1(data_split)), files(split.payloads),
                    list(split.uncovered_data_files),
                    {name: ranges(values) for name, values in split.row_ranges_by_file.items()})
     if isinstance(split, IndexFullTextSearchSplit):
@@ -119,7 +123,7 @@ def _plan_to_native(plan, full_text):
     captured = plan.snapshot()
     snapshot = None if captured is None else sdk.Snapshot._from_json(JSON.to_json(captured))
     cls = sdk.FullTextScanPlan if full_text else sdk.VectorScanPlan
-    return cls([_split_to_native(split, full_text) for split in plan.splits()], snapshot)
+    return cls([_split_to_native(split, full_text, captured) for split in plan.splits()], snapshot)
 
 
 def _capture_builder(builder):

@@ -379,7 +379,7 @@ def test_ray_accepts_native_reader_and_transports_captured_sources(table, family
 
 @pytest.mark.parametrize('family', ['vector', 'full-text'])
 @pytest.mark.parametrize('filtered', [False, True])
-def test_pk_native_plans_export_physical_sources_for_python_readers(source, pk_vector_table, family, filtered):
+def test_pk_plans_round_trip_between_backends(source, pk_vector_table, family, filtered):
     table = source[0] if family == 'full-text' else pk_vector_table
 
     def builder(native):
@@ -390,9 +390,11 @@ def test_pk_native_plans_export_physical_sources_for_python_readers(source, pk_v
         return query
 
     classic = builder(False)
-    expected = _read(_reader(classic, family), family, _scan(classic, family).scan())
+    python_plan = _scan(classic, family).scan()
+    expected = _read(_reader(classic, family), family, python_plan)
     native = builder(True)
     with _native_only():
+        _assert_results(_read(_reader(native, family), family, pickle.loads(pickle.dumps(python_plan))), expected)
         plan = _scan(native, family).scan()
         actual = _read(_reader(native, family), family, plan)
     assert plan.snapshot_id == expected[0].snapshot_id

@@ -17,7 +17,23 @@
 
 """Attach distributed task execution to Python search readers."""
 
+from contextlib import contextmanager
 import math
+
+
+@contextmanager
+def closing_task_results(results):
+    """Close scheduled work without replacing an existing execution failure."""
+    try:
+        yield results
+    except BaseException:
+        try:
+            results.close()
+        except BaseException:
+            pass
+        raise
+    else:
+        results.close()
 
 
 def create_distributed_reader(reader, executor):

@@ -16,6 +16,8 @@
 # under the License.
 
 
+from copy import copy
+
 from pypaimon.table.source.search_types import (PrimaryKeyFullTextSearchSplit, PrimaryKeyFullTextScanPlan)
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
@@ -61,7 +63,7 @@ class PrimaryKeyFullTextScan(FullTextScan):
                 entry, self._definition.field_id,
                 self._definition.index_type, self._partition_filter))
         return PrimaryKeyFullTextScanPlan(
-            snapshot.id, _full_text_bucket_splits(source_splits, entries), snapshot)
+            snapshot.id, _full_text_bucket_splits(source_splits, entries, snapshot.id), snapshot)
 
 
 def _matches(entry, field_id, index_type, partition_filter):
@@ -77,7 +79,7 @@ def _partition_key(partition):
     return tuple(partition.values)
 
 
-def _full_text_bucket_splits(source_splits, entries):
+def _full_text_bucket_splits(source_splits, entries, snapshot_id=None):
     payloads_by_bucket = {}
     for entry in entries:
         key = (_partition_key(entry.partition), entry.bucket)
@@ -89,7 +91,7 @@ def _full_text_bucket_splits(source_splits, entries):
             continue
         key = (_partition_key(split.partition), split.bucket)
         bucket = buckets.setdefault(key, {
-            "partition": split.partition, "files": [],
+            "source": split, "files": [],
             "deletions": [], "names": set(), "has_deletions": False})
         deletions = split.data_deletion_files
         if deletions is not None and len(deletions) != len(split.files):
@@ -114,9 +116,12 @@ def _full_text_bucket_splits(source_splits, entries):
             continue
         payloads, covered = _current_payloads(
             bucket["files"], payloads_by_bucket.get(key, []))
-        data_split = DataSplit(
-            bucket["files"], bucket["partition"], key[1], False,
-            bucket["deletions"] if bucket["has_deletions"] else None)
+        data_split = copy(bucket["source"])
+        data_split._files = bucket["files"]
+        data_split.raw_convertible = False
+        data_split.data_deletion_files = bucket["deletions"] if bucket["has_deletions"] else None
+        if snapshot_id is not None:
+            data_split.snapshot_id = snapshot_id
         result.append(PrimaryKeyFullTextSearchSplit(
             data_split, tuple(payloads),
             tuple(data_file.file_name for data_file in bucket["files"]

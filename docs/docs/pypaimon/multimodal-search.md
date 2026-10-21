@@ -373,8 +373,8 @@ results = builder.new_batch_vector_search_read().read_batch_plan(selected)
 ```
 
 The supplied splits are authoritative: readers do not add uncovered raw ranges
-or rediscover other search indexes. A plan with no captured snapshot stays
-empty rather than selecting the latest snapshot. Query vectors, limits and
+or rediscover other search indexes. A Native plan without a captured snapshot
+must have no sources and never selects the latest snapshot. Query vectors, limits and
 filters belong to the reader. Rust Core coordinates global candidate selection
 and refinement; its internal shard protocol is separate from the public source
 plan.

@@ -18,7 +18,6 @@
 """Python search tasks and global result coordination for distributed executors."""
 
 from collections import Counter
-from contextlib import closing
 import math
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
@@ -29,6 +28,7 @@ from pypaimon.execution.python.read.search.vector_search_read import (
     _filtered_raw_row_ranges, _offer_score, _scored_result, _split_search_splits,
 )
 from pypaimon.execution.python.read.search import global_index_live_row_filter
+from pypaimon.execution.python.read.search.distributed_search import closing_task_results
 from pypaimon.table.source.search_execution import SearchTask
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -55,7 +55,7 @@ class DistributedVectorSearchRead(DataEvolutionVectorRead):
         context = (self._table, self._vector_column, query, search_limit, self._options,
                    self._filter, self._partition_filter, snapshot)
         work = _index_tasks(_search_index_split, context, splits, self._filter)
-        with closing(self._executor.map(work, ordered=True)) as tasks:
+        with closing_task_results(self._executor.map(work, ordered=True)) as tasks:
             for _, (metric, scores) in tasks:
                 if metric is not None:
                     self._set_index_metric(metric)
@@ -81,7 +81,7 @@ class DistributedVectorSearchRead(DataEvolutionVectorRead):
         # Keep each planned data split intact: its files may be vertical column
         # groups that must be read together to reconstruct a logical row.
         work = [SearchTask(_search_raw_split, context, split) for split in splits]
-        with closing(self._executor.map(work)) as tasks:
+        with closing_task_results(self._executor.map(work)) as tasks:
             for _, scores in tasks:
                 for row_id, score in scores.items():
                     _offer_score(heap, self._limit, row_id, score)
@@ -107,7 +107,7 @@ class DistributedBatchVectorSearchRead(BatchVectorSearchReadImpl):
         context = (self._table, self._vector_column, query, search_limit, self._options,
                    self._filter, self._partition_filter, snapshot)
         work = _index_tasks(_search_batch_index_split, context, splits, self._filter)
-        with closing(self._executor.map(work, ordered=True)) as tasks:
+        with closing_task_results(self._executor.map(work, ordered=True)) as tasks:
             for _, (metric, scores) in tasks:
                 if metric is not None:
                     self._set_index_metric(metric)
@@ -124,7 +124,7 @@ class DistributedBatchVectorSearchRead(BatchVectorSearchReadImpl):
         context = (table_read, self._vector_column, self._query_vectors,
                    self._limit, self._search_metric(index_type))
         work = [SearchTask(_search_batch_raw_split, context, split) for split in splits]
-        with closing(self._executor.map(work)) as tasks:
+        with closing_task_results(self._executor.map(work)) as tasks:
             for _, results in tasks:
                 for heap, scores in zip(heaps, results):
                     for row_id, score in scores.items():
@@ -144,7 +144,7 @@ class DistributedBatchVectorSearchRead(BatchVectorSearchReadImpl):
                    self._search_metric(index_type), queries_by_row)
         heaps = [[] for _ in query_vectors]
         work = [SearchTask(_search_batch_refine_split, context, split) for split in splits]
-        with closing(self._executor.map(work)) as tasks:
+        with closing_task_results(self._executor.map(work)) as tasks:
             for _, results in tasks:
                 for heap, scores in zip(heaps, results):
                     for row_id, score in scores.items():

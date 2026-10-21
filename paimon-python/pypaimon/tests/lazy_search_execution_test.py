@@ -526,7 +526,8 @@ def test_missing_primary_key_plan_snapshot_does_not_fall_back_to_latest(full_tex
 
 
 @pytest.mark.parametrize('full_text', [False, True])
-def test_primary_key_sources_round_trip_as_typed_splits(search_table, full_text):
+@pytest.mark.parametrize('split_snapshot', [None, 7])
+def test_primary_key_sources_round_trip_as_typed_splits(search_table, full_text, split_snapshot):
     from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
     from pypaimon.index.index_file_meta import IndexFileMeta
     from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -547,7 +548,7 @@ def test_primary_key_sources_round_trip_as_typed_splits(search_table, full_text)
     file = DataFileMeta.create('tail.parquet', 256, 5, empty, empty,
                                SimpleStats.empty_stats(), SimpleStats.empty_stats(), 0, 4, 2, 1, [])
     data = DataSplit([file], empty, 0, data_deletion_files=[DeletionFile('dv/one', 2, 10, 3)],
-                     snapshot_id=7, bucket_path='bucket-0', total_buckets=1)
+                     snapshot_id=split_snapshot, bucket_path='bucket-0', total_buckets=1)
     payload = IndexFileMeta('full-text' if full_text else 'ivf-flat', 'payload', 1024, 4,
                             external_path='s3://bucket/payload')
     split_class = PrimaryKeyFullTextSearchSplit if full_text else PrimaryKeyVectorSearchSplit
@@ -561,7 +562,11 @@ def test_primary_key_sources_round_trip_as_typed_splits(search_table, full_text)
     expected_type = datafusion.PrimaryKeyFullTextSearchSplit if full_text else datafusion.PrimaryKeyVectorSearchSplit
     assert type(native.splits()[0]) is expected_type
     assert type(native.splits()[0].data_split()) is datafusion.Split
-    assert serialize_split_v1(restored.splits()[0].data_split) == serialize_split_v1(data)
+    from copy import copy
+    normalized = copy(data)
+    normalized.snapshot_id = 7
+    assert serialize_split_v1(restored.splits()[0].data_split) == serialize_split_v1(normalized)
+    assert data.snapshot_id == split_snapshot
     assert restored.snapshot() == snapshot and restored.snapshot_id == 7
     assert restored.splits()[0].payloads == (payload,)
     assert restored.splits()[0].uncovered_data_files == ('tail.parquet',)

@@ -17,14 +17,13 @@
 
 """Python full-text tasks preserve corpus statistics and plan-ordered merging."""
 
-from contextlib import closing
-
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.execution.python.read.search.full_text_read import (
     DataEvolutionFullTextRead, _index_candidate_limit, _index_type, _raw_row_ranges, _split_search_splits,
 )
 from pypaimon.execution.python.read.search import global_index_live_row_filter
+from pypaimon.execution.python.read.search.distributed_search import closing_task_results
 from pypaimon.execution.python.read.search.distributed_vector_search import _index_tasks, _scores
 from pypaimon.table.source.search_execution import SearchTask
 from pypaimon.utils.range import Range
@@ -47,7 +46,10 @@ class DistributedFullTextRead(DataEvolutionFullTextRead):
     def read(self, splits):
         # Keep bitmap construction and candidate data reads off the driver.
         index_splits, raw_splits = _split_search_splits(splits)
-        indexed = self._eval_column_query({self._text_columns[0].name: index_splits}, None)
+        splits_by_column = {}
+        for split in index_splits:
+            splits_by_column.setdefault(split.column_name, []).append(split)
+        indexed = self._eval_column_query(splits_by_column, None)
         raw = self._read_raw_search(_raw_row_ranges(raw_splits), _index_type(index_splits))
         return indexed.or_(raw).top_k(self._limit)
 
@@ -59,7 +61,7 @@ class DistributedFullTextRead(DataEvolutionFullTextRead):
         reader = self._worker_reader()
         reader._limit = _index_candidate_limit(items, self._limit)
         work = _index_tasks(_search_index, reader, items, self._filter, _prepare_scalar_filter)
-        with closing(self._executor.map(work, ordered=True)) as tasks:
+        with closing_task_results(self._executor.map(work, ordered=True)) as tasks:
             for _, scores in tasks:
                 # Duplicate row IDs keep the first planned shard's score.
                 for row_id, score in scores.items():
@@ -73,7 +75,7 @@ class DistributedFullTextRead(DataEvolutionFullTextRead):
         # Splitting this corpus would change document frequencies and BM25.
         # Keep the existing local corpus intact, but read/build/search on a worker.
         work = [SearchTask(_search_raw, self._worker_reader(), (ranges, index_type, include))]
-        with closing(self._executor.map(work)) as tasks:
+        with closing_task_results(self._executor.map(work)) as tasks:
             for _, scores in tasks:
                 return DictBasedScoredIndexResult(scores)
 

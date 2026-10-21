@@ -225,3 +225,104 @@ def test_closing_callback_after_a_core_error_does_not_promote_a_cleanup_failure(
     assert next(results) == b'result'
     results.close()
     callback.raise_if_failed()
+
+
+@pytest.mark.parametrize('columns,expected', [
+    (['title'], []), (['body'], [1]), (['title', 'body'], [1]),
+])
+def test_scheduled_full_text_read_keeps_each_source_column(columns, expected):
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.common.options.options import Options
+    from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+    from pypaimon.globalindex.global_index_reader import _completed_future
+    from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
+    from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit
+    from pypaimon.table.source.search_types import FullTextScanPlan
+    from pypaimon.tests.vector_search_filter_test import _StubTable, _entry, _field, match_query
+
+    fields = [_field(0, 'title', 'STRING'), _field(1, 'body', 'STRING')]
+    entries = [_entry(None, field.id, 'full-text', field.name, 0, 1) for field in fields]
+    table = _StubTable(fields, entries)
+    table.options = CoreOptions(Options({'data-evolution.enabled': 'true'}))
+    files_by_column = {field.name: entry.index_file for field, entry in zip(fields, entries)}
+    splits = [IndexFullTextSearchSplit(column, 0, 1, [files_by_column[column]]) for column in columns]
+    query = match_query('needle')
+    read = DataEvolutionFullTextRead(table, 1, fields[1], query)
+    executor = InlineExecutor()
+
+    class IndexReader:
+        def __init__(self, name):
+            self.name = name
+
+        def visit_full_text_search(self, search):
+            assert search.field_name == 'body' and search.query == query
+            return _completed_future(DictBasedScoredIndexResult(
+                {0: 0.9} if self.name == 'title' else {1: 0.7}))
+
+        def close(self):
+            pass
+
+    with patch('pypaimon.execution.python.read.search.full_text_read._create_full_text_reader',
+               side_effect=lambda kind, io, path, metas, bound: IndexReader(metas[0].file_name)):
+        plan = FullTextScanPlan(splits)
+        local = read.read_plan(plan)
+        scheduled = read.read_plan(plan, executor=executor)
+    assert list(local.results()) == list(scheduled.results()) == expected
+    assert [task.item.column_name for task in executor.tasks] == (['body'] if expected else [])
+
+
+@pytest.mark.parametrize('family', ['single', 'batch', 'full-text'])
+@pytest.mark.parametrize('failure_type', [None, ValueError, CancelledError, KeyboardInterrupt])
+def test_python_scheduled_read_preserves_primary_and_surfaces_cleanup_errors(family, failure_type):
+    from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+    from pypaimon.execution.python.read.search.vector_search_read import (
+        BatchVectorSearchReadImpl, DataEvolutionVectorRead,
+    )
+    from pypaimon.table.source.full_text_search_split import IndexFullTextSearchSplit
+    from pypaimon.table.source.search_types import FullTextScanPlan, VectorSearchScanPlan
+    from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
+
+    table = SimpleNamespace(options=SimpleNamespace(data_evolution_enabled=lambda: True))
+    table.copy = lambda options: table
+    column = SimpleNamespace(name='value')
+    index = SimpleNamespace(index_type='full-text' if family == 'full-text' else 'ivf-flat')
+    if family == 'full-text':
+        reader = DataEvolutionFullTextRead(table, 1, column, 'needle')
+        plan = FullTextScanPlan([IndexFullTextSearchSplit('value', 0, 1, [index])])
+        execute = reader.read_plan
+        result = {1: 0.5}
+    else:
+        reader = (BatchVectorSearchReadImpl(table, 1, column, [[1.]]) if family == 'batch'
+                  else DataEvolutionVectorRead(table, 1, column, [1.]))
+        plan = VectorSearchScanPlan([IndexVectorSearchSplit(0, 1, [index])])
+        execute = reader.read_batch_plan if family == 'batch' else reader.read_plan
+        result = (None, [{1: 0.5}] if family == 'batch' else {1: 0.5})
+
+    primary = None if failure_type is None else failure_type('worker failed')
+    cleanup = RuntimeError('scheduler cleanup failed')
+
+    class Results:
+        def __init__(self):
+            self.returned = False
+            self.closed = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if primary is not None:
+                raise primary
+            if self.returned:
+                raise StopIteration
+            self.returned = True
+            return 0, result
+
+        def close(self):
+            self.closed += 1
+            raise cleanup
+
+    results = Results()
+    with pytest.raises(BaseException) as caught:
+        execute(plan, executor=MapExecutor(lambda tasks, ordered: results))
+    assert caught.value is (cleanup if primary is None else primary)
+    assert results.closed == 1
