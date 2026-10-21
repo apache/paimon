@@ -163,12 +163,38 @@ class NativeSearchRead:
         state['_native'] = None
         return state
 
-    def read_plan(self, plan):
-        return _result(self._table, self._native.read_plan(plan), self._primary_key)
+    def read_plan(self, plan, executor=None):
+        if executor is None:
+            result = self._native.read_plan(plan)
+        else:
+            self._validate_task_execution()
+            from pypaimon.execution.native.read.search_execution import native_task_executor
+            callback = native_task_executor(self._table, executor)
+            try:
+                result = self._native.read_plan(plan, executor=callback)
+            finally:
+                callback.cancel()
+                callback.raise_if_failed()
+        return _result(self._table, result, self._primary_key)
 
-    def read_batch_plan(self, plan):
+    def read_batch_plan(self, plan, executor=None):
+        if executor is None:
+            results = self._native.read_batch_plan(plan)
+        else:
+            self._validate_task_execution()
+            from pypaimon.execution.native.read.search_execution import native_task_executor
+            callback = native_task_executor(self._table, executor)
+            try:
+                results = self._native.read_batch_plan(plan, executor=callback)
+            finally:
+                callback.cancel()
+                callback.raise_if_failed()
         return [_result(self._table, result, False)
-                for result in self._native.read_batch_plan(plan)]
+                for result in results]
+
+    def _validate_task_execution(self):
+        if self._primary_key or not self._table.options.data_evolution_enabled():
+            raise ValueError('Distributed search supports only data-evolution tables')
 
     def resolve_plan(self, plan):
         # Search modes choose source work at scan time. A new reader may use

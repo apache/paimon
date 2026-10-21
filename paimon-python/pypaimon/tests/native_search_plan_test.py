@@ -17,7 +17,7 @@
 
 """Explicit search plans keep native work and transportable source metadata."""
 
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from copy import copy
 import pickle
 from unittest.mock import patch
@@ -327,48 +327,34 @@ def test_native_plan_is_query_independent_and_pickle_keeps_original_handle(table
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
 def test_ray_accepts_native_reader_and_transports_captured_sources(table, family):
-    # Run the real Ray adapters and workers with in-process serialized task
-    # dispatch. This exercises their reader qualification and metadata contract
-    # without starting another cluster in the native CI jobs.
+    # Exercise the real Native task bridge with process-style serialization,
+    # without rebuilding the SDK or starting another cluster in Native CI.
     from pypaimon.ray import vector_search, batch_vector_search, full_text_search
-    module, reader_type, execute, method = {
-        'vector': (vector_search, vector_search._RayVectorSearchRead,
-                   vector_search._execute_vector_search, 'read_plan'),
-        'batch': (batch_vector_search, batch_vector_search._RayBatchVectorSearchRead,
-                  batch_vector_search._execute_batch_vector_search, 'read_batch_plan'),
-        'full-text': (full_text_search, full_text_search._RayFullTextRead,
-                      full_text_search._execute_full_text_search, 'read_plan'),
+    from pypaimon.table.source.search_execution import SearchTaskExecutor
+    module, execute = {
+        'vector': (vector_search, vector_search._execute_vector_search),
+        'batch': (batch_vector_search, batch_vector_search._execute_batch_vector_search),
+        'full-text': (full_text_search, full_text_search._execute_full_text_search),
     }[family]
     classic = _builder(table, family, limit=20)
     expected = _read(_reader(classic, family), family, _scan(classic, family).scan())
-    original_read = getattr(reader_type, method)
+    appended = []
 
-    def read_after_append(reader, plan):
-        captured = plan.snapshot().id
-        transported = pickle.loads(pickle.dumps(plan))
-        assert plan._unchanged_native_plan() is not None
-        indexes._append(table, hybrid._rows(12, 4), hybrid.SCHEMA)
-        assert transported.snapshot().id == captured
-        return original_read(reader, transported)
+    class SerializedExecutor(SearchTaskExecutor):
+        def map(self, tasks, ordered=False):
+            assert ordered
+            if not appended:
+                indexes._append(table, hybrid._rows(12, 4), hybrid.SCHEMA)
+                appended.append(True)
+            for ordinal, task in enumerate(tasks):
+                transported = pickle.loads(pickle.dumps(task))
+                assert not transported.dependencies
+                yield ordinal, transported.execute()
 
-    def dispatch(worker, context, items, *args):
-        for ordinal, item in enumerate(items):
-            yield ordinal, worker(pickle.loads(pickle.dumps(context)), pickle.loads(pickle.dumps(item)))
-
-    @contextmanager
-    def scalar_filters(*args):
-        yield None
-
-    with ExitStack() as stack:
-        stack.enter_context(patch.object(module, '_require_ray'))
-        stack.enter_context(patch.object(module, '_map_tasks', dispatch))
-        stack.enter_context(patch.object(reader_type, method, read_after_append))
-        if family != 'full-text':
-            stack.enter_context(patch.object(module, '_shared_scalar_filters', scalar_filters))
-        for cls in (DataEvolutionVectorScan, DataEvolutionFullTextScan):
-            stack.enter_context(patch.object(cls, 'scan', side_effect=AssertionError('Python search scan ran')))
+    with _native_only(), patch.object(module, 'RaySearchTaskExecutor', return_value=SerializedExecutor()):
         actual = execute(_builder(table, family, native=True, limit=20))
     _assert_results(actual if family == 'batch' else [actual], expected)
+    assert appended
 
 
 @pytest.mark.parametrize('family', ['vector', 'full-text'])

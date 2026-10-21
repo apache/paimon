@@ -64,6 +64,10 @@ class AbstractVectorSearchReadImpl:
         self._index_metric = None
         self._scalar_pre_filter = None
 
+    def _with_executor(self, executor):
+        from pypaimon.execution.python.read.search.distributed_search import create_distributed_reader
+        return create_distributed_reader(self, executor)
+
     def _search_metric(self, index_type=None):
         if self._index_metric is not None:
             return self._index_metric

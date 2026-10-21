@@ -20,12 +20,15 @@ from unittest.mock import patch
 import pytest
 
 pytest.importorskip("ray")
+
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.tests.search_execution_test_helpers import task_parts
 pytest.importorskip("paimon_ftindex")
 
 import pypaimon.multimodal as pm
 from pypaimon.tests import ray_vector_search_test as ray_fixtures
 from pypaimon.tests import full_text_scalar_filter_test as text_fixtures
-from pypaimon.ray import full_text_search as module
+from pypaimon.execution.python.read.search import distributed_full_text_search as module
 
 ray_cluster = ray_fixtures.ray_cluster
 docs = text_fixtures.docs
@@ -39,13 +42,14 @@ def test_index_raw_filters_and_scores(docs, ray_cluster, predicate, concurrency)
     query = docs.search("paimon", column="text", pre_filter=predicate).select(["id"]).with_score().order_by_score()
     expected = query.to_list()
     dispatched = []
-    original = module._map_tasks
+    original = RaySearchTaskExecutor.map
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
         dispatched.append((worker.__name__, len(items)))
-        return original(worker, context, items, *args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(module, "_map_tasks", record):
+    with patch.object(RaySearchTaskExecutor, "map", record):
         assert query.to_list(execution="ray", concurrency=concurrency) == expected
     if predicate is None:
         assert ("_search_index", 1) in dispatched
@@ -149,16 +153,16 @@ def test_shared_scalar_indexes_are_evaluated_once(tmp_path, ray_cluster):
 def test_worker_filters_use_planned_snapshot(docs, ray_cluster):
     query = docs.search("paimon", column="text", pre_filter="id >= 0").select(["id"]).order_by_score()
     expected = query.to_list()
-    original = module._map_tasks
+    original = RaySearchTaskExecutor.map
     committed = []
 
-    def commit_before_dispatch(*args):
+    def commit_before_dispatch(executor, tasks, ordered=False):
         if not committed:
             docs.delete("id = 0")
             committed.append(True)
-        return original(*args)
+        return original(executor, tasks, ordered=ordered)
 
-    with patch.object(module, "_map_tasks", commit_before_dispatch):
+    with patch.object(RaySearchTaskExecutor, "map", commit_before_dispatch):
         assert query.to_list(execution="ray", concurrency=2) == expected
     assert committed == [True]
     assert query.to_list(execution="ray") == query.to_list()

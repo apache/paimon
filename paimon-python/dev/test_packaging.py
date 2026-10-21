@@ -122,6 +122,12 @@ class PackagingTest(unittest.TestCase):
         for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
             self.assertIn(name, names)
         execution_files = (
+            "pypaimon/table/source/search_execution.py",
+            "pypaimon/ray/search_execution.py",
+            "pypaimon/execution/native/read/search_execution.py",
+            "pypaimon/execution/python/read/search/distributed_search.py",
+            "pypaimon/execution/python/read/search/distributed_vector_search.py",
+            "pypaimon/execution/python/read/search/distributed_full_text_search.py",
             "pypaimon/execution/python/map_blob_key_serializer.py",
             "pypaimon/execution/python/write/external_path_provider.py",
             "pypaimon/execution/python/read/predicate_json_parser.py",

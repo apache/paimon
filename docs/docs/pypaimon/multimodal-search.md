@@ -200,8 +200,8 @@ data. Historical snapshot and deletion semantics remain the same. Plain
 
 Use `execution="ray"` to execute vector queries across Ray workers and return
 Arrow results to the driver. This supports single and batch vector queries on
-data-evolution tables; primary-key tables and hybrid queries are not supported
-by this execution mode.
+data-evolution tables; primary-key tables are not supported by this execution
+mode. Full-text and hybrid queries are described below.
 
 Install the same PyPaimon and index dependencies on the driver and workers:
 
@@ -234,6 +234,12 @@ neighbors = (
 the number of in-flight Ray tasks, with a default of 4. `ray_remote_args` supplies
 Ray task options, including resources and retry settings; `num_returns` is
 managed by PyPaimon. These two arguments require `execution="ray"`.
+
+Ray schedules tasks from the selected search backend. With Native reads enabled
+on a supported REST table, Rust performs the query, filtering and ranking on the
+driver and workers. Install the same Native SDK on every node. Selecting Ray
+does not force Python search execution. A failure after execution starts is
+propagated without rerunning the query through another backend.
 
 For single and batch vector queries, `to_pandas()` and `to_list()` accept the
 same `execution`, `concurrency`, and `ray_remote_args` arguments as `to_arrow()`.
@@ -274,7 +280,7 @@ filtering and final row lookup.
 In particular, `pre_filter` filters candidates before ranking; `where()` filters
 the selected rows and can return fewer than the requested number of results.
 
-For indexed vector searches, workers evaluate scalar predicates and build
+For indexed vector searches using the Python backend, workers evaluate scalar predicates and build
 live-row filters at the query snapshot. Tasks using the same scalar index files
 share one Ray scalar-index evaluation; its result is passed directly to dependent
 tasks without materializing the bitmap on the driver. Candidate verification
@@ -282,6 +288,9 @@ reads only filter columns and row IDs in the task's shard range, without scannin
 the scalar indexes again. The final shard filter is reused across a batch's query
 vectors. This lets expensive verification scale with search concurrency; partially
 overlapping scalar index inputs can still cause repeated index reads.
+The Native backend resolves shared snapshot filters in Rust before distributing
+index and data-reading tasks. Query matrices and other shared task context are
+transported once per task group.
 
 Index search, raw scans, refinement, lookup, and task retries use the same read
 snapshot. The existing `snapshot_id` and `tag_name` arguments to `search()` also
@@ -324,10 +333,34 @@ uncovered corpus, preserving existing BM25 statistics; that corpus must fit the
 worker's memory. Pre-filters and deletion vectors keep the local ranking semantics.
 
 Hybrid routes share one resolved snapshot, use Ray for their shard work, and
-reuse the existing RRF, MRR, or weighted-score fusion on the driver. Routes run
-successively so `concurrency` bounds the whole query. Final Arrow/Pandas row lookup
+reuse the existing RRF, MRR, or weighted-score fusion on the driver. Concurrent
+routes share the query's task budget, so `concurrency` bounds the whole query.
+Final Arrow/Pandas row lookup
 remains on the driver. Native resources close on workers; task errors propagate
 and pending read tasks are cancelled.
+
+### Scheduling a search plan
+
+Lower-level vector, batch-vector and full-text readers accept an optional
+`SearchTaskExecutor` in `read_plan()` or `read_batch_plan()`. The reader keeps
+ownership of the complete snapshot-scoped query, including global candidate
+selection and refinement. A scheduler only places the backend's serializable
+tasks and returns their results:
+
+```python
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+
+builder = (table.new_batch_vector_search_builder()
+           .with_vector_column("embedding")
+           .with_query_vectors([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+           .with_limit(10))
+plan = builder.new_vector_search_scan().scan()
+results = builder.new_batch_vector_search_read().read_batch_plan(
+    plan, executor=RaySearchTaskExecutor(concurrency=4))
+```
+
+Hybrid builders expose `execute(executor=...)` for the same scheduler.
+The existing `execute_local()` methods retain their local defaults.
 
 ## Search Hybrid
 

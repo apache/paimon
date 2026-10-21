@@ -49,7 +49,9 @@ class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
         self._definition = definition
         super().__init__(table, limit, text_column, query, partition_filter)
 
-    def read_plan(self, plan):
+    def read_plan(self, plan, executor=None):
+        if executor is not None:
+            return self._with_executor(executor).read_plan(plan)
         if not isinstance(plan, PrimaryKeyFullTextScanPlan):
             raise ValueError("Primary-key full-text read requires a PrimaryKeyFullTextScanPlan.")
         futures = []

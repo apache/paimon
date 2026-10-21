@@ -144,6 +144,16 @@ Ray package. Public Ray helper entry points delegate to those same helpers.
 System-table output applies common Arrow filtering/projection to `SystemSplit`
 results from either metadata provider without creating a Python file reader.
 
+Search readers accept an optional `SearchTaskExecutor` when executing a complete
+plan. `SearchTask` and its dependency/context transport contract stay in
+`table/source/search_execution`; Ray only implements bounded scheduling,
+context sharing and cancellation. It does not inherit a Python search reader
+or select Python on behalf of a Native reader. Python's distributed adapters
+own their index/filter/raw/refinement operations. Native adapters transport
+opaque shared context and task bytes; Core owns both their interpretation and
+global query coordination. The global candidate limit is applied before
+refinement, and full-text raw fallback retains one corpus for BM25 statistics.
+
 ## Corresponding execution APIs
 
 Compare the operation's inputs, results and lifecycle when changing a backend.
