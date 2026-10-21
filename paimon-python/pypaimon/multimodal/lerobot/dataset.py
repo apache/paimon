@@ -460,9 +460,12 @@ class PaimonDatasetReader(ABC):
                 row, self._features, self.return_uint8)
             for position, row in base_rows.items()
         }
+        window_keys = {key for plan in plans for key in plan["windows"]}
         converted.update({
             position: _torch_row(
-                row, self._features, self.return_uint8)
+                {key: value for key, value in row.items()
+                 if key in window_keys},
+                self._features, self.return_uint8)
             for position, row in delta_rows.items()
         })
 

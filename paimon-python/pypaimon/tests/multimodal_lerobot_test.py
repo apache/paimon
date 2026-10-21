@@ -990,7 +990,12 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(_schema_from_info(info), dataset.reader.schema)
         self.assertIsNone(dataset.reader.absolute_to_relative_idx)
         self.assertTrue(repr(dataset).startswith("PaimonLeRobotDataset("))
-        sample, _ = dataset.__getitems__([1, 2])
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset._torch_row",
+                wraps=_torch_row) as convert:
+            sample, _ = dataset.__getitems__([1, 2])
+        self.assertEqual(3, convert.call_count)
+        self.assertEqual({"action"}, set(convert.call_args_list[-1][0][0]))
 
         self.assertEqual([((0, 1, 2), tuple(info["features"]))],
                          reader.calls)
@@ -1010,6 +1015,19 @@ class LeRobotValidationTest(unittest.TestCase):
             batch_size=2, shuffle=False, num_workers=0)))
         self.assertEqual([0, 1], batch["index"].tolist())
         self.assertEqual([2, 3], list(batch["action"].shape))
+        control_reader = Reader(
+            metadata,
+            delta_timestamps={"timestamp": [-0.1, 0.0, 0.1]},
+        )
+        torch.testing.assert_close(
+            control_reader[1]["timestamp"], torch.tensor([0.0, 0.1, 0.2]))
+        control_reader.close()
+        rows[0]["episode_index"] = 1
+        try:
+            with self.assertRaisesRegex(ValueError, "episode_index"):
+                dataset[1]
+        finally:
+            rows[0]["episode_index"] = 0
         with self.assertRaisesRegex(ValueError, "manages collate_fn"):
             dataset.to_dataloader(batch_size=2, collate_fn=lambda rows: rows)
         dataset.return_uint8 = True
