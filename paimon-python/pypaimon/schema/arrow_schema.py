@@ -128,6 +128,8 @@ def _write_child_nullability(source, target):
 def _check_write_nullability(array, field, path):
     if not field.nullable and array.null_count:
         raise ValueError("Input schema isn't consistent with table schema: non-nullable field %s contains NULL" % path)
+    if array.null_count == len(array):
+        return
     data_type = field.type
     if pa.types.is_struct(data_type):
         valid = pc.is_valid(array) if array.null_count else None
@@ -141,14 +143,15 @@ def _check_write_nullability(array, field, path):
         child = data_type.value_field
         _check_write_nullability(pc.list_flatten(array), child, path + '.' + child.name)
     elif pa.types.is_map(data_type):
-        # Keys/items expose the full backing array, including values outside a
-        # slice or hidden by NULL maps. A temporary list selects visible entries.
-        start, stop = array.offsets[0].as_py(), array.offsets[-1].as_py()
+        # MAP and LIST<STRUCT<key, value>> share a layout. Retain the parent's
+        # validity and offset so flatten selects only visible entries, including
+        # with Arrow 6 where ListArray.from_arrays has no mask argument.
         entries = pa.StructArray.from_arrays(
-            [array.keys.slice(start, stop - start), array.items.slice(start, stop - start)],
+            [array.keys, array.items],
             fields=[array.type.key_field, array.type.item_field])
-        offsets = pc.subtract(array.offsets, pa.scalar(start, type=array.offsets.type))
-        entries = pc.list_flatten(pa.ListArray.from_arrays(offsets, entries, mask=pc.is_null(array)))
+        entries = pc.list_flatten(pa.Array.from_buffers(
+            pa.list_(entries.type), len(array), array.buffers()[:2], children=[entries],
+            offset=array.offset, null_count=array.null_count))
         for index, child in enumerate((data_type.key_field, data_type.item_field)):
             _check_write_nullability(entries.field(index), child, path + '.' + child.name)
 

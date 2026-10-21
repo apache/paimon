@@ -69,6 +69,9 @@ shared metadata remain in `globalindex`; shared search plans and splits remain i
 `table/source`. Python index file codecs, compression and reader/writer helpers
 live in `execution/python/globalindex`. Vector-index stream ownership and I/O
 callbacks are shared by both backends through `execution/vindex_input.py`.
+Public streaming scan names resolve to the original classes on demand, without
+loading the other backend. Python 3.6 retains eager exports because it does not
+support module-level lazy attribute lookup.
 Public Format, Object and System table classes keep their existing paths and
 delegate file enumeration, decoding and filtering to Python read execution.
 Native system-table planning uses `execution/native/read/system_table.py`.
@@ -99,6 +102,9 @@ requires a complete HASH index for existing data buckets. Python coordinators
 use their Python metadata loader. Selection finishes before assigning input
 keys. Python's Arrow grouping capability probe runs only when its grouping
 implementation is used.
+The public postpone planner uses this shared input planning directly. Supplied
+bucket metadata avoids loading either backend; its Python metadata loader is
+imported only when existing bucket layouts are requested.
 
 ## Selection and failure boundaries
 
