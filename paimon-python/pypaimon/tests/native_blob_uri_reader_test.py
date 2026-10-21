@@ -301,7 +301,7 @@ def test_reader_factory_replacement_clear_and_native_rows(tmp_path):
             [{'id': 1, 'large': b'inline', 'small': None}],
             schema=PyarrowFieldParser.from_paimon_schema(table.fields)))
         assert factory.opened == []
-        with pytest.raises(ValueError, match='before any write'):
+        with pytest.raises(RuntimeError, match='before any write'):
             writer.with_blob_uri_reader_factory(factory)
     finally:
         writer.close()

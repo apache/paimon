@@ -113,6 +113,23 @@ def test_decimal_evolution_uses_supported_jvm_floating_decimal_digits(chunked):
 
 
 @pytest.mark.parametrize('chunked', [False, True])
+@pytest.mark.parametrize('source_type', [pa.int8(), pa.int16(), pa.int32(), pa.int64()])
+def test_integer_decimal_evolution_applies_precision_per_value(chunked, source_type):
+    # Java NumericPrimitiveToDecimalCastRule accepts a narrow target even when
+    # the source type's full range would overflow it. Only overflowing rows
+    # become NULL; PyArrow's integer cast instead rejects the whole target type.
+    values = pa.array([None, 1, -1, 99, -99, 100, -100, None], type=source_type)
+    source = values.slice(1, 7)
+    if chunked:
+        source = pa.chunked_array([source.slice(0, 2), source.slice(2, 0), source.slice(2)])
+    actual = cast_array_for_schema_evolution(source, pa.decimal128(4, 2))
+    assert actual.to_pylist() == [
+        Decimal('1.00'), Decimal('-1.00'), Decimal('99.00'), Decimal('-99.00'),
+        None, None, None,
+    ]
+
+
+@pytest.mark.parametrize('chunked', [False, True])
 @pytest.mark.parametrize('source_type,values,precision,scale,expected', [
     (pa.float64(), [1.005, -1.005, 2.675, -2.675, 0.145, 999.995, 1e30, None], 5, 2,
      ['1.01', '-1.01', '2.68', '-2.68', '0.15', None, None, None]),

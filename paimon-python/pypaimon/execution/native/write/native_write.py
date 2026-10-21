@@ -194,7 +194,7 @@ class NativeTableWrite:
         if self._python_writer is not None:
             return self._python_writer.with_blob_consumer(blob_consumer)
         if blob_consumer is None:
-            self._native_writer.with_blob_consumer(None)
+            self._configure_native_blob('with_blob_consumer', None)
             self._blob_consumer = None
             return self
         if not callable(blob_consumer):
@@ -205,7 +205,7 @@ class NativeTableWrite:
             descriptor = None if encoded is None else BlobDescriptor.deserialize(encoded)
             return blob_consumer(field_name, descriptor)
 
-        self._native_writer.with_blob_consumer(consume)
+        self._configure_native_blob('with_blob_consumer', consume)
         self._blob_consumer = blob_consumer
         return self
 
@@ -218,12 +218,24 @@ class NativeTableWrite:
             # Only core knows whether RowKind filtering accepted any rows or a
             # postpone writer buffered data. Validate before changing the live
             # bridge's fallback, including when clearing the application factory.
-            self._native_writer.with_blob_uri_reader_factory(self._blob_rows)
+            self._configure_native_blob('with_blob_uri_reader_factory', self._blob_rows)
             self._blob_rows.fallback = uri_reader_factory
         else:
-            self._native_writer.with_blob_uri_reader_factory(uri_reader_factory)
+            self._configure_native_blob('with_blob_uri_reader_factory', uri_reader_factory)
         self._blob_uri_reader_factory = uri_reader_factory
         return self
+
+    def _configure_native_blob(self, method, value):
+        try:
+            getattr(self._native_writer, method)(value)
+        except ValueError as error:
+            # Core owns written state: an ignored RowKind can leave it writable
+            # even after this facade accepted a batch. Preserve the existing
+            # Python state-error type without changing unrelated input errors.
+            message = method + ' must be called before any write operation'
+            if message in str(error):
+                raise RuntimeError(message) from error
+            raise
 
     def write_arrow(self, data, bucket=None):
         if self._python_writer is not None:

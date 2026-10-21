@@ -78,6 +78,8 @@ class TableUpdate(PythonTableUpdateMixin):
         """Create a shard updater for scan and rewrite style updates."""
         if total_shard_count <= 0 or shard_num < 0 or shard_num >= total_shard_count:
             raise ValueError('Shard index must be smaller than a positive shard count')
+        if self.update_cols == []:
+            raise ValueError('Shard update columns must not be empty')
         native = prepare_native_write_operation(
             'shard_update', self.table, self.commit_user, self.projection,
             self.update_cols, shard_num, total_shard_count,

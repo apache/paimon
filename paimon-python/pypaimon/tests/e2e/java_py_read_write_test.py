@@ -485,15 +485,17 @@ class JavaPyReadWriteTest(unittest.TestCase):
                                             options={'bucket': '1'})
         self.catalog.create_table('default.test_pk_dv', schema, True)
         table = self.catalog.get_table('default.test_pk_dv')
+        self.assertEqual(pa_schema, PyarrowFieldParser.from_paimon_schema(table.fields))
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'pt')
+        # Read results allow runtime NULLs; the logical write schema stays NOT NULL.
         expected = pa.Table.from_pydict({
             'pt': [1, 2, 2],
             'a': [10, 21, 22],
             'b': [1000, 20001, 202]
-        }, schema=pa_schema)
+        }, schema=pa.schema([field.with_nullable(True) for field in pa_schema]))
         self.assertEqual(expected, actual)
 
     def test_pk_dv_read_multi_batch(self):
@@ -508,6 +510,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                                             options={'bucket': '1'})
         self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
         table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+        self.assertEqual(pa_schema, PyarrowFieldParser.from_paimon_schema(table.fields))
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
@@ -516,7 +519,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'pt': [1] * 9999,
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
-        }, schema=pa_schema)
+        }, schema=pa.schema([field.with_nullable(True) for field in pa_schema]))
         self.assertEqual(expected, actual)
 
     def test_pk_dv_read_multi_batch_with_value_filter(self):
@@ -532,6 +535,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
                                             options={'bucket': '1'})
         self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
         table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+
+        self.assertEqual(pa_schema, PyarrowFieldParser.from_paimon_schema(table.fields))
 
         # Unfiltered scan: count total files
         rb_all = table.new_read_builder()
@@ -553,7 +558,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'pt': [1, 1, 1, 1],
             'a': [10, 20, 30, 40],
             'b': [100, 200, 300, 400]
-        }, schema=pa_schema)
+        }, schema=pa.schema([field.with_nullable(True) for field in pa_schema]))
         self.assertEqual(expected, filtered_result)
 
         # Verify file pruning: filtered scan should read fewer files
@@ -573,6 +578,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                                             options={'bucket': '1'})
         self.catalog.create_table('default.test_pk_dv_raw_convertable', schema, True)
         table = self.catalog.get_table('default.test_pk_dv_raw_convertable')
+        self.assertEqual(pa_schema, PyarrowFieldParser.from_paimon_schema(table.fields))
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
@@ -581,7 +587,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'pt': [1] * 9999,
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
-        }, schema=pa_schema)
+        }, schema=pa.schema([field.with_nullable(True) for field in pa_schema]))
         self.assertEqual(expected, actual)
 
     def test_read_btree_index_table(self):

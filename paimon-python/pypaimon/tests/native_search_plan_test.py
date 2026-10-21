@@ -26,6 +26,7 @@ import pytest
 import pyarrow as pa
 
 from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.read.native_search_plan import python_search_reader
 from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
 from pypaimon.execution.python.read.search.full_text_scan import DataEvolutionFullTextScan
 from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
@@ -237,7 +238,7 @@ def test_raw_native_plans_use_java_configured_indexer_default(rest_catalog, fami
         plan = _scan(builder, family).scan()
         actual = _read(_reader(builder, family), family, plan)
     assert all(split.index_type == index_type.strip().lower() for split in plan.splits())
-    expected = _read(_reader(builder, family)._python, family, pickle.loads(pickle.dumps(plan)))
+    expected = _read(python_search_reader(_reader(builder, family)), family, pickle.loads(pickle.dumps(plan)))
     _assert_results(actual, expected)
     assert all(set(_scores(result)) == ({6, 7} if metric is None else {1, 2}) for result in actual)
 
@@ -265,7 +266,7 @@ def test_persisted_vector_family_ignores_other_columns_metric(table, family):
         plan = _scan(builder, family).scan()
         actual = _read(_reader(builder, family), family, plan)
         implicit = builder.execute_batch_local() if family == 'batch' else [builder.execute_local()]
-    expected = _read(_reader(builder, family)._python, family, pickle.loads(pickle.dumps(plan)))
+    expected = _read(python_search_reader(_reader(builder, family)), family, pickle.loads(pickle.dumps(plan)))
     _assert_results(actual, expected)
     _assert_results(implicit, expected)
 
@@ -317,7 +318,7 @@ def test_native_plan_is_query_independent_and_pickle_keeps_original_handle(table
     else:
         builder.with_query_vector([7., 0.]).with_options({'ivf.nprobe': '1'})
     builder.with_limit(4)
-    classic = _reader(builder, family)._python
+    classic = python_search_reader(_reader(builder, family))
     expected = _read(classic, family, pickle.loads(pickle.dumps(plan)))
     with _native_only():
         actual = _read(_reader(builder, family), family, plan)

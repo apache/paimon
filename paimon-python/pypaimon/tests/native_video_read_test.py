@@ -173,7 +173,7 @@ def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_pat
 
 
 def test_native_video_deletion_vectors_filter_both_arrow_readers(tmp_path, native_rest_catalog):
-    from pypaimon.write.table_update import TableDeleteByRowId
+    from pypaimon.write.table_delete import TableDeleteByRowId
 
     table = _table(tmp_path, True, catalog=native_rest_catalog).copy(
         {'deletion-vectors.enabled': 'true', 'write.native.enabled': 'true', 'commit.native.enabled': 'true'})

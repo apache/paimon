@@ -233,7 +233,7 @@ def test_blob_consumer_can_be_replaced_cleared_and_cannot_change_after_write(tmp
             writer.with_blob_consumer(123)
         writer.with_blob_consumer(None)
         writer.write_arrow(_data())
-        with pytest.raises(ValueError, match='before any write'):
+        with pytest.raises(RuntimeError, match='before any write'):
             writer.with_blob_consumer(None)
         assert writer._python_writer is None
     finally:

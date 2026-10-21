@@ -526,7 +526,7 @@ def test_uri_reader_factory_none_keeps_native_and_rejects_late_change(tmp_path):
 
     native = table.new_batch_write_builder().new_write()
     native.write_arrow_batch(_batch([2], ['a']))
-    with pytest.raises(ValueError, match='before any write'):
+    with pytest.raises(RuntimeError, match='before any write'):
         native.with_blob_uri_reader_factory(None)
     with pytest.raises(ValueError, match='before any data is written'):
         native.with_write_type(['id'])
