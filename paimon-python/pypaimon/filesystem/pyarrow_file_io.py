@@ -557,6 +557,7 @@ class PyArrowFileIO(FileIO):
                     raise OSError(f"Directory {path} is not empty")
                 bucket, key = self._split_s3_path(path_str)
                 if key:
+                    self._ensure_s3_parent_exists(self._get_s3_delete_client(), bucket, key)
                     self._get_s3_delete_client().delete_object(
                         Bucket=bucket, Key=key.rstrip("/") + "/")
                 return True
@@ -581,17 +582,34 @@ class PyArrowFileIO(FileIO):
         if prefix:
             prefix += "/"
         deadline = time.monotonic() + _S3_DELETE_TIMEOUT_SECONDS
-        # Finish listing before deleting: mutating a paginated listing may skip keys.
+        root_schema = prefix + "schema/schema-0"
+        has_root_schema = False
+        # Finish listing before deleting; retain only the root schema-0.
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as listed:
             for name in self._list_s3_keys(client, bucket, prefix, deadline, path_str):
-                listed.write(json.dumps(name) + "\n")
+                if name == root_schema:
+                    has_root_schema = True
+                else:
+                    listed.write(json.dumps(name) + "\n")
             listed.seek(0)
             self._delete_s3_objects(
                 client, bucket, (json.loads(line) for line in listed),
                 deadline, path_str)
-        if any(self._list_s3_keys(client, bucket, prefix, deadline, path_str)):
-            raise OSError(f"S3 directory {path_str} changed during deletion")
+        for name in self._list_s3_keys(client, bucket, prefix, deadline, path_str):
+            if not has_root_schema or name != root_schema:
+                raise OSError(f"S3 directory {path_str} changed during deletion")
+        self._check_s3_delete_deadline(deadline, path_str)
+        self._ensure_s3_parent_exists(client, bucket, key)
+        if has_root_schema:
+            self._delete_s3_objects(client, bucket, [root_schema], deadline, path_str)
         return True
+
+    @staticmethod
+    def _ensure_s3_parent_exists(client, bucket: str, key: str):
+        parent, _, _ = key.rstrip("/").rpartition("/")
+        if parent:
+            client.put_object(Bucket=bucket, Key=parent + "/", Body=b"",
+                              ContentType="application/x-directory")
 
     def _list_s3_keys(self, client, bucket: str, prefix: str,
                       deadline: float, path_str: str):
@@ -670,7 +688,14 @@ class PyArrowFileIO(FileIO):
         if self._s3_delete_client is not None:
             return self._s3_delete_client
 
-        import boto3
+        try:
+            import boto3
+        except ModuleNotFoundError as error:
+            if error.name != "boto3":
+                raise
+            raise ImportError(
+                "S3/OSS batch deletion requires pypaimon[s3] or pypaimon[oss]."
+            ) from error
         from botocore.config import Config
 
         if self._is_oss:

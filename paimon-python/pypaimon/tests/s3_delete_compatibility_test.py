@@ -24,6 +24,7 @@ import base64
 import hashlib
 import os
 import socketserver
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -299,7 +300,9 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         ], [item["Key"] for item in
             client.delete_objects.call_args[1]["Delete"]["Objects"]])
         client.delete_object.assert_not_called()
-        client.put_object.assert_not_called()
+        client.put_object.assert_called_once_with(
+            Bucket="test-bucket", Key="db-uuid.db/", Body=b"",
+            ContentType="application/x-directory")
         file_io.filesystem.delete_file.assert_not_called()
         file_io.filesystem.delete_dir_contents.assert_not_called()
         file_io.filesystem.delete_dir.assert_not_called()
@@ -332,7 +335,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
         self.assertEqual("next", client.list_objects_v2.call_args_list[1][1][
             "ContinuationToken"])
 
-    def test_recursive_delete_treats_schema_as_regular_key(self):
+    def test_recursive_delete_retains_schema_zero_until_validation(self):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
         directory = file_io.to_filesystem_path(TABLE_PATH)
@@ -344,7 +347,7 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             prefix + "snapshot/snapshot-1",
             prefix + "schema/schema-1",
             prefix + "data/file.parquet",
-        ], [])
+        ], [prefix + "schema/schema-0"])
 
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
@@ -355,6 +358,10 @@ class OssDeleteCompatibilityTest(unittest.TestCase):
             prefix + "schema/schema-1",
             prefix + "data/file.parquet",
         ], calls)
+
+        self.assertEqual(
+            [{"Key": prefix + "schema/schema-0"}],
+            file_io._s3_delete_client.delete_objects.call_args[1]["Delete"]["Objects"])
 
     def test_recursive_delete_times_out_when_directory_keeps_changing(self):
         file_io = self._new_file_io(legacy=False)
@@ -572,6 +579,13 @@ class CustomS3EndpointTest(unittest.TestCase):
             restored.__setstate__(state)
         self.assertIsNone(restored._s3_delete_client)
 
+    def test_missing_boto3_reports_optional_extra(self):
+        file_io = self._new_file_io()
+        file_io._s3_delete_client = None
+        with mock.patch.dict(sys.modules, {"boto3": None}):
+            with self.assertRaisesRegex(ImportError, r"pypaimon\[s3\]"):
+                file_io._get_s3_delete_client()
+
     def test_jindo_and_native_s3_do_not_use_delete_fallback(self):
         file_io = self._new_file_io()
         file_io._pyarrow_gte_22 = True
@@ -709,7 +723,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                     for recursive in (False, True):
                         with self.subTest(path=path, recursive=recursive):
                             server.bucket_objects["target-bucket"] = {
-                                "parent/", "parent/child/"}
+                                "parent/child/"}
                             if recursive:
                                 server.bucket_objects["target-bucket"].add(
                                     "parent/child/delete.parquet")
@@ -737,7 +751,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                 ["/target-bucket"] * 4,
                 [urlsplit(path).path for method, path in server.requests
                  if method == "POST"])
-            self.assertEqual([], server.put_headers)
+            self.assertEqual(8, len(server.put_headers))
         finally:
             server.shutdown()
             server.server_close()
@@ -793,7 +807,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                           if method == "DELETE"]
             self.assertIn("/test-bucket/" + carriage_return, individual)
             self.assertIn("/test-bucket/" + control, individual)
-            self.assertEqual(1, sum(
+            self.assertEqual(2, sum(
                 method == "POST" for method, _ in server.requests))
         finally:
             server.shutdown()
@@ -810,7 +824,7 @@ class CustomS3EndpointTest(unittest.TestCase):
         server.requests = []
         server.prefix = "parent/table/"
         deleted = server.prefix + "data/deleted.parquet"
-        failed = server.prefix + "data/failed.parquet"
+        failed = server.prefix + "branch/branch-dev/schema/schema-0"
         schema_zero = server.prefix + "schema/schema-0"
         server.objects = {"parent/", server.prefix, deleted, failed, schema_zero}
         server.fail_delete_key_once = failed
@@ -842,13 +856,14 @@ class CustomS3EndpointTest(unittest.TestCase):
                     file_io.delete(
                         "s3://test-bucket/parent/table", recursive=True)
                 self.assertIn(failed, str(error.exception))
-                self.assertEqual({"parent/", failed}, server.objects)
+                self.assertEqual({"parent/", failed, "parent/table/schema/schema-0"},
+                                 server.objects)
                 self.assertTrue(file_io.delete(
                     "s3://test-bucket/parent/table", recursive=True))
                 file_io._s3_delete_client.close()
 
             self.assertEqual({"parent/"}, server.objects)
-            self.assertEqual(2, sum(
+            self.assertEqual(3, sum(
                 method == "POST" for method, _ in server.requests))
         finally:
             server.shutdown()
@@ -866,7 +881,8 @@ class CustomS3EndpointTest(unittest.TestCase):
         server.prefix = "ta/ble/"
         decoy = "ta/ble-other/keep.parquet"
         server.objects = {
-            "ta/", server.prefix, server.prefix + "first.parquet", decoy}
+            "ta/", server.prefix, server.prefix + "first.parquet",
+            server.prefix + "schema/schema-0", decoy}
         server.inject_late_after_delete = server.prefix + "first.parquet"
         server.late_object_added = False
         server.missing_object_removed = False
@@ -898,7 +914,8 @@ class CustomS3EndpointTest(unittest.TestCase):
                 file_io._s3_delete_client.close()
 
             self.assertTrue(server.missing_object_removed)
-            self.assertEqual({decoy, "ta/", server.prefix + "late.parquet"},
+            self.assertEqual({decoy, "ta/", server.prefix + "late.parquet",
+                              server.prefix + "schema/schema-0"},
                              server.objects)
             self.assertEqual(
                 {"GET", "POST"},
