@@ -380,7 +380,7 @@ and refinement; its internal shard protocol is separate from the public source
 plan.
 
 Hybrid builders expose `execute(executor=...)` for the same scheduler.
-The existing `execute_local()` methods retain their local defaults.
+PyPaimon's existing `execute_local()` methods retain their local defaults.
 
 ## Search Hybrid
 

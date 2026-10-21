@@ -97,7 +97,7 @@ def test_core_search_result_passes_directly_to_scan_and_scored_splits_round_trip
     from pypaimon_rust.datafusion import GlobalIndexResult, Split
     table, _ = source
     native = text._native_table(table)
-    result = text._native(table).execute_local()
+    result = text._native(table).execute()
     assert isinstance(result, GlobalIndexResult)
     scan = native.new_read_builder().with_projection(['id']).new_scan().with_global_index_result(result)
     for plan in [scan.plan(), scan.plan()]:
@@ -279,18 +279,18 @@ def test_all_core_searches_return_one_result_for_read_and_scan(rest_catalog, fam
     native = text._native_table(table)
     if family == 'vector':
         results = [(native.new_vector_search_builder().with_vector_column('embedding')
-                    .with_query_vector([0., 0.]).with_limit(3).execute_local())]
+                    .with_query_vector([0., 0.]).with_limit(3).execute())]
     elif family == 'batch-vector':
         results = (native.new_batch_vector_search_builder().with_vector_column('embedding')
-                   .with_query_vectors([[0., 0.], [7., 0.]]).with_limit(3).execute_batch_local())
+                   .with_query_vectors([[0., 0.], [7., 0.]]).with_limit(3).execute())
         assert len(results) == 2
     elif family == 'full-text':
-        results = [text._native(table, 'paimon', 3).execute_local()]
+        results = [text._native(table, 'paimon', 3).execute()]
     else:
         results = [(native.new_hybrid_search_builder().with_limit(3)
                     .add_vector_route('embedding', [0., 0.], 3, 1., {})
                     .add_full_text_route('content', hybrid.match_query('paimon'), 3, 1., {})
-                    .execute_local())]
+                    .execute())]
     for result in results:
         assert isinstance(result, GlobalIndexResult)
         assert result.snapshot_id() == table.snapshot_manager().get_latest_snapshot().id

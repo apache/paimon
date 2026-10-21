@@ -164,7 +164,9 @@ Readers own the table, schema, query and filter. Native selection is retained
 after transport, and source subsets never add missing indexes or raw ranges.
 An absent snapshot describes an empty capture and never selects latest. Shard
 callbacks use an internal binding bridge; they are not part of Rust's public
-Plan/Read API.
+Plan/Read API. SDK vector, batch-vector, full-text and hybrid builders share
+one `execute()` entry point. PyPaimon's existing public search methods delegate
+to it through the Native adapters.
 
 ## Corresponding execution APIs
 

@@ -239,9 +239,9 @@ def test_core_binding_rejects_invalid_configuration_before_empty_search(rest_cat
     table = indexes._create(catalog, schema=SCHEMA, partitioned=True, options={'read.native.enabled': 'true'})
     native = _native_table(table)
     with pytest.raises(Exception, match='Routes cannot be empty'):
-        native.new_hybrid_search_builder().with_limit(2).execute_local()
+        native.new_hybrid_search_builder().with_limit(2).execute()
     with pytest.raises(Exception, match='Limit must be positive'):
-        native.new_hybrid_search_builder().add_vector_route('embedding', [0., 0.], 2).execute_local()
+        native.new_hybrid_search_builder().add_vector_route('embedding', [0., 0.], 2).execute()
     with pytest.raises(Exception, match='Unsupported hybrid ranker'):
         native.new_hybrid_search_builder().with_ranker('unknown')
     with pytest.raises(Exception, match='Limit must be positive'):

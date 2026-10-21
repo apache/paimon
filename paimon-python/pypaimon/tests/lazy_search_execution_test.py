@@ -616,3 +616,56 @@ def test_selected_native_reader_does_not_probe_or_replay_an_older_sdk(search_tab
     assert reader._python_executor is None
     core_read.read_plan.assert_not_called()
     core_read.read_batch_plan.assert_not_called()
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'text', 'hybrid'])
+@pytest.mark.parametrize('failure', [False, True])
+def test_native_search_adapters_use_only_sdk_execute(search_table, family, failure):
+    from pypaimon.execution.native.read import native_full_text_search, native_hybrid_search, native_vector_search
+
+    expected = SimpleNamespace(row_ids=lambda: {7: 0.75})
+    error = OSError('Native execution started')
+
+    class ExecuteOnlyBuilder:
+        def __init__(self):
+            self.execute = Mock(side_effect=error if failure else None,
+                                return_value=[expected, expected] if family == 'batch' else expected)
+            for method in ('with_query_vector', 'with_query_vectors', 'with_limit', 'with_ranker',
+                           'add_vector_route', 'add_full_text_route'):
+                setattr(self, method, Mock(return_value=self))
+
+        def __getattr__(self, name):
+            if name in ('execute_local', 'execute_batch_local'):
+                raise AssertionError('Native adapter probed a removed SDK method: ' + name)
+            raise AttributeError(name)
+
+    core = ExecuteOnlyBuilder()
+    with ExitStack() as stack:
+        if family in ('vector', 'batch'):
+            stack.enter_context(patch.object(native_vector_search, '_native_vector_builder', return_value=core))
+            builder = _builder(search_table, family)
+            queries = builder._query_vectors if family == 'batch' else builder._query_vector
+            operation = lambda: native_vector_search.try_native_vector_search(builder, queries, family == 'batch')
+        elif family == 'text':
+            stack.enter_context(patch.object(native_full_text_search, '_native_full_text_builder', return_value=core))
+            operation = lambda: native_full_text_search.try_native_full_text_search(_builder(search_table, 'text'))
+        else:
+            stack.enter_context(patch.object(native_hybrid_search, 'native_runtime_available', return_value=True))
+            stack.enter_context(patch.object(native_hybrid_search, '_rest_catalog_supported', return_value=True))
+            stack.enter_context(patch.object(native_hybrid_search, '_native_table', return_value=SimpleNamespace(
+                new_hybrid_search_builder=Mock(return_value=core))))
+            builder = search_table.new_hybrid_search_builder().with_limit(2)
+            builder.add_vector_route('embedding', [1.0, 0.0], 2)
+            builder.add_full_text_route('body', '{"match":{"query":"needle"}}', 2)
+            operation = lambda: native_hybrid_search.try_native_hybrid_search(builder)
+        if failure:
+            with pytest.raises(OSError) as caught:
+                operation()
+            assert caught.value is error
+        else:
+            results = operation()
+            if family != 'batch':
+                results = [results]
+            assert [{row: result.score_getter()(row) for row in result.results()} for result in results] == (
+                [{7: 0.75}] * (2 if family == 'batch' else 1))
+    core.execute.assert_called_once_with()

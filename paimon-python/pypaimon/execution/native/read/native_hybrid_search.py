@@ -66,7 +66,7 @@ def try_native_hybrid_search(builder, executor=None):
         return None
     # Propagate execution failures: retrying Python can select a newer snapshot.
     if executor is None:
-        result = native.execute_local()
+        result = native.execute()
     else:
         from pypaimon.execution.native.read.search_execution import native_task_executor
         callback = native_task_executor(table, executor)
