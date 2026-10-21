@@ -32,6 +32,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.LongIterator;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -42,7 +43,9 @@ import dev.vortex.api.Partition;
 import dev.vortex.api.Scan;
 import dev.vortex.api.ScanOptions;
 import dev.vortex.arrow.ArrowAllocation;
+import dev.vortex.arrow.ArrowBatch;
 import dev.vortex.arrow.ArrowBatchStream;
+import dev.vortex.arrow.ViewColumn;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.UInt8Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -51,12 +54,17 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * File reader for Vortex format.
@@ -81,9 +89,15 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
     private final ArrowBatchReader arrowBatchReader;
     @Nullable private final int[] physicalFieldMapping;
     private final boolean readsRowIndex;
-    private final Set<VectorSchemaRoot> activeBatches = new HashSet<>();
+    private final Set<ArrowBatch> activeBatches = new HashSet<>();
 
+    /** Fetches the next batch while the consumer processes the current one. */
+    private static final ExecutorService PREFETCH_POOL =
+            Executors.newCachedThreadPool(new ExecutorThreadFactory("vortex-batch-prefetch"));
+
+    // Only one thread at a time calls fetchNext: the caller, or the prefetch it waits for.
     @Nullable private ArrowBatchStream currentStream;
+    @Nullable private Future<ArrowBatch> prefetched;
     private long nextPosition;
     private boolean closed;
 
@@ -128,23 +142,53 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
         this.readable = openedReadable;
         this.dataSource = openedDataSource;
+
+        // Start decoding the first batch now. A merge opens all files of a split before reading
+        // any of them, so their first batches then decode in parallel.
+        this.prefetched = PREFETCH_POOL.submit(this::fetchNext);
     }
 
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
         while (true) {
-            VectorSchemaRoot root = currentStream == null ? null : currentStream.next();
-            if (root != null) {
-                track(root);
-                if (root.getRowCount() > 0) {
-                    return toBatchIterator(root);
-                }
-                releaseBatch(root);
-                continue;
+            ArrowBatch batch = takeNext();
+            if (batch == null) {
+                return null;
             }
 
-            closeCurrentStream();
+            track(batch);
+            if (batch.rowCount() > 0) {
+                prefetched = PREFETCH_POOL.submit(this::fetchNext);
+                return toBatchIterator(batch);
+            }
+            releaseBatch(batch);
+        }
+    }
+
+    @Nullable
+    private ArrowBatch takeNext() throws IOException {
+        if (prefetched == null) {
+            return fetchNext();
+        }
+
+        Future<ArrowBatch> future = prefetched;
+        prefetched = null;
+        return await(future);
+    }
+
+    /** Reads the next batch, moving on to the next partition when one is exhausted. */
+    @Nullable
+    private ArrowBatch fetchNext() throws IOException {
+        while (true) {
+            if (currentStream != null) {
+                ArrowBatch batch = currentStream.next();
+                if (batch != null) {
+                    return batch;
+                }
+                closeCurrentStream();
+            }
+
             if (!scan.hasNext()) {
                 return null;
             }
@@ -152,6 +196,31 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             try (Partition partition = scan.next()) {
                 currentStream = partition.scanArrow(allocator);
             }
+        }
+    }
+
+    @Nullable
+    private static ArrowBatch await(Future<ArrowBatch> future) throws IOException {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            InterruptedIOException interrupted =
+                    new InterruptedIOException("Interrupted while reading a Vortex batch");
+            interrupted.initCause(e);
+            throw interrupted;
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            }
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new IOException(cause);
         }
     }
 
@@ -163,19 +232,36 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         closed = true;
 
         Throwable failure = null;
+        if (prefetched != null) {
+            // Wait for the prefetch, which may still use the stream, before closing anything.
+            Future<ArrowBatch> future = prefetched;
+            prefetched = null;
+            try {
+                ArrowBatch batch = await(future);
+                if (batch != null) {
+                    batch.close();
+                }
+            } catch (Throwable t) {
+                failure = t;
+            }
+        }
         try {
             closeCurrentStream();
         } catch (Throwable t) {
-            failure = t;
+            if (failure == null) {
+                failure = t;
+            } else {
+                failure.addSuppressed(t);
+            }
         }
 
-        List<VectorSchemaRoot> unreleased;
+        List<ArrowBatch> unreleased;
         synchronized (activeBatches) {
             unreleased = new ArrayList<>(activeBatches);
             activeBatches.clear();
         }
-        for (VectorSchemaRoot root : unreleased) {
-            failure = closeQuietly(root, failure);
+        for (ArrowBatch batch : unreleased) {
+            failure = closeQuietly(batch, failure);
         }
 
         failure = closeQuietly(scan, failure);
@@ -240,26 +326,34 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         }
     }
 
-    private void track(VectorSchemaRoot root) {
+    private void track(ArrowBatch batch) {
         synchronized (activeBatches) {
-            activeBatches.add(root);
+            activeBatches.add(batch);
         }
     }
 
-    private void releaseBatch(VectorSchemaRoot root) {
+    private void releaseBatch(ArrowBatch batch) {
         boolean owned;
         synchronized (activeBatches) {
-            owned = activeBatches.remove(root);
+            owned = activeBatches.remove(batch);
         }
         if (owned) {
-            root.close();
+            batch.close();
         }
     }
 
-    private FileRecordIterator<InternalRow> toBatchIterator(VectorSchemaRoot root) {
+    private FileRecordIterator<InternalRow> toBatchIterator(ArrowBatch arrowBatch) {
+        VectorSchemaRoot root = arrowBatch.root();
         VectorizedColumnBatch physicalBatch = arrowBatchReader.readVectorizedBatch(root);
+        // The root follows the projection, so its column i is physical column i.
+        for (int i = 0; i < physicalBatch.columns.length; i++) {
+            ViewColumn viewColumn = arrowBatch.viewColumn(i);
+            if (viewColumn != null) {
+                physicalBatch.columns[i] = new ViewBytesColumnVector(viewColumn);
+            }
+        }
         VectorizedColumnBatch batch = projectedBatch(physicalBatch);
-        int rowCount = root.getRowCount();
+        int rowCount = arrowBatch.rowCount();
 
         LongIterator positions;
         if (readsRowIndex) {
@@ -271,7 +365,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
         VectorizedRowIterator iterator =
                 new VectorizedRowIterator(
-                        filePath, new ColumnarRow(batch), () -> releaseBatch(root));
+                        filePath, new ColumnarRow(batch), () -> releaseBatch(arrowBatch));
         iterator.reset(positions);
         return iterator;
     }

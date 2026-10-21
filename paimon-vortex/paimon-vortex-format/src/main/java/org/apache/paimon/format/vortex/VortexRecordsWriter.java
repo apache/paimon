@@ -31,6 +31,8 @@ import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
 import org.apache.arrow.c.Data;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.BaseVariableWidthVector;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowStreamReader;
 import org.slf4j.Logger;
@@ -197,8 +199,27 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         writeRoot(root, arrowWriter.getAllocator());
 
         // The exported array keeps the buffers alive for the native writer. Clear the vectors so
-        // that the next batch allocates new buffers instead of resetting the exported ones.
+        // that the next batch allocates new buffers instead of resetting the exported ones, and
+        // size the new buffers like this batch, so they do not grow value by value.
+        int rowCount = root.getRowCount();
+        double[] densities = new double[root.getFieldVectors().size()];
+        for (int i = 0; i < densities.length; i++) {
+            FieldVector vector = root.getVector(i);
+            if (vector instanceof BaseVariableWidthVector && rowCount > 0) {
+                long bytes = ((BaseVariableWidthVector) vector).getStartOffset(rowCount);
+                densities[i] = Math.max(1.0, (double) bytes / rowCount);
+            }
+        }
         root.clear();
+        for (int i = 0; i < densities.length; i++) {
+            FieldVector vector = root.getVector(i);
+            if (densities[i] > 0) {
+                ((BaseVariableWidthVector) vector).setInitialCapacity(rowCount, densities[i]);
+            } else {
+                vector.setInitialCapacity(rowCount);
+            }
+            vector.allocateNew();
+        }
         arrowWriter.reset();
     }
 
