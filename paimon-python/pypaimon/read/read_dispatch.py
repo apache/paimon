@@ -206,7 +206,9 @@ def plan_files(scanner):
             return entries
     if scan._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(scan.table.identifier)
-    source = python_file_scanner(scan)
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    # Let the selected executor refresh cached rules for this unrestricted scope.
+    source = PythonTableScan(scan)._scanner(None)
     entries = source.plan_files()
     scanner._scanned_snapshot = source._scanned_snapshot
     scanner._scanned_snapshot_id = source._scanned_snapshot_id

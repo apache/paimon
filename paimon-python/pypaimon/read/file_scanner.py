@@ -76,8 +76,11 @@ class FileScanner:
         if initialized and name in self._CONFIGURATION_FIELDS:
             if name == 'predicate':
                 object.__setattr__(self, '_user_predicate', value)
-                object.__setattr__(self, 'partition_key_predicate', scan_partition_predicate(
-                    self.table, value, self._partition_predicate))
+                if not self._explicit_partition_filter:
+                    object.__setattr__(self, 'partition_key_predicate', scan_partition_predicate(
+                        self.table, value, self._partition_predicate))
+            if name == 'partition_key_predicate':
+                object.__setattr__(self, '_explicit_partition_filter', True)
             if name in ('skip_level0', 'only_read_real_buckets'):
                 self._policy_overrides.add(name)
             self._invalidate_python_scanner()

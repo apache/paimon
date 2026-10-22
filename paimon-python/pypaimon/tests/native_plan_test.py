@@ -86,6 +86,7 @@ def _scan(native_enabled, file_scanner):
     file_scanner.is_streaming = False
     file_scanner.skip_level0 = False
     file_scanner.only_read_real_buckets = False    # not postpone bucket
+    file_scanner._explicit_partition_filter = False
     scan.file_scanner = file_scanner
     scan.predicate = None
     scan.partition_predicate = None

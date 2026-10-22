@@ -103,7 +103,8 @@ class TableScan:
                         if row_ranges is not None else None),
             read_predicate=scanner._user_predicate if neutral else self.predicate,
             read_limit=scanner.limit if neutral else self.limit,
-            partition_filter=self.partition_predicate,
+            partition_filter=(scanner.partition_key_predicate
+                              if neutral and scanner._explicit_partition_filter else self.partition_predicate),
             read_type=tuple(self._read_type) if self._read_type is not None else None,
             file_filters=((scanner.skip_level0, scanner.only_read_real_buckets)
                           if neutral and scanner._policy_overrides else None),
