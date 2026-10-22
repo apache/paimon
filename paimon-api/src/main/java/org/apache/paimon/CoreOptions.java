@@ -3171,8 +3171,7 @@ public class CoreOptions implements Serializable {
                             "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
                                     + "Each column owns one index and must define "
                                     + "fields.<column>.pk-vector.index.type. Index options and distance "
-                                    + "metric are also field-scoped. The first release supports exactly "
-                                    + "one column.");
+                                    + "metric are also field-scoped.");
 
     public static final ConfigOption<String> PK_BTREE_INDEX_COLUMNS =
             key("pk-btree.index.columns")
@@ -5120,15 +5119,6 @@ public class CoreOptions implements Serializable {
             resolved.setString(qualifiedKey, value);
         }
         return resolved;
-    }
-
-    public String primaryKeyVectorIndexColumn() {
-        List<String> columns = primaryKeyVectorIndexColumns();
-        checkArgument(
-                columns.size() == 1,
-                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
-                columns);
-        return columns.get(0);
     }
 
     @Nullable

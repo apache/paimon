@@ -41,11 +41,25 @@ class PrimaryKeyVectorIndexOptionsTest {
     }
 
     @Test
-    void testResolvesSingleIndexColumn() {
+    void testResolvesIndependentOptionsForSameAlgorithm() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), " embedding , other_embedding ");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-flat");
+        options.put("fields.other_embedding.pk-vector.index.type", "ivf-flat");
+        options.put("fields.embedding.pk-vector.distance.metric", "cosine");
+        options.put("fields.other_embedding.pk-vector.distance.metric", "l2");
+        options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":64}");
+        options.put("fields.other_embedding.pk-vector.index.options", "{\"nlist\":128}");
+        CoreOptions coreOptions = new CoreOptions(options);
 
-        assertThat(new CoreOptions(options).primaryKeyVectorIndexColumn()).isEqualTo("embedding");
+        assertThat(coreOptions.primaryKeyVectorIndexColumns())
+                .containsExactly("embedding", "other_embedding");
+        Options first = coreOptions.primaryKeyVectorIndexOptions("embedding");
+        Options second = coreOptions.primaryKeyVectorIndexOptions("other_embedding");
+        assertThat(first.get("ivf-flat.nlist")).isEqualTo("64");
+        assertThat(first.get("ivf-flat.metric")).isEqualTo("cosine");
+        assertThat(second.get("ivf-flat.nlist")).isEqualTo("128");
+        assertThat(second.get("ivf-flat.metric")).isEqualTo("l2");
     }
 
     @Test

@@ -21,7 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.read.{SparkPrimaryKeyVectorRead, SparkVectorSearchBuilderImpl}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.{BucketVectorSearchSplit, DataSplit, PrimaryKeyVectorResult}
 
 import scala.collection.JavaConverters._
 
@@ -101,6 +101,74 @@ class PrimaryKeyVectorSearchTest extends PaimonSparkTestBase {
           .collect()
         assert(scores.length == 2)
         assert(scores.forall(!_.isNullAt(0)))
+      }
+    }
+  }
+
+  test("distributed primary-key vector search isolates multiple indexed columns") {
+    withTable("T") {
+      val indexType = TestVectorGlobalIndexerFactory.IDENTIFIER
+      spark.sql(s"""
+                   |CREATE TABLE T (
+                   |  id INT, image_embedding ARRAY<FLOAT>, text_embedding ARRAY<FLOAT>
+                   |) TBLPROPERTIES (
+                   |  'primary-key' = 'id', 'bucket' = '2',
+                   |  'deletion-vectors.enabled' = 'true',
+                   |  'vector-field' = 'image_embedding,text_embedding',
+                   |  'field.image_embedding.vector-dim' = '2',
+                   |  'field.text_embedding.vector-dim' = '2',
+                   |  'pk-vector.index.columns' = 'image_embedding,text_embedding',
+                   |  'fields.image_embedding.pk-vector.index.type' = '$indexType',
+                   |  'fields.text_embedding.pk-vector.index.type' = '$indexType',
+                   |  'fields.image_embedding.pk-vector.distance.metric' = 'l2',
+                   |  'fields.text_embedding.pk-vector.distance.metric' = 'l2',
+                   |  'global-index.search-mode' = 'fast',
+                   |  'global-index.thread-num' = '1',
+                   |  'test.vector.dimension' = '2', 'test.vector.metric' = 'l2'
+                   |)
+                   |""".stripMargin)
+      val values = (1 to 16)
+        .map(id => s"($id, array($id.0f, 0.0f), array(${17 - id}.0f, 0.0f))")
+        .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      Seq("image_embedding" -> Set(1, 2), "text_embedding" -> Set(15, 16)).foreach {
+        case (column, expectedIds) =>
+          val table = loadTable("T")
+          val builder = new SparkVectorSearchBuilderImpl(table)
+          builder.withVectorColumn(column).withVector(Array(0.0f, 0.0f)).withLimit(2)
+          val plan = builder.newVectorScan().scan()
+          val splits = plan.splits().asScala.map(_.asInstanceOf[BucketVectorSearchSplit])
+          assert(splits.map(_.dataSplit().bucket()).toSet == Set(0, 1))
+          assert(splits.forall(!_.payloadFiles().isEmpty))
+          val fieldId = table.rowType().getField(column).id()
+          assert(
+            splits
+              .flatMap(_.payloadFiles().asScala)
+              .forall(_.globalIndexMeta().indexFieldId() == fieldId))
+
+          val jobGroup = s"primary-key-multiple-vectors-$column-${System.nanoTime()}"
+          spark.sparkContext.setJobGroup(jobGroup, jobGroup)
+          try {
+            val result = builder.newVectorRead().read(plan).asInstanceOf[PrimaryKeyVectorResult]
+            assert(result.positions().size() == 2)
+          } finally {
+            spark.sparkContext.clearJobGroup()
+          }
+          assert(spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).nonEmpty)
+
+          withSparkSQLConf("spark.paimon.vector-search.distribute.enabled" -> "true") {
+            val ids = spark
+              .sql(s"""
+                      |SELECT id
+                      |FROM vector_search('T', '$column', array(0.0f, 0.0f), 2)
+                      |""".stripMargin)
+              .collect()
+              .map(_.getInt(0))
+              .toSet
+            assert(ids == expectedIds)
+          }
       }
     }
   }
