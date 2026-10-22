@@ -21,7 +21,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
+from pypaimon.common.options.core_options import (
+    CoreOptions,
+    GlobalIndexColumnUpdateAction,
+    GlobalIndexSearchMode,
+)
 from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import AtomicType
@@ -341,9 +345,15 @@ class PythonTableUpsert:
             input_key_set:   Set of composite key tuples from the input data.
         """
         context = self._context
-        scan_table = context.table.copy_without_time_travel({
+        scan_options = {
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
-        })
+        }
+        # IGNORE can retain old indexed key values after a row update. FULL
+        # only covers unindexed ranges; it cannot recover these stale matches.
+        if (context.table.options.global_index_column_update_action()
+                == GlobalIndexColumnUpdateAction.IGNORE):
+            scan_options[CoreOptions.GLOBAL_INDEX_ENABLED.key()] = 'false'
+        scan_table = context.table.copy_without_time_travel(scan_options)
         read_builder = scan_table.new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []

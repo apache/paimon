@@ -221,3 +221,33 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                     {(0.0,): [0, 1]}, [0, 1, 2]))
                 self.assertEqual(self._counted_lookup(table, ['id', 'value'], {(1, 0.0)}), (
                     {(1, 0.0): [0]}, [0]))
+
+    def test_ignore_index_updates_still_match_changed_keys(self):
+        for row_api in (False, True):
+            with self.subTest(row_api=row_api):
+                table = self._create_table(options={
+                    **self.table_options, 'global-index.column-update-action': 'IGNORE',
+                })
+                self._write_arrow(table, pa.table({
+                    'id': [1, 1, 2], 'payload': ['old', 'duplicate', 'keep'],
+                }, schema=self.pa_schema))
+                self.assertGreater(table.create_global_index('id', index_type='btree'), 0)
+                builder = table.new_batch_write_builder()
+                messages = builder.new_update().with_update_type(['id']).update_by_arrow_with_row_id(
+                    pa.table({'_ROW_ID': pa.array([0, 1], type=pa.int64()),
+                              'id': pa.array([3, 3], type=pa.int32())}))
+                commit = builder.new_commit()
+                try:
+                    commit.commit(messages)
+                finally:
+                    commit.close()
+                # IGNORE deliberately retains the old key values in the index.
+                # They cannot prove that the new key is absent from the table.
+                self.assertEqual(self._lookup(table, ['id'], {(3,)}), {(3,): [0, 1]})
+                self._upsert(table, pa.table({
+                    'id': [3], 'payload': ['new'],
+                }, schema=self.pa_schema), row_api)
+                rows = self._read_all(table).to_pylist()
+                self.assertEqual(sorted((r['id'], r['payload']) for r in rows), [
+                    (2, 'keep'), (3, 'new'), (3, 'new'),
+                ])
