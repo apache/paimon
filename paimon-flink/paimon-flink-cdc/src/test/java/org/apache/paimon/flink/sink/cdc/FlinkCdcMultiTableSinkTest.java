@@ -20,17 +20,24 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -121,6 +128,65 @@ public class FlinkCdcMultiTableSinkTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Explicit parallelism")
                 .hasMessageContaining("database name");
+    }
+
+    @Test
+    public void testDatabaseBuilderPropagatesWriterManagedMemory(
+            @TempDir java.nio.file.Path tempDir) {
+        Options catalogOptions = new Options();
+        catalogOptions.setString("warehouse", tempDir.toString());
+        Options options = new Options();
+        options.setString("sink.writer-memory", "512 mb");
+        options.setString("sink.writer-managed-memory", "128 mb");
+        options.setString("sink.committer-memory", "64 mb");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        new FlinkCdcSyncDatabaseSinkBuilder<TestCdcEvent>()
+                .withInput(
+                        env.fromData(
+                                TestCdcEvent.class,
+                                new TestCdcEvent("t", Collections.emptyList(), 0)))
+                .withParserFactory(TestCdcEventParser::new)
+                .withTableOptions(options)
+                .withDatabase("test_db")
+                .withCatalogLoader(() -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions))
+                .withTypeMapping(TypeMapping.defaultMapping())
+                .withMode(MultiTablesSinkMode.COMBINED)
+                .build();
+        StreamGraph graph = env.getStreamGraph();
+        ResourceProfile writerResources =
+                graph.getSlotSharingGroupResource("CDC MultiplexWriter").get();
+        assertThat(writerResources.getManagedMemory().getMebiBytes()).isEqualTo(128);
+        assertThat(writerResources.getTaskHeapMemory().getMebiBytes()).isEqualTo(512);
+        ResourceProfile committerResources =
+                graph.getSlotSharingGroupResource("Multiplex Global Committer").get();
+        assertThat(committerResources.getManagedMemory().getBytes()).isZero();
+        assertThat(committerResources.getTaskHeapMemory().getMebiBytes()).isEqualTo(64);
+    }
+
+    @Test
+    public void testManagedMemoryWithoutHeapIsRejected() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        FlinkCdcMultiTableSink sink =
+                new FlinkCdcMultiTableSink(
+                        () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
+                        "test_db",
+                        1.0,
+                        null,
+                        MemorySize.ofMebiBytes(128),
+                        1.0,
+                        null,
+                        "test-user",
+                        false,
+                        null);
+        assertThatThrownBy(
+                        () ->
+                                sink.sinkFrom(
+                                        env.fromData(
+                                                CdcMultiplexRecord.class,
+                                                new CdcMultiplexRecord("", "", null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sink.writer-managed-memory")
+                .hasMessageContaining("sink.writer-memory");
     }
 
     @Test
