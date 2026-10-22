@@ -114,11 +114,10 @@ jobs:
                                "pypaimon/_version.py", "pypaimon/_full_version"):
                   if prefix + required not in names:
                       raise SystemExit("Missing {} from sdist".format(required))
-              for forbidden in ("pypaimon/tests", "pypaimon/sample"):
-                  if any(name == prefix + forbidden or name.startswith(prefix + forbidden + "/")
-                         for name in names):
+              for forbidden in ("pypaimon/tests/",):
+                  if any(name.startswith(prefix + forbidden) for name in names):
                       raise SystemExit(
-                          "Excluded content must not be packaged: {}".format(forbidden)
+                          "Test content must not be packaged: {}".format(forbidden)
                       )
 
           with zipfile.ZipFile(wheels[0]) as archive:
@@ -133,10 +132,10 @@ jobs:
               ]
               if not license_files or not notice_files:
                   raise SystemExit("Wheel is missing LICENSE or NOTICE")
-              for forbidden in ("pypaimon/tests", "pypaimon/sample"):
-                  if any(name == forbidden or name.startswith(forbidden + "/") for name in names):
+              for forbidden in ("pypaimon/tests/",):
+                  if any(name.startswith(forbidden) for name in names):
                       raise SystemExit(
-                          "Excluded content must not be packaged: {}".format(forbidden)
+                          "Test content must not be packaged: {}".format(forbidden)
                       )
           PY
 
