@@ -183,8 +183,8 @@ class NativeTableScan:
             if request.partition_filter is not None:
                 builder = builder.with_partition_filter(native_builder._predicate_to_native(
                     request.partition_key_predicate))
-            plan = builder.new_scan().plan_files(
-                skip_level0=skip_level0, only_read_real_buckets=only_read_real_buckets)
+            plan = builder.new_scan().with_file_filters(
+                skip_level0, only_read_real_buckets).plan_files()
             from pypaimon.execution.native.read.file_scan import from_native_file_plan
             return from_native_file_plan(self._scan.table, plan)
         except Exception as error:

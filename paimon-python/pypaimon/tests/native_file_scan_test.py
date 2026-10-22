@@ -90,18 +90,21 @@ def test_public_file_scanner_does_not_initialize_python(table, method, native_pl
         files.assert_not_called()
 
 
-def test_native_raw_file_planning_ignores_query_result_transforms(table):
+@pytest.mark.parametrize('skip_level0,only_real', [(False, False), (False, True), (True, False), (True, True)])
+def test_native_raw_file_planning_ignores_query_result_transforms(table, skip_level0, only_real):
     scan = table.new_read_builder().with_projection(['id']).with_limit(1).new_scan()
     scan.with_shard(0, 3)
     scan.file_scanner.with_all_buckets()
     native = Mock()
     raw = native.new_scan.return_value
+    raw.with_file_filters.return_value = raw
     plan = raw.plan_files.return_value
     plan.files.return_value = []
     plan.snapshot_id.return_value = 9
     with patch('pypaimon.execution.native.read.builder._native_read_builder', return_value=native):
-        assert NativeTableScan(scan).plan_files(True, False) == ([], 9)
-    raw.plan_files.assert_called_once_with(skip_level0=True, only_read_real_buckets=False)
+        assert NativeTableScan(scan).plan_files(skip_level0, only_real) == ([], 9)
+    raw.with_file_filters.assert_called_once_with(skip_level0, only_real)
+    raw.plan_files.assert_called_once_with()
     native.with_projection.assert_not_called()
     native.with_limit.assert_not_called()
     raw.with_shard.assert_not_called()
