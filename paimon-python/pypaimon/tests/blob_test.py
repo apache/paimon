@@ -34,6 +34,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
@@ -2998,19 +2999,19 @@ class BlobTest(unittest.TestCase):
         reader = SimpleNamespace(blob_view_lookup=lookup)
         row = OffsetRow((view_bytes, view_bytes), 0, 2)
 
-        converted = table_read._serialize_blob_view_row_tuple(row, reader)
+        converted = PythonTableRead(table_read)._serialize_blob_view_row_tuple(row, reader)
 
         self.assertEqual(converted[0], view_bytes)
         self.assertEqual(converted[1], descriptor.serialize())
 
         table_read._blob_view_output_indices = ()
-        skipped = table_read._serialize_blob_view_row_tuple(
+        skipped = PythonTableRead(table_read)._serialize_blob_view_row_tuple(
             row, SimpleNamespace())
         self.assertEqual(skipped, (view_bytes, view_bytes))
 
         table_read._blob_view_output_indices = (1,)
         table_read._blob_as_descriptor = False
-        not_descriptor = table_read._serialize_blob_view_row_tuple(row, reader)
+        not_descriptor = PythonTableRead(table_read)._serialize_blob_view_row_tuple(row, reader)
         self.assertEqual(not_descriptor, (view_bytes, view_bytes))
 
     def test_offset_row_get_blob_v1_resolved_blob_view_field(self):

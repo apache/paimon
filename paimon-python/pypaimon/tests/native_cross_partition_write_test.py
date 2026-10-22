@@ -55,7 +55,10 @@ def _rows(table, native):
     splits = builder.new_scan().plan_all_files().splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()
@@ -224,7 +227,10 @@ def test_cross_partition_internal_row_kinds_and_migration_deletes(tmp_path):
         read = builder.new_read()
         read.include_row_kind = True
         if native:
-            with patch.object(read, '_create_split_read', side_effect=AssertionError('fallback')):
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('fallback')
+            ):
                 rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()
         else:
             rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()

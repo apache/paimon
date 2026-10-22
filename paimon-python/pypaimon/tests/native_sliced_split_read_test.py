@@ -119,8 +119,10 @@ def _read(table, splits, native, projection, limit=2, predicate=None):
     read = builder.with_filter(predicate).new_read()
     with ExitStack() as guard:
         if native:
-            guard.enter_context(patch.object(
-                read, '_create_split_read', side_effect=AssertionError('Python sliced-reader fallback')))
+            guard.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python sliced-reader fallback')
+            ))
         return read.to_arrow(splits, parallelism=1)
 
 

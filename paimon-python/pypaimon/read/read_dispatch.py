@@ -218,7 +218,7 @@ def new_streaming_scan(self):
 
     projection = self._projection_builder()
     projection._validate_map_key_filter()
-    if self.table.options.native_plan_enabled():
+    if native_plan_requested(self):
         from pypaimon.execution.native.table import _native_query_auth_supported
         native_supported = _native_query_auth_supported(self.table)
     else:

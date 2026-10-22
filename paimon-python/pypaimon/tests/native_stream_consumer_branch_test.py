@@ -83,8 +83,10 @@ def _read_and_acknowledge(table, native):
             reader = builder.new_read()
             with ExitStack() as guards:
                 if native:
-                    guards.enter_context(patch.object(reader, '_create_split_read',
-                                                      side_effect=AssertionError('Python read fallback')))
+                    guards.enter_context(patch(
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                        side_effect=AssertionError('Python read fallback')
+                    ))
                 rows = reader.to_arrow(plan.splits()).to_pylist()
             # Resuming acknowledges the preceding plan before polling for data.
             with pytest.raises(asyncio.TimeoutError):

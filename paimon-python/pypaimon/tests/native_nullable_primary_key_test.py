@@ -91,7 +91,10 @@ def _read(table, native, null_field=None, all_files=False):
         if native:
             if not all_files:
                 stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-            stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read')
+            ))
         splits = (scan.plan_all_files() if all_files else scan.plan()).splits()
         rows = read.to_arrow(splits).to_pylist()
     # All values in these fixtures are non-negative except the seeded MERGE target.
@@ -204,7 +207,10 @@ def test_nullable_scalar_key_distinguishes_null_from_default_value(rest_catalog,
         with ExitStack() as stack:
             if native:
                 stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-                stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read')
+                ))
             rows = read.to_arrow(scan.plan().splits()).to_pylist()
         assert sorted(rows, key=lambda row: row['id'] is not None) == [
             {'id': None, 'value': 30}, {'id': zero, 'value': 200}]

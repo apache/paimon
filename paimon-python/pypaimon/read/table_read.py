@@ -30,7 +30,7 @@ from pypaimon.read.read_type import OutputProjection, output_schema, reader_adap
 from pypaimon.read.blob_read_support import deferred_blob_field_names
 from pypaimon.schema.data_types import DataField
 
-from pypaimon.read.constants import ROW_KIND_COLUMN, _DEFAULT_PREDICATE
+from pypaimon.read.constants import ROW_KIND_COLUMN
 
 
 if TYPE_CHECKING:
@@ -645,163 +645,11 @@ class TableRead:
         from pypaimon.read.read_support import convert_rows_to_arrow_batch
         return convert_rows_to_arrow_batch(row_tuples, schema)
 
-    def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema,
-                               blob_parallelism: int = 1) -> Iterator[pyarrow.RecordBatch]:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        yield from PythonTableRead(self)._arrow_batch_generator(splits, schema, blob_parallelism)
-
-    def _to_arrow_parallel(
-        self,
-        splits: List[Split],
-        schema: pyarrow.Schema,
-        effective: int,
-        blob_parallelism: int = 1,
-    ) -> pyarrow.Table:
-        """Read ``splits`` concurrently and assemble the result in input order.
-
-        Each split is read in its own worker thread; row quota for ``limit``
-        is shared through :class:`_RemainingRows` so the combined output
-        never exceeds ``self.limit`` rows. Per-split batches are collected
-        by submission index, so the merged table preserves the order of the
-        input ``splits`` list.
-        """
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._to_arrow_parallel(splits, schema, effective, blob_parallelism)
-
-    def _read_one_split_to_batches(
-        self,
-        split: Split,
-        schema: pyarrow.Schema,
-        remaining_state: "_RemainingRows",
-        blob_parallelism: int = 1,
-    ) -> List[pyarrow.RecordBatch]:
-        """Read a single split into arrow batches under soft-stop control.
-
-        Row quota is debited against the shared ``remaining_state``; once a
-        request returns 0, the worker stops emitting further batches. The
-        reader is always closed via ``finally``.
-        """
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._read_one_split_to_batches(split, schema, remaining_state, blob_parallelism)
-
-    def _convert_rows_to_output_batches(
-        self,
-        row_tuples: List[tuple],
-        row_kinds: List[str],
-        schema: pyarrow.Schema,
-    ) -> Iterator[pyarrow.RecordBatch]:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        yield from PythonTableRead(self)._convert_rows_to_output_batches(row_tuples, row_kinds, schema)
-
-    def _convert_rows_to_arrow_batches_with_row_kind(
-        self,
-        row_tuples: List[tuple],
-        row_kinds: List[str],
-        schema: pyarrow.Schema
-    ) -> Iterator[pyarrow.RecordBatch]:
-        """Convert rows to one or more Arrow batches, optionally including row kind column.
-
-        Yields more than one batch only when a column overflows pyarrow's 2GB
-        per-column limit (see ``_emit_overflow_safe_batches``); otherwise a single
-        batch is produced as before.
-        """
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        yield from PythonTableRead(self)._convert_rows_to_arrow_batches_with_row_kind(
-            row_tuples,
-            row_kinds,
-            schema,
-        )
-
-    def _create_split_read(self, split: Split, blob_parallelism: int = 1,
-                           read_type=None, limit: Optional[int] = None,
-                           push_down_limit: bool = True,
-                           post_merge_filter=None,
-                           eager_blob_fields=None,
-                           post_filter_after_inline: bool = False,
-                           predicate=_DEFAULT_PREDICATE,
-                           defer_blob_resolution: bool = False) -> "SplitRead":
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._create_split_read(
-            split,
-            blob_parallelism,
-            read_type,
-            limit,
-            push_down_limit,
-            post_merge_filter,
-            eager_blob_fields,
-            post_filter_after_inline,
-            predicate,
-            defer_blob_resolution,
-        )
-
-    def _build_split_read(self, split: Split, read_type=None,
-                          limit: Optional[int] = None,
-                          push_down_limit: bool = True,
-                          post_merge_filter=None,
-                          eager_blob_fields=None,
-                          post_filter_after_inline: bool = False,
-                          predicate=_DEFAULT_PREDICATE,
-                          defer_blob_resolution: bool = False) -> "SplitRead":
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._build_split_read(
-            split,
-            read_type,
-            limit,
-            push_down_limit,
-            post_merge_filter,
-            eager_blob_fields,
-            post_filter_after_inline,
-            predicate,
-            defer_blob_resolution,
-        )
-
-    def _serialize_blob_views_as_descriptors(self, batch: pyarrow.RecordBatch, reader) -> pyarrow.RecordBatch:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._serialize_blob_views_as_descriptors(batch, reader)
-
-    def _serialize_blob_view_row_tuple(self, row: "OffsetRow", reader) -> tuple:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._serialize_blob_view_row_tuple(row, reader)
-
-    def _widen_to_top_level_for_merge(self, name_paths=None) -> List[DataField]:
-        """Unique top-level fields from ``name_paths``, in path order."""
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._widen_to_top_level_for_merge(name_paths)
-
-    def _only_map_key_nested_paths(self) -> bool:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._only_map_key_nested_paths()
-
-    def _has_map_key_projection(self) -> bool:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._has_map_key_projection()
-
-    def _map_has_aggregator(self, field_name: str) -> bool:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._map_has_aggregator(field_name)
-
     def _check_python_merge_supported(self):
         if getattr(self, '_python_merge_validation_pending', False):
             from pypaimon.execution.python.read.merge_engine_support import check_supported
             check_supported(self.table)
             self._python_merge_validation_pending = False
-
-    def _TableRead__create_reader_for_split(
-            self, split, blob_parallelism=1, limit: Optional[int] = None):
-        # Raw-convertible splits skip MergeFileSplitRead, so validate before
-        # dispatch, including when native setup failed or bindings are absent.
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._TableRead__create_reader_for_split(split, blob_parallelism, limit)
-
-    def _TableRead__authed_reader(
-            self, split, auth_result, blob_parallelism=1, limit: Optional[int] = None):
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead(self)._TableRead__authed_reader(split, auth_result, blob_parallelism, limit)
-
-    @staticmethod
-    def _auth_filter_field_names(auth_result, read_fields) -> set:
-        from pypaimon.execution.python.read.table_read import PythonTableRead
-        return PythonTableRead._auth_filter_field_names(auth_result, read_fields)
 
     def _native_fallback(
         self,

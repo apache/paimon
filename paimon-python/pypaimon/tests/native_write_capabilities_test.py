@@ -51,7 +51,10 @@ def _rows(table, native_read, all_files=False, chunk_shuffle=False):
     splits = (scan.plan_all_files() if all_files else scan.plan()).splits()
     read = builder.new_read()
     if native_read:
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python fallback')
+        ):
             rows = read.to_arrow(splits).to_pylist()
     else:
         rows = read.to_arrow(splits).to_pylist()

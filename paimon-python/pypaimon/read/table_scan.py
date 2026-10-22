@@ -19,12 +19,11 @@ from dataclasses import replace
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.auth_support import (
     authorize, latest_auth_fields, validate_auth_rules)
 from pypaimon.read.plan import Plan
 from pypaimon.read.scan_config import (
-    _validate_scan_mode, _parse_incremental_timestamp_window, resolve_scan_snapshot_range)
+    _validate_scan_mode, _parse_incremental_timestamp_window, validate_scan_options)
 from pypaimon.read.scan_request import ScanRequest
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.utils.range import Range
@@ -52,14 +51,9 @@ class TableScan:
         self._query_auth_fn = self.table.catalog_environment.table_query_auth(
             self.table.options, self.table.identifier)
         self._file_scanner = None
-        self._incremental_snapshot_range = resolve_scan_snapshot_range(self.table)
-        empty_incremental = (
-            self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
-            and self._incremental_snapshot_range is None)
-        # Empty incremental scanners historically carry no row predicate or LIMIT.
+        validate_scan_options(self.table)
         self._scan_configuration = ScanRequest.for_table(
-            table, None if empty_incremental else predicate,
-            None if empty_incremental else limit, partition_predicate)
+            table, predicate, limit, partition_predicate)
 
     @property
     def file_scanner(self):
@@ -94,7 +88,6 @@ class TableScan:
                 read_limit=self.limit,
                 partition_filter=self.partition_predicate,
                 read_type=tuple(self._read_type) if self._read_type is not None else None,
-                incremental_snapshot_range=self._incremental_snapshot_range,
             )
         row_ranges = getattr(scanner, '_row_ranges', None)
         chunk_shuffle = getattr(scanner, 'chunk_shuffle', None)
@@ -121,7 +114,6 @@ class TableScan:
             read_limit=self.limit,
             partition_filter=self.partition_predicate,
             read_type=tuple(self._read_type) if self._read_type is not None else None,
-            incremental_snapshot_range=getattr(self, '_incremental_snapshot_range', None),
         )
 
     def plan(self) -> Plan:

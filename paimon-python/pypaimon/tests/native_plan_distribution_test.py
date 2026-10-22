@@ -124,7 +124,7 @@ class _DistributionFixture:
                 getattr(split, '_native_split', None) is not None
                 for split in plan.splits()))
             read_guard = patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'distributed native read fell back to Python'))
         else:

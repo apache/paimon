@@ -306,29 +306,33 @@ def _python_read_source(primary=None, cleanup=None):
     source = Source()
     read = SimpleNamespace(
         _check_python_merge_supported=lambda: None,
-        _TableRead__create_reader_for_split=lambda *args, **kwargs: source,
         _begin_auth_read=lambda splits: None,
-        _serialize_blob_views_as_descriptors=lambda batch, reader: batch,
+        _blob_as_descriptor=False,
+        _blob_view_output_indices=(),
         _project_batch_to_output=lambda batch: batch,
         output_projection=None,
         _adapter_read_type=[DataField(0, 'id', AtomicType('INT'))],
         include_row_kind=False,
         limit=None,
     )
-    return read, source, schema
+    from pypaimon.execution.python.read.table_read import PythonTableRead
+
+    execution = PythonTableRead(read)
+    execution._create_reader_for_split = lambda *args, **kwargs: source
+    return execution, source, schema
 
 
 def _consume_python_read_path(path, read, schema):
     from concurrent.futures import ThreadPoolExecutor
-    from pypaimon.execution.python.read.table_read import PythonTableRead, _RemainingRows
+    from pypaimon.execution.python.read.table_read import _RemainingRows
 
     if path == 'rows':
-        return list(PythonTableRead(read).read_rows([object()]))
+        return list(read.read_rows([object()]))
     if path == 'serial':
-        return list(PythonTableRead(read)._arrow_batch_generator([object()], schema))
+        return list(read._arrow_batch_generator([object()], schema))
     with ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(
-            PythonTableRead(read)._read_one_split_to_batches,
+            read._read_one_split_to_batches,
             object(), schema, _RemainingRows(None),
         ).result(timeout=5)
 
@@ -370,14 +374,12 @@ def test_python_batch_conversion_keeps_primary_failure_when_close_also_fails(pat
 @pytest.mark.parametrize('path', ['rows', 'serial'])
 @pytest.mark.parametrize('close_error', [False, True])
 def test_python_read_explicit_generator_close_keeps_cleanup_error_visible(path, close_error):
-    from pypaimon.execution.python.read.table_read import PythonTableRead
-
     cleanup = OSError('explicit close failure') if close_error else None
     read, source, schema = _python_read_source(cleanup=cleanup)
     if path == 'rows':
-        iterator = PythonTableRead(read).read_rows([object()])
+        iterator = read.read_rows([object()])
     else:
-        iterator = PythonTableRead(read)._arrow_batch_generator([object()], schema)
+        iterator = read._arrow_batch_generator([object()], schema)
     next(iterator)
     if close_error:
         with pytest.raises(OSError) as caught:

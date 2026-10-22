@@ -156,8 +156,10 @@ def _check(table, expected):
         reader = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(reader, '_create_split_read',
-                                                 side_effect=AssertionError('Python read fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read fallback')
+                ))
             rows = reader.to_arrow(builder.new_scan().plan().splits()).sort_by('id')
         assert rows['value'].to_pylist() == expected + [None] * (5 - len(expected))
         assert rows['keep'].to_pylist() == list(range(10, 15))

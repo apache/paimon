@@ -105,7 +105,7 @@ def _read(table, native, predicate=None, projection=None):
         assert all(getattr(split, '_native_split', None) is not None
                    for split in plan.splits())
         read_guard = patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError('resolved-schema native read fell back'))
     else:
         read_guard = ExitStack()

@@ -29,6 +29,7 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.execution.python.globalindex.build_plan import (
     filter_non_indexable_splits as _filter_non_indexable_splits,
     split_by_global_index_shard as _split_by_global_index_shard,
@@ -681,7 +682,6 @@ class GlobalIndexBuildTest(
                 entry.index_file.file_name)))
 
     def test_create_vindex_streaming_failure_cleans_resources(self):
-        from pypaimon.read.table_read import TableRead
 
         schema = pa.schema([('embedding', pa.list_(pa.float32()))])
         table = self._create_table(pa_schema=schema, options=dict(
@@ -690,7 +690,7 @@ class GlobalIndexBuildTest(
             {'embedding': [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]}, schema=schema))
         snapshot_id = table.snapshot_manager().get_latest_snapshot().id
         original_write = VindexVectorIndexWriter.write_batch
-        original_batches = TableRead._arrow_batch_generator
+        original_batches = PythonTableRead._arrow_batch_generator
         temp_paths = []
         closed = []
         generators = []
@@ -712,7 +712,7 @@ class GlobalIndexBuildTest(
             return generator
 
         with patch.object(VindexVectorIndexWriter, 'write_batch', failing_write), \
-                patch.object(TableRead, '_arrow_batch_generator', tracked_batches):
+                patch.object(PythonTableRead, '_arrow_batch_generator', tracked_batches):
             with self.assertRaisesRegex(RuntimeError, 'injected write failure'):
                 table.create_global_index('embedding', index_type='ivf-flat', options={
                     'ivf-flat.dimension': '2',

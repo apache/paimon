@@ -90,7 +90,10 @@ def test_full_batch_startup_reads(source, native, mode, method, filtered):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-            stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read')
+            ))
         plan = scan.plan()
         if method == 'arrow':
             rows = read.to_arrow(plan.splits()).to_pylist()
@@ -153,7 +156,10 @@ def test_full_startup_empty_table(rest_catalog, native, mode):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-            stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read')
+            ))
         plan = scan.plan()
         assert plan.snapshot_id is None
         assert plan.splits() == []

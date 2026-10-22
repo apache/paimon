@@ -93,8 +93,10 @@ def _check_rows(table, values):
         read = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(read, '_create_split_read',
-                                                 side_effect=AssertionError('Python read fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read fallback')
+                ))
             actual = read.to_arrow(builder.new_scan().plan().splits()).sort_by('id')
         assert actual['value'].to_pylist() == values
         assert actual['untouched'].to_pylist() == list(range(10, 10 + len(values)))

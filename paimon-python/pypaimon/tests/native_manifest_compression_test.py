@@ -62,8 +62,10 @@ def _read(table, native, snapshot_id=None):
         plan = scan.plan()
         if native:
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                      side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         return builder.new_read().to_arrow(plan.splits()).sort_by('id').to_pylist()
 
 

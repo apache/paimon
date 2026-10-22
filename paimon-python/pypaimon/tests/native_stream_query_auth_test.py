@@ -101,8 +101,10 @@ def _rows(builder, plan, native):
     reader = builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(reader, '_create_split_read',
-                                             side_effect=AssertionError('Native read fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Native read fell back')
+            ))
         result = reader.to_arrow(plan.splits()).to_pylist()
     return sorted(result, key=repr)
 
@@ -220,9 +222,31 @@ def test_combined_timestamp_events_apply_auth_and_masked_filter_before_limit(sou
         reader = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(reader, '_create_split_read',
-                                                 side_effect=AssertionError('Native incremental read fell back')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Native incremental read fell back')
+                ))
             assert reader.to_arrow(plan.splits()).to_pylist() == [{'id': 5}]
+
+
+@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('window', ['equal', 'future'])
+def test_empty_timestamp_windows_cannot_bypass_authorization(source, method, window):
+    _, table, server, _ = source
+    timestamp = table.snapshot_manager().get_latest_snapshot().time_millis
+    bounds = (timestamp, timestamp) if window == 'equal' else (timestamp + 1000, timestamp + 2000)
+    denied = server._mock_response(ErrorResponse('TABLE', 't', 'permission denied', 403), 403)
+    for native in (False, True):
+        selected = table.copy({
+            'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
+            'incremental-between-timestamp': '{},{}'.format(*bounds),
+        })
+        with patch.object(server, '_table_query_auth_handle', return_value=denied):
+            scan = selected.new_read_builder().new_scan()
+            with patch.object(scan, '_create_file_scanner', side_effect=AssertionError('Python scanner ran')):
+                with pytest.raises(Exception, match='403|permission|denied'):
+                    getattr(scan, method)()
 
 
 @pytest.mark.parametrize('custom_policy', ['subclass', 'instance'])

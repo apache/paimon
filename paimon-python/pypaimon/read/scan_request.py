@@ -62,7 +62,6 @@ class ScanRequest:
     read_limit: Optional[int] = None
     partition_filter: Optional[Predicate] = None
     read_type: Optional[Tuple[DataField, ...]] = None
-    incremental_snapshot_range: Optional[Tuple[int, int]] = None
 
     @classmethod
     def for_table(cls, table, predicate=None, limit=None, partition_predicate=None):

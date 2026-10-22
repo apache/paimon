@@ -106,7 +106,7 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
                 read_guard = patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError(
                         'materialized PK native read fell back'))
             else:
@@ -204,7 +204,7 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
                 read_guard = patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError(
                         'first-row native read fell back'))
             else:
@@ -283,7 +283,7 @@ def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merge
                     plan = scan.plan()
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
-                guard = patch('pypaimon.read.table_read.TableRead._create_split_read',
+                guard = patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                               side_effect=AssertionError('native read fell back'))
             else:
                 plan = scan.plan()
@@ -332,8 +332,9 @@ def test_first_row_sorted_materialized_and_l0_merge_natively(tmp_path, batch_siz
             if native:
                 guards.enter_context(patch.object(scan.file_scanner, 'scan',
                                                   side_effect=AssertionError('Native plan fell back')))
-                guards.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                           side_effect=AssertionError('Native read fell back')))
+                guards.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Native read fell back')))
             plan = scan.plan()
             assert any(not split.raw_convertible for split in plan.splits())
             rows = builder.new_read().to_arrow(plan.splits()).sort_by([('id', 'ascending')]).to_pylist()

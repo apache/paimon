@@ -93,7 +93,10 @@ def _rows(table, native):
               and table.options.merge_engine() == MergeEngine.FIRST_ROW else scan.plan()).splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()

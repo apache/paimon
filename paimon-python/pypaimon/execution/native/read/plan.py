@@ -22,14 +22,13 @@ from dataclasses import replace
 from typing import List, Optional, Tuple
 
 from pypaimon.common.identifier import UNKNOWN_DATABASE
-from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scan_request import ScanRequest
 from pypaimon.read import split_serializer
 
@@ -272,12 +271,8 @@ class NativeTableScan:
             has_distribution = (request.idx_of_this_subtask is not None
                                 or request.start_pos_of_this_subtask is not None)
             extra_options = {}
-            if scan.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
-                if request.incremental_snapshot_range is None:
-                    return Plan([], _scan_stats=ScanStats.empty_native(request.read_limit))
-                extra_options['incremental_range'] = request.incremental_snapshot_range
-                if scan.table.options.changelog_producer() != ChangelogProducer.NONE:
-                    extra_options['incremental_mode'] = 'changelog'
+            # Core resolves timestamp options after authorization, including
+            # empty windows. Never preselect snapshots with Python here.
             chunk_shuffle = request.chunk_shuffle
             if chunk_shuffle is not None:
                 extra_options['chunk_shuffle'] = chunk_shuffle

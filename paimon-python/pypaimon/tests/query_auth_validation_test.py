@@ -19,12 +19,14 @@
 import json
 import time
 import unittest
+from unittest.mock import patch
 
 from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -486,7 +488,7 @@ class TestReadValidationWiring(unittest.TestCase):
             [_string_field(0, "id"), _string_field(2, "s_a")],
             [["id"], ["s", "a"]])
         with self.assertRaises(RuntimeError) as ctx:
-            read._TableRead__authed_reader(None, auth)
+            PythonTableRead(read)._authed_reader(None, auth)
         self.assertIn("partial column", str(ctx.exception))
 
     def test_read_rejects_nested_projection_of_filter_operand(self):
@@ -497,7 +499,7 @@ class TestReadValidationWiring(unittest.TestCase):
             [_string_field(0, "id"), _string_field(2, "s_a")],
             [["id"], ["s", "a"]])
         with self.assertRaises(RuntimeError) as ctx:
-            read._TableRead__authed_reader(None, auth)
+            PythonTableRead(read)._authed_reader(None, auth)
         self.assertIn("partial column", str(ctx.exception))
 
 
@@ -821,8 +823,11 @@ class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
         batch = pa.RecordBatch.from_pydict(
             {"id": ["1"], "email": ["SECRET"]},
             schema=PyarrowFieldParser.from_paimon_schema(fields))
-        read._create_split_read = lambda split, **kw: SimpleNamespace(
-            create_reader=lambda: _OneBatch(batch))
+        storage = patch.object(
+            PythonTableRead, '_create_split_read', side_effect=lambda split, **kw: SimpleNamespace(
+                create_reader=lambda: _OneBatch(batch)))
+        storage.start()
+        self.addCleanup(storage.stop)
         return read
 
     def test_a_read_asks_the_catalog_once_across_workers_and_rule_objects(self):
@@ -881,7 +886,9 @@ class TestReaderAppliesTheRules(unittest.TestCase):
                 {f.name: data[f.name] for f in requested}, schema=schema)
             return SimpleNamespace(create_reader=lambda: _OneBatch(batch))
 
-        read._create_split_read = storage
+        stub = patch.object(PythonTableRead, '_create_split_read', side_effect=storage)
+        stub.start()
+        self.addCleanup(stub.stop)
         return read
 
     def _rows(self, read, auth):

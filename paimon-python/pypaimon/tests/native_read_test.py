@@ -587,7 +587,9 @@ def test_native_batch_reader_setup_fallback_preserves_python_blob_worker_cap():
     schema = pa.schema([('id', pa.int32())])
     with patch('pypaimon.execution.native.read.table_read.native_read',
                side_effect=RuntimeError('setup failed')) as native, \
-            patch.object(read, '_arrow_batch_generator', return_value=iter([_id_batch([1])])) as python_read:
+            patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._arrow_batch_generator',
+                return_value=iter([_id_batch([1])])) as python_read:
         result = read.to_arrow_batch_reader(splits, parallelism=16, blob_parallelism=16).read_all()
     assert result.to_pydict() == {'id': [1]}
     assert native.call_args.kwargs['parallelism'] == 16
@@ -636,7 +638,10 @@ def test_native_stream_error_closes_input_without_replaying_python(method_name):
             closed.append(True)
 
     with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches()) as native, \
-            patch.object(read, '_create_split_read', side_effect=AssertionError('Python replay')):
+            patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python replay')
+    ):
         with pytest.raises(RuntimeError, match='stream failed'):
             result = getattr(read, method_name)(splits)
             if method_name != 'to_arrow':

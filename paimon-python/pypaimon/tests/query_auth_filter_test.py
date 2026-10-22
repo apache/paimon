@@ -22,9 +22,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.table_read import TableRead
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -220,14 +220,14 @@ def test_or_arms_match_independently(table, masked_value, expected):
 def test_unmasked_conjunct_is_pushed_to_split_reads(table, monkeypatch):
     authorize(table, rules())
     pushed = []
-    create_split_read = TableRead._create_split_read
+    create_split_read = PythonTableRead._create_split_read
 
     def recording(self, *args, **kwargs):
         split_read = create_split_read(self, *args, **kwargs)
         pushed.append(split_read.predicate)
         return split_read
 
-    monkeypatch.setattr(TableRead, '_create_split_read', recording)
+    monkeypatch.setattr(PythonTableRead, '_create_split_read', recording)
     predicates = PredicateBuilder(table.fields)
     unmasked = predicates.greater_than('id', 1)
     for combine, expected_push, expected_ids in [

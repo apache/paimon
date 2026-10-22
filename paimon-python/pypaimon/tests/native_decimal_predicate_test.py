@@ -110,8 +110,10 @@ def _read(table, predicate, native_plan, native_read, projection=('id',)):
         if native_read:
             stack.enter_context(patch.object(reader, '_native_fallback',
                                              side_effect=AssertionError('Python read fallback')))
-            stack.enter_context(patch.object(reader, '_create_split_read',
-                                             side_effect=AssertionError('Python split reader')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python split reader')
+            ))
         rows = reader.to_arrow(plan.splits(), parallelism=1).to_pylist()
     return sorted(rows, key=lambda row: row['id'])
 

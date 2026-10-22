@@ -96,8 +96,10 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
         reader = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(
-                    reader, '_create_split_read', side_effect=AssertionError('Python read')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read')
+                ))
             rows = reader.to_arrow(plan.splits()).to_pylist()
         assert plan.snapshot_id == snapshot.id
         if native:

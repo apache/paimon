@@ -68,7 +68,7 @@ def table(tmp_path):
 
 @pytest.mark.parametrize('backend', ['python', 'native'])
 @pytest.mark.parametrize('method', ['read_rows', 'read_batches'])
-def test_bound_read_uses_live_configuration_and_preserves_public_reader_hooks(table, backend, method):
+def test_bound_read_uses_live_configuration_and_selected_executor(table, backend, method):
     splits = table.new_read_builder().new_scan().plan().splits()
     if backend == 'native':
         table = table.copy({'read.native.enabled': 'true'})
@@ -95,8 +95,8 @@ def test_bound_read_uses_live_configuration_and_preserves_public_reader_hooks(ta
         return batches()
 
     with patch('pypaimon.execution.native.read.table_read.native_read', side_effect=native_batches) as native, \
-            patch.object(read, '_TableRead__create_reader_for_split',
-                         wraps=read._TableRead__create_reader_for_split) as python:
+            patch.object(PythonTableRead, '_create_reader_for_split', autospec=True,
+                         side_effect=PythonTableRead._create_reader_for_split) as python:
         if method == 'read_rows':
             values = [row.get_field(0) for row in execution.read_rows(splits)]
         else:

@@ -141,7 +141,7 @@ class PythonTableRead:
             if limit is not None and count >= limit:
                 return
             remaining = None if limit is None else limit - count
-            reader = read._TableRead__create_reader_for_split(split, limit=remaining)
+            reader = self._create_reader_for_split(split, limit=remaining)
             failure = None
             try:
                 if read.output_projection is not None or not read._adapter_read_type:
@@ -179,7 +179,7 @@ class PythonTableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = read._TableRead__create_reader_for_split(
+            reader = self._create_reader_for_split(
                 split, blob_parallelism, limit=remaining)
             failure = None
             try:
@@ -189,7 +189,7 @@ class PythonTableRead:
                             continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
-                        batch = read._serialize_blob_views_as_descriptors(
+                        batch = self._serialize_blob_views_as_descriptors(
                             batch, reader)
                         batch = read._project_batch_to_output(batch)
                         if read.include_row_kind:
@@ -212,7 +212,7 @@ class PythonTableRead:
                             if not isinstance(row, OffsetRow):
                                 raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
                             row_tuple_chunk.append(
-                                read._serialize_blob_view_row_tuple(row, reader))
+                                self._serialize_blob_view_row_tuple(row, reader))
                             if read.include_row_kind:
                                 row_kind_chunk.append(row.get_row_kind().to_string())
 
@@ -223,7 +223,7 @@ class PythonTableRead:
                                     break
 
                             if len(row_tuple_chunk) >= chunk_size:
-                                yield from read._convert_rows_to_output_batches(
+                                yield from self._convert_rows_to_output_batches(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
                                 row_tuple_chunk = []
@@ -232,7 +232,7 @@ class PythonTableRead:
                             break
 
                     if row_tuple_chunk:
-                        yield from read._convert_rows_to_output_batches(
+                        yield from self._convert_rows_to_output_batches(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
             except BaseException as error:
@@ -268,7 +268,7 @@ class PythonTableRead:
         ) as executor:
             futures = {
                 executor.submit(
-                    read._read_one_split_to_batches,
+                    self._read_one_split_to_batches,
                     split,
                     schema,
                     remaining_state,
@@ -312,7 +312,7 @@ class PythonTableRead:
         read = self._read
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        reader = read._TableRead__create_reader_for_split(split, blob_parallelism)
+        reader = self._create_reader_for_split(split, blob_parallelism)
         failure = None
         try:
             if isinstance(reader, RecordBatchReader):
@@ -324,7 +324,7 @@ class PythonTableRead:
                         break
                     if allowed < batch.num_rows:
                         batch = batch.slice(0, allowed)
-                    batch = read._serialize_blob_views_as_descriptors(
+                    batch = self._serialize_blob_views_as_descriptors(
                         batch, reader)
                     batch = read._project_batch_to_output(batch)
                     if read.include_row_kind:
@@ -349,17 +349,17 @@ class PythonTableRead:
                             stop = True
                             break
                         row_tuple_chunk.append(
-                            read._serialize_blob_view_row_tuple(row, reader))
+                            self._serialize_blob_view_row_tuple(row, reader))
                         if read.include_row_kind:
                             row_kind_chunk.append(row.get_row_kind().to_string())
 
                         if len(row_tuple_chunk) >= chunk_size:
-                            out.extend(read._convert_rows_to_output_batches(
+                            out.extend(self._convert_rows_to_output_batches(
                                 row_tuple_chunk, row_kind_chunk, schema))
                             row_tuple_chunk = []
                             row_kind_chunk = []
                 if row_tuple_chunk:
-                    out.extend(read._convert_rows_to_output_batches(
+                    out.extend(self._convert_rows_to_output_batches(
                         row_tuple_chunk, row_kind_chunk, schema))
         except BaseException as error:
             failure = error
@@ -376,13 +376,13 @@ class PythonTableRead:
     ) -> Iterator[pyarrow.RecordBatch]:
         read = self._read
         if read.output_projection is None:
-            yield from read._convert_rows_to_arrow_batches_with_row_kind(
+            yield from self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, schema)
             return
         physical_schema = read_arrow_schema(read._adapter_read_type)
         if read.include_row_kind:
             physical_schema = read._add_row_kind_to_schema(physical_schema)
-        for batch in read._convert_rows_to_arrow_batches_with_row_kind(
+        for batch in self._convert_rows_to_arrow_batches_with_row_kind(
                 row_tuples, row_kinds, physical_schema):
             yield read._try_to_pad_batch_by_schema(
                 read._project_batch_to_output(batch), schema, allow_type_cast=True)
@@ -424,7 +424,7 @@ class PythonTableRead:
                            predicate=_DEFAULT_PREDICATE,
                            defer_blob_resolution: bool = False) -> SplitRead:
         read = self._read
-        sr = read._build_split_read(
+        sr = self._build_split_read(
             split,
             read_type,
             limit,
@@ -469,7 +469,7 @@ class PythonTableRead:
                 # Inner: full ROW for the merge function. Outer: extract
                 # the requested sub-paths back to the user's flat schema.
                 inner_read_type = read._with_predicate_extra_fields(
-                    read._widen_to_top_level_for_merge(nested_name_paths))
+                    self._widen_to_top_level_for_merge(nested_name_paths))
                 outer_extract_name_paths = nested_name_paths
 
             # When the user's projection drops a ``sequence.field``, the merge
@@ -513,12 +513,12 @@ class PythonTableRead:
         elif read.table.options.data_evolution_enabled():
             if nested_name_paths and any(
                     len(p) > 1 for p in nested_name_paths):
-                if not read._only_map_key_nested_paths():
+                if not self._only_map_key_nested_paths():
                     raise NotImplementedError(
                         "ROW nested-field projection on data-evolution tables "
                         "is not yet supported")
                 scan_read_type = read._with_predicate_extra_fields(
-                    read._widen_to_top_level_for_merge(nested_name_paths))
+                    self._widen_to_top_level_for_merge(nested_name_paths))
                 outer_extract_name_paths = nested_name_paths
             else:
                 outer_extract_name_paths = None
@@ -555,7 +555,7 @@ class PythonTableRead:
                 # names/types), then extract the requested sub-paths back to
                 # the user's flat schema.
                 inner_read_type = read._with_predicate_extra_fields(
-                    read._widen_to_top_level_for_merge(nested_name_paths))
+                    self._widen_to_top_level_for_merge(nested_name_paths))
                 outer_extract_name_paths = nested_name_paths
             if read_type is None and outer_extract_name_paths is None and read._needs_output_projection():
                 outer_extract_name_paths = read._output_extract_name_paths()
@@ -631,7 +631,7 @@ class PythonTableRead:
             if (isinstance(field.type, MapType)
                     and all(len(path) > 1 for path in paths)
                     and not is_map_blob_type(field.type)
-                    and not read._map_has_aggregator(top_name)):
+                    and not self._map_has_aggregator(top_name)):
                 keys = []
                 for path in paths:
                     if path[1] not in keys:
@@ -675,7 +675,7 @@ class PythonTableRead:
             or "fields.default-aggregate-function" in options
         )
 
-    def _TableRead__create_reader_for_split(
+    def _create_reader_for_split(
             self, split, blob_parallelism=1, limit: Optional[int] = None):
         # Raw-convertible splits skip MergeFileSplitRead, so validate before
         # dispatch, including when native setup failed or bindings are absent.
@@ -687,21 +687,21 @@ class PythonTableRead:
             split = split.split
 
         if auth_result is not None:
-            return read._TableRead__authed_reader(
+            return self._authed_reader(
                 split, auth_result, blob_parallelism, limit)
         if limit is None:
-            return read._create_split_read(
+            return self._create_split_read(
                 split, blob_parallelism=blob_parallelism).create_reader()
-        return read._create_split_read(
+        return self._create_split_read(
             split,
             blob_parallelism=blob_parallelism,
             limit=limit,
         ).create_reader()
 
-    def _TableRead__authed_reader(
+    def _authed_reader(
             self, split, auth_result, blob_parallelism=1, limit: Optional[int] = None):
         read = self._read
-        if read._has_map_key_projection():
+        if self._has_map_key_projection():
             raise NotImplementedError(
                 "MAP-key projection with query authorization is not supported")
         table_fields = read.table.fields
@@ -727,7 +727,7 @@ class PythonTableRead:
         filter_fn = auth_result.extract_row_filter()
         effective_limit = read.limit if limit is None else limit
         auth_fields = (
-            read._auth_filter_field_names(auth_result, effective_read_type)
+            self._auth_filter_field_names(auth_result, effective_read_type)
             if filter_fn is not None else set()
         )
         eager_blob_fields = set(auth_fields)
@@ -751,7 +751,7 @@ class PythonTableRead:
         # If the auth filter references an inline BLOB, run it after inline resolution (in
         # the split read) so it sees resolved payloads while scalar BLOBs still defer.
         post_filter_after_inline = embed_filter and bool(auth_fields & inline_blob_fields)
-        split_read = read._create_split_read(
+        split_read = self._create_split_read(
             split,
             blob_parallelism=blob_parallelism,
             read_type=effective_read_type,
@@ -829,9 +829,9 @@ class PythonTableRead:
         read._check_python_merge_supported()
         effective = read._effective_parallelism(parallelism, len(splits))
         if read._should_run_parallel(splits, effective):
-            return read._to_arrow_parallel(splits, schema, effective, blob_parallelism)
+            return self._to_arrow_parallel(splits, schema, effective, blob_parallelism)
 
-        batch_iterator = read._arrow_batch_generator(
+        batch_iterator = self._arrow_batch_generator(
             splits, schema, blob_parallelism)
         batch_reader = pyarrow.ipc.RecordBatchReader.from_batches(
             schema, batch_iterator)
@@ -860,5 +860,5 @@ class PythonTableRead:
         if read._should_run_parallel(splits, effective):
             blob_parallelism = read._cap_blob_parallelism(
                 min(effective, len(splits)), blob_parallelism)
-        return read._arrow_batch_generator(
+        return self._arrow_batch_generator(
             splits, schema, blob_parallelism)

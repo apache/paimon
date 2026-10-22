@@ -26,6 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.blob import Blob
@@ -5474,7 +5475,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         from pypaimon import Schema
         from pypaimon.globalindex.indexed_split import IndexedSplit
         from pypaimon.execution.python.read.split_read import (RawFileSplitRead)
-        from pypaimon.read.table_read import TableRead
         from pypaimon.table.row.blob import BlobViewStruct
         from pypaimon.utils.range import Range
 
@@ -5550,14 +5550,14 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         predicate = read_builder.new_predicate_builder().equal("id", 9)
         read_builder = read_builder.with_filter(predicate).with_limit(1)
         split_types = []
-        orig_build = TableRead._build_split_read
+        orig_build = PythonTableRead._build_split_read
 
         def capturing_build(self, *args, **kwargs):
             split_read = orig_build(self, *args, **kwargs)
             split_types.append(type(split_read))
             return split_read
 
-        with mock.patch.object(TableRead, '_build_split_read', capturing_build):
+        with mock.patch.object(PythonTableRead, '_build_split_read', capturing_build):
             result = read_builder.new_read().to_arrow(
                 read_builder.new_scan().plan().splits()
             )

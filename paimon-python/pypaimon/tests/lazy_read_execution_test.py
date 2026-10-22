@@ -80,6 +80,31 @@ def test_python_scanner_is_constructed_only_after_native_preparation_fails(table
         assert [(r.from_, r.to) for r in scan.file_scanner._row_ranges] == [(1, 4)]
 
 
+@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('window', ['100,100', '100,200'])
+def test_native_timestamp_scan_delegates_snapshot_selection_and_authorization(table, method, window):
+    table = table.copy({'incremental-between-timestamp': window, 'query-auth.enabled': 'true'})
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(
+            table, 'snapshot_manager', side_effect=AssertionError('Python resolved Native snapshots')))
+        stack.enter_context(patch.object(
+            table.catalog_environment, 'table_query_auth', return_value=object()))
+        stack.enter_context(patch(
+            'pypaimon.read.table_scan.TableScan._native_plan_supported', return_value=True))
+        stack.enter_context(patch(
+            'pypaimon.execution.native.table._native_query_auth_supported', return_value=True))
+        stack.enter_context(patch(
+            'pypaimon.read.table_scan.authorize', side_effect=AssertionError('Python authorization ran')))
+        native = stack.enter_context(patch(
+            'pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)))
+        scan = table.new_read_builder().new_scan()
+        result = getattr(scan, method)()
+    plan = result[0] if method == 'scan_with_stats' else result
+    assert plan.snapshot_id == 7
+    native.assert_called_once()
+    assert 'incremental_range' not in native.call_args.kwargs
+
+
 def test_explicit_scanner_access_and_mutation_remain_visible_to_native(table):
     scan = table.new_read_builder().new_scan()
     scanner = scan.file_scanner
@@ -122,13 +147,20 @@ def test_native_read_never_initializes_or_replays_python_read(table, end):
     assert events == ['closed']
 
 
-def test_native_stream_scan_does_not_construct_python_executors(table):
+@pytest.mark.parametrize('native_plan,native_read', [(True, False), (False, True), (True, True)])
+def test_native_stream_scan_does_not_construct_python_executors(table, native_plan, native_read):
+    table = table.copy({
+        'scan.native-plan.enabled': str(native_plan).lower(),
+        'read.native.enabled': str(native_read).lower(),
+    })
     with ExitStack() as stack:
         for target in (
                 'pypaimon.execution.python.read.streaming_table_scan.FileScanner',
                 'pypaimon.execution.python.read.streaming_table_scan.ManifestListManager',
                 'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager'):
             stack.enter_context(patch(target, side_effect=AssertionError(target)))
+        stack.enter_context(patch(
+            'pypaimon.execution.native.runtime.native_runtime_available', return_value=True))
         core = stack.enter_context(patch(
             'pypaimon.execution.native.read.streaming_table_scan.native_stream_scan')).return_value
         expected = Plan([], 7)
@@ -137,6 +169,23 @@ def test_native_stream_scan_does_not_construct_python_executors(table):
         scan = table.new_stream_read_builder().new_streaming_scan()
         assert scan.plan() is expected
         core.plan.assert_called_once()
+
+
+@pytest.mark.parametrize('runtime_available', [False, True])
+def test_native_read_stream_falls_back_before_planning(table, runtime_available):
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
+
+    table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'true'})
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=runtime_available), \
+            patch('pypaimon.execution.native.read.streaming_table_scan.native_stream_scan',
+                  side_effect=RuntimeError('prepare')) as native:
+        scan = table.new_stream_read_builder().new_streaming_scan()
+        try:
+            assert isinstance(scan, AsyncStreamingTableScan)
+            assert scan.plan() is None
+        finally:
+            scan.close()
+        assert native.call_count == int(runtime_available)
 
 
 def test_python_read_resources_are_created_after_native_setup_failure(table):

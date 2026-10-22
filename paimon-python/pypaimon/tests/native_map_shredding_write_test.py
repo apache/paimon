@@ -82,7 +82,10 @@ def _read(table, native, projection=None):
         builder.with_projection(projection)
     reader = builder.new_read()
     splits = builder.new_scan().plan().splits()
-    guard = patch.object(reader, '_create_split_read', side_effect=AssertionError('Python reader fallback'))
+    guard = patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python reader fallback')
+    )
     with guard if native else nullcontext():
         return sorted(reader.to_arrow(splits).to_pylist(), key=lambda row: row['id'])
 

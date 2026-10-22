@@ -113,10 +113,9 @@ def _read(table, native, window, predicate=None, limit=None, shard=None,
         scan.with_row_ranges(row_ranges)
     with ExitStack() as stack:
         if native:
-            for method in ('scan', 'scan_with_stats'):
-                stack.enter_context(patch.object(
-                    scan.file_scanner, method, side_effect=AssertionError(
-                        'incremental native plan fell back to Python')))
+            stack.enter_context(patch.object(
+                scan, '_create_file_scanner', side_effect=AssertionError(
+                    'incremental native plan fell back to Python')))
         plan = scan.scan_with_stats()[0] if with_stats else scan.plan()
     with ExitStack() as stack:
         if native:
@@ -124,7 +123,7 @@ def _read(table, native, window, predicate=None, limit=None, shard=None,
                 getattr(split, '_native_split', None) is not None
                 for split in plan.splits())
             stack.enter_context(patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'incremental native read fell back to Python')))
         result = builder.new_read().to_arrow(
@@ -387,7 +386,7 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
         read = builder.new_read()
         read.include_row_kind = True
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('native row-kind read fell back')):
             arrow = read.to_arrow(plan.splits(), parallelism=2)
         assert sorted(zip(
@@ -444,7 +443,7 @@ def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
     scan.restore(snapshot.id)
     plan = scan.plan()
     with patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError('streaming nested native read fell back')):
         rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
 
@@ -502,7 +501,7 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
         for plan in plans for split in plan.splits() for file in split.files)
 
     with patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError(
                 'streaming changelog native read fell back to Python')):
         rows = [
@@ -579,7 +578,7 @@ def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native,
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('explicit DV native read fell back')))
         result = read_table.new_read_builder().new_read().to_arrow([dv_split]).to_pylist()
     assert result == [{'k': 1, 'v': '1'}, {'k': 3, 'v': '3'}]
@@ -597,13 +596,31 @@ def test_reverse_window_is_rejected_when_snapshots_exist(catalog):
     table = _table(catalog, 'reverse_window')
     _write(table, 100, [{'k': 1, 'v': 'base'}])
     with pytest.raises(ValueError, match='Ending timestamp'):
-        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan()
+        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan().plan()
 
 
 def test_equal_window_is_empty_for_populated_tables(native, history):
     plan, rows = _read(history, native, (100, 100))
     assert rows == []
     assert plan.snapshot_id is None
+
+
+def test_timestamp_selection_is_deferred_until_planning(native, catalog):
+    table = _table(catalog, 'deferred_window')
+    builder = table.copy({
+        'scan.native-plan.enabled': str(native).lower(),
+        'read.native.enabled': str(native).lower(),
+        'incremental-between-timestamp': '0,200',
+    }).new_read_builder()
+    scan = builder.new_scan()
+    _write(table, 100, [{'k': 1, 'v': 'selected'}])
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch.object(
+                scan, '_create_file_scanner', side_effect=AssertionError('Python scanner ran')))
+        plan = scan.plan()
+    assert plan.snapshot_id == 1
+    assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [{'k': 1, 'v': 'selected'}]
 
 
 def test_timestamp_auto_reads_physical_changelog(native, catalog):

@@ -30,6 +30,7 @@ import pytest
 from parameterized import parameterized
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -1517,7 +1518,7 @@ class ReaderBasicTest(unittest.TestCase):
         
         if splits:
             # Use _create_split_read to create reader
-            split_read = table_read._create_split_read(splits[0])
+            split_read = PythonTableRead(table_read)._create_split_read(splits[0])
             reader = split_read.create_reader()
             batch_count = 0
             total_rows = 0

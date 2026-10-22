@@ -1341,16 +1341,15 @@ class NativePlanTest(unittest.TestCase):
                     native.assert_called_once()
                     fs.scan.assert_not_called()
 
-    def test_incremental_range_is_forwarded_without_timestamp_reinterpretation(self):
+    def test_incremental_timestamp_options_are_resolved_in_core(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
         scan.table._applied_dynamic_options = {'incremental-between-timestamp': '100,200'}
-        scan._incremental_snapshot_range = (2, 4)
         with patch('pypaimon.execution.native.read.plan.native_plan',
                    return_value=Plan([], 4)) as native:
             self.assertEqual(scan.plan().snapshot_id, 4)
-        self.assertEqual(native.call_args[1]['incremental_range'], (2, 4))
+        self.assertNotIn('incremental_range', native.call_args[1])
         fs.scan.assert_not_called()
 
     def test_native_plan_forwards_explicit_incremental_mode(self):
@@ -1375,16 +1374,15 @@ class NativePlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'incremental_range'):
             native_plan(table, incremental_mode='changelog')
 
-    def test_incremental_window_outside_snapshots_is_terminal_empty(self):
+    def test_empty_incremental_window_still_runs_core_planning(self):
         fs = Mock(partition_key_predicate=None)
         scan = _scan(True, fs)
         scan.table.options.options = Options({'incremental-between-timestamp': '100,200'})
-        scan._incremental_snapshot_range = None
-        with patch('pypaimon.execution.native.read.plan.native_plan') as native:
+        with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([])) as native:
             plan = scan.plan()
         self.assertEqual(plan.splits(), [])
         self.assertIsNone(plan.snapshot_id)
-        native.assert_not_called()
+        native.assert_called_once()
         fs.scan.assert_not_called()
 
     def test_primary_key_shard_and_limit_are_planned_in_rust(self):
