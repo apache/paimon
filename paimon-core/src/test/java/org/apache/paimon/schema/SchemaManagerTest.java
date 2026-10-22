@@ -77,6 +77,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
@@ -175,6 +176,76 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"partial-update", "aggregation", "first-row"})
+    public void testCreateTableWithPreserveFieldOnRetractRejectsUnsupportedMergeEngine(
+            String mergeEngine) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+        Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
+
+        assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(schema)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'changelog-producer.preserve-field-on-retract' is only supported with 'merge-engine' = 'deduplicate'.");
+        assertThat(retryArtificialException(() -> manager.latest())).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"partial-update", "aggregation", "first-row"})
+    public void testAlterTableWithPreserveFieldOnRetractRejectsUnsupportedMergeEngine(
+            String mergeEngine) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
+        TableSchema original = retryArtificialException(() -> manager.createTable(schema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT
+                                                                        .key(),
+                                                                "f2"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'changelog-producer.preserve-field-on-retract' is only supported with 'merge-engine' = 'deduplicate'.");
+        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
+        assertThat(latest).isEqualTo(original);
+        assertThat(latest.id()).isEqualTo(original.id());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPreserveFieldOnRetractWithDeduplicateMergeEngine(boolean setOnCreate)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "deduplicate");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        if (setOnCreate) {
+            options.put(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+        }
+        Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
+        retryArtificialException(() -> manager.createTable(schema));
+        if (!setOnCreate) {
+            retryArtificialException(
+                    () ->
+                            manager.commitChanges(
+                                    SchemaChange.setOption(
+                                            CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(),
+                                            "f2")));
+        }
+
+        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
+        assertThat(latest.options())
+                .containsEntry(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
     }
 
     @ParameterizedTest

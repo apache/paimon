@@ -2295,6 +2295,48 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testPreserveFieldOnRetractWithDeduplicateMergeEngine() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.put(CoreOptions.MERGE_ENGINE.key(), "deduplicate");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"partial-update", "aggregation", "first-row"})
+    public void testPreserveFieldOnRetractWithUnsupportedMergeEngine(String mergeEngine) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'changelog-producer.preserve-field-on-retract' is only supported with 'merge-engine' = 'deduplicate'.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "input", "full-compaction"})
+    public void testPreserveFieldOnRetractWithUnsupportedChangelogProducer(
+            String changelogProducer) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
+        options.put(CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'changelog-producer.preserve-field-on-retract' is only supported with 'changelog-producer' = 'lookup'.");
+    }
+
+    @Test
     public void testFullCompactionDeltaCommitsWithLookupChangelogProducer() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
