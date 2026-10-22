@@ -37,7 +37,6 @@ def key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
     from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
     from pypaimon.index.index_file_handler import IndexFileHandler
     from pypaimon.read.push_down_utils import trim_and_transform_predicate
-    from pypaimon.utils.range import Range
 
     try:
         key_ids = {table.field_dict[key].id for key in match_keys}
@@ -67,23 +66,32 @@ def key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
         builder = table.copy_without_time_travel({
             CoreOptions.GLOBAL_INDEX_ENABLED.key(): 'false',
         }).new_read_builder().with_filter(partition_predicate)
+        indexed_groups = {(tuple(index.partition.values), index.bucket) for index, _ in baselines}
         files_by_group = {}
         for split in builder.new_scan().plan_all().splits():
-            files = files_by_group.setdefault((tuple(split.partition.values), split.bucket), {})
-            files.update((file.file_name, file) for file in split.files)
+            group = (tuple(split.partition.values), split.bucket)
+            if group in indexed_groups:
+                files = files_by_group.setdefault(group, {})
+                files.update((file.file_name, file) for file in split.files)
+        ranges_by_group = {}
+        for group, files in files_by_group.items():
+            ranges = []
+            for file in files.values():
+                row_range = file.row_id_range()
+                if row_range is None:
+                    return False
+                ranges.append((row_range.from_, row_range.to, file))
+            ranges_by_group[group] = _FileRangeIndex(ranges)
 
         schema = table.table_schema
         known_names = set(table.field_names) | SpecialFields.SYSTEM_FIELD_NAMES
         for index, baseline in baselines:
             meta = index.index_file.global_index_meta
             indexed_keys = key_ids.intersection([meta.index_field_id] + (meta.extra_field_ids or []))
-            index_range = Range(meta.row_range_start, meta.row_range_end)
-            for file in files_by_group.get((tuple(index.partition.values), index.bucket), {}).values():
-                row_range = file.row_id_range()
-                if row_range is None:
-                    return False
-                if not index_range.overlaps(row_range):
-                    continue
+            ranges = ranges_by_group.get((tuple(index.partition.values), index.bucket))
+            if ranges is None:
+                continue
+            for file in ranges.overlapping(meta.row_range_start, meta.row_range_end):
                 # Historical schemas are outside this optimization's proof.
                 if file.schema_id != schema.id:
                     return False
@@ -105,3 +113,56 @@ def key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
     except Exception:
         logger.debug("Cannot verify upsert key index freshness; scanning without indexes.", exc_info=True)
         return False
+
+
+class _FileRangeIndex:
+    """Centered interval tree for inclusive physical-file row ranges.
+
+    Build once per partition/bucket in O(F log F); each shard visits only
+    O(log F + overlapping files), including nested and long column files.
+    """
+
+    def __init__(self, ranges):
+        self._root = self._build(sorted(ranges, key=lambda item: item[0]))
+
+    @classmethod
+    def _build(cls, ranges):
+        if not ranges:
+            return None
+        center = ranges[len(ranges) // 2][0]
+        left, crossing, right = [], [], []
+        for item in ranges:
+            start, end, _ = item
+            if end < center:
+                left.append(item)
+            elif start > center:
+                right.append(item)
+            else:
+                crossing.append(item)
+        # Filtering preserves start order; each file belongs to one node only.
+        by_end = sorted(crossing, key=lambda item: item[1], reverse=True)
+        return center, crossing, by_end, cls._build(left), cls._build(right)
+
+    def overlapping(self, start, end):
+        pending = [self._root]
+        while pending:
+            node = pending.pop()
+            if node is None:
+                continue
+            center, by_start, by_end, left, right = node
+            if end < center:
+                for file_start, _, file in by_start:
+                    if file_start > end:
+                        break
+                    yield file
+                pending.append(left)
+            elif start > center:
+                for _, file_end, file in by_end:
+                    if file_end < start:
+                        break
+                    yield file
+                pending.append(right)
+            else:
+                for _, _, file in by_start:
+                    yield file
+                pending.extend((left, right))

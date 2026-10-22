@@ -25,7 +25,8 @@ import pyarrow as pa
 
 from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.execution.python.globalindex.index_freshness import key_indexes_are_fresh
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.execution.python.globalindex.index_freshness import _FileRangeIndex, key_indexes_are_fresh
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
@@ -350,6 +351,76 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
         with mock.patch.object(TableScan, 'plan_all', return_value=plan):
             self.assertTrue(key_indexes_are_fresh(table, snapshot, ['id'], None))
 
+    def _freshness_metadata(self):
+        table = self._create_table(options={
+            **self.table_options, 'global-index.column-update-action': 'IGNORE',
+        })
+        self._write_arrow(table, pa.table({
+            'id': [1, 2, 3], 'payload': ['old'] * 3,
+        }, schema=self.pa_schema))
+        table.create_global_index('id', index_type='btree')
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        table = table._copy_with_snapshot(snapshot)
+        split = table.new_read_builder().new_scan().plan_all().splits()[0]
+        index = IndexFileHandler(table).scan(snapshot)[0]
+        return table, snapshot, split, index
+
+    def test_ignore_freshness_extracts_each_file_range_once(self):
+        table, snapshot, split, original_index = self._freshness_metadata()
+        size = 1024
+        files = [replace(split.files[0], file_name=f'file-{i}', first_row_id=i * 10)
+                 for i in range(size)]
+        indexes = [replace(original_index, index_file=replace(
+            original_index.index_file, file_name=f'index-{i}', global_index_meta=replace(
+                original_index.index_file.global_index_meta,
+                row_range_start=i * 10, row_range_end=i * 10 + 2)))
+            for i in reversed(range(size))]
+        # The same physical file can occur in more than one split.
+        plan = Plan([DataSplit(list(reversed(files)), split.partition, split.bucket),
+                     DataSplit(files[:1], split.partition, split.bucket)], snapshot.id)
+        calls = 0
+        original_row_range = DataFileMeta.row_id_range
+
+        def counted_row_range(file):
+            nonlocal calls
+            calls += 1
+            return original_row_range(file)
+
+        with mock.patch.object(IndexFileHandler, 'scan', return_value=indexes), \
+                mock.patch.object(TableScan, 'plan_all', return_value=plan), \
+                mock.patch.object(DataFileMeta, 'row_id_range', counted_row_range):
+            self.assertTrue(key_indexes_are_fresh(table, snapshot, ['id'], None))
+        self.assertEqual(calls, size)
+
+    def test_ignore_freshness_checks_nested_ranges_and_group_boundaries(self):
+        table, snapshot, split, original_index = self._freshness_metadata()
+        original_file = split.files[0]
+        index = replace(original_index, index_file=replace(
+            original_index.index_file, global_index_meta=replace(
+                original_index.index_file.global_index_meta, row_range_start=100, row_range_end=199)))
+        # An unchanged outer column file overlaps many small disjoint files.
+        outer = replace(original_file, file_name='outer', first_row_id=0, row_count=1000)
+        disjoint = [replace(original_file, file_name=f'old-{i}', first_row_id=i * 3)
+                    for i in range(30)]
+        stale = replace(original_file, file_name='stale', max_sequence_number=snapshot.id)
+        cases = [
+            (replace(stale, first_row_id=99), split.bucket, False),
+            (replace(stale, first_row_id=199), split.bucket, False),
+            (replace(stale, first_row_id=200), split.bucket, True),
+            (replace(stale, first_row_id=150), split.bucket + 1, True),
+            (replace(stale, first_row_id=None), split.bucket, False),
+            (replace(stale, first_row_id=None), split.bucket + 1, True),
+            # Malformed metadata outside the indexed range is irrelevant.
+            (replace(stale, first_row_id=200, write_cols=['unknown']), split.bucket, True),
+        ]
+        for file, bucket, expected in cases:
+            with self.subTest(first_row_id=file.first_row_id, bucket=bucket):
+                plan = Plan([DataSplit(disjoint + [outer], split.partition, split.bucket),
+                             DataSplit([file], split.partition, bucket)], snapshot.id)
+                with mock.patch.object(IndexFileHandler, 'scan', return_value=[index]), \
+                        mock.patch.object(TableScan, 'plan_all', return_value=plan):
+                    self.assertEqual(key_indexes_are_fresh(table, snapshot, ['id'], None), expected)
+
     def test_ignore_index_rebuild_restores_key_pruning(self):
         table = self._create_table(options={
             **self.table_options, 'global-index.column-update-action': 'IGNORE',
@@ -372,3 +443,39 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
         table.drop_global_index('id', index_type='btree')
         table.create_global_index('id', index_type='btree')
         self.assertEqual(self._counted_lookup(table, ['id'], {(99,)}), ({(99,): [5]}, [5]))
+
+
+class FileRangeIndexTest(unittest.TestCase):
+    def test_inclusive_overlaps_match_full_scan(self):
+        ranges = [(0, 1000, 'outer'), (20, 30, 'nested'), (20, 25, 'same-start'),
+                  (20, 30, 'duplicate'), (40, 40, 'point'), (1001, 1005, 'adjacent')]
+        index = _FileRangeIndex(list(reversed(ranges)))
+        for start, end in [(-10, -1), (0, 0), (19, 20), (25, 30), (31, 39),
+                           (40, 40), (1000, 1001), (1005, 1006), (1006, 2000), (-10, 2000)]:
+            with self.subTest(start=start, end=end):
+                expected = sorted(file for lo, hi, file in ranges if lo <= end and hi >= start)
+                self.assertEqual(sorted(index.overlapping(start, end)), expected)
+        self.assertEqual(list(_FileRangeIndex([]).overlapping(0, 1)), [])
+
+    def test_sparse_queries_do_not_scan_all_files_with_one_long_range(self):
+        class CountedInt(int):
+            comparisons = 0
+
+            def __lt__(self, other):
+                CountedInt.comparisons += 1
+                return int.__lt__(self, other)
+
+            def __gt__(self, other):
+                CountedInt.comparisons += 1
+                return int.__gt__(self, other)
+
+        size = 5000
+        ranges = [(CountedInt(i * 10), CountedInt(i * 10 + 2), i) for i in range(size)]
+        ranges.append((CountedInt(0), CountedInt(size * 10), 'outer'))
+        index = _FileRangeIndex(list(reversed(ranges)))
+        CountedInt.comparisons = 0
+        for i in range(size):
+            self.assertCountEqual(index.overlapping(i * 10, i * 10 + 2), [i, 'outer'])
+        # A cached list scan or prefix-max window still takes 25 million
+        # comparisons here. Assert work rather than wall-clock timing.
+        self.assertLess(CountedInt.comparisons, size * 80)
