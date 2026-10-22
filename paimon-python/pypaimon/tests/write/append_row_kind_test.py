@@ -365,6 +365,8 @@ def test_partial_batch_projection_uses_columns_and_preserves_schema_metadata(col
     writer.data_writers = {}
     writer._write_columns_by_bucket = {}
     writer._runtime_total_buckets = {}
+    writer._written_buckets = set()
+    writer._ever_written = False
     writer.options = object()
     target = Mock()
     writer._create_data_writer = Mock(return_value=target)

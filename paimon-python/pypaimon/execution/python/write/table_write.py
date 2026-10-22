@@ -234,7 +234,7 @@ class PythonTableWrite:
         writer = self.writer
         if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
             raise TypeError('URI reader factory must provide callable create')
-        if writer.file_store_write.data_writers:
+        if writer.file_store_write._ever_written:
             raise RuntimeError(
                 "with_blob_uri_reader_factory must be called before any "
                 "write operation."

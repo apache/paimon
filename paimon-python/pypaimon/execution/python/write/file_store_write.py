@@ -36,6 +36,7 @@ from pypaimon.table.bucket_mode import BucketMode
 
 
 logger = logging.getLogger(__name__)
+_MIN_COMMIT_IDENTIFIER = -(1 << 63)
 
 
 class FileStoreWrite:
@@ -55,12 +56,18 @@ class FileStoreWrite:
             check_supported(table)
 
         self.table: FileStoreTable = table
+        self._commit_user = commit_user
         self.data_writers: Dict[Tuple, DataWriter] = {}
         # Like Java's per-bucket writer factory, existing writers retain the
         # requested layout even when the factory changes for future buckets.
         # DataWriter.write_cols may instead describe optimized physical files.
         self._write_columns_by_bucket = {}
         self._runtime_total_buckets: Dict[Tuple, int] = {}
+        self._last_modified_commit_identifiers = {}
+        self._written_buckets = set()
+        # Factory lifecycle guards survive idle retirement of every bucket.
+        self._ever_written = False
+        self._prepared_writer_lifecycle = None
         self.max_seq_numbers: dict = {}
         self.restore_snapshot_id = None
         self.write_cols = None
@@ -102,6 +109,7 @@ class FileStoreWrite:
         if write_columns is not None:
             data = project_arrow_batch(data, write_columns)
         writer.write(data)
+        self._written_buckets.add(key)
 
     def _new_bucket_writer(self, partition, bucket):
         columns = tuple(self.write_cols) if self.write_cols is not None else None
@@ -109,6 +117,7 @@ class FileStoreWrite:
         key = (partition, bucket)
         self.data_writers[key] = writer
         self._write_columns_by_bucket[key] = columns
+        self._ever_written = True
 
     def _write_columns_for(self, partition, bucket):
         return self._write_columns_by_bucket.get((partition, bucket), self.write_cols)
@@ -153,6 +162,7 @@ class FileStoreWrite:
         writer = self.data_writers[key]
         if hasattr(writer, 'write_row'):
             writer.write_row(row)
+            self._written_buckets.add(key)
             return
 
         data = row_values_to_arrow_table(
@@ -163,6 +173,7 @@ class FileStoreWrite:
         from pypaimon.write.row_kind import with_row_kind
         data = with_row_kind(self.table, data, row)
         writer.write(data.to_batches()[0])
+        self._written_buckets.add(key)
 
     def roll_before_group_if_needed(self, row_count: int):
         for writer in self.data_writers.values():
@@ -374,11 +385,17 @@ class FileStoreWrite:
     def _prepare_commit_messages(self, commit_identifier) -> List[CommitMessage]:
         """Collect files while their parent is still preparing the complete increment."""
         self.commit_identifier = commit_identifier
+        self._prepared_writer_lifecycle = None
+        # Resolve metadata before draining any writer, so lookup failures leave
+        # every partition's pending rows and prepared files available for retry.
+        idle_writers = self._idle_append_writers()
         commit_messages = []
+        modified_writers = set()
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
             changelog_files = writer.prepare_changelog_commit()
             if committed_files or changelog_files:
+                modified_writers.add((partition, bucket))
                 commit_message = CommitMessage(
                     partition=partition,
                     bucket=bucket,
@@ -387,13 +404,75 @@ class FileStoreWrite:
                     total_buckets=self._runtime_total_buckets.get(partition),
                 )
                 commit_messages.append(commit_message)
+        self._prepared_writer_lifecycle = (
+            commit_identifier, modified_writers, idle_writers - modified_writers)
         return commit_messages
 
+    def _idle_append_writers(self):
+        if self.table.is_primary_key_table or not any(
+                identifier != _MIN_COMMIT_IDENTIFIER
+                for identifier in self._last_modified_commit_identifiers.values()):
+            # Like Java, the first prepare must retain all newly opened writers.
+            return set()
+        mode = self.table.bucket_mode()
+        if mode not in (BucketMode.BUCKET_UNAWARE, BucketMode.HASH_FIXED):
+            return set()
+        idle = set(self.data_writers).difference(self._written_buckets)
+        if not idle or mode == BucketMode.BUCKET_UNAWARE:
+            return idle
+        latest_identifier = self._latest_committed_identifier_from_filesystem()
+        if latest_identifier is None:
+            return set()
+        return {key for key in idle
+                if self._last_modified_commit_identifiers.get(key, _MIN_COMMIT_IDENTIFIER) < latest_identifier}
+
+    def _latest_committed_identifier_from_filesystem(self):
+        # Java FileSystemWriteRestore uses filesystem snapshots for writer
+        # cleanup, independently of catalog loaders and a caller's read view.
+        manager = self.table.snapshot_manager()
+        try:
+            snapshot = manager._get_latest_snapshot_from_filesystem()
+        except FileNotFoundError:
+            return None
+        while snapshot is not None:
+            if snapshot.commit_user == self._commit_user:
+                return snapshot.commit_identifier
+            if snapshot.id <= 1:
+                break
+            try:
+                snapshot = manager.get_snapshot_by_id(snapshot.id - 1)
+            except FileNotFoundError:
+                # Expiration can race the exists/read pair. A gap ends the
+                # search; permission, transport and decoding errors propagate.
+                break
+        return None
+
     def _release_prepared_files(self):
+        lifecycle = self._prepared_writer_lifecycle
+        if lifecycle is not None:
+            _, _, retired = lifecycle
+            # All data/index preparations succeeded. Close idle writers before
+            # releasing metadata, so a close failure can still retry the files
+            # prepared by active writers in this checkpoint.
+            for key in retired:
+                self.data_writers[key].close()
         # Hand off only after every partition prepared successfully. Until
         # then, close/abort must still clean up files from earlier partitions.
         for writer in self.data_writers.values():
             writer._release_prepared_files()
+        if lifecycle is not None:
+            identifier, modified, retired = lifecycle
+            for key in modified:
+                self._last_modified_commit_identifiers[key] = identifier
+            for key in retired:
+                del self.data_writers[key]
+                self._write_columns_by_bucket.pop(key, None)
+                self._last_modified_commit_identifiers.pop(key, None)
+            partitions = {partition for partition, _ in self.data_writers}
+            for partition in set(self._runtime_total_buckets).difference(partitions):
+                del self._runtime_total_buckets[partition]
+        self._written_buckets.clear()
+        self._prepared_writer_lifecycle = None
         # Existing bucket writers keep their advancing sequence counters. A
         # bucket opened after this checkpoint must restore from the latest
         # snapshot rather than reuse another bucket's earlier partition scan.
@@ -406,6 +485,9 @@ class FileStoreWrite:
         self.data_writers.clear()
         self._write_columns_by_bucket.clear()
         self._runtime_total_buckets.clear()
+        self._last_modified_commit_identifiers.clear()
+        self._written_buckets.clear()
+        self._prepared_writer_lifecycle = None
 
     def abort(self):
         """Abort all data writers and clean up files produced by this write."""
@@ -417,6 +499,9 @@ class FileStoreWrite:
         self.data_writers.clear()
         self._write_columns_by_bucket.clear()
         self._runtime_total_buckets.clear()
+        self._last_modified_commit_identifiers.clear()
+        self._written_buckets.clear()
+        self._prepared_writer_lifecycle = None
 
     def _seq_number_stats(self, partition: Tuple) -> Dict[int, int]:
         buckets = self.max_seq_numbers.get(partition)
