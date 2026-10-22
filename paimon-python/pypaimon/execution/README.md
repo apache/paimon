@@ -57,6 +57,7 @@ pypaimon/
   globalindex/                  Public index contracts and backend coordination
     index_dispatch.py           Index selection and Vindex resource ownership
     vindex_input.py             Python SDK/Native callback streams and ownership
+  index/                        Shared index metadata, definitions and input routing
   table/source/
     search_dispatch.py          Search selection and transported-plan coordination
   table/system/                 SystemSplit metadata and common Arrow output
@@ -77,6 +78,7 @@ pypaimon/
       write/                    File writers, committers and update execution
         external_path_provider.py Per-writer external file placement strategies
       globalindex/              Index file codecs, readers, writers and build algorithms
+      index/                    Primary-key index source selection and sorted-index grouping
       merge_engine_dispatch.py  Python merge-function selection
     native/
       runtime.py                Lazy SDK discovery and process safety
@@ -103,6 +105,11 @@ Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.
 `DeletionFile` and `DeletionVectorMeta` remain shared metadata in `table/source`
 and `index`; importing or transporting them does not load either backend.
+
+Primary-key index source selection, payload eligibility and sorted-index coverage
+planning belong to `execution/python/index`. Index definitions, source metadata
+and their wire formats remain in `index`, shared with public builders and Native
+adapters. Native index planning performs source selection and grouping in Rust.
 
 Arrow read schemas and logical type-change rules stay in `schema`. Shared
 numeric, calendar and metadata text helpers stay in `utils`; Native read and

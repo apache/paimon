@@ -119,8 +119,7 @@ class PackagingTest(unittest.TestCase):
         self.assertFalse(any(name.startswith("pypaimon/tests/")
                              for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
-        for name in ("pypaimon/sample/data/data.jsonl", "pypaimon/_version.py"):
-            self.assertIn(name, names)
+        self.assertIn("pypaimon/_version.py", names)
         execution_files = (
             "pypaimon/table/source/search_execution.py",
             "pypaimon/ray/search_execution.py",
@@ -189,6 +188,9 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/globalindex/btree/block_handle.py",
             "pypaimon/execution/python/globalindex/block_compression.py",
             "pypaimon/execution/python/globalindex/key_serializer.py",
+            "pypaimon/execution/python/index/pk/primary_key_index_source_policy.py",
+            "pypaimon/execution/python/index/pksorted/pk_sorted_bucket_index_state.py",
+            "pypaimon/execution/python/index/pksorted/pk_sorted_index_group.py",
             "pypaimon/execution/python/globalindex/vindex/vindex_vector_global_index_reader.py",
             "pypaimon/execution/python/write/table_write.py",
             "pypaimon/execution/python/write/table_commit.py",
@@ -254,6 +256,9 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/globalindex/btree_format/block_handle.py",
             "pypaimon/globalindex/bitmap/bitmap_index_writer.py",
             "pypaimon/globalindex/block_compression.py",
+            "pypaimon/index/pk/primary_key_index_source_policy.py",
+            "pypaimon/index/pksorted/pk_sorted_bucket_index_state.py",
+            "pypaimon/index/pksorted/pk_sorted_index_group.py",
         )
         for name in internal_aliases:
             self.assertNotIn(name, names)

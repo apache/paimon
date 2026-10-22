@@ -24,7 +24,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
-from pypaimon.index.pk.primary_key_index_source_policy import (
+from pypaimon.execution.python.index.pk.primary_key_index_source_policy import (
     should_read as _should_read_source)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
