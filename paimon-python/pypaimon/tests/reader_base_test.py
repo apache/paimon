@@ -29,6 +29,7 @@ import pyarrow as pa
 import pytest
 from parameterized import parameterized
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -302,9 +303,10 @@ class ReaderBasicTest(unittest.TestCase):
 
         # to test GenericRow ability
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
-            manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name, lambda row: file_scanner._filter_manifest_entry(row), False)
 
         if stats_mode == 'full':
             self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
@@ -652,10 +654,11 @@ class ReaderBasicTest(unittest.TestCase):
         pk_read_builder = pk_table.new_read_builder()
         pk_table_scan = pk_read_builder.new_scan()
         latest_snapshot = pk_table.snapshot_manager().get_latest_snapshot()
-        pk_manifest_files = pk_table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        pk_manifest_entries = pk_table_scan.file_scanner.manifest_file_manager.read(
+        pk_file_scanner = PythonTableScan(pk_table_scan)._file_scanner()
+        pk_manifest_files = pk_file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        pk_manifest_entries = pk_file_scanner.manifest_file_manager.read(
             pk_manifest_files[0].file_name,
-            lambda row: pk_table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: pk_file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -669,7 +672,7 @@ class ReaderBasicTest(unittest.TestCase):
                          f"table.fields should NOT contain system fields, but got: {pk_table_field_names}")
 
         if pk_file_meta.value_stats_cols is None:
-            pk_value_stats_fields = pk_table_scan.file_scanner.manifest_file_manager._get_value_stats_fields(
+            pk_value_stats_fields = pk_file_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': None},
                 pk_table.fields
             )
@@ -727,10 +730,11 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -1240,10 +1244,11 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
+            lambda row: file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -1296,7 +1301,7 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
             
-            value_stats_fields = table_scan.file_scanner.manifest_file_manager._get_value_stats_fields(
+            value_stats_fields = file_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': file_meta.value_stats_cols},
                 table.fields
             )

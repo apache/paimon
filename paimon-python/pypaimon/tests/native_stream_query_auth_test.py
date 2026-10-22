@@ -28,7 +28,7 @@ from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.consumer.consumer_manager import ConsumerManager
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
+from pypaimon.read.streaming_table_scan import StreamTableScan
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
@@ -113,18 +113,13 @@ def _frame(builder, native, snapshot=None):
     with patch('pypaimon.execution.python.read.streaming_table_scan.AsyncStreamingTableScan',
                side_effect=AssertionError('Native stream fell back')) if native else ExitStack():
         scan = builder.new_streaming_scan()
-    if native:
+    try:
         assert isinstance(scan, StreamTableScan)
         if snapshot is not None:
             scan.restore(snapshot.id)
         return scan.plan()
-    try:
-        if snapshot is None:
-            snapshot = builder.table.snapshot_manager().get_latest_snapshot()
-            return scan._create_initial_plan(snapshot)
-        return scan._create_follow_up_plan(snapshot)
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('kinds', [False, True])
@@ -269,12 +264,11 @@ def test_custom_authorization_environment_keeps_its_python_policy(source, custom
     selected.catalog_environment = custom
     builder = selected.new_stream_read_builder().with_projection(['id'])
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, AsyncStreamingTableScan)
+    assert isinstance(scan, StreamTableScan)
     try:
-        snapshot = selected.snapshot_manager().get_latest_snapshot()
-        assert _rows(builder, scan._create_initial_plan(snapshot), False) == [{'id': 2}]
+        assert _rows(builder, scan.plan(), False) == [{'id': 2}]
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('native', [False, True])

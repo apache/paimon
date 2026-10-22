@@ -83,14 +83,11 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
                 stack.enter_context(patch(
                     'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
                     side_effect=AssertionError('Python incremental planning')))
-            if native:
-                if mode != 'initial':
-                    scan.restore(snapshot.id)
-                plan = scan.plan()
-            else:
-                plan = getattr(scan, '_create_{}_plan'.format(mode))(snapshot)
+            if mode != 'initial':
+                scan.restore(snapshot.id)
+            plan = scan.plan()
         if plan is None:
-            assert native and mode != 'initial'
+            assert mode != 'initial'
             assert scan.checkpoint() == snapshot.id + 1
             return None, []
         reader = builder.new_read()
@@ -106,8 +103,7 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
         return plan, sorted(rows, key=lambda row: (row.get('id', 0), repr(row)))
     finally:
-        if getattr(scan, '_prefetch_executor', None) is not None:
-            scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('engine', ['deduplicate', 'first-row'])

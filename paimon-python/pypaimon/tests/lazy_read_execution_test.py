@@ -181,7 +181,7 @@ def test_native_read_stream_falls_back_before_planning(table, runtime_available)
                   side_effect=RuntimeError('prepare')) as native:
         scan = table.new_stream_read_builder().new_streaming_scan()
         try:
-            assert isinstance(scan, AsyncStreamingTableScan)
+            assert isinstance(scan._execution, AsyncStreamingTableScan)
             assert scan.plan() is None
         finally:
             scan.close()

@@ -34,8 +34,9 @@ from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.table_scan import TableScan, validate_auth_rules
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_request import ScanRequest
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.special_fields import SpecialFields
 
@@ -116,6 +117,9 @@ def _make_scan(auth_result, read_type, table):
     scan._query_auth_fn = lambda select: auth_result
     scan._read_type = read_type
     scan.table = table
+    scan.limit = None
+    scan._file_scanner = None
+    scan._scan_configuration = ScanRequest()
     return scan
 
 
@@ -546,7 +550,7 @@ class TestCodexReviewFindings(unittest.TestCase):
         self.assertIn("masked too", str(ctx.exception))
 
     def test_streaming_scan_validates_like_the_batch_scan(self):
-        from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+        from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
         auth = TableQueryAuthResult(None, {"email": _null_mask()})
         fields = [_string_field(0, "id"), _string_field(1, "mail")]
         scan = AsyncStreamingTableScan.__new__(AsyncStreamingTableScan)

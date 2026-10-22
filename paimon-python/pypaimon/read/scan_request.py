@@ -62,6 +62,7 @@ class ScanRequest:
     read_limit: Optional[int] = None
     partition_filter: Optional[Predicate] = None
     read_type: Optional[Tuple[DataField, ...]] = None
+    file_filters: Optional[Tuple[bool, bool]] = None
 
     @classmethod
     def for_table(cls, table, predicate=None, limit=None, partition_predicate=None):

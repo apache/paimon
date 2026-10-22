@@ -525,7 +525,8 @@ class FileStoreWrite:
                                   else predicate_builder.equal(key, value))
         partition_filter = predicate_builder.and_predicates(sub_predicates)
 
-        scanner = read_builder.with_filter(partition_filter).new_scan().file_scanner
+        from pypaimon.execution.python.read.table_scan import PythonTableScan
+        scanner = PythonTableScan(read_builder.with_filter(partition_filter).new_scan())._file_scanner()
         # Sequence restoration reads file metadata, not query results. As in
         # Java's writer scan, include L0 and do not require SELECT or apply row
         # filters/masks to internal state. Public plan_all_files stays guarded.

@@ -25,6 +25,7 @@ def dynamic_bucket_data_buckets(table, partition, snapshot):
     read_builder = bucket_read_builder(table, partition, snapshot)
     # This internal manifest lookup returns no rows and must include every
     # live bucket, independently of a SELECT policy or level-zero read option.
-    scanner = read_builder.new_scan().file_scanner
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    scanner = PythonTableScan(read_builder.new_scan())._file_scanner()
     scanner.skip_level0 = False
     return {entry.bucket for entry in scanner.plan_files()}

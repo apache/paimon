@@ -23,6 +23,7 @@ from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
 from pypaimon.read.scan_config import validate_scan_options
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
+from pypaimon.utils.range import Range
 
 
 def _resolve_incremental_snapshot_range(table):
@@ -144,9 +145,32 @@ class PythonTableScan:
             skip_level0=scan.table.options.batch_scan_skip_level0(),
         )
 
+    def _file_scanner(self):
+        """Return the private Python scanner without entering public dispatch."""
+        scan = self._scan
+        scanner = getattr(scan, '_python_file_scanner', None)
+        if scanner is None:
+            scanner = self._create_file_scanner()
+            request = scan._scan_request()
+            if request.idx_of_this_subtask is not None:
+                scanner.with_shard(request.idx_of_this_subtask, request.number_of_para_subtasks)
+            if request.start_pos_of_this_subtask is not None:
+                scanner.with_slice(request.start_pos_of_this_subtask, request.end_pos_of_this_subtask)
+            if request.global_index_result is not None:
+                scanner.with_global_index_result(request.global_index_result)
+            if request.row_ranges is not None:
+                scanner.with_row_ranges([Range(start, end) for start, end in request.row_ranges])
+            if request.chunk_shuffle is not None:
+                scanner.with_chunk_shuffle(*request.chunk_shuffle)
+            public_scanner = getattr(scan, '_file_scanner', None)
+            if getattr(type(public_scanner), '_is_dispatch_file_scanner', False) is True:
+                public_scanner._configure_python_scanner(scanner)
+            scan._python_file_scanner = scanner
+        return scanner
+
     def _scanner(self, auth_result):
         scan = self._scan
-        scanner = scan.file_scanner
+        scanner = self._file_scanner()
         if scan._query_auth_fn is not None:
             prune_scanner_by_auth(scan.table, scanner, auth_result)
         return scanner

@@ -98,8 +98,18 @@ Neither backend imports the other. Native adapters do not construct or retain
 Python executors. Python implementations do not load the optional Native SDK
 just because it is installed. Planning, reading, writing and committing retain
 independent options; shared plans and commit messages connect those stages.
-Explicit access to an existing Python scanner/router/committer property selects
-that implementation. Ordinary configuration and metadata inspection do not.
+The public `TableScan.file_scanner`, `AsyncStreamingTableScan` and
+`StreamTableScan` are backend-neutral facades, including direct construction.
+Accessing file configuration does not construct a Python scanner. File plans
+require unrestricted whole-table authorization because they expose raw file
+metadata. Internal writer metadata restoration uses the selected executor's
+private scanner and retains its write authorization boundary.
+
+Manifest-source and follow-up-scanner callbacks belong to Python execution
+internals. Public scanner configuration selects the existing snapshot, delta
+or changelog strategies without accepting custom scanner callbacks. Explicit
+Python router/committer properties retain their implementation-specific APIs.
+Ordinary configuration and metadata inspection do not select that backend.
 
 Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.

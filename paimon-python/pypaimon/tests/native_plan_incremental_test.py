@@ -332,7 +332,7 @@ def test_incremental_does_not_evaluate_endpoint_global_indexes(catalog, native):
 
 
 def test_incremental_rejects_manifest_delete_before_reconciliation(catalog, native):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
     table = _table(catalog, 'invalid_delta', True)
     _write(table, 100, [{'k': 1, 'v': 'old'}])
     _write(table, 200, [{'k': 1, 'v': 'new'}], overwrite=True)
@@ -352,7 +352,7 @@ def test_incremental_rejects_manifest_delete_before_reconciliation(catalog, nati
 
 def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
     import pyarrow.parquet as pq
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
     table = _table(catalog, 'row_kinds', True, {'bucket': '1'})
     scan = AsyncStreamingTableScan(table, prefetch_enabled=False)
     expected = []

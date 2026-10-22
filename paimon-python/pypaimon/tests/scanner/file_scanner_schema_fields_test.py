@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
@@ -121,7 +122,7 @@ def test_transported_query_auth_files_retain_snapshot_statistics(tmp_path, guard
     table = table.copy({'query-auth.enabled': str(guarded).lower()})
     snapshot = table.snapshot_manager().get_latest_snapshot()
     manifests = ManifestListManager(table).read_all(snapshot)
-    scanner = table.new_read_builder().new_scan().file_scanner
+    scanner = PythonTableScan(table.new_read_builder().new_scan())._file_scanner()
     entries = scanner.read_manifest_entries(manifests)
     assert len(entries) == 1
     # Core validates the complete transported metadata against the snapshot.

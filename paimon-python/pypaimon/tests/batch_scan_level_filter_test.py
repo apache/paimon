@@ -136,7 +136,7 @@ def test_copy_can_disable_persisted_merge_on_read(tmp_path, native, override):
 
 
 def test_first_row_streaming_and_overwrite_see_uncompacted_files(tmp_path):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 
     table = _table(tmp_path, 'first-row', False, False)
     _write(table, [{'id': 1, 'v': 'before'}], 100)

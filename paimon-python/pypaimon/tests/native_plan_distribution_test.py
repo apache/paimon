@@ -115,8 +115,9 @@ class _DistributionFixture:
                 stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
                     'distributed native plan fell back to Python')))
                 if table.is_primary_key_table and not table.options.global_index_enabled():
-                    stack.enter_context(patch.object(
-                        scan.file_scanner, '_apply_push_down_limit', side_effect=AssertionError(
+                    stack.enter_context(patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner._apply_push_down_limit',
+                        side_effect=AssertionError(
                             'PK shard LIMIT was applied in Python')))
             plan = scan.plan()
         if native:

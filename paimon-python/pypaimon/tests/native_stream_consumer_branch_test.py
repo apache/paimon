@@ -28,7 +28,7 @@ from pypaimon import Schema
 from pypaimon.common.identifier import Identifier
 from pypaimon.consumer.consumer import Consumer
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
+from pypaimon.read.streaming_table_scan import StreamTableScan
 from pypaimon.tests import native_plan_rest_test
 
 
@@ -69,12 +69,12 @@ def _tables(catalog, native, branch_snapshot):
 def _read_and_acknowledge(table, native):
     builder = table.new_stream_read_builder().with_consumer_id('job').with_poll_interval_ms(1)
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, StreamTableScan if native else AsyncStreamingTableScan)
+    assert isinstance(scan, StreamTableScan)
     if not native:
         # Keep this regression independent of the optional prefetch worker.
-        scan._prefetch_executor.shutdown(wait=True)
-        scan._prefetch_executor = None
-        scan._prefetch_enabled = False
+        scan._execution._prefetch_executor.shutdown(wait=True)
+        scan._execution._prefetch_executor = None
+        scan._execution._prefetch_enabled = False
 
     async def consume():
         iterator = scan.stream()
