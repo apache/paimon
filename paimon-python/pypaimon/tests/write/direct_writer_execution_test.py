@@ -18,6 +18,7 @@
 """Direct public writer construction shares the builder execution boundary."""
 
 from contextlib import ExitStack, contextmanager
+import inspect
 from pathlib import Path
 import subprocess
 import sys
@@ -130,6 +131,44 @@ def test_direct_writer_metadata_inspection_does_not_select_python(tmp_path, writ
                 assert writer.batch_committed is False
             create.assert_called_once_with(table)
             core.close.assert_not_called()
+        finally:
+            writer.close()
+
+
+@pytest.mark.parametrize('writer_class', WRITERS)
+@pytest.mark.parametrize('native', [False, True])
+def test_direct_writer_public_api_is_backend_independent(tmp_path, writer_class, native):
+    table, _ = _table(tmp_path, writer_class)
+    schema = PyarrowFieldParser.from_paimon_schema(table.fields)
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(_native_backend())
+        else:
+            stack.enter_context(patch(
+                'pypaimon.execution.native.write.native_write.create_native_write', return_value=None))
+        writer = _construct(writer_class, table)
+        try:
+            assert type(writer) is writer_class
+            assert writer.table is table
+            assert writer.commit_user == 'direct-writer'
+            assert writer.static_partition is None
+            assert writer.table_pyarrow_schema == schema
+            assert writer.restore_snapshot_id is None
+            if isinstance(writer, BatchTableWrite):
+                assert writer.batch_committed is False
+            else:
+                assert not hasattr(writer, 'batch_committed')
+            if writer_class is TableWrite:
+                # The base API intentionally leaves preparation to its subclass.
+                # Discovering optional methods must not leak the selected executor.
+                assert not hasattr(writer, 'prepare_commit')
+            else:
+                parameters = list(inspect.signature(writer.prepare_commit).parameters.values())
+                if writer_class is StreamTableWrite:
+                    assert [parameter.name for parameter in parameters] == ['commit_identifier']
+                    assert parameters[0].default is inspect.Parameter.empty
+                else:
+                    assert not parameters
         finally:
             writer.close()
 

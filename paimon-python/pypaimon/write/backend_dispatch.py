@@ -81,7 +81,8 @@ def _initialize_python_write(owner, table, commit_user, static_partition, stream
         execution.initialize(table, commit_user, static_partition,
                              restore_snapshot_id=restore_snapshot_id)
     owner._execution = execution
-    if not stream:
+    from pypaimon.write.table_write import BatchTableWrite
+    if isinstance(owner, BatchTableWrite):
         owner.__dict__['batch_committed'] = False
 
 
@@ -110,6 +111,9 @@ def initialize_write(owner, table, commit_user, static_partition=None, stream=Fa
         _initialize_python_write(owner, table, commit_user, static_partition, stream,
                                  restore_snapshot_id, fixed_bucket, bucket_plan)
     else:
+        owner.table = table
+        owner.commit_user = commit_user
+        owner.static_partition = static_partition
         execution._public_writer = owner
         owner._execution = execution
 
