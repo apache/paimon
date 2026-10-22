@@ -46,7 +46,7 @@ import org.apache.spark.sql.connector.catalog.{CatalogPlugin, CatalogV2Util, Col
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
-import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
+import org.apache.spark.sql.execution.{FormatTableFileIndex, SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
@@ -453,7 +453,10 @@ object Spark4Shim {
       parameters: Map[String, String],
       userSpecifiedSchema: Option[StructType],
       override val partitionSchema: StructType)
-    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema) {
+    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
+    with FormatTableFileIndex {
+
+    override val tableOptions: Map[String, String] = parameters
 
     override def partitionSpec(): PartitionSpec = {
       SparkFormatTable.alignPartitionSpec(super.partitionSpec(), partitionSchema)
