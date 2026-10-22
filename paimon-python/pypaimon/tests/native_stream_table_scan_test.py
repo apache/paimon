@@ -157,7 +157,8 @@ def test_bucket_filter_is_applied_to_every_streaming_frame(tmp_path, mode, selec
     python_plan, expected = _frame(table, snapshot, mode, False, callback, predicate=predicate)
     native_plan, actual = _frame(table, snapshot, mode, True, callback, predicate=predicate)
     assert actual == expected
-    splits = python_plan.splits() + (native_plan.splits() if native_plan is not None else [])
+    splits = ((python_plan.splits() if python_plan is not None else [])
+              + (native_plan.splits() if native_plan is not None else []))
     assert all(split.bucket in selected for split in splits)
     if not selected:
         assert not actual and (native_plan is None or not native_plan.splits())

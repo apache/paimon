@@ -25,6 +25,7 @@ The independent plan/read/write/commit options keep their existing meaning.
 import logging
 import sys
 
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.write.commit_identifier import validate_commit_identifier
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ def try_prepare_native(factory, *args, **kwargs):
         return factory(*args, **kwargs)
     except Exception as error:
         propagate_fork_safety_error(error)
+        if isinstance(error, TableNoPermissionException):
+            raise
         logger.debug('Native execution preparation failed; using Python: %s', error)
         return None
 
@@ -319,6 +322,8 @@ def create_python_merge_into_operation(
 
 def create_shard_update_execution(owner, table, projection, columns, commit_user, shard, shard_count):
     """Select the direct shard constructor's backend before capturing files."""
+    from pypaimon.write.update_validation import _authorize_update
+    _authorize_update(table)
     native = prepare_native_write_operation(
         'shard_update', table, commit_user, projection, columns, shard, shard_count)
     if native is not None:
@@ -328,9 +333,8 @@ def create_shard_update_execution(owner, table, projection, columns, commit_user
 
 def create_row_id_update_execution(table, commit_user, commit_identifier, precomputed=None):
     """Select one incremental updater before capturing target files."""
-    if precomputed is not None:
-        from pypaimon.write.update_validation import _authorize_update
-        _authorize_update(table)
+    from pypaimon.write.update_validation import _authorize_update
+    _authorize_update(table)
     if precomputed is None:
         native = prepare_native_write_operation('update_by_row_id', table, commit_user, commit_identifier)
         if native is not None:
@@ -340,9 +344,8 @@ def create_row_id_update_execution(table, commit_user, commit_identifier, precom
 
 def create_row_id_delete_execution(table, precomputed=None):
     """Keep precomputed broadcast metadata within its selected Python executor."""
-    if precomputed is not None:
-        from pypaimon.write.update_validation import _authorize_update
-        _authorize_update(table)
+    from pypaimon.write.update_validation import _authorize_update
+    _authorize_update(table)
     if precomputed is None and table.options.native_write_enabled():
         def prepare():
             from pypaimon.execution.native.write.native_update import create_native_row_id_delete

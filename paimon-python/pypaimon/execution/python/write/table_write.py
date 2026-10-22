@@ -343,7 +343,7 @@ class PythonTableWrite:
     def _write_routing_columns(self):
         table = self.writer.table
         routing = set(table.partition_keys)
-        if table.options.bucket() > 1:
+        if table.options.bucket() > 0:
             routing.update(table.table_schema.bucket_keys)
         row_kind = table.options.options.to_map().get('rowkind.field')
         if row_kind is not None:

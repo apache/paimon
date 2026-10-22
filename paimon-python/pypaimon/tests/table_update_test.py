@@ -85,6 +85,8 @@ def test_python_row_id_delete_reports_unsupported_table_capabilities(missing_met
     from pypaimon.write.table_delete import TableDeleteByRowId
 
     table = mock.Mock()
+    table.options.native_write_enabled.return_value = False
+    table.catalog_environment.table_query_auth.return_value = None
     table.options.data_evolution_enabled.return_value = True
     table.options.row_tracking_enabled.return_value = True
     table.options.deletion_vectors_enabled.return_value = True
@@ -98,6 +100,8 @@ def test_python_row_id_delete_keeps_invalid_input_as_value_error():
     from pypaimon.write.table_delete import TableDeleteByRowId
 
     table = mock.Mock()
+    table.options.native_write_enabled.return_value = False
+    table.catalog_environment.table_query_auth.return_value = None
     table.options.data_evolution_enabled.return_value = True
     table.options.row_tracking_enabled.return_value = True
     table.options.deletion_vectors_enabled.return_value = True

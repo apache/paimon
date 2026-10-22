@@ -59,6 +59,7 @@ class TableUpdateOperations:
             raise ValueError('Shard index must be smaller than a positive shard count')
         if context.update_cols == []:
             raise ValueError('Shard update columns must not be empty')
+        _authorize_update(context.table)
         native = prepare_native_write_operation(
             'shard_update',
             context.table,

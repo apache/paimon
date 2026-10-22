@@ -29,6 +29,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
@@ -254,6 +255,85 @@ def _restricted(server, table, policy):
         AuthTableQueryResponse(column_masking={'name': json.dumps({'name': 'CONCAT', 'inputs': ['masked']})}))
     server.table_query_auth_store[table.identifier.get_full_name()] = response
     return patch.object(server, '_table_query_auth_handle', wraps=server._table_query_auth_handle)
+
+
+def _new_update_executor(table, entrypoint):
+    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+    from pypaimon.write.table_delete import TableDeleteByRowId
+    from pypaimon.write.table_update import ShardTableUpdator
+    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+    builder = table.new_stream_write_builder() if entrypoint == 'stream' else table.new_batch_write_builder()
+    if entrypoint == 'direct-update':
+        return TableUpdateByRowId(table, builder.commit_user, BATCH_COMMIT_IDENTIFIER)
+    if entrypoint == 'direct-delete':
+        return TableDeleteByRowId(table)
+    if entrypoint == 'direct-shard':
+        return ShardTableUpdator(table, ['id'], ['value'], builder.commit_user, 0, 1)
+    update = builder.new_update().with_update_type(['value'])
+    update.with_read_projection(['id'])
+    return update.new_shard_updator(0, 1)
+
+
+@pytest.mark.parametrize('entrypoint', ['batch', 'stream', 'direct-shard', 'direct-update', 'direct-delete'])
+@pytest.mark.parametrize('policy', ['denied', 'filter', 'mask'])
+def test_update_authorization_refusal_precedes_backend_selection(rest_catalog, entrypoint, policy):
+    catalog, server = rest_catalog
+    table = _table(catalog, True, seed=False)
+    before = _files(table)
+    with ExitStack() as stack:
+        authorize = stack.enter_context(_restricted(server, table, policy))
+        prepare = [stack.enter_context(patch(path, side_effect=AssertionError(
+            'Backend prepared before authorization: ' + path))) for path in (
+                'pypaimon.write.update_dispatch.prepare_native_write_operation',
+                'pypaimon.write.backend_dispatch.prepare_native_write_operation',
+                'pypaimon.execution.native.write.native_update.create_native_row_id_delete',
+                'pypaimon.write.backend_dispatch.create_python_shard_updator',
+                'pypaimon.write.backend_dispatch.create_python_row_id_update',
+                'pypaimon.write.backend_dispatch.create_python_row_id_delete')]
+        snapshot = stack.enter_context(patch.object(table, 'snapshot_manager',
+                                                    side_effect=AssertionError('Unauthorized snapshot read')))
+        with pytest.raises(TableNoPermissionException):
+            _new_update_executor(table, entrypoint)
+        for factory in prepare:
+            factory.assert_not_called()
+        snapshot.assert_not_called()
+        authorize.assert_called_once()
+        assert json.loads(authorize.call_args.args[1]).get('select') is None
+    assert _files(table) == before
+
+
+@pytest.mark.parametrize('entrypoint,native_factory', [
+    ('batch', 'create_native_shard_updator'), ('stream', 'create_native_shard_updator'),
+    ('direct-shard', 'create_native_shard_updator'), ('direct-update', 'create_native_update_by_row_id'),
+    ('direct-delete', 'create_native_row_id_delete')])
+def test_native_preparation_permission_refusal_is_not_retried_in_python(rest_catalog, entrypoint, native_factory):
+    catalog, server = rest_catalog
+    table = _table(catalog, True, seed=False)
+    failure = TableNoPermissionException(table.identifier)
+    before = _files(table)
+    with ExitStack() as stack:
+        authorize = stack.enter_context(patch.object(
+            server, '_table_query_auth_handle', wraps=server._table_query_auth_handle))
+        native = stack.enter_context(patch(
+            'pypaimon.execution.native.write.native_update.' + native_factory, side_effect=failure))
+        python = [stack.enter_context(patch(
+            'pypaimon.write.backend_dispatch.' + name,
+            side_effect=AssertionError('Permission refusal selected Python')))
+            for name in ('create_python_shard_updator', 'create_python_row_id_update',
+                         'create_python_row_id_delete')]
+        snapshot = stack.enter_context(patch.object(table, 'snapshot_manager',
+                                                    side_effect=AssertionError('Unauthorized snapshot read')))
+        with pytest.raises(TableNoPermissionException) as raised:
+            _new_update_executor(table, entrypoint)
+        assert raised.value is failure
+        native.assert_called_once()
+        for factory in python:
+            factory.assert_not_called()
+        snapshot.assert_not_called()
+        authorize.assert_called_once()
+        assert json.loads(authorize.call_args.args[1]).get('select') is None
+    assert _files(table) == before
 
 
 @pytest.mark.parametrize('use_native', _ENGINES)

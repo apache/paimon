@@ -146,7 +146,8 @@ class Execution:
 
 native_update.create_native_update_by_row_id = lambda *args: Execution()
 native_update.create_native_row_id_delete = lambda *args: Execution()
-table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True))
+table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True), identifier=object(),
+                        catalog_environment=SimpleNamespace(table_query_auth=lambda *args: None))
 if sys.argv[1] == 'update':
     update = TableUpdateByRowId(table, 'user', BATCH_COMMIT_IDENTIFIER)
     assert update.update_columns(pa.table({'_ROW_ID': [3], 'value': [10]}), ['value']) == ['message']

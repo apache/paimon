@@ -31,6 +31,7 @@ def test_direct_shard_constructor_never_loads_or_replays_python(tmp_path, fails)
     source = r'''
 import importlib.abc
 import sys
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 class BlockPythonExecution(importlib.abc.MetaPathFinder):
@@ -46,7 +47,8 @@ core = Mock()
 core.prepare_commit.return_value = ['prepared']
 core.update_by_arrow_batch.side_effect = failure if sys.argv[1] == 'True' else None
 with patch('pypaimon.write.backend_dispatch.prepare_native_write_operation', return_value=core) as prepare:
-    table = object()
+    table = SimpleNamespace(options=object(), identifier=object(),
+                            catalog_environment=SimpleNamespace(table_query_auth=lambda *args: None))
     shard = ShardTableUpdator(table, ['value'], ['value'], 'writer', 0, 2)
     prepare.assert_called_once_with('shard_update', table, 'writer', ['value'], ['value'], 0, 2)
     assert shard.arrow_reader() is core.arrow_reader.return_value
