@@ -119,14 +119,16 @@ remain unsupported.
 
 Append `with_write_type()` preserves the selected column order. Both the full
 table schema and the selected schema are accepted as Arrow input; only selected
-columns are written. Full Arrow inputs and named Rows can carry partition and
-hash columns used only for routing, independently of the physical write type.
+columns are written. Selected Arrow inputs can also carry partition, hash and
+configured row-kind columns used for routing and event handling. The selected
+columns must retain their declared order. Named Rows bind fields by name.
 Reads restore omitted partition columns from split metadata. Selected-schema
 inputs must include the routing columns they need; `write_arrow(data, bucket=...)`
 also accepts a bucket assigned upstream.
 
 Configure `with_write_type()` before the first effective write. Empty batches
-and ignored events do not lock the selection. After writing, the same ordered
+and ignored events do not lock the selection. Row-to-Arrow encoding failures
+before execution starts also leave it configurable. After writing, the same ordered
 selection can be set again, but changing its columns or their order is rejected,
 including after `prepare_commit()` or idle writer cleanup. Create a new writer
 to use a different write type.

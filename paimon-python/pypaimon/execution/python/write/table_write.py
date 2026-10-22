@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.schema.arrow_schema import (
-    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability)
+    arrow_schemas_compatible, normalize_arrow_strings, normalize_arrow_write_nullability, project_arrow_batch)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.row_utils import (
@@ -303,20 +303,50 @@ class PythonTableWrite:
             return data
         data = writer._normalize_arrow_write_schema(data)
         from pypaimon.write.row_kind import filter_write_batch
-        write_cols = (writer.file_store_write.write_cols
-                      if data.schema.names == writer.table_pyarrow_schema.names else data.schema.names)
+        selected = (writer.file_store_write.write_cols if not table.is_primary_key_table else None)
+        write_cols = selected
+        if selected is None:
+            write_cols = (writer.file_store_write.write_cols
+                          if data.schema.names == writer.table_pyarrow_schema.names else data.schema.names)
         data = filter_write_batch(table, data, write_cols)
         if not data.num_rows:
             return data
+        if selected is not None:
+            routing = self._write_routing_columns()
+            columns = selected + [name for name in data.schema.names
+                                  if name in routing and name not in selected]
+            data = self._project_write_input(data, columns)
+            # Routing fields are not written values. Arrow's whole-table
+            # string cast must not reapply their declared top-level NOT NULL.
+            schema = pa.schema([field if field.name in selected else field.with_nullable(True)
+                                for field in data.schema], metadata=data.schema.metadata)
+            data = (pa.RecordBatch.from_arrays(data.columns, schema=schema) if isinstance(data, pa.RecordBatch)
+                    else pa.Table.from_arrays(data.columns, schema=schema))
         data = normalize_arrow_strings(data)
+        physical = self._project_write_input(data, selected) if selected is not None else data
         target = writer.table_pyarrow_schema
-        if data.schema.names != target.names:
-            target = writer._write_cols_pyarrow_schema(data.schema.names)
+        if physical.schema.names != target.names:
+            target = writer._write_cols_pyarrow_schema(physical.schema.names)
         # Validate only surviving values. Keep the input transport metadata:
         # PyArrow otherwise rejects hidden NULL children of NULL ROW parents.
-        validated = normalize_arrow_write_nullability(data, target)
+        validated = normalize_arrow_write_nullability(physical, target)
         writer._validate_pyarrow_schema(validated.schema)
         return data
+
+    @staticmethod
+    def _project_write_input(data, columns):
+        return (project_arrow_batch(data, columns) if isinstance(data, pa.RecordBatch)
+                else data.select(columns))
+
+    def _write_routing_columns(self):
+        table = self.writer.table
+        routing = set(table.partition_keys)
+        if table.options.bucket() > 1:
+            routing.update(table.table_schema.bucket_keys)
+        row_kind = table.options.options.to_map().get('rowkind.field')
+        if row_kind is not None:
+            routing.add(row_kind)
+        return routing
 
     def _prepare_arrow_schema(self, data):
         # Legacy schema-only callers have no row-kind options to evaluate.
@@ -359,6 +389,17 @@ class PythonTableWrite:
             if writer._is_compatible_pyarrow_schema(
                     data_schema, write_cols_schema, check_nested_nullability=check_nested_nullability):
                 return
+            table = getattr(writer, 'table', None)
+            if table is not None and not table.is_primary_key_table:
+                names = data_schema.names
+                selected = set(write_cols)
+                allowed = selected | self._write_routing_columns()
+                if (len(set(names)) == len(names) and set(names).issubset(allowed)
+                        and [name for name in names if name in selected] == write_cols):
+                    transport_schema = writer._write_cols_pyarrow_schema(names)
+                    if writer._is_compatible_pyarrow_schema(
+                            data_schema, transport_schema, check_nested_nullability=check_nested_nullability):
+                        return
 
         writer._raise_inconsistent_schema(data_schema)
 

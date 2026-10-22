@@ -33,7 +33,7 @@ _ENGINES = [False, pytest.param(True, marks=[pytest.mark.native_plan, pytest.mar
     not native_runtime_available(), reason='pypaimon-rust not installed')])]
 
 
-def _table(tmp_path, native, precomputed=False, unwritten_not_null=False, blob=False):
+def _table(tmp_path, native, precomputed=False, unwritten_not_null=False, blob=False, unwritten_blob=False):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     fields = [pa.field('id', pa.int32()), pa.field('value', pa.int32())]
@@ -41,6 +41,8 @@ def _table(tmp_path, native, precomputed=False, unwritten_not_null=False, blob=F
         fields.append(pa.field('omitted', pa.int32(), nullable=False))
     if blob:
         fields.append(pa.field('payload', pa.large_binary()))
+    if unwritten_blob:
+        fields.append(pa.field('unused_blob', pa.large_binary()))
     schema = pa.schema(fields + [pa.field('pt', pa.string())])
     options = {'write.native.enabled': str(native).lower(), 'commit.native.enabled': 'false',
                'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'}
@@ -344,5 +346,100 @@ def test_failure_after_row_encoding_keeps_the_created_write_type_fixed(tmp_path)
         assert writer.with_write_type(['id', 'pt']) is writer
         with pytest.raises(RuntimeError, match='before any write'):
             writer.with_write_type(['value', 'pt'])
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('backend', ['python', 'native-mock'])
+@pytest.mark.parametrize('inline', ['descriptor', 'view'])
+def test_inline_blob_conversion_failure_does_not_fix_write_type(tmp_path, backend, inline):
+    from pypaimon.execution.native.write.native_write import NativeTableWrite as NativeWrite
+    from pypaimon.table.row.blob import Blob, BlobView
+
+    table = _table(tmp_path, False, blob=True).copy({'blob-%s-field' % inline: 'payload'})
+    builder = table.new_batch_write_builder()
+    core = Mock(spec_set=['with_blob_uri_reader_factory', 'with_write_type', 'write_arrow', 'close'])
+    writer = builder.new_write() if backend == 'python' else NativeWrite(table, 'job', None, False, core)
+    value = Blob.from_data(b'not a descriptor')
+    if inline == 'view':
+        value = Mock(spec=BlobView)
+        value.view_struct.serialize.side_effect = ValueError('cannot serialize view')
+        value.new_input_stream.side_effect = AssertionError('view stream was opened')
+    try:
+        writer.with_write_type(['payload', 'pt'])
+        with pytest.raises(ValueError):
+            writer.write_row(GenericRow([value, 'old'], [table.field_dict[name] for name in ['payload', 'pt']]))
+        assert not list(tmp_path.rglob('*.parquet')) and not list(tmp_path.rglob('*.blob'))
+        if backend == 'python':
+            assert writer.file_store_write.data_writers == {}
+            assert not writer.file_store_write._ever_written
+        else:
+            core.write_arrow.assert_not_called()
+            assert not writer._written
+        assert writer.with_write_type(['value', 'pt']) is writer
+        writer.write_row(GenericRow([20, 'old'], [table.field_dict[name] for name in ['value', 'pt']]))
+        if backend == 'python':
+            commit = builder.new_commit()
+            try:
+                commit.commit(writer.prepare_commit())
+            finally:
+                commit.close()
+            assert _read(table) == [dict(id=None, value=20, payload=None, pt='old')]
+        else:
+            assert core.write_arrow.call_args[0][0].to_pydict() == {'value': [20], 'pt': ['old']}
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('inline', ['descriptor', 'view'])
+def test_inline_blob_wire_validation_failure_keeps_write_type_fixed(tmp_path, inline):
+    table = _table(tmp_path, False, blob=True).copy({'blob-%s-field' % inline: 'payload'})
+    writer = table.new_batch_write_builder().new_write().with_write_type(['payload', 'pt'])
+    try:
+        with pytest.raises(ValueError, match='blob-%s-field' % inline):
+            writer.write_row(GenericRow([b'invalid wire bytes', 'old'],
+                                        [table.field_dict[name] for name in ['payload', 'pt']]))
+        assert writer.file_store_write._ever_written
+        assert writer.with_write_type(['payload', 'pt']) is writer
+        with pytest.raises(RuntimeError, match='before any write'):
+            writer.with_write_type(['value', 'pt'])
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('inline', ['descriptor', 'view'])
+def test_inline_blob_encoding_is_reused_and_unselected_blob_is_untouched(tmp_path, inline):
+    import pyarrow.parquet as pq
+    from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobView, BlobViewStruct
+
+    table = _table(tmp_path, False, blob=True, unwritten_blob=True).copy({'blob-%s-field' % inline: 'payload'})
+    if inline == 'descriptor':
+        descriptor = BlobDescriptor('file:///unused-source', 0, 7)
+        encoded = descriptor.serialize()
+        value = Mock(spec=Blob)
+        value.to_descriptor.side_effect = [descriptor, AssertionError('descriptor encoded twice')]
+    else:
+        encoded = BlobViewStruct('default.upstream', 1, 2).serialize()
+        value = Mock(spec=BlobView)
+        value.view_struct.serialize.side_effect = [encoded, AssertionError('view encoded twice')]
+    value.new_input_stream.side_effect = AssertionError('inline Blob stream was opened')
+    unused = Mock(spec=Blob)
+    unused.to_descriptor.side_effect = AssertionError('unselected Blob was encoded')
+    unused.new_input_stream.side_effect = AssertionError('unselected Blob stream was opened')
+    writer = table.new_batch_write_builder().new_write().with_write_type(['payload', 'pt'])
+    try:
+        names = ['payload', 'unused_blob', 'pt']
+        writer.write_row(GenericRow([value, unused, 'old'], [table.field_dict[name] for name in names]))
+        messages = writer.prepare_commit()
+        paths = [file.file_path for message in messages for file in message.new_files]
+        assert len(paths) == 1
+        assert pq.ParquetFile(paths[0]).read(columns=['payload']).column('payload').to_pylist() == [encoded]
+        if inline == 'descriptor':
+            value.to_descriptor.assert_called_once()
+        else:
+            value.view_struct.serialize.assert_called_once()
+        value.new_input_stream.assert_not_called()
+        unused.to_descriptor.assert_not_called()
+        unused.new_input_stream.assert_not_called()
     finally:
         writer.close()

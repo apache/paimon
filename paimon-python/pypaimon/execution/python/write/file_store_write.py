@@ -24,7 +24,7 @@ import pyarrow as pa
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import is_blob_file_field
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.row_utils import require_columns, row_values_to_arrow_table
+from pypaimon.write.row_utils import inline_blob_value, require_columns, row_values_to_arrow_table
 from pypaimon.schema.arrow_schema import project_arrow_batch
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
@@ -128,11 +128,23 @@ class FileStoreWrite:
         writer = self.data_writers.get(key)
         data = None
         if writer is None and self._has_blob_columns():
-            # Dedicated writers consume live Blobs themselves. Validate only
-            # ordinary selected fields before capturing the writer's layout,
-            # without opening or encoding any selected or unused Blob value.
+            # Dedicated writers consume live payloads themselves. Inline fields
+            # instead encode to Arrow before the writer captures its layout.
+            descriptor_fields = self.options.blob_descriptor_fields()
+            view_fields = self.options.blob_view_fields()
+            inline_columns = [name for name in column_names if name in descriptor_fields or name in view_fields]
+            if inline_columns:
+                values_by_name = dict(values_by_name)
+                for name in inline_columns:
+                    values_by_name[name] = inline_blob_value(
+                        values_by_name[name], name in descriptor_fields, name in view_fields)
+                # Reuse the encoded bytes in the dedicated row path. Keep the
+                # original event kind and leave unselected Blob objects alone.
+                from pypaimon.table.row.generic_row import GenericRow
+                row = GenericRow([values_by_name[name] for name in column_names],
+                                 [self.table.field_dict[name] for name in column_names], row.get_row_kind())
             ordinary_columns = [name for name in column_names
-                                if not is_blob_file_field(self.table.field_dict[name])]
+                                if name in inline_columns or not is_blob_file_field(self.table.field_dict[name])]
             if ordinary_columns:
                 row_values_to_arrow_table(
                     values_by_name, self.table.table_schema.fields, ordinary_columns)

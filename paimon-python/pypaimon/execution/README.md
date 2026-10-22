@@ -211,9 +211,12 @@ replacing the current configuration. Append writers keep one ordered write type
 after their first effective write; empty batches and ignored events do not lock
 it. Repeating the same selection is a no-op, while a different selection requires
 a new writer, including after prepares or idle cleanup. Full-schema inputs are
-projected to the selected columns by name. Native named-row conversion encodes
-these columns and the required routing/event fields in one batch, leaving unused
-payloads untouched.
+projected to the selected columns by name. Selected Arrow inputs may also carry
+routing/event fields while retaining the selected column order. Named-row
+conversion encodes selected ordinary and inline reference fields before capturing
+a bucket writer; encoding failures leave the configuration open. Dedicated live
+Blob payloads are consumed only during execution, and unused payloads remain
+untouched.
 Blob consumers are captured per partition/bucket; changes apply to newly created
 writers, and active writers retain their consumer across prepares. Idle writers
 retire at the Java commit boundary, so reopening uses the current consumer.
