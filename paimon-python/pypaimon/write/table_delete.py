@@ -29,15 +29,15 @@ class TableDeleteByRowId:
     def __init__(self, table, _precomputed_anchor_ranges: Optional['_AnchorRangesInfo'] = None):
         self.table = table
         from pypaimon.write.backend_dispatch import create_row_id_delete_execution
-        self._execution = create_row_id_delete_execution(self, table, _precomputed_anchor_ranges)
+        self._execution = create_row_id_delete_execution(table, _precomputed_anchor_ranges)
 
     @classmethod
     def _from_python(cls, table, _precomputed_anchor_ranges=None):
         """Create within an operation that has already selected Python execution."""
         owner = cls.__new__(cls)
         owner.table = table
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        owner._execution = PythonTableDeleteByRowId().initialize(table, _precomputed_anchor_ranges)
+        from pypaimon.write.backend_dispatch import create_python_row_id_delete
+        owner._execution = create_python_row_id_delete(table, _precomputed_anchor_ranges)
         return owner
 
     def delete(self, row_ids: Sequence[int]) -> List[CommitMessage]:

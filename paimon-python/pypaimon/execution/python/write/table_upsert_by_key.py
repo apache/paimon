@@ -34,7 +34,7 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import require_columns
 from pypaimon.write.update_validation import _authorize_update
-from pypaimon.write.table_write import StreamTableWrite
+from pypaimon.write.backend_dispatch import create_python_write
 
 # Composite key is represented as a tuple of values
 _KeyTuple = Tuple[Any, ...]
@@ -454,7 +454,7 @@ class PythonTableUpsert:
         all_ordered_cols = [c for c in context.table.field_names if c in new_data.column_names]
         new_data = new_data.select(all_ordered_cols)
 
-        table_write = StreamTableWrite(context.table, context.commit_user)
+        table_write = create_python_write(context.table, context.commit_user, stream=True)
         try:
             table_write.with_write_type(all_ordered_cols)
             table_write.write_arrow(new_data)
@@ -469,7 +469,7 @@ class PythonTableUpsert:
         context = self._context
         all_ordered_cols = self._append_row_column_names(row_items)
 
-        table_write = StreamTableWrite(context.table, context.commit_user)
+        table_write = create_python_write(context.table, context.commit_user, stream=True)
         try:
             table_write.with_write_type(all_ordered_cols)
             for row, _ in row_items:

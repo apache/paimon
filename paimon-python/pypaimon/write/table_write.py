@@ -19,8 +19,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.write.backend_dispatch import (
+    get_write_attribute, initialize_write, prepare_batch_write, prepare_write_commit, write_property,
+)
 from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import validate_write_columns
@@ -33,41 +35,46 @@ class TableWrite:
     """Public writer API backed by the selected execution implementation."""
 
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None, *, restore_snapshot_id=None):
-        return self._python_execution().initialize(
-            table, commit_user, static_partition, restore_snapshot_id=restore_snapshot_id)
+        initialize_write(self, table, commit_user, static_partition,
+                         restore_snapshot_id=restore_snapshot_id)
 
-    def _python_execution(self):
-        from pypaimon.execution.python.write.table_write import PythonTableWrite
-        return PythonTableWrite(self)
+    def __getattr__(self, name):
+        return get_write_attribute(self, name)
+
+    file_store_write = write_property('file_store_write')
+    row_key_extractor = write_property('row_key_extractor')
+    table_pyarrow_schema = write_property('table_pyarrow_schema')
+    restore_snapshot_id = write_property('restore_snapshot_id')
+    batch_committed = write_property('batch_committed')
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
-        return self._python_execution().write_arrow(data, bucket)
+        return self._execution.write_arrow(data, bucket)
 
     def write_arrow_batch(self, data: pa.RecordBatch, bucket: Optional[int] = None):
-        return self._python_execution().write_arrow_batch(data, bucket)
+        return self._execution.write_arrow_batch(data, bucket)
 
     def roll_before_group_if_needed(self, row_count: int):
         """Roll current files before the next logical write group if needed."""
-        return self._python_execution().roll_before_group_if_needed(row_count)
+        return self._execution.roll_before_group_if_needed(row_count)
 
     def write_row(self, row):
-        return self._python_execution().write_row(row)
+        return self._execution.write_row(row)
 
     def write_pandas(self, dataframe):
-        return self._python_execution().write_pandas(dataframe)
+        return self._execution.write_pandas(dataframe)
 
     def with_write_type(self, write_cols: List[str]):
         write_cols = validate_write_columns(write_cols)
-        self._python_execution().with_write_type(write_cols)
+        self._execution.with_write_type(write_cols)
         return self
 
     def with_blob_consumer(self, blob_consumer: BlobConsumer):
-        self._python_execution().with_blob_consumer(blob_consumer)
+        self._execution.with_blob_consumer(blob_consumer)
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
-        self._python_execution().with_blob_uri_reader_factory(uri_reader_factory)
+        self._execution.with_blob_uri_reader_factory(uri_reader_factory)
         return self
 
     def write_ray(
@@ -103,16 +110,16 @@ class TableWrite:
                           hash_fixed_precluster, static_partition)
 
     def close(self):
-        return self._python_execution().close()
+        return self._execution.close()
 
     def abort(self):
-        return self._python_execution().abort()
+        return self._execution.abort()
 
     def _distributed_write_options(self, *, overwrite=False):
         return {}
 
     def _prepare_commit(self, commit_identifier):
-        return self._python_execution().prepare_commit(commit_identifier)
+        return prepare_write_commit(self, commit_identifier)
 
 
 class BatchTableWrite(TableWrite):
@@ -120,19 +127,15 @@ class BatchTableWrite(TableWrite):
                  *, restore_snapshot_id=None):
         super().__init__(table, commit_user, static_partition,
                          restore_snapshot_id=restore_snapshot_id)
-        self.batch_committed = False
 
     def prepare_commit(self) -> List[CommitMessage]:
-        if self.batch_committed:
-            raise RuntimeError("BatchTableWrite only supports one-time committing.")
-        self.batch_committed = True
-        return self._prepare_commit(BATCH_COMMIT_IDENTIFIER)
+        return prepare_batch_write(self)
 
 
 class StreamTableWrite(TableWrite):
 
     def __init__(self, table, commit_user, *, restore_snapshot_id=None):
-        super().__init__(table, commit_user, None,
+        initialize_write(self, table, commit_user, stream=True,
                          restore_snapshot_id=restore_snapshot_id)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:

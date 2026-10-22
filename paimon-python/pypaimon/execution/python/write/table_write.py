@@ -39,8 +39,9 @@ from pypaimon.write.input_adapter import _pandas_write_batch
 class PythonTableWrite:
     """Bound Python writer implementing the common write execution protocol."""
 
-    def __init__(self, writer):
+    def __init__(self, writer, public_writer=None):
         self.writer = writer
+        self.public_writer = public_writer if public_writer is not None else writer
 
     def initialize(self, table, commit_user, static_partition: Optional[dict] = None,
                    *, restore_snapshot_id=None):
@@ -87,9 +88,9 @@ class PythonTableWrite:
         # Public batch overrides remain observable for Arrow and pandas input.
         # Schema, routing and preparation helpers stay within this executor.
         if isinstance(data, pa.RecordBatch):
-            return self.writer.write_arrow_batch(data, bucket)
+            return self.public_writer.write_arrow_batch(data, bucket)
         for batch in data.to_batches():
-            self.writer.write_arrow_batch(batch, bucket)
+            self.public_writer.write_arrow_batch(batch, bucket)
 
     def write_arrow_batch(self, data: pa.RecordBatch, bucket: Optional[int] = None):
         writer = self.writer
@@ -204,7 +205,7 @@ class PythonTableWrite:
             pa_schema = writer.table_pyarrow_schema
         record_batch = _pandas_write_batch(
             getattr(writer, 'table', None), dataframe, pa_schema, writer.table_pyarrow_schema)
-        return writer.write_arrow_batch(record_batch)
+        return self.public_writer.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
         writer = self.writer

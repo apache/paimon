@@ -125,6 +125,7 @@ class ArrowSchemaTest(unittest.TestCase):
     @parameterized.expand([('table',), ('batch',)])
     def test_schema_only_writer_normalizes_input(self, entry):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
         source = pa.Table.from_pydict({'text': ['中文', None]}, schema=pa.schema([('text', pa.large_string())]))
@@ -141,6 +142,7 @@ class ArrowSchemaTest(unittest.TestCase):
     @parameterized.expand([('table',), ('batch',)])
     def test_normalization_failure_fails_before_routing(self, entry):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.row_key_extractor = Mock()
         writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
@@ -159,6 +161,7 @@ class ArrowSchemaTest(unittest.TestCase):
     @unittest.skipUnless(int(pa.__version__.split('.')[0]) == 6, 'Arrow 6 lacks struct cast kernels')
     def test_unsupported_nested_cast_fails_before_routing(self):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.row_key_extractor = Mock()
         writer.table_pyarrow_schema = pa.schema([('nested', pa.struct([('text', pa.string())]))])

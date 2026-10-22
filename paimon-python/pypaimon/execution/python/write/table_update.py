@@ -485,13 +485,6 @@ class PythonTableUpdate:
         row_ids = self._matched_delete_row_ids(predicate)
         return self._delete_rows_with_python(row_ids)
 
-    def _new_python_shard_updator(self, shard_num, total_shard_count):
-        context = self._context
-        from pypaimon.write.table_update import ShardTableUpdator
-        return ShardTableUpdator._from_python(
-            context.table, context.projection, context.update_cols,
-            context.commit_user, shard_num, total_shard_count)
-
     def _delete_rows_with_python(self, row_ids):
         context = self._context
         return TableDeleteByRowId._from_python(context.table).delete(list(row_ids))

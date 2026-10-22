@@ -40,7 +40,7 @@ class TableUpdateByRowId(RowIdUpdateInputMixin, metaclass=ABCMeta):
         self.commit_identifier = validate_commit_identifier(commit_identifier)
         from pypaimon.write.backend_dispatch import create_row_id_update_execution
         self._execution = create_row_id_update_execution(
-            self, table, commit_user, self.commit_identifier, _precomputed_files_info)
+            table, commit_user, self.commit_identifier, _precomputed_files_info)
 
     @classmethod
     def _from_python(cls, table, commit_user, commit_identifier, _precomputed_files_info=None):
@@ -49,8 +49,8 @@ class TableUpdateByRowId(RowIdUpdateInputMixin, metaclass=ABCMeta):
         owner.table = table
         owner.commit_user = commit_user
         owner.commit_identifier = validate_commit_identifier(commit_identifier)
-        from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
-        owner._execution = PythonTableUpdateByRowId().initialize(
+        from pypaimon.write.backend_dispatch import create_python_row_id_update
+        owner._execution = create_python_row_id_update(
             table, commit_user, owner.commit_identifier, _precomputed_files_info)
         return owner
 

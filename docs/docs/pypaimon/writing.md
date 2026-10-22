@@ -127,6 +127,11 @@ does not prevent Native updates on tables without VECTOR fields. These operation
 continue to write Parquet/BLOB files; an active dedicated format must still be
 supported by the Native path.
 
+The same Native selection applies to direct construction of `TableWrite`,
+`BatchTableWrite`, `StreamTableWrite` and `PostponeFixedBucketBatchTableWrite`.
+Their public classes, constructor signatures and Arrow/Pandas batch overrides
+are preserved. Python execution is initialized only when that backend is selected.
+
 `write_ray()` uses the shared Python coordinator and lets workers select Native
 writers. For postpone fixed-bucket writes, overwrite plans use the new input
 unless an explicit bucket plan was supplied. A complete primary-key

@@ -330,22 +330,17 @@ class ShardTableUpdator:
             raise ValueError('Shard index must be smaller than a positive shard count')
         if write_cols == []:
             raise ValueError('Shard update columns must not be empty')
-        from pypaimon.write.backend_dispatch import prepare_native_write_operation
-        self._execution = prepare_native_write_operation(
-            'shard_update', table, commit_user, projection, write_cols, shard_num, total_shard_count)
-        if self._execution is None:
-            self._initialize_python(table, projection, write_cols, commit_user, shard_num, total_shard_count)
+        from pypaimon.write.backend_dispatch import create_shard_update_execution
+        self._execution = create_shard_update_execution(
+            self, table, projection, write_cols, commit_user, shard_num, total_shard_count)
 
     @classmethod
     def _from_python(cls, table, projection, write_cols, commit_user, shard_num, total_shard_count):
         instance = cls.__new__(cls)
-        instance._initialize_python(table, projection, write_cols, commit_user, shard_num, total_shard_count)
+        from pypaimon.write.backend_dispatch import create_python_shard_updator
+        instance._execution = create_python_shard_updator(
+            instance, table, projection, write_cols, commit_user, shard_num, total_shard_count)
         return instance
-
-    def _initialize_python(self, table, projection, write_cols, commit_user, shard_num, total_shard_count):
-        from pypaimon.execution.python.write.table_update import ShardTableUpdator
-        self._execution = ShardTableUpdator(self)
-        self._execution.initialize(table, projection, write_cols, commit_user, shard_num, total_shard_count)
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
@@ -367,9 +362,8 @@ class ShardTableUpdator:
 class SingleWriter:
 
     def __init__(self, writer: 'DataWriter', partition, first_row_id: int, row_count: int):
-        from pypaimon.execution.python.write.table_update import SingleWriter
-        self._execution = SingleWriter(self)
-        self._execution.initialize(writer, partition, first_row_id, row_count)
+        from pypaimon.write.backend_dispatch import create_python_single_writer
+        self._execution = create_python_single_writer(self, writer, partition, first_row_id, row_count)
 
     def capacity(self) -> int:
         return self._execution.capacity()

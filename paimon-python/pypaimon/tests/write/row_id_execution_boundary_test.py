@@ -41,7 +41,7 @@ def test_direct_row_id_update_caches_executor_and_delegates_messages():
         assert update.update_columns(data, ['value']) is messages
         assert update.commit_messages is execution.commit_messages
         update._write_row_columns(data, ['value'], {'value': [10]})
-        prepare.assert_called_once_with(update, table, 'user', BATCH_COMMIT_IDENTIFIER, None)
+        prepare.assert_called_once_with(table, 'user', BATCH_COMMIT_IDENTIFIER, None)
     execution.update_columns.assert_called_once_with(data, ['value'])
     execution._write_row_columns.assert_called_once_with(data, ['value'], {'value': [10]})
     assert not hasattr(update, '_merge_update_with_original')
@@ -68,7 +68,7 @@ def test_direct_delete_caches_executor_and_preserves_execution_error():
         execution.delete.side_effect = RuntimeError('already staged')
         with pytest.raises(RuntimeError, match='already staged'):
             delete.delete([2])
-        prepare.assert_called_once_with(delete, table, None)
+        prepare.assert_called_once_with(table, None)
     assert not hasattr(delete, '_scan_anchor_ranges')
     assert not hasattr(delete, '_write_deletion_vector_index')
 

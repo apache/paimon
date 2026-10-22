@@ -107,6 +107,11 @@ private scanner and retains its write authorization boundary.
 
 Direct `TableUpdateByRowId`, `TableDeleteByRowId` and `ShardTableUpdator`
 construction also selects one execution backend before loading target files.
+Direct `TableWrite`, batch/stream writers and postpone fixed-bucket writers
+use the same selection boundary as builders while retaining their public class
+and subclass hooks. Writer resources and update executors are created in
+`write/backend_dispatch.py`; the public classes only delegate to the selected
+implementation. Python-only nested writers use explicit Python factories.
 An operation that selected Python keeps its nested update/delete writers in
 Python, including MERGE actions. Private schema, routing and rewrite algorithms
 call their executor's helpers; public method overrides and user callbacks remain

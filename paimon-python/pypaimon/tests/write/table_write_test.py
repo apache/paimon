@@ -44,6 +44,7 @@ from pypaimon.execution.python.write.writer.append_only_data_writer import Appen
 class TableWriteTest(unittest.TestCase):
     def test_large_string_compatibility_rejects_other_type_changes(self):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.table_pyarrow_schema = pa.schema([
             ('id', pa.int32()),
@@ -232,6 +233,7 @@ class TableWriteTest(unittest.TestCase):
     @staticmethod
     def _mock_table_write(partitions, buckets, schema):
         table_write = object.__new__(TableWrite)
+        table_write._execution = PythonTableWrite(table_write)
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(schema).fields)
@@ -309,6 +311,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write._execution = PythonTableWrite(table_write)
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(data.schema).fields)
@@ -336,6 +339,7 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write._execution = PythonTableWrite(table_write)
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(data.schema).fields)

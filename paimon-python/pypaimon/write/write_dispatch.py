@@ -43,6 +43,7 @@ class NativeTableWrite:
         self._execution = NativeWrite(table, commit_user, static_partition, stream,
                                       native_writer, restore_snapshot_id)
         self._python_writer = None
+        self._public_writer = self
 
     @classmethod
     def from_native(cls, native):
@@ -57,6 +58,7 @@ class NativeTableWrite:
         result = object.__new__(selected)
         result._execution = native
         result._python_writer = None
+        result._public_writer = result
         return result
 
     def __getattr__(self, name):
@@ -81,7 +83,7 @@ class NativeTableWrite:
 
         writer = create_python_write(
             self.table, self.commit_user, self.static_partition, self.stream,
-            restore_snapshot_id=self._restore_snapshot_id)
+            restore_snapshot_id=self._restore_snapshot_id, public_writer=self._public_writer)
         return self._configure_python_writer(writer)
 
     def _configure_python_writer(self, writer):
@@ -178,9 +180,9 @@ class NativeTableWrite:
             return self._python_writer.write_arrow(data, bucket)
         data = self._execution._prepare_native_arrow_data(data)
         if isinstance(data, pa.RecordBatch):
-            return self.write_arrow_batch(data, bucket)
+            return self._public_writer.write_arrow_batch(data, bucket)
         for batch in data.to_batches():
-            self.write_arrow_batch(batch, bucket)
+            self._public_writer.write_arrow_batch(batch, bucket)
 
     def write_arrow_batch(self, data, bucket=None):
         execution = self._python_writer if self._python_writer is not None else self._execution
@@ -191,7 +193,7 @@ class NativeTableWrite:
             return self._python_writer.write_pandas(dataframe)
         from pypaimon.write.input_adapter import _pandas_write_batch
 
-        return self.write_arrow_batch(_pandas_write_batch(
+        return self._public_writer.write_arrow_batch(_pandas_write_batch(
             self.table, dataframe, self._schema, self._table_schema))
 
     def write_row(self, row):
@@ -258,15 +260,18 @@ class NativePostponeFixedBucketTableWrite(NativeBatchTableWrite):
         self._execution = NativePostponeWrite(
             table, commit_user, static_partition, bucket_plan, native_writer)
         self._python_writer = None
+        self._public_writer = self
 
     def _new_python_writer(self):
         from pypaimon.write.backend_dispatch import create_python_write
 
         return self._configure_python_writer(create_python_write(
             self.table, self.commit_user, self.static_partition,
-            fixed_bucket=True, bucket_plan=self._bucket_plan))
+            fixed_bucket=True, bucket_plan=self._bucket_plan, public_writer=self._public_writer))
 
     def _distributed_write_options(self, *, overwrite=False):
+        if self._python_writer is not None:
+            return self._python_writer._distributed_write_options(overwrite=overwrite)
         from pypaimon.write.input_adapter import postpone_distributed_write_options
 
         return postpone_distributed_write_options(self.table, self._bucket_plan, overwrite)

@@ -35,7 +35,7 @@ from pypaimon.write.merge_transform import (
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+from pypaimon.write.backend_dispatch import create_python_write
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.merge_inputs import (
     _PrepareCtx,
@@ -513,9 +513,7 @@ def _prepare_commit_messages(
 
 
 def _new_table_write(table, commit_user: str, commit_identifier: int):
-    if commit_identifier == BATCH_COMMIT_IDENTIFIER:
-        return BatchTableWrite(table, commit_user)
-    return StreamTableWrite(table, commit_user)
+    return create_python_write(table, commit_user, stream=commit_identifier != BATCH_COMMIT_IDENTIFIER)
 
 
 def _normalize_source(source: Any, on_columns=()) -> pa.Table:
