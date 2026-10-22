@@ -104,7 +104,8 @@ Vector additionally requires:
 - `deletion-vectors.enabled = true`, except for `first-row`, where it must be `false`.
 - The configured ANN implementation on every writer and reader classpath.
 
-Exactly one vector column is currently supported per table.
+Multiple vector columns are supported. Each column owns an independent index with its own
+dimension, ANN implementation, distance metric, and build options.
 
 </TabItem>
 
@@ -265,11 +266,40 @@ schema validation.
 
 </details>
 
+### Index Multiple Vector Columns
+
+List the vector columns in `pk-vector.index.columns` and configure each column separately.
+For example, this Flink table indexes image and text embeddings independently:
+
+```sql
+CREATE TABLE multimodal_items (
+    id BIGINT,
+    image_embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;512',
+    text_embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'pk-vector.index.columns' = 'image_embedding,text_embedding',
+    'fields.image_embedding.pk-vector.index.type' = 'ivf-flat',
+    'fields.image_embedding.pk-vector.distance.metric' = 'cosine',
+    'fields.image_embedding.pk-vector.index.options' = '{"nlist":"256"}',
+    'fields.text_embedding.pk-vector.index.type' = 'ivf-flat',
+    'fields.text_embedding.pk-vector.distance.metric' = 'inner_product',
+    'fields.text_embedding.pk-vector.index.options' = '{"nlist":"512"}'
+);
+```
+
+Each vector search selects one column and uses that column's index, dimension, and distance
+metric. Listing multiple columns does not combine their vectors or define a fused ranking.
+Index coverage is tracked separately for each column, so an index on `image_embedding` does
+not cover a query on `text_embedding`.
+
 ### Options
 
 | Option | Default | Description |
 |---|---|---|
-| `pk-vector.index.columns` | Not set | Vector column to index. Exactly one vector column is currently supported. |
+| `pk-vector.index.columns` | Not set | Comma-separated vector columns which own independent vector indexes. |
 | `fields.<column>.pk-vector.index.type` | Required | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann`. |
 | `fields.<column>.pk-vector.distance.metric` | `inner_product` | Distance metric: `l2`, `cosine`, or `inner_product`. |
 | `fields.<column>.pk-vector.index.options` | Not set | JSON object containing build options for the selected ANN implementation. |
@@ -610,7 +640,7 @@ create a table with the desired definition and migrate the data.
 - Multivalue supports arrays of scalar element types accepted by the global-index key serializer.
   Null elements are not indexed. Higher array and element cardinality increases the expanded-sort
   I/O and index-file size.
-- Exactly one vector index column is currently supported per table.
+- Vector indexes are single-column indexes; each configured vector column has an independent index.
 - Exactly one full-text index column is currently supported per table.
 - Only `FLOAT` vectors are supported.
 - Indexes are built from eligible compact output, not directly from Level-0 appends.
