@@ -162,10 +162,11 @@ def test_filtered_blob_batches_allow_configuration_and_real_writes_capture_it(re
             writer.write_arrow(pa.Table.from_pylist([
                 dict(id=2, op='+I', payload=BlobDescriptor('custom://source', 6, 7).serialize()),
             ], schema=schema))
-            # Java keeps the existing bucket's columns/consumer while allowing
-            # a new factory configuration for future buckets.
+            # Consumers can change for future buckets; the writer's ordered
+            # column selection remains fixed after an accepted write.
             writer.with_blob_consumer(None)
-            writer.with_write_type(['id'])
+            with pytest.raises(RuntimeError, match='before.*writ'):
+                writer.with_write_type(['id'])
             with pytest.raises(RuntimeError, match='before.*writ'):
                 writer.with_blob_uri_reader_factory(None)
             if native:

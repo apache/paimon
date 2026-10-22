@@ -207,14 +207,17 @@ Invalid call arguments fail before either executor prepares files.
 Public stream write, update and commit entry points normalize integer-like
 commit identifiers to Java `long` / Rust `i64` before execution starts.
 Write-column selections reject empty selections and duplicate names before
-replacing the current configuration. Like Java, append writers capture their
-write columns and Blob consumer per partition/bucket. Reconfiguration affects
-future bucket writers; existing buckets retain their configuration across
-`prepare_commit` calls. Full-schema inputs project by column name, and batches
-are checked against every target's captured layout before staging any group.
-Native named-row conversion queries Rust for the target columns using only
-routing metadata, so Python does not duplicate bucket state or encode unused
-payloads. Index build/drop requests bind partition
+replacing the current configuration. Append writers keep one ordered write type
+after their first effective write; empty batches and ignored events do not lock
+it. Repeating the same selection is a no-op, while a different selection requires
+a new writer, including after prepares or idle cleanup. Full-schema inputs are
+projected to the selected columns by name. Native named-row conversion encodes
+these columns and the required routing/event fields in one batch, leaving unused
+payloads untouched.
+Blob consumers are captured per partition/bucket; changes apply to newly created
+writers, and active writers retain their consumer across prepares. Idle writers
+retire at the Java commit boundary, so reopening uses the current consumer.
+Index build/drop requests bind partition
 predicates to the partition layout and reject predicates containing
 non-partition fields.
 

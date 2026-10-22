@@ -99,8 +99,6 @@ class PythonTableWrite:
             return
 
         groups = writer.row_key_extractor.extract_partition_bucket_groups(data)
-        writer.file_store_write.validate_write_columns(
-            data.schema.names, [(partition, bucket) for partition, bucket, _ in groups])
         for partition, bucket, row_indices in groups:
             if row_indices is None:
                 # Every input row belongs to the same partition/bucket. Passing the
@@ -220,6 +218,10 @@ class PythonTableWrite:
                         and set(write_cols) == set(full_names))
         if write_cols == full_names or full_pk_type:
             write_cols = None
+        if writer.file_store_write._ever_written:
+            if write_cols == writer.file_store_write.write_cols:
+                return self
+            raise RuntimeError('with_write_type must be called before any write operation')
         writer.file_store_write.write_cols = write_cols
         return self
 
@@ -357,15 +359,6 @@ class PythonTableWrite:
             if writer._is_compatible_pyarrow_schema(
                     data_schema, write_cols_schema, check_nested_nullability=check_nested_nullability):
                 return
-
-        # Existing bucket writers keep their input layout across checkpoints.
-        # Their requested columns can differ from optimized physical writeCols.
-        if isinstance(writer.file_store_write, FileStoreWrite):
-            for columns in writer.file_store_write._write_columns_by_bucket.values():
-                if columns is not None and writer._is_compatible_pyarrow_schema(
-                        data_schema, writer._write_cols_pyarrow_schema(columns),
-                        check_nested_nullability=check_nested_nullability):
-                    return
 
         writer._raise_inconsistent_schema(data_schema)
 

@@ -58,10 +58,6 @@ class FileStoreWrite:
         self.table: FileStoreTable = table
         self._commit_user = commit_user
         self.data_writers: Dict[Tuple, DataWriter] = {}
-        # Like Java's per-bucket writer factory, existing writers retain the
-        # requested layout even when the factory changes for future buckets.
-        # DataWriter.write_cols may instead describe optimized physical files.
-        self._write_columns_by_bucket = {}
         self._runtime_total_buckets: Dict[Tuple, int] = {}
         self._last_modified_commit_identifiers = {}
         self._written_buckets = set()
@@ -99,48 +95,21 @@ class FileStoreWrite:
         data: pa.RecordBatch,
         total_buckets=None,
     ):
-        self.validate_write_columns(data.schema.names, [(partition, bucket)])
         self._check_runtime_bucket(partition, bucket, total_buckets)
         key = (partition, bucket)
         if key not in self.data_writers:
             self._new_bucket_writer(partition, bucket)
         writer = self.data_writers[key]
-        write_columns = self._write_columns_for(partition, bucket)
-        if write_columns is not None:
-            data = project_arrow_batch(data, write_columns)
+        if self.write_cols is not None:
+            data = project_arrow_batch(data, self.write_cols)
         writer.write(data)
         self._written_buckets.add(key)
 
     def _new_bucket_writer(self, partition, bucket):
-        columns = tuple(self.write_cols) if self.write_cols is not None else None
         writer = self._create_data_writer(partition, bucket, self.options)
         key = (partition, bucket)
         self.data_writers[key] = writer
-        self._write_columns_by_bucket[key] = columns
         self._ever_written = True
-
-    def _write_columns_for(self, partition, bucket):
-        return self._write_columns_by_bucket.get((partition, bucket), self.write_cols)
-
-    def validate_write_columns(self, input_columns, partition_buckets):
-        """Check every target layout before any group from a batch is staged."""
-        full_columns = list(self.table.field_names)
-        input_columns = list(input_columns)
-        if input_columns == full_columns:
-            return
-        from pypaimon.table.special_fields import SpecialFields
-        # Internal PK rows carry their event kind outside the user schema.
-        if SpecialFields.VALUE_KIND.name not in full_columns:
-            input_columns = [name for name in input_columns if name != SpecialFields.VALUE_KIND.name]
-        if input_columns == full_columns:
-            return
-        for partition, bucket in partition_buckets:
-            columns = self._write_columns_for(partition, bucket)
-            expected = list(columns) if columns is not None else full_columns
-            if input_columns != expected:
-                raise ValueError(
-                    'Input columns %s do not match captured write columns %s for partition %s, bucket %s'
-                    % (input_columns, expected, partition, bucket))
 
     def write_row(
         self,
@@ -151,13 +120,30 @@ class FileStoreWrite:
         total_buckets=None,
     ):
         key = (partition, bucket)
-        columns = self._write_columns_for(partition, bucket)
+        columns = self.write_cols
         column_names = list(columns) if columns is not None else list(self.table.field_names)
         # InternalRows carry explicit field names and may arrive reordered.
-        # Bind values by those names, then write the bucket's captured order.
+        # Bind values by those names, then write the selected column order.
         require_columns(values_by_name, column_names, 'write_row')
+        writer = self.data_writers.get(key)
+        data = None
+        if writer is None and self._has_blob_columns():
+            # Dedicated writers consume live Blobs themselves. Validate only
+            # ordinary selected fields before capturing the writer's layout,
+            # without opening or encoding any selected or unused Blob value.
+            ordinary_columns = [name for name in column_names
+                                if not is_blob_file_field(self.table.field_dict[name])]
+            if ordinary_columns:
+                row_values_to_arrow_table(
+                    values_by_name, self.table.table_schema.fields, ordinary_columns)
+        elif writer is None or not hasattr(writer, 'write_row'):
+            data = row_values_to_arrow_table(
+                values_by_name, self.table.table_schema.fields, column_names)
+            from pypaimon.write.row_kind import with_row_kind
+            data = with_row_kind(self.table, data, row)
+
         self._check_runtime_bucket(partition, bucket, total_buckets)
-        if key not in self.data_writers:
+        if writer is None:
             self._new_bucket_writer(partition, bucket)
         writer = self.data_writers[key]
         if hasattr(writer, 'write_row'):
@@ -165,13 +151,6 @@ class FileStoreWrite:
             self._written_buckets.add(key)
             return
 
-        data = row_values_to_arrow_table(
-            values_by_name,
-            self.table.table_schema.fields,
-            column_names,
-        )
-        from pypaimon.write.row_kind import with_row_kind
-        data = with_row_kind(self.table, data, row)
         writer.write(data.to_batches()[0])
         self._written_buckets.add(key)
 
@@ -466,7 +445,6 @@ class FileStoreWrite:
                 self._last_modified_commit_identifiers[key] = identifier
             for key in retired:
                 del self.data_writers[key]
-                self._write_columns_by_bucket.pop(key, None)
                 self._last_modified_commit_identifiers.pop(key, None)
             partitions = {partition for partition, _ in self.data_writers}
             for partition in set(self._runtime_total_buckets).difference(partitions):
@@ -483,7 +461,6 @@ class FileStoreWrite:
         for writer in self.data_writers.values():
             writer.close()
         self.data_writers.clear()
-        self._write_columns_by_bucket.clear()
         self._runtime_total_buckets.clear()
         self._last_modified_commit_identifiers.clear()
         self._written_buckets.clear()
@@ -497,7 +474,6 @@ class FileStoreWrite:
             except Exception as e:
                 logger.warning("Failed to abort data writer.", exc_info=e)
         self.data_writers.clear()
-        self._write_columns_by_bucket.clear()
         self._runtime_total_buckets.clear()
         self._last_modified_commit_identifiers.clear()
         self._written_buckets.clear()

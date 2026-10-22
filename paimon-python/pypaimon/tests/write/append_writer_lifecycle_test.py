@@ -34,71 +34,81 @@ pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
               pytest.mark.python_write, pytest.mark.python_commit]
 
 
+def _blob_table(tmp_path, native):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    fields = [DataField(0, 'id', AtomicType('INT')), DataField(1, 'payload', AtomicType('BLOB')),
+              DataField(2, 'pt', AtomicType('STRING'))]
+    options = {'write.native.enabled': str(native).lower(), 'commit.native.enabled': 'false',
+               'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+               'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
+    catalog.create_table('default.blobs', Schema(fields=fields, partition_keys=['pt'], options=options), False)
+    return catalog.get_table('default.blobs')
+
+
+def _blob_rows(table):
+    read = table.new_read_builder()
+    return sorted(read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist(),
+                  key=lambda row: row['id'])
+
+
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
 @pytest.mark.parametrize('idle_prepares', [0, 1, 2])
 @pytest.mark.parametrize('mode', ['arrow', 'row'])
-def test_unaware_idle_prepare_reopens_with_current_write_type(tmp_path, native, idle_prepares, mode):
-    table = _table(tmp_path, native)
+def test_unaware_idle_prepare_reopens_with_current_blob_consumer(tmp_path, native, idle_prepares, mode):
+    table = _blob_table(tmp_path, native)
     builder = table.new_stream_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
+    received = []
+    rows = [{'id': 1, 'payload': b'old', 'pt': 'old'}, {'id': 2, 'payload': b'new', 'pt': 'old'}]
     try:
         assert writer.prepare_commit(0) == []
-        writer.with_write_type(['id', 'pt'])
-        _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}], mode)
+        writer.with_blob_consumer(lambda name, descriptor: received.append(('old', descriptor)) or True)
+        _write(writer, table, rows[:1], mode)
         commit.commit(writer.prepare_commit(1), 1)
         for identifier in range(2, 2 + idle_prepares):
             assert writer.prepare_commit(identifier) == []
-        writer.with_write_type(['value', 'pt'])
-        _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'old'}], mode)
+        writer.with_blob_consumer(lambda name, descriptor: received.append(('new', descriptor)) or True)
+        _write(writer, table, rows[1:], mode)
         identifier = 2 + idle_prepares
-        messages = writer.prepare_commit(identifier)
-        assert [file.write_cols for message in messages for file in message.new_files] == [
-            ['value', 'pt'] if idle_prepares else ['id', 'pt']]
-        commit.commit(messages, identifier)
+        commit.commit(writer.prepare_commit(identifier), identifier)
+        assert [label for label, _ in received] == ['old', 'new' if idle_prepares else 'old']
+        assert [descriptor.length for _, descriptor in received] == [3, 3]
     finally:
         writer.close()
         commit.close()
-    expected = [
-        {'id': None, 'value': 20, 'pt': 'old'}, {'id': 1, 'value': None, 'pt': 'old'}
-    ] if idle_prepares else [
-        {'id': 1, 'value': None, 'pt': 'old'}, {'id': 2, 'value': None, 'pt': 'old'}]
-    assert _read(table) == expected
+    assert _blob_rows(table) == rows
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
 @pytest.mark.parametrize('first_identifier', [-(1 << 63), 0], ids=['minimum', 'ordinary'])
 def test_minimum_identifier_remains_first_prepare_until_a_later_nonempty_increment(
         tmp_path, native, first_identifier):
-    table = _table(tmp_path, native)
+    table = _blob_table(tmp_path, native)
     builder = table.new_stream_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
+    received = []
+    rows = [dict(id=index, payload=value, pt='old')
+            for index, value in enumerate([b'one', b'two', b'three'], 1)]
     try:
-        writer.with_write_type(['id', 'pt'])
-        _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}])
+        writer.with_blob_consumer(lambda name, descriptor: received.append('old') or True)
+        _write(writer, table, rows[:1])
         commit.commit(writer.prepare_commit(first_identifier), first_identifier)
         assert writer.prepare_commit(first_identifier + 1) == []
-        writer.with_write_type(['value', 'pt'])
-        _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'old'}])
-        messages = writer.prepare_commit(first_identifier + 1)
-        minimum = first_identifier == -(1 << 63)
-        assert [file.write_cols for message in messages for file in message.new_files] == [
-            ['id', 'pt'] if minimum else ['value', 'pt']]
-        commit.commit(messages, first_identifier + 1)
-        # Once a nonempty increment has advanced past MIN, this idle bucket
-        # can retire and capture the factory's new full layout.
+        writer.with_blob_consumer(lambda name, descriptor: received.append('second') or True)
+        _write(writer, table, rows[1:2])
+        commit.commit(writer.prepare_commit(first_identifier + 1), first_identifier + 1)
+        assert received == ['old', 'old' if first_identifier == -(1 << 63) else 'second']
+        # A later nonempty increment advances past MIN and permits retirement.
         assert writer.prepare_commit(first_identifier + 2) == []
-        writer.with_write_type(table.field_names)
-        _write(writer, table, [{'id': 3, 'value': 30, 'pt': 'old'}])
-        messages = writer.prepare_commit(first_identifier + 3)
-        assert [file.write_cols for message in messages for file in message.new_files] == [None]
-        commit.commit(messages, first_identifier + 3)
+        writer.with_blob_consumer(lambda name, descriptor: received.append('third') or True)
+        _write(writer, table, rows[2:])
+        commit.commit(writer.prepare_commit(first_identifier + 3), first_identifier + 3)
+        assert received[-1] == 'third'
     finally:
         writer.close()
         commit.close()
-    expected = [{'id': 1, 'value': None, 'pt': 'old'}, {'id': 3, 'value': 30, 'pt': 'old'}]
-    expected.append({'id': 2, 'value': None, 'pt': 'old'} if minimum
-                    else {'id': None, 'value': 20, 'pt': 'old'})
-    assert _read(table) == sorted(expected, key=lambda row: row['id'] or -1)
+    assert _blob_rows(table) == rows
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
@@ -174,8 +184,12 @@ def test_fixed_idle_prepare_requires_strictly_newer_commit_of_same_user(tmp_path
         writer.with_write_type(['id', 'pt'])
         _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}], 'precomputed')
         commit.commit(writer.prepare_commit(1), 1)
+        if not native:
+            reference = weakref.ref(writer.file_store_write.data_writers[(('old',), 0)])
         # Equality is insufficient, even if another checkpoint is being prepared.
         assert writer.prepare_commit(2) == []
+        if not native:
+            assert reference() is not None
         expected = [{'id': 1, 'value': None, 'pt': 'old'}]
         if latest_commit == 'other-user':
             other = table.new_stream_write_builder()
@@ -192,18 +206,16 @@ def test_fixed_idle_prepare_requires_strictly_newer_commit_of_same_user(tmp_path
             commit.commit(writer.prepare_commit(2), 2)
             expected.insert(0, {'id': 8, 'value': None, 'pt': 'helper'})
         assert writer.prepare_commit(3) == []
-        writer.with_write_type(['value', 'pt'])
+        if not native:
+            gc.collect()
+            assert (reference() is None) == (latest_commit == 'higher-id')
+        assert writer.with_write_type(['id', 'pt']) is writer
         _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'old'}], 'precomputed')
-        messages = writer.prepare_commit(4)
-        retired = latest_commit == 'higher-id'
-        assert [file.write_cols for message in messages for file in message.new_files] == [
-            ['value', 'pt'] if retired else ['id', 'pt']]
-        commit.commit(messages, 4)
+        commit.commit(writer.prepare_commit(4), 4)
     finally:
         writer.close()
         commit.close()
-    expected.append({'id': None, 'value': 20, 'pt': 'old'} if retired
-                    else {'id': 2, 'value': None, 'pt': 'old'})
+    expected.append({'id': 2, 'value': None, 'pt': 'old'})
     assert _read(table) == sorted(expected, key=lambda row: (row['pt'], row['id'] or -1))
 
 
@@ -271,7 +283,7 @@ def test_fixed_snapshot_search_stops_at_expired_gap(tmp_path, missing, lookup):
                 side_effect=AssertionError('writer cleanup must not use the catalog snapshot loader')):
             assert writer.prepare_commit(2) == []
         assert get.call_args_list == ([] if lookup == 'latest' else [((2,), {})])
-        writer.with_write_type(['value', 'pt'])
+        assert (('old',), 0) in writer.file_store_write.data_writers
         _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'old'}], 'precomputed')
         messages = writer.prepare_commit(3)
         assert [file.write_cols for message in messages for file in message.new_files] == [['id', 'pt']]
@@ -371,7 +383,7 @@ def test_retirement_close_failure_keeps_active_files_for_retry(tmp_path):
         messages = writer.prepare_commit(2)
         assert [message.partition for message in messages] == [('new',)]
         assert [file.row_count for message in messages for file in message.new_files] == [1]
-        assert set(store.data_writers) == set(store._write_columns_by_bucket) == {(('new',), 0)}
+        assert set(store.data_writers) == {(('new',), 0)}
         files = list(tmp_path.rglob('*.parquet'))
         assert len(files) == 2
         writer.abort()
