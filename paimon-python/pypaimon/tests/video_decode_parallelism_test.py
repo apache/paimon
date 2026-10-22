@@ -391,6 +391,49 @@ class VideoDecodeParallelismTest(unittest.TestCase):
                 finally:
                     dataset.close()
 
+    def test_single_payload_shared_batch_matches_windows(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _decode_video_windows
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+
+        pixels = torch.arange(10 * 4 * 5 * 3).reshape(10, 4, 5, 3).to(torch.uint8)
+        rows = {i: {"camera": VideoFrameDescriptor("video", 0, 1, i, -1, 0).serialize()}
+                for i in range(10)}
+        windows = ([0, 0, 2], [2, 3, 4], [9, 7, 8], [0, 0, 2])
+        plans = [{"windows": {"camera": indices}} for indices in windows]
+        collator = self.collator()
+        decoder = SimpleNamespace(get_frames_at=lambda indices: SimpleNamespace(
+            data=pixels[indices].permute(0, 3, 1, 2)))
+        original_device = torch.get_default_device()
+        try:
+            with patch.object(collator, "_decoder", return_value=decoder), \
+                    patch("torch.get_num_threads", return_value=1), \
+                    patch.object(torch.Tensor, "share_memory_",
+                                 side_effect=AssertionError("Unexpected storage copy")):
+                for default_device in ("cpu", "meta"):
+                    torch.set_default_device(default_device)
+                    for uint8 in (True, False):
+                        result = _decode_video_windows(
+                            plans, rows, [collator],
+                            {"camera": {"dtype": "video", "shape": [4, 5, 3]}}, uint8,
+                            return_batch=True, share_memory=True)["camera"]
+                        expected = torch.stack([pixels[w].permute(0, 3, 1, 2) for w in windows])
+                        if not uint8:
+                            expected = expected.float().div_(255)
+                        self.assertEqual(result.device.type, "cpu")
+                        self.assertTrue(torch.equal(result, expected))
+                        self.assertTrue(result.is_shared())
+                        self.assertTrue(result.is_contiguous())
+                        saved = result[3].clone()
+                        result[0].zero_()
+                        self.assertTrue(torch.equal(result[3], saved))
+        finally:
+            torch.set_default_device(original_device)
+            collator.close()
+
     def test_real_pyav_payloads_match_serial(self):
         try:
             import av
