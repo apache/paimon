@@ -23,6 +23,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
+import org.apache.paimon.index.pkfulltext.BucketedFullTextIndexMaintainer;
+import org.apache.paimon.index.pksorted.BucketedSortedIndexMaintainer;
 import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -34,6 +36,7 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.annotation.Nullable;
 
@@ -42,12 +45,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
@@ -58,7 +65,7 @@ import static org.mockito.Mockito.when;
 class PrimaryKeyVectorIndexWriteTest {
 
     @Test
-    void testRestoreRebindsVectorIndexExecutor() throws Exception {
+    void testRestoreRebindsSharedIndexExecutor() throws Exception {
         DataIncrement dataIncrement = DataIncrement.emptyIncrement();
         CompactIncrement compactIncrement = CompactIncrement.emptyIncrement();
         RecordWriter<String> writer = mock(RecordWriter.class);
@@ -70,21 +77,66 @@ class PrimaryKeyVectorIndexWriteTest {
         when(vectorCommit.appendIncrement()).thenReturn(Optional.empty());
         when(vectorCommit.compactIncrement()).thenReturn(Optional.empty());
         BucketedVectorIndexMaintainer maintainer = mock(BucketedVectorIndexMaintainer.class);
+        when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(false)))
+                .thenReturn(vectorCommit);
         when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(true)))
                 .thenReturn(vectorCommit);
         BucketedVectorIndexMaintainer secondMaintainer = mock(BucketedVectorIndexMaintainer.class);
+        when(secondMaintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(false)))
+                .thenReturn(vectorCommit);
         when(secondMaintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(true)))
                 .thenReturn(vectorCommit);
 
         TestingFileStoreWrite write = new TestingFileStoreWrite();
-        write.install(writer, maintainer, secondMaintainer);
+        BucketedFullTextIndexMaintainer fullText = mock(BucketedFullTextIndexMaintainer.class);
+        when(fullText.prepareCommit(any(), any(), anyBoolean()))
+                .thenReturn(mock(BucketedFullTextIndexMaintainer.FullTextIndexCommit.class));
+        BucketedSortedIndexMaintainer sorted = mock(BucketedSortedIndexMaintainer.class);
+        when(sorted.prepareCommit(any(), any(), anyBoolean()))
+                .thenReturn(mock(BucketedSortedIndexMaintainer.SortedIndexCommit.class));
+        write.install(
+                writer,
+                BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                        Arrays.asList(maintainer, secondMaintainer),
+                        fullText,
+                        Collections.singletonList(sorted)));
         List<FileStoreWrite.State<String>> states = write.checkpoint();
 
-        TestingFileStoreWrite restored = new TestingFileStoreWrite(mock(RecordWriter.class));
+        TestingFileStoreWrite restored = new TestingFileStoreWrite(mock(RecordWriter.class), 2);
         restored.restore(states);
 
-        verify(maintainer).withExecutor(any(ExecutorService.class));
-        verify(secondMaintainer).withExecutor(any(ExecutorService.class));
+        ArgumentCaptor<ExecutorService> executor = ArgumentCaptor.forClass(ExecutorService.class);
+        verify(maintainer).withExecutor(executor.capture());
+        verify(secondMaintainer).withExecutor(same(executor.getValue()));
+        verify(fullText).withExecutor(same(executor.getValue()));
+        verify(sorted).withExecutor(same(executor.getValue()));
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<?> first =
+                    executor.getValue()
+                            .submit(
+                                    () -> {
+                                        started.countDown();
+                                        return release.await(10, TimeUnit.SECONDS);
+                                    });
+            Future<?> second =
+                    executor.getValue()
+                            .submit(
+                                    () -> {
+                                        started.countDown();
+                                        return release.await(10, TimeUnit.SECONDS);
+                                    });
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            assertThat(first.get(5, TimeUnit.SECONDS)).isEqualTo(true);
+            assertThat(second.get(5, TimeUnit.SECONDS)).isEqualTo(true);
+        } finally {
+            release.countDown();
+            restored.close();
+            write.close();
+        }
+        assertThat(executor.getValue().isShutdown()).isTrue();
     }
 
     @Test
@@ -148,10 +200,11 @@ class PrimaryKeyVectorIndexWriteTest {
         @Nullable private final RecordWriter<String> restoredWriter;
 
         private TestingFileStoreWrite() {
-            this(null);
+            this(null, 1);
         }
 
-        private TestingFileStoreWrite(@Nullable RecordWriter<String> restoredWriter) {
+        private TestingFileStoreWrite(
+                @Nullable RecordWriter<String> restoredWriter, int buildParallelism) {
             super(
                     mock(SnapshotManager.class),
                     mock(FileStoreScan.class),
@@ -159,26 +212,26 @@ class PrimaryKeyVectorIndexWriteTest {
                     null,
                     null,
                     "test-table",
-                    new CoreOptions(new HashMap<>()),
+                    new CoreOptions(
+                            Collections.singletonMap(
+                                    CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(),
+                                    String.valueOf(buildParallelism))),
                     RowType.of());
             this.restoredWriter = restoredWriter;
         }
 
         private void install(
                 RecordWriter<String> writer, BucketedVectorIndexMaintainer... vectorMaintainers) {
+            install(
+                    writer,
+                    BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                            Arrays.asList(vectorMaintainers), null, Collections.emptyList()));
+        }
+
+        private void install(
+                RecordWriter<String> writer, BucketedPrimaryKeyIndexMaintainer maintainer) {
             writers.computeIfAbsent(EMPTY_ROW, ignored -> new HashMap<>())
-                    .put(
-                            0,
-                            new WriterContainer<>(
-                                    writer,
-                                    1,
-                                    null,
-                                    null,
-                                    BucketedPrimaryKeyIndexMaintainer.ofVectors(
-                                            Arrays.asList(vectorMaintainers),
-                                            null,
-                                            Collections.emptyList()),
-                                    null));
+                    .put(0, new WriterContainer<>(writer, 1, null, null, maintainer, null));
         }
 
         @Override

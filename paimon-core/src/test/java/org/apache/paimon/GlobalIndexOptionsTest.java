@@ -48,6 +48,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GlobalIndexOptionsTest {
 
     @ParameterizedTest
+    @CsvSource({"0,ivf-pq", "-1,ivf-pq", "0,btree", "-1,btree"})
+    void testRejectsNonPositivePrimaryKeyIndexBuildParallelism(int parallelism, String type) {
+        Map<String, String> values = new HashMap<>();
+        values.put("bucket", "1");
+        values.put("deletion-vectors.enabled", "true");
+        values.put(
+                "global-index." + type + ".index-columns",
+                "btree".equals(type) ? "amount" : "embedding");
+        values.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), String.valueOf(parallelism));
+
+        assertThatThrownBy(() -> SchemaValidation.validateTableSchema(schema(values, true)))
+                .hasMessageContaining("pk-index.build.parallelism must be greater than zero");
+    }
+
+    @ParameterizedTest
     @ValueSource(
             strings = {
                 "index_type",
