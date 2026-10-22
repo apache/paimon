@@ -23,7 +23,6 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import (
     CoreOptions,
-    GlobalIndexColumnUpdateAction,
     GlobalIndexSearchMode,
 )
 from pypaimon.execution.python.globalindex.key_serializer import create_serializer
@@ -439,9 +438,9 @@ class PythonTableUpsert:
                  else predicate_builder.equal(k, v))
                 for k, v in partition_spec.items()
             ])
-        if (scan_table.options.global_index_enabled()
-                and scan_table.options.global_index_column_update_action()
-                == GlobalIndexColumnUpdateAction.IGNORE):
+        # Earlier writers may have retained stale indexes under IGNORE,
+        # regardless of this upsert's current column-update policy.
+        if scan_table.options.global_index_enabled():
             from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 
             snapshot = TimeTravelUtil.resolve_snapshot(scan_table)

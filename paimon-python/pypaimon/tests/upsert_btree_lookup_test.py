@@ -259,6 +259,37 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                     (2, 'keep'), (3, 'new'), (3, 'new'),
                 ])
 
+    def test_historical_ignore_updates_still_match_with_other_current_policies(self):
+        for action in ('THROW_ERROR', 'DROP_PARTITION_INDEX'):
+            for row_api in (False, True):
+                with self.subTest(action=action, row_api=row_api):
+                    table = self._create_table()
+                    self._write_arrow(table, pa.table({
+                        'id': [1, 1, 2], 'payload': ['old', 'duplicate', 'keep'],
+                    }, schema=self.pa_schema))
+                    self.assertGreater(table.create_global_index('id', index_type='btree'), 0)
+                    # A separate writer may retain stale indexes without
+                    # changing this upsert's current update policy.
+                    ignore_table = table.copy({'global-index.column-update-action': 'IGNORE'})
+                    builder = ignore_table.new_batch_write_builder()
+                    messages = builder.new_update().with_update_type(['id']).update_by_arrow_with_row_id(
+                        pa.table({'_ROW_ID': pa.array([0, 1], type=pa.int64()),
+                                  'id': pa.array([3, 3], type=pa.int32())}))
+                    commit = builder.new_commit()
+                    try:
+                        commit.commit(messages)
+                    finally:
+                        commit.close()
+
+                    table = table.copy({'global-index.column-update-action': action})
+                    self._upsert(table, pa.table({
+                        'id': [3], 'payload': ['new'],
+                    }, schema=self.pa_schema), row_api)
+                    rows = self._read_all(table).to_pylist()
+                    self.assertEqual(sorted((r['id'], r['payload']) for r in rows), [
+                        (2, 'keep'), (3, 'new'), (3, 'new'),
+                    ])
+
     def test_ignore_index_updates_keep_fresh_key_pruning(self):
         for payload_updated in (False, True):
             with self.subTest(payload_updated=payload_updated):
