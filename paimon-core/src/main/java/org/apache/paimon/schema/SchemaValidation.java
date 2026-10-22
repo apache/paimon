@@ -78,6 +78,7 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
@@ -204,6 +205,16 @@ public class SchemaValidation {
                     String.format(
                             "Can not set %s on table without primary keys, please define primary keys.",
                             CHANGELOG_PRODUCER.key()));
+        }
+        if (!options.changelogPreserveFieldOnRetract().isEmpty()) {
+            checkArgument(
+                    options.mergeEngine() == MergeEngine.DEDUPLICATE,
+                    "'%s' is only supported with 'merge-engine' = 'deduplicate'.",
+                    CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key());
+            checkArgument(
+                    changelogProducer == ChangelogProducer.LOOKUP,
+                    "'%s' is only supported with 'changelog-producer' = 'lookup'.",
+                    CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key());
         }
         if (options.streamingReadOverwrite()
                 && (changelogProducer == ChangelogProducer.FULL_COMPACTION

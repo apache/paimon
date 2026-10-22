@@ -115,7 +115,9 @@ By setting `'changelog-producer.preserve-field-on-retract'` to a comma-separated
 retraction records (`-U`, `-D`) will take those columns' values from the incoming event instead of the
 stored row. This is useful when delete or update events carry an event timestamp that downstream consumers
 need, such as external systems like Cassandra that rely on `WRITETIME` for conflict resolution.
-This option is only supported by the `lookup` changelog producer.
+This option is only supported by the `lookup` changelog producer with the `deduplicate` merge engine.
+Both `CREATE TABLE` and `ALTER TABLE ... SET` reject this option unless these requirements are met.
+A rejected `ALTER TABLE` leaves the existing table schema and options unchanged.
 
 ```sql
 CREATE TABLE my_table (
@@ -124,6 +126,7 @@ CREATE TABLE my_table (
     event_ts BIGINT
 ) WITH (
     'changelog-producer' = 'lookup',
+    'merge-engine' = 'deduplicate',
     'sequence.field' = 'event_ts',
     'changelog-producer.preserve-field-on-retract' = 'event_ts'
 );

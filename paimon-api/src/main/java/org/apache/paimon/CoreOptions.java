@@ -1187,7 +1187,7 @@ public class CoreOptions implements Serializable {
                                     + "retraction records (-U, -D). This is useful when delete or update "
                                     + "events carry their own event timestamp and you want that timestamp "
                                     + "preserved in the changelog. "
-                                    + "Only valid when changelog-producer is lookup.");
+                                    + "Only valid when changelog-producer is lookup and merge-engine is deduplicate.");
 
     public static final ConfigOption<Boolean> TABLE_READ_SEQUENCE_NUMBER_ENABLED =
             key("table-read.sequence-number.enabled")

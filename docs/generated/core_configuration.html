@@ -228,7 +228,7 @@ under the License.
             <td><h5>changelog-producer.preserve-field-on-retract</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>A comma-separated list of column names whose values should be taken from the incoming event rather than the stored row when producing changelog retraction records (-U, -D). This is useful when delete or update events carry their own event timestamp and you want that timestamp preserved in the changelog. Only valid when changelog-producer is lookup.</td>
+            <td>A comma-separated list of column names whose values should be taken from the incoming event rather than the stored row when producing changelog retraction records (-U, -D). This is useful when delete or update events carry their own event timestamp and you want that timestamp preserved in the changelog. Only valid when changelog-producer is lookup and merge-engine is deduplicate.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
