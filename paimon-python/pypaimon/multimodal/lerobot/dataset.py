@@ -2267,12 +2267,24 @@ def _decode_video_rows(
     else:
         from concurrent.futures import wait
 
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            grad_enabled = torch.is_grad_enabled()
+            inference_enabled = torch.is_inference_mode_enabled()
+
+        def decode(collator, rows):
+            if torch is None:
+                return collator(rows)
+            with torch.inference_mode(inference_enabled), \
+                    torch.set_grad_enabled(grad_enabled):
+                return collator(rows)
+
         pool = decode_pool if decode_pool is not None else _VideoDecodePool()
         futures = []
         try:
             executor = pool.get(decode_parallelism)
             for collator, _, rows in tasks:
-                futures.append(executor.submit(collator, rows))
+                futures.append(executor.submit(decode, collator, rows))
             decoded_groups = [future.result() for future in futures]
         finally:
             for future in futures:
