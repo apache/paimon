@@ -172,9 +172,15 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             return fetchNext();
         }
 
-        Future<ArrowBatch> future = prefetched;
-        prefetched = null;
-        return await(future);
+        // Keep the prefetch reachable until it completes. An interrupted wait leaves it running,
+        // and close must then wait for it before it releases native resources.
+        try {
+            return await(prefetched);
+        } finally {
+            if (prefetched.isDone()) {
+                prefetched = null;
+            }
+        }
     }
 
     /** Reads the next batch, moving on to the next partition when one is exhausted. */
@@ -210,18 +216,47 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             interrupted.initCause(e);
             throw interrupted;
         } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof IOException) {
-                throw (IOException) cause;
-            }
-            if (cause instanceof RuntimeException) {
-                throw (RuntimeException) cause;
-            }
-            if (cause instanceof Error) {
-                throw (Error) cause;
-            }
-            throw new IOException(cause);
+            throw unwrap(e);
         }
+    }
+
+    /**
+     * Waits for the prefetch to complete, also when the thread is interrupted, because native IO in
+     * the prefetch can still use the stream and the allocator. The interrupt flag is restored after
+     * the wait.
+     */
+    @Nullable
+    private static ArrowBatch awaitUninterruptibly(Future<ArrowBatch> future) throws IOException {
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    return future.get();
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                } catch (ExecutionException e) {
+                    throw unwrap(e);
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static IOException unwrap(ExecutionException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof IOException) {
+            return (IOException) cause;
+        }
+        if (cause instanceof RuntimeException) {
+            throw (RuntimeException) cause;
+        }
+        if (cause instanceof Error) {
+            throw (Error) cause;
+        }
+        return new IOException(cause);
     }
 
     @Override
@@ -237,7 +272,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             Future<ArrowBatch> future = prefetched;
             prefetched = null;
             try {
-                ArrowBatch batch = await(future);
+                ArrowBatch batch = awaitUninterruptibly(future);
                 if (batch != null) {
                     batch.close();
                 }
