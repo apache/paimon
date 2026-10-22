@@ -249,6 +249,38 @@ public class SchemaManagerTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"sequence.field", "changelog-producer.preserve-field-on-retract"})
+    public void testDropColumnReferencedByOptions(String option) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(option, "f3");
+        Schema schema =
+                new Schema(
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
+        TableSchema original = retryArtificialException(() -> manager.createTable(schema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.commitChanges(SchemaChange.dropColumn("f3"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("f3")
+                .hasMessageContaining("can not be found in table schema.");
+        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
+        assertThat(latest).isEqualTo(original);
+        assertThat(latest.id()).isEqualTo(original.id());
+
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.removeOption(option)));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("f3")));
+        assertThat(retryArtificialException(() -> manager.latest()).get().fieldNames())
+                .containsExactly("f0", "f1", "f2");
+    }
+
+    @ParameterizedTest
     @ValueSource(ints = {2, 9})
     public void testIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
             throws Exception {

@@ -2307,6 +2307,19 @@ class SchemaValidationTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"missing", "f2, missing"})
+    public void testPreserveFieldOnRetractWithMissingField(String fields) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), fields);
+
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Column 'missing' specified in 'changelog-producer.preserve-field-on-retract' can not be found in table schema.");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"partial-update", "aggregation", "first-row"})
     public void testPreserveFieldOnRetractWithUnsupportedMergeEngine(String mergeEngine) {
         Map<String, String> options = new HashMap<>();

@@ -119,6 +119,9 @@ This option is only supported by the `lookup` changelog producer with the `dedup
 Both `CREATE TABLE` and `ALTER TABLE ... SET` reject this option unless these requirements are met.
 A rejected `ALTER TABLE` leaves the existing table schema and options unchanged.
 
+Column renames automatically update this option. A column cannot be dropped while either this option
+or `sequence.field` still references it. Remove the column from the relevant options before dropping it.
+
 ```sql
 CREATE TABLE my_table (
     id INT PRIMARY KEY NOT ENFORCED,
