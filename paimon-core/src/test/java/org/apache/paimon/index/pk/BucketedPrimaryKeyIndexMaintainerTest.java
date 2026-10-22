@@ -31,11 +31,13 @@ import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.index.pksorted.BucketedSortedIndexMaintainer;
 import org.apache.paimon.index.pksorted.PkSortedIndexFile;
 import org.apache.paimon.index.pkvector.BucketedVectorIndexMaintainer;
+import org.apache.paimon.index.pkvector.PkVectorAnnSegmentFile;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
@@ -44,6 +46,7 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.InOrder;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,8 +67,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -82,18 +89,121 @@ class BucketedPrimaryKeyIndexMaintainerTest {
 
     @Test
     void testDelegatesVectorLifecycle() {
-        BucketedVectorIndexMaintainer vector = mock(BucketedVectorIndexMaintainer.class);
+        BucketedVectorIndexMaintainer first = mock(BucketedVectorIndexMaintainer.class);
+        BucketedVectorIndexMaintainer second = mock(BucketedVectorIndexMaintainer.class);
         ExecutorService executor = mock(ExecutorService.class);
-        when(vector.buildNotCompleted()).thenReturn(true);
+        when(second.buildNotCompleted()).thenReturn(true);
         BucketedPrimaryKeyIndexMaintainer maintainer =
-                BucketedPrimaryKeyIndexMaintainer.ofVector(vector);
+                BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                        Arrays.asList(first, second), null, Collections.emptyList());
 
         assertThat(maintainer.buildNotCompleted()).isTrue();
+        assertThatThrownBy(() -> maintainer.withExecutor(executor))
+                .hasMessageContaining("Cannot replace executor");
+        verify(first, never()).withExecutor(any());
+        verify(second, never()).withExecutor(any());
+
+        when(second.buildNotCompleted()).thenReturn(false);
+        assertThat(maintainer.buildNotCompleted()).isFalse();
         maintainer.withExecutor(executor);
         maintainer.close();
 
-        verify(vector).withExecutor(executor);
-        verify(vector).close();
+        verify(first).withExecutor(executor);
+        verify(second).withExecutor(executor);
+        verify(first).close();
+        verify(second).close();
+    }
+
+    @Test
+    void testClosesAllIndexesWhenVectorCloseFails() {
+        BucketedVectorIndexMaintainer first = mock(BucketedVectorIndexMaintainer.class);
+        BucketedVectorIndexMaintainer second = mock(BucketedVectorIndexMaintainer.class);
+        RuntimeException failure = new RuntimeException("first close failed");
+        RuntimeException suppressed = new RuntimeException("second close failed");
+        doThrow(failure).when(first).close();
+        doThrow(suppressed).when(second).close();
+        BucketedFullTextIndexMaintainer fullText = mock(BucketedFullTextIndexMaintainer.class);
+        BucketedSortedIndexMaintainer sorted = mock(BucketedSortedIndexMaintainer.class);
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                        Arrays.asList(first, second), fullText, Collections.singletonList(sorted));
+
+        assertThatThrownBy(maintainer::close).isSameAs(failure).hasSuppressedException(suppressed);
+        verify(second).close();
+        verify(fullText).close();
+        verify(sorted).close();
+    }
+
+    @Test
+    void testVectorFailureRollsBackEarlierIndexAndAllowsRetry() throws Exception {
+        DataFileMeta source = dataFile("data-1", 3);
+        IndexFileMeta firstPayload = payload("first", source, 3, 2, "vector");
+        IndexFileMeta secondPayload = payload("second", source, 3, 1, "vector");
+        PkVectorAnnSegmentFile firstFile = mock(PkVectorAnnSegmentFile.class);
+        PkVectorAnnSegmentFile secondFile = mock(PkVectorAnnSegmentFile.class);
+        when(firstFile.build(anyList(), any(), any(), eq("l2"), eq("vector")))
+                .thenReturn(firstPayload);
+        when(secondFile.build(anyList(), any(), any(), eq("l2"), eq("vector")))
+                .thenThrow(new IllegalStateException("second vector failed"))
+                .thenReturn(secondPayload);
+        BucketedVectorIndexMaintainer first = vectorMaintainer(2, firstFile);
+        BucketedVectorIndexMaintainer second = vectorMaintainer(1, secondFile);
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                        Arrays.asList(first, second), null, Collections.emptyList());
+        DataIncrement append = DataIncrement.emptyIncrement();
+        CompactIncrement failed = compactAfter(source);
+
+        assertThatThrownBy(() -> maintainer.prepareCommit(append, failed, true))
+                .hasMessage("second vector failed");
+        assertThat(append.newIndexFiles()).isEmpty();
+        assertThat(append.deletedIndexFiles()).isEmpty();
+        assertThat(failed.newIndexFiles()).isEmpty();
+        assertThat(failed.deletedIndexFiles()).isEmpty();
+        assertThat(first.segments()).isEmpty();
+        assertThat(second.segments()).isEmpty();
+        assertThat(maintainer.buildNotCompleted()).isFalse();
+        verify(firstFile).delete(firstPayload);
+
+        CompactIncrement retry = compactAfter(source);
+        maintainer.prepareCommit(DataIncrement.emptyIncrement(), retry, true);
+
+        assertThat(retry.newIndexFiles()).containsExactly(firstPayload, secondPayload);
+        assertThat(first.segments()).containsExactly(firstPayload);
+        assertThat(second.segments()).containsExactly(secondPayload);
+        maintainer.close();
+    }
+
+    @Test
+    void testFullTextFailureAbortsAllPreparedVectorsInReverseOrder() throws Exception {
+        BucketedVectorIndexMaintainer first = mock(BucketedVectorIndexMaintainer.class);
+        BucketedVectorIndexMaintainer second = mock(BucketedVectorIndexMaintainer.class);
+        BucketedVectorIndexMaintainer.VectorIndexCommit firstCommit =
+                mock(BucketedVectorIndexMaintainer.VectorIndexCommit.class);
+        BucketedVectorIndexMaintainer.VectorIndexCommit secondCommit =
+                mock(BucketedVectorIndexMaintainer.VectorIndexCommit.class);
+        when(first.prepareCommit(any(), any(), eq(true))).thenReturn(firstCommit);
+        when(second.prepareCommit(any(), any(), eq(true))).thenReturn(secondCommit);
+        BucketedFullTextIndexMaintainer fullText = mock(BucketedFullTextIndexMaintainer.class);
+        IllegalStateException failure = new IllegalStateException("full-text failed");
+        when(fullText.prepareCommit(any(), any(), eq(true))).thenThrow(failure);
+        BucketedPrimaryKeyIndexMaintainer maintainer =
+                BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                        Arrays.asList(first, second), fullText, Collections.emptyList());
+        DataIncrement append = DataIncrement.emptyIncrement();
+        CompactIncrement compact = CompactIncrement.emptyIncrement();
+
+        assertThatThrownBy(() -> maintainer.prepareCommit(append, compact, true)).isSameAs(failure);
+        InOrder order = inOrder(first, second, fullText, firstCommit, secondCommit);
+        order.verify(first).prepareCommit(append, compact, true);
+        order.verify(second).prepareCommit(append, compact, true);
+        order.verify(fullText).prepareCommit(append, compact, true);
+        order.verify(secondCommit).abort(failure);
+        order.verify(firstCommit).abort(failure);
+        verify(firstCommit, never()).appendIncrement();
+        verify(secondCommit, never()).appendIncrement();
+        assertThat(append.newIndexFiles()).isEmpty();
+        assertThat(compact.newIndexFiles()).isEmpty();
     }
 
     @Test
@@ -119,6 +229,7 @@ class BucketedPrimaryKeyIndexMaintainerTest {
 
         assertThat(compactIncrement.newIndexFiles()).containsExactly(payload);
         assertThat(maintainer.buildNotCompleted()).isTrue();
+        when(fullText.buildNotCompleted()).thenReturn(false);
         maintainer.withExecutor(buildExecutor);
         maintainer.close();
         verify(fullText).withExecutor(buildExecutor);
@@ -397,6 +508,28 @@ class BucketedPrimaryKeyIndexMaintainerTest {
         assertThat(retryIncrement.newIndexFiles())
                 .extracting(IndexFileMeta::fileName)
                 .containsExactly("btree-2", "bitmap-2");
+    }
+
+    private BucketedVectorIndexMaintainer vectorMaintainer(
+            int fieldId, PkVectorAnnSegmentFile indexFile) {
+        IndexFileHandler handler = mock(IndexFileHandler.class);
+        when(handler.pkVectorAnnSegment(any(), eq(0))).thenReturn(indexFile);
+        return new BucketedVectorIndexMaintainer.Factory(
+                        handler,
+                        mock(KeyValueFileReaderFactory.Builder.class, RETURNS_SELF),
+                        new DataField(
+                                fieldId,
+                                "vector_" + fieldId,
+                                DataTypes.VECTOR(2, DataTypes.FLOAT())),
+                        "l2",
+                        "vector")
+                .withIndexOptions(new Options())
+                .create(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        buildExecutor);
     }
 
     private BucketedSortedIndexMaintainer sortedMaintainer(

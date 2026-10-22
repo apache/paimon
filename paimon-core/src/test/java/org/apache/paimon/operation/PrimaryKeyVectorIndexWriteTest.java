@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -71,15 +72,19 @@ class PrimaryKeyVectorIndexWriteTest {
         BucketedVectorIndexMaintainer maintainer = mock(BucketedVectorIndexMaintainer.class);
         when(maintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(true)))
                 .thenReturn(vectorCommit);
+        BucketedVectorIndexMaintainer secondMaintainer = mock(BucketedVectorIndexMaintainer.class);
+        when(secondMaintainer.prepareCommit(same(dataIncrement), same(compactIncrement), eq(true)))
+                .thenReturn(vectorCommit);
 
         TestingFileStoreWrite write = new TestingFileStoreWrite();
-        write.install(writer, maintainer);
+        write.install(writer, maintainer, secondMaintainer);
         List<FileStoreWrite.State<String>> states = write.checkpoint();
 
         TestingFileStoreWrite restored = new TestingFileStoreWrite(mock(RecordWriter.class));
         restored.restore(states);
 
         verify(maintainer).withExecutor(any(ExecutorService.class));
+        verify(secondMaintainer).withExecutor(any(ExecutorService.class));
     }
 
     @Test
@@ -160,7 +165,7 @@ class PrimaryKeyVectorIndexWriteTest {
         }
 
         private void install(
-                RecordWriter<String> writer, BucketedVectorIndexMaintainer vectorMaintainer) {
+                RecordWriter<String> writer, BucketedVectorIndexMaintainer... vectorMaintainers) {
             writers.computeIfAbsent(EMPTY_ROW, ignored -> new HashMap<>())
                     .put(
                             0,
@@ -169,7 +174,10 @@ class PrimaryKeyVectorIndexWriteTest {
                                     1,
                                     null,
                                     null,
-                                    BucketedPrimaryKeyIndexMaintainer.ofVector(vectorMaintainer),
+                                    BucketedPrimaryKeyIndexMaintainer.ofVectors(
+                                            Arrays.asList(vectorMaintainers),
+                                            null,
+                                            Collections.emptyList()),
                                     null));
         }
 

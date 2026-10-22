@@ -138,9 +138,10 @@ class PrimaryKeyIndexWriteTest {
         AbstractFileStoreWrite.WriterContainer<KeyValue> container =
                 write.createWriterContainer(generator.getPartition(record), 1);
 
-        Object vectorMaintainer =
-                readField(container.primaryKeyIndexMaintainer, "vectorMaintainer");
-        assertThat(vectorMaintainer).isNotNull();
+        List<?> vectorMaintainers =
+                (List<?>) readField(container.primaryKeyIndexMaintainer, "vectorMaintainers");
+        assertThat(vectorMaintainers).hasSize(1);
+        Object vectorMaintainer = vectorMaintainers.get(0);
         assertThat((List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers"))
                 .hasSize(4);
 
