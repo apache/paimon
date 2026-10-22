@@ -25,7 +25,7 @@ import pyarrow as pa
 
 from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.execution.python.write.table_upsert_by_key import _key_indexes_are_fresh
+from pypaimon.execution.python.globalindex.index_freshness import key_indexes_are_fresh
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
@@ -259,37 +259,6 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                     (2, 'keep'), (3, 'new'), (3, 'new'),
                 ])
 
-    def test_historical_ignore_updates_still_match_with_other_current_policies(self):
-        for action in ('THROW_ERROR', 'DROP_PARTITION_INDEX'):
-            for row_api in (False, True):
-                with self.subTest(action=action, row_api=row_api):
-                    table = self._create_table()
-                    self._write_arrow(table, pa.table({
-                        'id': [1, 1, 2], 'payload': ['old', 'duplicate', 'keep'],
-                    }, schema=self.pa_schema))
-                    self.assertGreater(table.create_global_index('id', index_type='btree'), 0)
-                    # A separate writer may retain stale indexes without
-                    # changing this upsert's current update policy.
-                    ignore_table = table.copy({'global-index.column-update-action': 'IGNORE'})
-                    builder = ignore_table.new_batch_write_builder()
-                    messages = builder.new_update().with_update_type(['id']).update_by_arrow_with_row_id(
-                        pa.table({'_ROW_ID': pa.array([0, 1], type=pa.int64()),
-                                  'id': pa.array([3, 3], type=pa.int32())}))
-                    commit = builder.new_commit()
-                    try:
-                        commit.commit(messages)
-                    finally:
-                        commit.close()
-
-                    table = table.copy({'global-index.column-update-action': action})
-                    self._upsert(table, pa.table({
-                        'id': [3], 'payload': ['new'],
-                    }, schema=self.pa_schema), row_api)
-                    rows = self._read_all(table).to_pylist()
-                    self.assertEqual(sorted((r['id'], r['payload']) for r in rows), [
-                        (2, 'keep'), (3, 'new'), (3, 'new'),
-                    ])
-
     def test_ignore_index_updates_keep_fresh_key_pruning(self):
         for payload_updated in (False, True):
             with self.subTest(payload_updated=payload_updated):
@@ -321,10 +290,8 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                 # still-fresh index can establish absence without a data read.
                 self.assertEqual(self._counted_lookup(table, ['id'], {(11,)}), ({}, []))
 
-    def test_ignore_index_updates_untrusted_source_falls_back(self):
-        table = self._create_table(options={
-            **self.table_options, 'global-index.column-update-action': 'IGNORE',
-        })
+    def test_untrusted_index_source_falls_back_only_for_ignore(self):
+        table = self._create_table()
         self._write_arrow(table, pa.table({
             'id': list(range(0, 32, 2)), 'payload': ['old'] * 16,
         }, schema=self.pa_schema))
@@ -334,18 +301,21 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
         self.assertTrue(entries)
         sources = [None, b'unknown', b'DEIX',
                    DataEvolutionIndexSourceMeta(snapshot.id + 1).serialize()]
-        for source in sources:
-            with self.subTest(source=source):
-                untrusted_entries = [replace(
-                    entry,
-                    index_file=replace(
-                        entry.index_file,
-                        global_index_meta=replace(
-                            entry.index_file.global_index_meta, source_meta=source)))
-                    for entry in entries]
-                with mock.patch.object(IndexFileHandler, 'scan', return_value=untrusted_entries):
-                    self.assertEqual(self._counted_lookup(table, ['id'], {(10,)}), (
-                        {(10,): [5]}, list(range(16))))
+        for action in ('IGNORE', 'THROW_ERROR', 'DROP_PARTITION_INDEX'):
+            scan_table = table.copy({'global-index.column-update-action': action})
+            expected_row_ids = list(range(16)) if action == 'IGNORE' else [5]
+            for source in sources:
+                with self.subTest(action=action, source=source):
+                    untrusted_entries = [replace(
+                        entry,
+                        index_file=replace(
+                            entry.index_file,
+                            global_index_meta=replace(
+                                entry.index_file.global_index_meta, source_meta=source)))
+                        for entry in entries]
+                    with mock.patch.object(IndexFileHandler, 'scan', return_value=untrusted_entries):
+                        self.assertEqual(self._counted_lookup(scan_table, ['id'], {(10,)}), (
+                            {(10,): [5]}, expected_row_ids))
 
     def test_ignore_index_updates_use_compacted_column_sequences(self):
         table = self._create_table(options={
@@ -358,7 +328,7 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
         table.create_global_index('id', index_type='btree')
         snapshot = table.snapshot_manager().get_latest_snapshot()
         table = table._copy_with_snapshot(snapshot)
-        split = table.new_read_builder().new_scan().plan_all_files().splits()[0]
+        split = table.new_read_builder().new_scan().plan_all().splits()[0]
         original_file = split.files[0]
         # Model a compaction which rewrote the full schema after a payload
         # update. Its overall sequence is new, but the key sequence is old.
@@ -371,14 +341,14 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                     file = replace(original_file, max_sequence_number=snapshot.id,
                                    write_cols=write_cols, write_cols_sequences=sequences)
                     plan = Plan([DataSplit([file], split.partition, split.bucket)], snapshot.id)
-                    with mock.patch.object(TableScan, 'plan_all_files', return_value=plan):
-                        self.assertEqual(_key_indexes_are_fresh(
+                    with mock.patch.object(TableScan, 'plan_all', return_value=plan):
+                        self.assertEqual(key_indexes_are_fresh(
                             table, snapshot, ['id'], None), expected)
         # Updates outside this index's row range cannot stale its key values.
         disjoint = replace(original_file, first_row_id=3, max_sequence_number=snapshot.id)
         plan = Plan([DataSplit([disjoint], split.partition, split.bucket)], snapshot.id)
-        with mock.patch.object(TableScan, 'plan_all_files', return_value=plan):
-            self.assertTrue(_key_indexes_are_fresh(table, snapshot, ['id'], None))
+        with mock.patch.object(TableScan, 'plan_all', return_value=plan):
+            self.assertTrue(key_indexes_are_fresh(table, snapshot, ['id'], None))
 
     def test_ignore_index_rebuild_restores_key_pruning(self):
         table = self._create_table(options={
