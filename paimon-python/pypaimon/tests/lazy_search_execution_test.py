@@ -461,7 +461,7 @@ def test_python_source_metadata_round_trips_through_public_native_plan_construct
     assert isinstance(native.splits()[0], datafusion.IndexFullTextSearchSplit if full_text else
                       datafusion.IndexVectorSearchSplit)
     assert copied.snapshot()._to_json() == native.snapshot()._to_json()
-    assert type(copied.splits()[0]) is type(native.splits()[0])
+    assert copied.splits()[0].__class__ is native.splits()[0].__class__
     assert restored.snapshot() == snapshot
     restored_index = restored.splits()[0]
     restored_files = restored_index.full_text_index_files if full_text else restored_index.vector_index_files

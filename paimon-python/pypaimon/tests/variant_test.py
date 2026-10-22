@@ -1516,7 +1516,7 @@ class TestVariantPaimonTable(unittest.TestCase):
             builder = table.new_batch_write_builder()
             writer = builder.new_write()
             self.assertEqual(type(writer).__name__,
-                             'NativeTableWrite' if native else 'BatchTableWrite')
+                             'NativeBatchTableWrite' if native else 'BatchTableWrite')
             commit = builder.new_commit()
             try:
                 for start in range(0, len(gvs), 3):

@@ -130,9 +130,9 @@ class NativeTableWrite:
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
+            raise TypeError('URI reader factory must provide callable create')
         if self._blob_rows is not None:
-            if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
-                raise TypeError('URI reader factory must provide callable create')
             # Only core knows whether RowKind filtering accepted any rows or a
             # postpone writer buffered data. Validate before changing the live
             # bridge's fallback, including when clearing the application factory.

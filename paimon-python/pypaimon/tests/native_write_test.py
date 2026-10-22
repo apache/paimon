@@ -334,9 +334,9 @@ def test_writer_abort_preserves_native_commit_files(native_rest_catalog, failure
         native, native_messages = prepared
         proxy = Mock(wraps=native)
 
-        def publish(*args):
+        def publish(*args, **kwargs):
             if failure != 'before-publication':
-                native.commit(*args)
+                native.commit(*args, **kwargs)
             if failure:
                 raise RuntimeError('Native commit outcome is unknown')
 
