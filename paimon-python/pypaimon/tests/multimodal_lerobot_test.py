@@ -165,6 +165,66 @@ def _configure_uint8_transform_worker(unused_worker_id):
 
 class LeRobotValidationTest(unittest.TestCase):
 
+    def test_episode_validation_projects_batched_hf_metadata(self):
+        try:
+            from datasets import Dataset
+        except ImportError:
+            self.skipTest("datasets is not installed")
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+
+        rows = [{
+            "episode_index": index,
+            "dataset_from_index": index * 2,
+            "dataset_to_index": index * 2 + 2,
+            "length": 2,
+            "tasks": ["place", "pick"],
+            "stats/camera/mean": [0.5] * 32,
+        } for index in range(2050)]
+        episodes = Dataset.from_list(rows)
+        expected = [(index * 2, index * 2 + 2) for index in range(2050)]
+        with patch.object(
+                Dataset, "__getitem__",
+                side_effect=AssertionError("Do not format individual rows")):
+            self.assertEqual(expected, _episode_ranges(
+                {"episodes": episodes}, 4100, 2050))
+            self.assertEqual((("pick", "place"),) * 2050,
+                             _episode_tasks({"episodes": episodes}))
+        self.assertIn("stats/camera/mean", episodes.column_names)
+        self.assertEqual(rows[0], episodes[0])
+        self.assertEqual((None,) * 2050, _episode_tasks({
+            "episodes": episodes.remove_columns("tasks"),
+        }))
+        # Preserve a selected Dataset's logical row order and range validation.
+        with self.assertRaisesRegex(ValueError, "episode_index=1"):
+            _episode_ranges({"episodes": episodes.select([1, 0])}, 4, 2)
+        with self.assertRaisesRegex(ValueError, "integer controls"):
+            _episode_ranges({"episodes": episodes.remove_columns("length")},
+                            4100, 2050)
+
+    def test_episode_validation_preserves_metadata_representations(self):
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+        import pandas as pd
+
+        rows = [{
+            "episode_index": 0, "dataset_from_index": 0,
+            "dataset_to_index": 2, "length": 2, "tasks": "pick",
+        }, {
+            "episode_index": 1, "dataset_from_index": 2,
+            "dataset_to_index": 3, "length": 1, "tasks": None,
+        }]
+        for episodes in (rows, pd.DataFrame(rows)):
+            with self.subTest(type=type(episodes).__name__):
+                metadata = {"episodes": episodes}
+                self.assertEqual([(0, 2), (2, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), None), _episode_tasks(metadata))
+                with self.assertRaisesRegex(ValueError, "expected 4"):
+                    _episode_ranges(metadata, 4, 2)
+
     def test_episode_metadata_pickle_stays_small_and_usable(self):
         try:
             from datasets import Dataset
