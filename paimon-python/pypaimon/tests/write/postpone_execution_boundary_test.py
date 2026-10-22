@@ -97,7 +97,7 @@ def _table(tmp_path, partition_name='p'):
 
 def _native_table(table):
     native = Mock()
-    native.new_postpone_fixed_bucket_write_builder.return_value.bucket_plan.return_value = pa.record_batch([
+    native.new_postpone_fixed_bucket_write_builder.return_value.resolve_bucket_plan.return_value = pa.record_batch([
         pa.array(['existing']), pa.array([3], type=pa.int32())], names=['p', 'total_buckets'])
     return native
 
@@ -220,7 +220,7 @@ def test_native_bucket_metadata_reports_core_conflicts(tmp_path, forbid_python_e
     table = _table(tmp_path)
     native = _native_table(table)
     failure = ValueError('Existing postpone files contain conflicting total bucket counts')
-    native.new_postpone_fixed_bucket_write_builder.return_value.bucket_plan.side_effect = failure
+    native.new_postpone_fixed_bucket_write_builder.return_value.resolve_bucket_plan.side_effect = failure
     with patch('pypaimon.execution.native.write.postpone_bucket.create_native_write_table', return_value=native):
         with pytest.raises(ValueError, match='conflicting total bucket counts') as raised:
             NativePostponeBucketPlanner(table)
@@ -232,7 +232,7 @@ def test_native_bucket_plan_keeps_a_partition_named_total_buckets(tmp_path):
 
     table = _table(tmp_path, 'total_buckets')
     native = _native_table(table)
-    native.new_postpone_fixed_bucket_write_builder.return_value.bucket_plan.return_value = pa.record_batch([
+    native.new_postpone_fixed_bucket_write_builder.return_value.resolve_bucket_plan.return_value = pa.record_batch([
         pa.array(['west', 'east']), pa.array([3, 7], type=pa.int32())],
         names=['total_buckets', 'total_buckets'])
     with patch('pypaimon.execution.native.write.postpone_bucket.create_native_write_table', return_value=native):

@@ -38,7 +38,7 @@ class NativePostponeBucketPlanner(PostponeBucketPlanning):
         native_table = create_native_write_table(table)
         if native_table is None:
             raise RuntimeError('Native bucket metadata planning is unavailable')
-        plan = native_table.new_postpone_fixed_bucket_write_builder().bucket_plan()
+        plan = native_table.new_postpone_fixed_bucket_write_builder().resolve_bucket_plan()
         # A partition key may itself be called total_buckets. Keep the
         # positional schema used by the Core plan and with_bucket_plan input.
         columns = [column.to_pylist() for column in plan.columns]
