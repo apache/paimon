@@ -28,6 +28,7 @@ from parameterized import parameterized
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.write.table_write import TableWrite
+from pypaimon.execution.python.write.table_write import PythonTableWrite
 
 
 class ArrowSchemaTest(unittest.TestCase):
@@ -124,13 +125,14 @@ class ArrowSchemaTest(unittest.TestCase):
     @parameterized.expand([('table',), ('batch',)])
     def test_schema_only_writer_normalizes_input(self, entry):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
         source = pa.Table.from_pydict({'text': ['中文', None]}, schema=pa.schema([('text', pa.large_string())]))
         if entry == 'batch':
             source = source.to_batches()[0]
 
-        result = writer._prepare_arrow_data(source)
+        result = PythonTableWrite(writer)._prepare_arrow_data(source)
 
         self.assertIsInstance(result, type(source))
         self.assertEqual(result.schema, writer.table_pyarrow_schema)
@@ -140,6 +142,7 @@ class ArrowSchemaTest(unittest.TestCase):
     @parameterized.expand([('table',), ('batch',)])
     def test_normalization_failure_fails_before_routing(self, entry):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.row_key_extractor = Mock()
         writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
@@ -158,6 +161,7 @@ class ArrowSchemaTest(unittest.TestCase):
     @unittest.skipUnless(int(pa.__version__.split('.')[0]) == 6, 'Arrow 6 lacks struct cast kernels')
     def test_unsupported_nested_cast_fails_before_routing(self):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.row_key_extractor = Mock()
         writer.table_pyarrow_schema = pa.schema([('nested', pa.struct([('text', pa.string())]))])

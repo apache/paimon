@@ -17,6 +17,8 @@
 
 """An unused vector format must not disable Parquet/Blob Native mutations."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -30,9 +32,7 @@ from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.execution.native.write.native_update import _native_update_formats_supported
-from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -83,11 +83,11 @@ def _read(table):
 def _native_only(native):
     stack = ExitStack()
     if native:
-        for owner, method in [(TableUpdateByRowId, '_load_existing_files_info'),
+        for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
                               (TableUpsertByKey, '_upsert_partition'),
                               (TableUpsertByKey, '_upsert_row_partition'),
                               (TableUpdate, '_build_predicate_update_table'),
-                              (TableDeleteByRowId, '_scan_anchor_ranges')]:
+                              (PythonTableDeleteByRowId, '_scan_anchor_ranges')]:
             stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python mutation fallback')))
         stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                   side_effect=AssertionError('Python MERGE fallback')))

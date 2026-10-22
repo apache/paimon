@@ -17,6 +17,7 @@
 
 """Nested Native update dispatch and parity with the Python implementation."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -27,7 +28,6 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -69,7 +69,7 @@ def _table(tmp_path, data_type, native):
 def _native_only(native):
     stack = ExitStack()
     if native:
-        for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
+        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
                             (TableUpdate, '_build_predicate_update_table'),
                             (TableUpsertByKey, '_upsert_partition'),
                             (TableUpsertByKey, '_upsert_row_partition')]:
@@ -201,7 +201,7 @@ def test_nested_row_id_coercion_matches_python(tmp_path, native, input_values, t
     data = pa.table({'_ROW_ID': list(range(len(input_values))), 'value': input_values})
     before = set(tmp_path.rglob('*.parquet'))
     try:
-        expected = TableUpdateByRowId._coerce_column(input_values, target).to_pylist()
+        expected = PythonTableUpdateByRowId._coerce_column(input_values, target).to_pylist()
     except (ValueError, TypeError, pa.ArrowException):
         with _native_only(native), pytest.raises((ValueError, TypeError, pa.ArrowException)):
             update.update_by_arrow_with_row_id(data)

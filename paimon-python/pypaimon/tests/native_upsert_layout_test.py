@@ -17,6 +17,7 @@
 
 """Equivalent Arrow layouts must not send upsert matching back to Python."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -26,7 +27,6 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
@@ -80,7 +80,7 @@ def _native_only(native):
     stack = ExitStack()
     if native:
         for owner, method in [(TableUpsertByKey, '_upsert_partition'),
-                              (TableUpdateByRowId, '_load_existing_files_info'),
+                              (PythonTableUpdateByRowId, '_load_existing_files_info'),
                               (TableUpdate, '_build_predicate_update_table')]:
             stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
     return stack

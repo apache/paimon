@@ -33,7 +33,8 @@ from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import require_columns
-from pypaimon.write.table_write import StreamTableWrite
+from pypaimon.write.update_validation import _authorize_update
+from pypaimon.write.backend_dispatch import create_python_write
 
 # Composite key is represented as a tuple of values
 _KeyTuple = Tuple[Any, ...]
@@ -80,16 +81,16 @@ class PythonTableUpsert:
         self._rows = rows
 
     def upsert(self):
-        context = self._context
         if self._rows:
-            return context._upsert_rows(self._data, self._upsert_keys, self._update_cols)
-        return context._upsert_arrow(self._data, self._upsert_keys, self._update_cols)
+            return self._upsert_rows(self._data, self._upsert_keys, self._update_cols)
+        return self._upsert_arrow(self._data, self._upsert_keys, self._update_cols)
 
     def _new_row_id_updater(self):
         context = self._context
-        from pypaimon.write.write_builder import _new_update_by_row_id
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-        return _new_update_by_row_id(
+        _authorize_update(context.table)
+        return TableUpdateByRowId._from_python(
             context.table, context.commit_user, context.commit_identifier)
 
     def _group_rows_by_partition(
@@ -132,10 +133,10 @@ class PythonTableUpsert:
                 if isinstance(value, Blob):
                     raise ValueError("Blob values are not supported as upsert keys.")
 
-        row_items, input_key_tuples = context._dedup_row_items_last_write_wins(
+        row_items, input_key_tuples = self._dedup_row_items_last_write_wins(
             row_items, input_key_tuples, partition_spec)
 
-        key_to_row_ids = context._build_key_to_row_ids_map(
+        key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples)
         )
 
@@ -158,14 +159,14 @@ class PythonTableUpsert:
             )
             for _, values_by_name in matched_items:
                 require_columns(values_by_name, cols_to_update, "upsert_by_key")
-            commit_messages.extend(context._new_row_id_updater().update_rows_columns(
+            commit_messages.extend(self._new_row_id_updater().update_rows_columns(
                 [row for row, _ in matched_items],
                 matched_row_ids,
                 cols_to_update,
             ))
 
         if new_items:
-            commit_messages.extend(context._append_rows(new_items))
+            commit_messages.extend(self._append_rows(new_items))
 
         return commit_messages
 
@@ -255,13 +256,13 @@ class PythonTableUpsert:
         ]
 
         # 2. Deduplicate – keep the LAST occurrence of every repeated key.
-        partition_data, input_key_tuples = context._dedup_last_write_wins(
+        partition_data, input_key_tuples = self._dedup_last_write_wins(
             partition_data, input_key_tuples, partition_spec,
         )
 
         # 3. Look up candidate rows using key predicates and available indexes,
         #    keeping only exact input-key matches.
-        key_to_row_ids = context._build_key_to_row_ids_map(
+        key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
 
@@ -286,12 +287,12 @@ class PythonTableUpsert:
 
         commit_messages: List[CommitMessage] = []
         if matched_indices:
-            commit_messages.extend(context._do_updates(
+            commit_messages.extend(self._do_updates(
                 partition_data, matched_indices,
                 input_key_tuples, key_to_row_ids, update_cols,
             ))
         if new_indices:
-            commit_messages.extend(context._do_appends(partition_data, new_indices))
+            commit_messages.extend(self._do_appends(partition_data, new_indices))
         return commit_messages
 
     @staticmethod
@@ -427,7 +428,7 @@ class PythonTableUpsert:
         )
 
         cols_to_update = list(update_cols) if update_cols else list(context.table.field_names)
-        return context._new_row_id_updater().update_columns(
+        return self._new_row_id_updater().update_columns(
             update_data, cols_to_update)
 
     def _do_appends(
@@ -453,7 +454,7 @@ class PythonTableUpsert:
         all_ordered_cols = [c for c in context.table.field_names if c in new_data.column_names]
         new_data = new_data.select(all_ordered_cols)
 
-        table_write = StreamTableWrite(context.table, context.commit_user)
+        table_write = create_python_write(context.table, context.commit_user, stream=True)
         try:
             table_write.with_write_type(all_ordered_cols)
             table_write.write_arrow(new_data)
@@ -466,9 +467,9 @@ class PythonTableUpsert:
             row_items: List[Tuple[Any, Dict[str, Any]]],
     ) -> List[CommitMessage]:
         context = self._context
-        all_ordered_cols = context._append_row_column_names(row_items)
+        all_ordered_cols = self._append_row_column_names(row_items)
 
-        table_write = StreamTableWrite(context.table, context.commit_user)
+        table_write = create_python_write(context.table, context.commit_user, stream=True)
         try:
             table_write.with_write_type(all_ordered_cols)
             for row, _ in row_items:
@@ -507,12 +508,11 @@ class PythonTableUpsert:
         ]
 
     def _upsert_arrow(self, data, upsert_keys, effective_update_cols):
-        context = self._context
         all_commit_messages: List[CommitMessage] = []
 
         # Process each partition independently
-        for partition_spec, partition_data in context._group_by_partition(data):
-            msgs = context._upsert_partition(
+        for partition_spec, partition_data in self._group_by_partition(data):
+            msgs = self._upsert_partition(
                 partition_data, upsert_keys, partition_spec, effective_update_cols
             )
             all_commit_messages.extend(msgs)
@@ -520,11 +520,10 @@ class PythonTableUpsert:
         return all_commit_messages
 
     def _upsert_rows(self, row_items, upsert_keys, effective_update_cols):
-        context = self._context
         commit_messages: List[CommitMessage] = []
-        for partition_spec, partition_items in context._group_rows_by_partition(row_items):
+        for partition_spec, partition_items in self._group_rows_by_partition(row_items):
             commit_messages.extend(
-                context._upsert_row_partition(
+                self._upsert_row_partition(
                     partition_items,
                     upsert_keys,
                     partition_spec,

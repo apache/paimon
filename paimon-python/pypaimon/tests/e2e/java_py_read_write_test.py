@@ -1909,7 +1909,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
         update.with_read_projection(['f0'])
         update.with_update_type(['f2'])
         upd = update.new_shard_updator(shard_num=0, total_shard_count=3)
-        print(f"Shard 0 row_ranges: {[(r[1].from_, r[1].to) for r in upd.row_ranges]}")
 
         reader = upd.arrow_reader()
         import pyarrow as pa

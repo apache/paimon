@@ -35,7 +35,7 @@ from pypaimon.write.merge_transform import (
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+from pypaimon.write.backend_dispatch import create_python_write
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.merge_inputs import (
     _PrepareCtx,
@@ -477,9 +477,9 @@ def _prepare_commit_messages(
         update_snapshot_table = _copy_at_snapshot(
             table, base_snapshot.id if base_snapshot is not None else None
         )
-        from pypaimon.write.write_builder import _new_update_by_row_id
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-        updater = _new_update_by_row_id(
+        updater = TableUpdateByRowId._from_python(
             update_snapshot_table, commit_user, commit_identifier)
         update_msgs = updater.update_columns(
             update_table, list(update_cols_union)
@@ -490,7 +490,7 @@ def _prepare_commit_messages(
         delete_snapshot_table = _copy_at_snapshot(
             table, base_snapshot.id if base_snapshot is not None else None
         )
-        deleter = TableDeleteByRowId(delete_snapshot_table)
+        deleter = TableDeleteByRowId._from_python(delete_snapshot_table)
         row_id_name = SpecialFields.ROW_ID.name
         delete_msgs = deleter.delete(
             delete_table.column(row_id_name).to_pylist()
@@ -513,9 +513,7 @@ def _prepare_commit_messages(
 
 
 def _new_table_write(table, commit_user: str, commit_identifier: int):
-    if commit_identifier == BATCH_COMMIT_IDENTIFIER:
-        return BatchTableWrite(table, commit_user)
-    return StreamTableWrite(table, commit_user)
+    return create_python_write(table, commit_user, stream=commit_identifier != BATCH_COMMIT_IDENTIFIER)
 
 
 def _normalize_source(source: Any, on_columns=()) -> pa.Table:

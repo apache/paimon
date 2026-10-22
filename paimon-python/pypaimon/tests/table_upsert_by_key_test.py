@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import os
 from contextlib import contextmanager
 import unittest
@@ -750,7 +751,6 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         self._compact_all_data_files(table)
 
         from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
-        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
         original_build = RowIdFileIndex.from_entries
         advanced = [False]
@@ -769,7 +769,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             return original_build(current_table, snapshot_id, entries)
 
         with mock.patch.object(
-                TableUpdateByRowId,
+                PythonTableUpdateByRowId,
                 '_load_existing_files_info',
                 side_effect=AssertionError("unexpected snapshot scan"),
         ), mock.patch.object(

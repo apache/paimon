@@ -120,7 +120,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
     encoded_not_matched = [encode(clause) for clause in not_matched]
     if any(clause is None for clause in encoded_matched + encoded_not_matched):
         return None
-    builder = (native_table.new_batch_write_builder()._with_commit_user(commit_user)
+    builder = (native_table.new_batch_write_builder().with_commit_user(commit_user)
                if commit_identifier == BATCH_COMMIT_IDENTIFIER else
                native_table.new_stream_write_builder().with_commit_user(commit_user))
     writer = builder.new_update()

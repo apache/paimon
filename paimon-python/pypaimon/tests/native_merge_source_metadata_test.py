@@ -134,7 +134,7 @@ def test_native_condition_transport_does_not_load_python_datafusion(native_rest_
               pa.table({'key': [0], 'value': [91]}, schema=_SCHEMA))
     source_key = '_ROW_ID' if table_source else 'key'
     native_table, native_source = Mock(), Mock()
-    core = native_table.new_batch_write_builder.return_value._with_commit_user.return_value.new_update.return_value
+    core = native_table.new_batch_write_builder.return_value.with_commit_user.return_value.new_update.return_value
     core.merge_into.return_value = []
     with patch('pypaimon.execution.native.write.native_merge_into._native_row_id_table', return_value=native_table), \
             patch(

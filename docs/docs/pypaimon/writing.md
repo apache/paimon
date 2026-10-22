@@ -72,6 +72,22 @@ Use `new_postpone_fixed_bucket_write_builder()` to write real buckets. New
 partitions are buffered until `prepare_commit()`; existing ones are incremental.
 This builder currently supports `bucket-function.type=default` only.
 
+### Commit Identity
+
+Write builders generate a commit user by default. Use `with_commit_user()` before
+creating writers, updates or committers to share an application identity across
+distributed tasks or restore a stream application:
+
+```python
+write_builder = table.new_stream_write_builder().with_commit_user('application-1')
+table_write = write_builder.new_write()
+table_commit = write_builder.new_commit()
+```
+
+Writers and their committer must use the same identity. Use different identities
+for independent applications. Batch and postpone fixed-bucket builders expose
+the same method. Changing a builder affects only operations created afterward.
+
 ### Native Write and Commit
 
 With the `pypaimon-rust` extension installed, set `write.native.enabled=true`
@@ -110,6 +126,11 @@ changelog is produced, including batch overwrite. Likewise, `vector.file.format`
 does not prevent Native updates on tables without VECTOR fields. These operations
 continue to write Parquet/BLOB files; an active dedicated format must still be
 supported by the Native path.
+
+The same Native selection applies to direct construction of `TableWrite`,
+`BatchTableWrite`, `StreamTableWrite` and `PostponeFixedBucketBatchTableWrite`.
+Their public classes, constructor signatures and Arrow/Pandas batch overrides
+are preserved. Python execution is initialized only when that backend is selected.
 
 `write_ray()` uses the shared Python coordinator and lets workers select Native
 writers. For postpone fixed-bucket writes, overwrite plans use the new input

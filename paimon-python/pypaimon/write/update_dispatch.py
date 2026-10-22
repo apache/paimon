@@ -22,7 +22,10 @@ from typing import Any, Iterable, List, Mapping, Optional, Sequence
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.write.backend_dispatch import prepare_native_write_operation
+from pypaimon.write.backend_dispatch import (
+    create_python_merge_into_operation, create_python_update_operation, create_python_upsert_operation,
+    prepare_native_write_operation,
+)
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
@@ -45,8 +48,8 @@ class TableUpdateOperations:
                 'update_by_row_id', context.table, context.commit_user, commit_identifier)
             if native is not None:
                 return native
-        return TableUpdateByRowId(context.table, context.commit_user, commit_identifier,
-                                  _precomputed_files_info=_precomputed_files_info)
+        return TableUpdateByRowId._from_python(context.table, context.commit_user, commit_identifier,
+                                               _precomputed_files_info=_precomputed_files_info)
 
     def new_shard_updator(self, shard_num: int, total_shard_count: int):
         context = self._context
@@ -56,6 +59,7 @@ class TableUpdateOperations:
             raise ValueError('Shard index must be smaller than a positive shard count')
         if context.update_cols == []:
             raise ValueError('Shard update columns must not be empty')
+        _authorize_update(context.table)
         native = prepare_native_write_operation(
             'shard_update',
             context.table,
@@ -69,7 +73,9 @@ class TableUpdateOperations:
                 StreamTableUpdate))
         if native is not None:
             return native
-        return context._new_python_shard_updator(shard_num, total_shard_count)
+        from pypaimon.write.table_update import ShardTableUpdator
+        return ShardTableUpdator._from_python(
+            context.table, context.projection, context.update_cols, context.commit_user, shard_num, total_shard_count)
 
     def _update_by_arrow_with_row_id(self, table: pa.Table, commit_identifier: int) -> List[CommitMessage]:
         context = self._context
@@ -79,15 +85,8 @@ class TableUpdateOperations:
         if table.num_rows and cols and (SpecialFields.ROW_ID.name in table.column_names):
             operation = prepare_native_write_operation('update', context.table, context.commit_user, cols)
         if operation is None:
-            from pypaimon.execution.python.write.table_update import PythonTableUpdate
-            operation = PythonTableUpdate(context, commit_identifier)
+            operation = create_python_update_operation(context, commit_identifier)
         return operation.update_by_arrow_with_row_id(table)
-
-    def _update_by_arrow_batches_with_row_id(
-            self, tables: Iterable[pa.Table], commit_identifier: int) -> List[CommitMessage]:
-        context = self._context
-        from pypaimon.execution.python.write.table_update import PythonTableUpdate
-        return PythonTableUpdate(context)._update_by_arrow_batches_with_row_id(tables, commit_identifier)
 
     def _upsert_by_arrow_with_key(
             self, table: pa.Table, upsert_keys: List[str], commit_identifier: int) -> List[CommitMessage]:
@@ -149,17 +148,15 @@ class TableUpdateOperations:
                 predicate,
                 list(assignments))
         if operation is None:
-            from pypaimon.execution.python.write.table_update import PythonTableUpdate
-            operation = PythonTableUpdate(context, commit_identifier, predicate,
-                                          has_callable=has_callable, has_array=has_array)
+            operation = create_python_update_operation(
+                context, commit_identifier, predicate, has_callable=has_callable, has_array=has_array)
         return operation.update(assignments, read_columns)
 
     def _delete_by_predicate(self, predicate: Optional[Predicate], commit_identifier: int) -> List[CommitMessage]:
         context = self._context
         operation = prepare_native_write_operation('predicate_delete', context.table, context.commit_user, predicate)
         if operation is None:
-            from pypaimon.execution.python.write.table_update import PythonTableUpdate
-            operation = PythonTableUpdate(context, commit_identifier, predicate)
+            operation = create_python_update_operation(context, commit_identifier, predicate)
         return operation.delete()
 
     def _delete_by_row_id(self, row_ids: Sequence[int], commit_identifier: int) -> List[CommitMessage]:
@@ -168,14 +165,8 @@ class TableUpdateOperations:
         if len(row_ids):
             operation = prepare_native_write_operation('delete', context.table, context.commit_user)
         if operation is None:
-            from pypaimon.execution.python.write.table_update import PythonTableUpdate
-            operation = PythonTableUpdate(context, commit_identifier)
+            operation = create_python_update_operation(context, commit_identifier)
         return operation.delete_by_row_id(row_ids)
-
-    def _matched_delete_row_ids(self, predicate: Optional[Predicate]) -> List[int]:
-        context = self._context
-        from pypaimon.execution.python.write.table_update import PythonTableUpdate
-        return PythonTableUpdate(context)._matched_delete_row_ids(predicate)
 
     def update_by_arrow_batches_with_row_id(self, tables: Iterable[pa.Table]) -> List[CommitMessage]:
         """Apply row-id updates from batches using one target-file index.
@@ -187,8 +178,7 @@ class TableUpdateOperations:
         context = self._context
         operation = prepare_native_write_operation('update', context.table, context.commit_user, context.update_cols)
         if operation is None:
-            from pypaimon.execution.python.write.table_update import PythonTableUpdate
-            operation = PythonTableUpdate(context)
+            operation = create_python_update_operation(context, BATCH_COMMIT_IDENTIFIER)
         return operation.update_by_arrow_batches_with_row_id(tables)
 
 
@@ -233,8 +223,7 @@ class UpsertOperations:
         columns = list(effective_update_cols) if effective_update_cols else list(context.table.field_names)
         operation = context._create_native_upsert(data, upsert_keys, columns)
         if operation is None:
-            from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
-            operation = PythonTableUpsert(context, data, upsert_keys, effective_update_cols)
+            operation = create_python_upsert_operation(context, data, upsert_keys, effective_update_cols)
         return operation.upsert()
 
     def upsert_rows(self, rows, upsert_keys: List[str], update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
@@ -252,8 +241,8 @@ class UpsertOperations:
         columns = list(effective_update_cols) if effective_update_cols is not None else list(context.table.field_names)
         operation = context._create_native_upsert([values for _, values in row_items], upsert_keys, columns)
         if operation is None:
-            from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
-            operation = PythonTableUpsert(context, row_items, upsert_keys, effective_update_cols, rows=True)
+            operation = create_python_upsert_operation(
+                context, row_items, upsert_keys, effective_update_cols, rows=True)
         return operation.upsert()
 
     def _create_native_upsert(self, data, upsert_keys, columns):
@@ -275,9 +264,7 @@ def merge_into(
         if native is not None:
             return native.prepare_commit()
 
-    from pypaimon.execution.python.write.merge_into import PythonTableMergeInto
-
-    return PythonTableMergeInto(
+    return create_python_merge_into_operation(
         target_table, source, on=on, when_matched=when_matched,
         when_not_matched=when_not_matched, commit_user=commit_user,
         commit_identifier=commit_identifier,

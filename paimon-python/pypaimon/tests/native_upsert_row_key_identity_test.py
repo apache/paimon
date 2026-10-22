@@ -24,6 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
@@ -87,10 +88,10 @@ def test_lossy_row_key_encoding_cannot_update_an_existing_key(
     fields = Schema.from_pyarrow_schema(pa.schema([('key', source_type), ('value', pa.int32())])).fields
     row = GenericRow([key, 99], fields)
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
-    original = TableUpsertByKey._upsert_row_partition
+    original = PythonTableUpsert._upsert_row_partition
     # The unsafe encoding is rejected before starting a core mutation. Python
     # still matches with the original key and constructs a distinct new row.
-    with patch.object(TableUpsertByKey, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
+    with patch.object(PythonTableUpsert, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
         update = builder.new_update().with_update_type(['value'])
         messages = update.upsert_by_key([row], ['key'], 17) if stream else update.upsert_by_key([row], ['key'])
         fallback.assert_called_once()
@@ -122,7 +123,7 @@ def test_exact_row_key_encodings_still_use_native_upsert(
     row = GenericRow([key, 99], fields)
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(TableUpsertByKey, '_upsert_row_partition',
+            stack.enter_context(patch.object(PythonTableUpsert, '_upsert_row_partition',
                                              side_effect=AssertionError('Python exact-key fallback')))
         update = target.new_batch_write_builder().new_update().with_update_type(['value'])
         messages = update.upsert_by_key([row], ['key'])
@@ -136,8 +137,8 @@ def test_large_integer_row_keys_retain_the_existing_constructor_fallback(native_
     key = 2 ** 53 + 2
     latest, target = _tables(native_rest_catalog, pa.float64(), float(key), native, False)
     fields = Schema.from_pyarrow_schema(pa.schema([('key', pa.int64()), ('value', pa.int32())])).fields
-    original = TableUpsertByKey._upsert_row_partition
-    with patch.object(TableUpsertByKey, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
+    original = PythonTableUpsert._upsert_row_partition
+    with patch.object(PythonTableUpsert, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
         messages = target.new_batch_write_builder().new_update().with_update_type(['value']).upsert_by_key(
             [GenericRow([key, 99], fields)], ['key'])
         # PyArrow's constructor rejects Python integers outside its consecutive
@@ -196,8 +197,8 @@ def test_text_binary_row_key_constructors_cannot_change_match_identity(
         native_rest_catalog, native, key_type, initial, source_type, key):
     latest, target = _tables(native_rest_catalog, key_type, initial, native, False)
     fields = Schema.from_pyarrow_schema(pa.schema([('key', source_type), ('value', pa.int32())])).fields
-    original = TableUpsertByKey._upsert_row_partition
-    with patch.object(TableUpsertByKey, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
+    original = PythonTableUpsert._upsert_row_partition
+    with patch.object(PythonTableUpsert, '_upsert_row_partition', autospec=True, side_effect=original) as fallback:
         messages = target.new_batch_write_builder().new_update().with_update_type(['value']).upsert_by_key(
             [GenericRow([key, 99], fields)], ['key'])
         fallback.assert_called_once()

@@ -55,7 +55,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
     if native_table is None:
         return None
     if fixed_bucket:
-        builder = native_table.new_postpone_fixed_bucket_write_builder()._with_commit_user(commit_user)
+        builder = native_table.new_postpone_fixed_bucket_write_builder().with_commit_user(commit_user)
         if bucket_plan is not None:
             builder = builder.with_bucket_plan(bucket_plan.to_arrow(table))
         if static_partition is not None:
@@ -65,7 +65,7 @@ def create_native_write(table, commit_user, static_partition=None, stream=False,
     if stream:
         builder = native_table.new_stream_write_builder().with_commit_user(commit_user)
     else:
-        builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
+        builder = native_table.new_batch_write_builder().with_commit_user(commit_user)
         if static_partition is not None:
             builder = builder.with_overwrite(static_partition)
     if restore_snapshot_id is not None:

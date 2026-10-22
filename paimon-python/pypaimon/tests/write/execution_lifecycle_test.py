@@ -187,7 +187,7 @@ def _data_evolution_table(tmp_path):
 def _core_builder():
     table = Mock()
     builder = table.new_batch_write_builder.return_value
-    builder._with_commit_user.return_value = builder
+    builder.with_commit_user.return_value = builder
     return table, builder
 
 

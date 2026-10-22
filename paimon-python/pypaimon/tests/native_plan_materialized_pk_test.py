@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
@@ -29,7 +30,6 @@ from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import Bit
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
@@ -78,7 +78,7 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
 
     vector = BitmapDeletionVector()
     vector.delete(0)  # clustered first file starts with id=3
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow([], []), 0, {files[0].file_name: vector})
     commit = table.new_batch_write_builder().new_commit()
     try:
@@ -174,7 +174,7 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
             commit.close()
     vector = BitmapDeletionVector()
     vector.delete(1)  # Remove id=2 from the first sorted L0 run.
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow(['pending'], table.partition_keys_fields), 0, {first_file.file_name: vector})
     commit = table.new_batch_write_builder().new_commit()
     try:
@@ -255,7 +255,7 @@ def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merge
     deleted_position = pq.read_table(first_path).column('id').to_pylist().index(2)
     vector = BitmapDeletionVector()
     vector.delete(deleted_position)
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow([], []), 0, {first_file.file_name: vector})
     commit = table.new_batch_write_builder().new_commit()
     try:

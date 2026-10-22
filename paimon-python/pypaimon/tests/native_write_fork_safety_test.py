@@ -31,7 +31,7 @@ from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 _OPERATIONS = ['batch-write', 'stream-write', 'commit', 'upsert', 'row-id-updater', 'update', 'batch-update',
-               'predicate-update', 'delete', 'predicate-delete']
+               'predicate-update', 'delete', 'predicate-delete', 'direct-row-id-updater', 'direct-row-id-delete']
 
 
 class _ForkSafetyError(RuntimeError):
@@ -52,15 +52,14 @@ def _operation(tmp_path, operation):
         if operation.endswith('write'):
             streaming = operation == 'stream-write'
             builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
-            name = 'StreamTableWrite' if streaming else 'BatchTableWrite'
-            context.enter_context(patch('pypaimon.write.table_write.' + name, pure))
+            context.enter_context(patch('pypaimon.write.backend_dispatch.create_python_write', pure))
             factory = 'create_native_write'
             module = 'pypaimon.execution.native.write.native_write.'
             invoke = builder.new_write
         elif operation == 'commit':
             committer = table.new_batch_write_builder().new_commit()
             context.callback(committer.close)
-            context.enter_context(patch.object(committer.file_store_commit, 'commit', pure))
+            context.enter_context(patch('pypaimon.execution.python.write.table_commit.create_python_commit', pure))
             context.enter_context(patch(
                 'pypaimon.execution.native.write.native_commit.native_messages_supported', return_value=True))
             message = Mock()
@@ -71,31 +70,40 @@ def _operation(tmp_path, operation):
             module = 'pypaimon.execution.native.write.native_update.'
             if operation == 'upsert':
                 upsert = TableUpsertByKey(table, 'test', 7)
-                context.enter_context(patch.object(upsert, '_group_by_partition', pure))
+                context.enter_context(patch('pypaimon.write.update_dispatch.create_python_upsert_operation', pure))
                 factory = 'create_native_upsert'
                 invoke = lambda: upsert.upsert(data, ['id'])
-            elif operation == 'row-id-updater':
-                context.enter_context(patch('pypaimon.write.update_dispatch.TableUpdateByRowId', pure))
-                factory, invoke = 'create_native_update_by_row_id', updater.new_update_by_row_id
+            elif operation in ('row-id-updater', 'direct-row-id-updater'):
+                from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+                context.enter_context(patch('pypaimon.write.backend_dispatch.create_python_row_id_update', pure))
+                factory = 'create_native_update_by_row_id'
+                invoke = (updater.new_update_by_row_id if operation == 'row-id-updater' else
+                          lambda: TableUpdateByRowId(table, 'test', 7))
+            elif operation == 'direct-row-id-delete':
+                from pypaimon.write.table_delete import TableDeleteByRowId
+
+                context.enter_context(patch('pypaimon.write.backend_dispatch.create_python_row_id_delete', pure))
+                factory = 'create_native_row_id_delete'
+                invoke = lambda: TableDeleteByRowId(table)
             elif operation in ('update', 'batch-update'):
                 data = data.append_column('_ROW_ID', pa.array([0], pa.int64()))
+                context.enter_context(patch('pypaimon.write.update_dispatch.create_python_update_operation', pure))
                 if operation == 'update':
-                    context.enter_context(patch.object(updater, '_new_row_id_updater', pure))
                     invoke = lambda: updater.update_by_arrow_with_row_id(data)
                 else:
-                    context.enter_context(patch.object(updater, '_update_by_arrow_batches_with_row_id', pure))
                     invoke = lambda: updater.update_by_arrow_batches_with_row_id([data])
                 factory = 'create_native_update'
             elif operation == 'predicate-update':
-                context.enter_context(patch.object(updater, '_matched_update_scan_table', pure))
+                context.enter_context(patch('pypaimon.write.update_dispatch.create_python_update_operation', pure))
                 factory = 'create_native_predicate_update'
                 invoke = lambda: updater.update_by_predicate(None, {'value': 'new'})
             elif operation == 'delete':
-                context.enter_context(patch('pypaimon.execution.python.write.table_update.TableDeleteByRowId', pure))
+                context.enter_context(patch('pypaimon.write.update_dispatch.create_python_update_operation', pure))
                 factory = 'create_native_delete'
                 invoke = lambda: updater.delete_by_row_id([0])
             elif operation == 'predicate-delete':
-                context.enter_context(patch.object(updater, '_partition_only_delete_filter', pure))
+                context.enter_context(patch('pypaimon.write.update_dispatch.create_python_update_operation', pure))
                 factory = 'create_native_predicate_delete'
                 invoke = lambda: updater.delete_by_predicate(None)
         yield invoke, module + factory, pure
@@ -114,11 +122,31 @@ def test_native_preparation_propagates_fork_errors_without_python_mutations(tmp_
     with _operation(tmp_path, operation) as (invoke, factory, pure), patch.dict(
             sys.modules, {'pypaimon_rust': module}), patch(
             'pypaimon.execution.native.runtime.native_runtime_available', return_value=True), patch(
-            factory, side_effect=error):
+            factory, side_effect=error) as prepare:
         with pytest.raises(_ForkSafetyError) as raised:
             invoke()
         assert raised.value is fork
+        prepare.assert_called_once()
         pure.assert_not_called()
+
+
+@pytest.mark.parametrize('chain', ['cause', 'context'])
+def test_permission_wrapper_preserves_fork_error_priority(chain):
+    from pypaimon.catalog.catalog_exception import TableNoPermissionException
+    from pypaimon.common.identifier import Identifier
+    from pypaimon.write.backend_dispatch import try_prepare_native
+
+    module = ModuleType('pypaimon_rust')
+    module.ForkSafetyError = _ForkSafetyError
+    fork = _ForkSafetyError('The inherited SDK cannot be used after fork')
+    permission = TableNoPermissionException(Identifier('default', 't'))
+    setattr(permission, '__cause__' if chain == 'cause' else '__context__', fork)
+    prepare = Mock(side_effect=permission)
+    with patch.dict(sys.modules, {'pypaimon_rust': module}):
+        with pytest.raises(_ForkSafetyError) as raised:
+            try_prepare_native(prepare)
+    assert raised.value is fork
+    prepare.assert_called_once()
 
 
 @pytest.mark.parametrize('operation', _OPERATIONS)
@@ -130,9 +158,10 @@ def test_ordinary_native_preparation_failures_keep_the_safe_python_fallback(tmp_
     with _operation(tmp_path, operation) as (invoke, factory, pure), patch.dict(
             sys.modules, {'pypaimon_rust': module}), patch(
             'pypaimon.execution.native.runtime.native_runtime_available', return_value=not missing_runtime), patch(
-            factory, side_effect=error):
+            factory, side_effect=error) as prepare:
         with pytest.raises(_PythonFallbackEntered):
             invoke()
+        prepare.assert_called_once()
         pure.assert_called_once()
 
 
@@ -146,8 +175,13 @@ def test_merge_native_failures_never_restart_python_execution(tmp_path, phase):
     native.prepare_commit.side_effect = failure
     with patch('pypaimon.execution.native.write.native_merge_into.create_native_merge_into',
                side_effect=failure if phase == 'prepare' else None, return_value=native), patch(
-            'pypaimon.write.merge_inputs._prepare', side_effect=_PythonFallbackEntered) as pure:
+            'pypaimon.write.update_dispatch.create_python_merge_into_operation',
+            side_effect=_PythonFallbackEntered) as pure:
         with pytest.raises(_ForkSafetyError) as raised:
             merge_into(table, pa.table({'id': [1]}), on='id', commit_user='job')
         assert raised.value is failure
         pure.assert_not_called()
+        if phase == 'prepare':
+            native.prepare_commit.assert_not_called()
+        else:
+            native.prepare_commit.assert_called_once_with()

@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import os
 import random
 import string
@@ -25,6 +26,7 @@ from unittest import mock
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -70,7 +72,7 @@ def test_write_builder_creates_row_id_updater_with_commit_identity(
     assert updater.table is table
     assert updater.commit_user == update.commit_user == builder.commit_user
     assert updater.commit_identifier == commit_identifier
-    assert updater.snapshot_id == 42
+    assert updater._snapshot_files_info().snapshot_id == 42
     table.new_read_builder.assert_not_called()
 
 
@@ -83,6 +85,8 @@ def test_python_row_id_delete_reports_unsupported_table_capabilities(missing_met
     from pypaimon.write.table_delete import TableDeleteByRowId
 
     table = mock.Mock()
+    table.options.native_write_enabled.return_value = False
+    table.catalog_environment.table_query_auth.return_value = None
     table.options.data_evolution_enabled.return_value = True
     table.options.row_tracking_enabled.return_value = True
     table.options.deletion_vectors_enabled.return_value = True
@@ -96,6 +100,8 @@ def test_python_row_id_delete_keeps_invalid_input_as_value_error():
     from pypaimon.write.table_delete import TableDeleteByRowId
 
     table = mock.Mock()
+    table.options.native_write_enabled.return_value = False
+    table.catalog_environment.table_query_auth.return_value = None
     table.options.data_evolution_enabled.return_value = True
     table.options.row_tracking_enabled.return_value = True
     table.options.deletion_vectors_enabled.return_value = True
@@ -113,7 +119,7 @@ def test_batch_row_id_update_batches_reuse_file_index():
     ]
 
     with mock.patch.object(
-            BatchTableUpdate, "_new_row_id_updater") as factory:
+            PythonTableUpdate, "_new_row_id_updater") as factory:
         updater = factory.return_value
         updater.commit_messages = []
 
@@ -137,7 +143,7 @@ def test_batch_row_id_update_batches_reuse_file_index():
 
 
 def test_batch_row_id_update_detects_overlap_before_write():
-    updater = TableUpdateByRowId.__new__(TableUpdateByRowId)
+    updater = PythonTableUpdateByRowId.__new__(PythonTableUpdateByRowId)
     updater.table = mock.Mock(field_names=['age'])
     updater.commit_messages = []
     updater._updated_first_row_ids_by_column = {}
@@ -1702,7 +1708,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 wb = self._make_write_builder(table)
                 tu = wb.new_update().with_update_type(columns)
                 with mock.patch.object(
-                        TableUpdateByRowId,
+                        PythonTableUpdateByRowId,
                         '_assign_update_file_metadata',
                         new=staticmethod(fail_after_prepare_commit)):
                     with self.assertRaisesRegex(
@@ -1822,7 +1828,6 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
         )
 
     def test_callable_output_preserves_large_offset_chunks(self):
-        from pypaimon.write.table_update import TableUpdate
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
         chunks = [
@@ -1834,14 +1839,14 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
         ]
         value = pa.chunked_array(chunks)
 
-        result = TableUpdate._assignment_to_array(value, value.type, 2)
+        result = PythonTableUpdate._assignment_to_array(value, value.type, 2)
 
         self.assertEqual(2, result.num_chunks)
         self.assertEqual(2_200_000_000, sum(
             len(chunk.values) for chunk in result.chunks
         ))
 
-        updater = TableUpdateByRowId.__new__(TableUpdateByRowId)
+        updater = PythonTableUpdateByRowId.__new__(PythonTableUpdateByRowId)
         updater.table = mock.Mock(field_names=['payload'])
         updater.commit_messages = []
         updater._updated_first_row_ids_by_column = {}

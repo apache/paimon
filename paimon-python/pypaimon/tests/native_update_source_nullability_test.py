@@ -81,8 +81,9 @@ def _messages(table, source, native, stream, operation):
     with ExitStack() as stack:
         if native:
             for method in ('_upsert_partition', '_upsert_row_partition'):
-                stack.enter_context(patch('pypaimon.write.table_upsert_by_key.TableUpsertByKey.' + method,
-                                          side_effect=AssertionError('Python upsert fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert.' + method,
+                    side_effect=AssertionError('Python upsert fallback')))
             stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python MERGE fallback')))
         if operation == 'merge':
@@ -208,7 +209,8 @@ def test_selected_blob_nullability_applies_to_dedicated_files(
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch(
-                'pypaimon.write.table_update_by_row_id.TableUpdateByRowId._load_existing_files_info',
+                'pypaimon.execution.python.write.table_update_by_row_id.'
+                'PythonTableUpdateByRowId._load_existing_files_info',
                 side_effect=AssertionError('Python row-ID update fallback')))
         updater = builder.new_update().new_update_by_row_id()
 
@@ -252,7 +254,8 @@ def test_not_null_blob_containers_keep_nullable_children(
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch(
-                'pypaimon.write.table_update_by_row_id.TableUpdateByRowId._load_existing_files_info',
+                'pypaimon.execution.python.write.table_update_by_row_id.'
+                'PythonTableUpdateByRowId._load_existing_files_info',
                 side_effect=AssertionError('Python row-ID update fallback')))
         messages = builder.new_update().new_update_by_row_id().update_columns(source, ['payload'])
     commit = builder.new_commit()

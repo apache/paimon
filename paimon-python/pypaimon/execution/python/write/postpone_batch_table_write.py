@@ -20,7 +20,7 @@ import pyarrow as pa
 
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.execution.python.write.file_store_write import PostponeFixedBucketFileStoreWrite
-from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner as PostponeBucketPlanner
 from pypaimon.execution.python.write.table_write import PythonTableWrite
 from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 from pypaimon.write.row_utils import (
@@ -55,7 +55,7 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         )
         writer._plan_provided = bucket_plan is not None
         writer._pending_inputs = []
-        PythonTableWrite(writer).initialize(table, commit_user, static_partition)
+        super().initialize(table, commit_user, static_partition)
 
     def _create_file_store_write(self, commit_user):
         writer = self.writer
@@ -100,9 +100,9 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         writer = self.writer
         if bucket is not None:
             raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
-        table = writer._prepare_arrow_data(table)
-        if not writer._buffer_input(table):
-            return PythonTableWrite(writer).write_arrow(table)
+        table = self._prepare_arrow_data(table)
+        if not self._buffer_input(table):
+            return super().write_arrow(table)
         writer._pending_inputs.extend(
             ("batch", batch) for batch in table.to_batches())
 
@@ -110,15 +110,15 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         writer = self.writer
         if bucket is not None:
             raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
-        data = writer._prepare_arrow_data(data)
-        if not writer._buffer_input(data):
-            return PythonTableWrite(writer).write_arrow_batch(data)
+        data = self._prepare_arrow_data(data)
+        if not self._buffer_input(data):
+            return super().write_arrow_batch(data)
         writer._pending_inputs.append(("batch", data))
 
     def write_row(self, row):
         writer = self.writer
         if writer._plan_provided:
-            return PythonTableWrite(writer).write_row(row)
+            return super().write_row(row)
 
         values_by_name = row_to_named_values(
             row, writer.table.table_schema.fields)
@@ -136,7 +136,7 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         partition = tuple(
             values_by_name[key] for key in writer.table.partition_keys)
         if writer._bucket_plan.contains(partition):
-            return PythonTableWrite(writer).write_row(row)
+            return super().write_row(row)
 
         arrow_row = row_values_to_arrow_table(
             values_by_name, writer.table.table_schema.fields, column_names)
@@ -170,14 +170,13 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         writer._pending_inputs = []
         for input_type, value in inputs:
             if input_type == "batch":
-                PythonTableWrite(writer).write_arrow_batch(value)
+                super().write_arrow_batch(value)
             else:
-                PythonTableWrite(writer).write_row(value[0])
+                super().write_row(value[0])
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        writer = self.writer
-        writer._flush_pending_inputs()
-        return PythonTableWrite(writer).prepare_commit(commit_identifier)
+        self._flush_pending_inputs()
+        return super().prepare_commit(commit_identifier)
 
     def _distributed_write_options(self, *, overwrite=False) -> Dict[str, Any]:
         writer = self.writer
@@ -188,9 +187,9 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
     def close(self):
         writer = self.writer
         writer._pending_inputs = []
-        PythonTableWrite(writer).close()
+        super().close()
 
     def abort(self):
         writer = self.writer
         writer._pending_inputs = []
-        PythonTableWrite(writer).abort()
+        super().abort()

@@ -105,6 +105,24 @@ require unrestricted whole-table authorization because they expose raw file
 metadata. Internal writer metadata restoration uses the selected executor's
 private scanner and retains its write authorization boundary.
 
+Direct `TableUpdateByRowId`, `TableDeleteByRowId` and `ShardTableUpdator`
+construction also selects one execution backend before loading target files.
+Direct `TableWrite`, batch/stream writers and postpone fixed-bucket writers
+use the same selection boundary as builders while retaining their public class
+and subclass hooks. Writer resources and update executors are created in
+`write/backend_dispatch.py`; the public classes only delegate to the selected
+implementation. Python-only nested writers use explicit Python factories.
+An operation that selected Python keeps its nested update/delete writers in
+Python, including MERGE actions. Private schema, routing and rewrite algorithms
+call their executor's helpers; public method overrides and user callbacks remain
+public hooks. Broadcast file indexes retain their captured snapshot and are
+consumed by the explicitly selected Python workers without per-worker rescans.
+
+Postpone bucket metadata is writer state. Native obtains it from the Core write
+builder, preserving per-file layout validation and write authorization without
+adding SELECT requirements. Shared input statistics and bucket arithmetic stay
+outside either backend.
+
 Manifest-source and follow-up-scanner callbacks belong to Python execution
 internals. Public scanner configuration selects the existing snapshot, delta
 or changelog strategies without accepting custom scanner callbacks. Explicit

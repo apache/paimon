@@ -162,7 +162,7 @@ def build_self_merge_update_plan(
         CoreOptions, GlobalIndexSearchMode,
     )
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.write.table_update import TableUpdate
+    from pypaimon.execution.python.write.table_update import PythonTableUpdate
 
     row_id_name = SpecialFields.ROW_ID.name
     needed_cols = set(resolve_target_projection(
@@ -207,7 +207,7 @@ def build_self_merge_update_plan(
     )
     # A packed scan split may contain multiple logical row-id groups. Keep
     # each group intact, but do not materialize unrelated groups together.
-    file_groups = list(TableUpdate._predicate_update_file_groups(
+    file_groups = list(PythonTableUpdate._predicate_update_file_groups(
         scan_plan.splits()
     ))
     update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
@@ -924,7 +924,7 @@ def distributed_delete_apply(
         if base_snapshot_id is not None else table
     )
 
-    planner = TableDeleteByRowId(scan_table)
+    planner = TableDeleteByRowId._from_python(scan_table)
     anchor_info = planner._snapshot_anchor_ranges()
     if not anchor_info.anchors:
         return [], 0, []
