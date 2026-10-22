@@ -58,40 +58,35 @@ class _AnchorRangesInfo:
 class PythonTableDeleteByRowId:
     """Write data-evolution deletes as deletion-vector index updates."""
 
-    def __init__(self, context):
-        self._context = context
-
     def initialize(
             self,
             table,
             _precomputed_anchor_ranges: Optional[_AnchorRangesInfo] = None,
     ):
-        context = self._context
         from pypaimon.table.file_store_table import FileStoreTable
 
-        context.table: FileStoreTable = table
-        context.file_io = table.file_io
-        context._precomputed_anchor_ranges = _precomputed_anchor_ranges
+        self.table: FileStoreTable = table
+        self.file_io = table.file_io
+        self._precomputed_anchor_ranges = _precomputed_anchor_ranges
+        return self
 
     def _snapshot_anchor_ranges(self) -> _AnchorRangesInfo:
-        context = self._context
-        snapshot_id, anchors = context._scan_anchor_ranges()
+        snapshot_id, anchors = self._scan_anchor_ranges()
         return _AnchorRangesInfo(snapshot_id=snapshot_id, anchors=anchors)
 
     def delete(self, row_ids: Sequence[int]) -> List[CommitMessage]:
-        context = self._context
-        context._validate_delete()
+        self._validate_delete()
 
-        deduplicated = context._deduplicate_row_ids(row_ids)
+        deduplicated = self._deduplicate_row_ids(row_ids)
         if not deduplicated:
             return []
 
-        snapshot_id, anchors = context._load_anchor_ranges()
-        targets = context._group_delete_targets(deduplicated, anchors)
+        snapshot_id, anchors = self._load_anchor_ranges()
+        targets = self._group_delete_targets(deduplicated, anchors)
 
         commit_messages = []
         for (partition, bucket), file_positions in targets.items():
-            message = context._build_commit_message(
+            message = self._build_commit_message(
                 partition,
                 bucket,
                 file_positions,
@@ -104,16 +99,15 @@ class PythonTableDeleteByRowId:
     def _validate_delete(self):
         # Java DataEvolutionDeleteSink.validateTable reports unsupported table
         # capabilities; Native maps the same failure to NotImplementedError.
-        context = self._context
-        if not context.table.options.data_evolution_enabled():
+        if not self.table.options.data_evolution_enabled():
             raise NotImplementedError(
                 "delete requires 'data-evolution.enabled' = 'true'."
             )
-        if not context.table.options.row_tracking_enabled():
+        if not self.table.options.row_tracking_enabled():
             raise NotImplementedError(
                 "delete requires 'row-tracking.enabled' = 'true'."
             )
-        if not context.table.options.deletion_vectors_enabled(False):
+        if not self.table.options.deletion_vectors_enabled(False):
             raise NotImplementedError(
                 "delete requires 'deletion-vectors.enabled' = 'true'."
             )
@@ -132,17 +126,15 @@ class PythonTableDeleteByRowId:
         return result
 
     def _load_anchor_ranges(self) -> Tuple[int, List[_AnchorRange]]:
-        context = self._context
-        if context._precomputed_anchor_ranges is not None:
+        if self._precomputed_anchor_ranges is not None:
             return (
-                context._precomputed_anchor_ranges.snapshot_id,
-                context._precomputed_anchor_ranges.anchors,
+                self._precomputed_anchor_ranges.snapshot_id,
+                self._precomputed_anchor_ranges.anchors,
             )
-        return context._scan_anchor_ranges()
+        return self._scan_anchor_ranges()
 
     def _scan_anchor_ranges(self) -> Tuple[int, List[_AnchorRange]]:
-        context = self._context
-        scan = context.table.new_read_builder().new_scan()
+        scan = self.table.new_read_builder().new_scan()
         plan = scan.plan_all()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         anchors = []
@@ -199,9 +191,8 @@ class PythonTableDeleteByRowId:
             file_positions: Dict[str, Set[int]],
             snapshot_id: int,
     ) -> Optional[CommitMessage]:
-        context = self._context
-        partition_row = GenericRow(list(partition), context.table.partition_keys_fields)
-        old_entries, deletion_vectors = context._read_existing_deletion_vectors(
+        partition_row = GenericRow(list(partition), self.table.partition_keys_fields)
+        old_entries, deletion_vectors = self._read_existing_deletion_vectors(
             partition_row,
             bucket,
             snapshot_id,
@@ -219,7 +210,7 @@ class PythonTableDeleteByRowId:
         if not changed:
             return None
 
-        new_entry = context._write_deletion_vector_index(
+        new_entry = self._write_deletion_vector_index(
             partition_row,
             bucket,
             deletion_vectors,
@@ -248,8 +239,7 @@ class PythonTableDeleteByRowId:
             bucket: int,
             snapshot_id: int,
     ) -> Tuple[List[IndexManifestEntry], Dict[str, DeletionVector]]:
-        context = self._context
-        snapshot_manager = context.table.snapshot_manager()
+        snapshot_manager = self.table.snapshot_manager()
         snapshot = (
             snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot_id >= 0 else snapshot_manager.get_latest_snapshot()
@@ -257,7 +247,7 @@ class PythonTableDeleteByRowId:
         if snapshot is None or not snapshot.index_manifest:
             return [], {}
 
-        index_manifest_file = IndexManifestFile(context.table)
+        index_manifest_file = IndexManifestFile(self.table)
         entries = []
         deletion_vectors: Dict[str, DeletionVector] = {}
         for entry in index_manifest_file.read(snapshot.index_manifest):
@@ -272,7 +262,7 @@ class PythonTableDeleteByRowId:
             if not entry.index_file.dv_ranges:
                 continue
 
-            dv_path = context._index_file_path(entry.index_file, partition, bucket)
+            dv_path = self._index_file_path(entry.index_file, partition, bucket)
             for data_file_name, meta in entry.index_file.dv_ranges.items():
                 deletion_file = DeletionFile(
                     dv_index_path=dv_path,
@@ -281,7 +271,7 @@ class PythonTableDeleteByRowId:
                     cardinality=meta.cardinality,
                 )
                 deletion_vectors[data_file_name] = DeletionVector.read(
-                    context.file_io,
+                    self.file_io,
                     deletion_file,
                 )
 
@@ -293,9 +283,8 @@ class PythonTableDeleteByRowId:
             bucket: int,
             deletion_vectors: Dict[str, DeletionVector],
     ) -> IndexManifestEntry:
-        context = self._context
         file_name = f"{FileStorePathFactory.INDEX_PREFIX}{uuid.uuid4()}-1"
-        path, external = context.table.path_factory().new_bucket_index_path(
+        path, external = self.table.path_factory().new_bucket_index_path(
             tuple(partition.values), bucket, file_name)
 
         position = 1
@@ -316,10 +305,10 @@ class PythonTableDeleteByRowId:
 
         data = b"".join(chunks)
         try:
-            with context.file_io.new_output_stream(path) as output_stream:
+            with self.file_io.new_output_stream(path) as output_stream:
                 output_stream.write(data)
         except Exception:
-            context.file_io.delete_quietly(path)
+            self.file_io.delete_quietly(path)
             raise
 
         index_file = IndexFileMeta(
@@ -338,6 +327,5 @@ class PythonTableDeleteByRowId:
         )
 
     def _index_file_path(self, index_file: IndexFileMeta, partition: GenericRow, bucket: int) -> str:
-        context = self._context
-        return context.table.path_factory().bucket_index_path(
+        return self.table.path_factory().bucket_index_path(
             tuple(partition.values), bucket, index_file)

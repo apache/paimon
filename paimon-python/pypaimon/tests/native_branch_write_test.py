@@ -22,6 +22,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.write.write_dispatch import NativeTableWrite
@@ -299,8 +301,6 @@ def test_native_branch_schema_evolution_is_independent(tmp_path, native_rest_cat
 @pytest.mark.parametrize('rest', [False, True], ids=['filesystem', 'rest'])
 def test_native_branch_predicate_upsert_and_batch_updates(tmp_path, native_rest_catalog, rest):
     from pypaimon.read.table_read import TableRead
-    from pypaimon.write.table_update import BatchTableUpdate
-    from pypaimon.write.table_upsert_by_key import TableUpsertByKey
     from pypaimon.write.table_delete import TableDeleteByRowId
 
     catalog, main = _table(tmp_path, native_rest_catalog, rest, {
@@ -316,7 +316,7 @@ def test_native_branch_predicate_upsert_and_batch_updates(tmp_path, native_rest_
             predicate, {'value': lambda batch: pa.compute.add(batch['value'], 1)}, ['value'])
     _commit(builder, messages)
     builder = branch.new_batch_write_builder()
-    with patch.object(TableUpsertByKey, '_upsert_partition',
+    with patch.object(PythonTableUpsert, '_upsert_partition',
                       side_effect=AssertionError('Python upsert fallback')):
         messages = builder.new_update().upsert_by_arrow_with_key(pa.Table.from_pylist([
             {'id': 1, 'value': 12, 'p': 'a'}, {'id': 3, 'value': 30, 'p': 'c'}], schema=_SCHEMA), ['id'])
@@ -328,7 +328,7 @@ def test_native_branch_predicate_upsert_and_batch_updates(tmp_path, native_rest_
     ids = {row['id']: row['_ROW_ID'] for row in read.new_read().to_arrow(
         read.new_scan().plan().splits()).to_pylist()}
     builder = branch.new_batch_write_builder()
-    with patch.object(BatchTableUpdate, '_update_by_arrow_batches_with_row_id',
+    with patch.object(PythonTableUpdate, '_update_by_arrow_batches_with_row_id',
                       side_effect=AssertionError('Python grouped update fallback')):
         messages = builder.new_update().with_update_type(['value']).update_by_arrow_batches_with_row_id([
             pa.table({'_ROW_ID': [ids[1]], 'value': [13]}),

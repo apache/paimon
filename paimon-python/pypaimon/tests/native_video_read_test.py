@@ -130,7 +130,7 @@ def test_native_update_of_normal_columns_keeps_packed_video_frames(tmp_path, nat
     before = _read(table, True)[0].to_pylist()
     builder = table.new_batch_write_builder()
     update = builder.new_update().with_update_type(['id'])
-    with patch('pypaimon.write.table_update.BatchTableUpdate._update_by_arrow_batches_with_row_id',
+    with patch('pypaimon.execution.python.write.table_update.PythonTableUpdate._update_by_arrow_batches_with_row_id',
                side_effect=AssertionError('Python update fallback')):
         messages = update.update_by_arrow_batches_with_row_id(iter([
             pa.table({'_ROW_ID': [0], 'id': [20]}, schema=pa.schema([('_ROW_ID', pa.int64()), ('id', pa.int32())]))]))

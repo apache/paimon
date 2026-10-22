@@ -108,52 +108,11 @@ class TableWrite:
     def abort(self):
         return self._python_execution().abort()
 
-    def _create_file_store_write(self, commit_user):
-        return self._python_execution()._create_file_store_write(commit_user)
-
-    def _create_row_key_extractor(self, static_partition):
-        return self._python_execution()._create_row_key_extractor(static_partition)
-
-    def _write_partition_bucket_batch(self, partition, bucket, data):
-        return self._python_execution()._write_partition_bucket_batch(partition, bucket, data)
-
-    def _write_precomputed_bucket(self, data, bucket):
-        return self._python_execution()._write_precomputed_bucket(data, bucket)
-
-    def _write_partition_bucket_row(self, partition, bucket, row, values_by_name):
-        return self._python_execution()._write_partition_bucket_row(partition, bucket, row, values_by_name)
-
     def _distributed_write_options(self, *, overwrite=False):
         return {}
 
     def _prepare_commit(self, commit_identifier):
         return self._python_execution().prepare_commit(commit_identifier)
-
-    def _release_prepared_indexes(self):
-        return self._python_execution()._release_prepared_indexes()
-
-    def _prepare_arrow_data(self, data):
-        return self._python_execution()._prepare_arrow_data(data)
-
-    def _prepare_arrow_schema(self, data):
-        return self._python_execution()._prepare_arrow_schema(data)
-
-    def _normalize_arrow_write_schema(self, data):
-        return self._python_execution()._normalize_arrow_write_schema(data)
-
-    def _validate_pyarrow_schema(self, data_schema, *, check_nested_nullability=True):
-        return self._python_execution()._validate_pyarrow_schema(
-            data_schema, check_nested_nullability=check_nested_nullability)
-
-    def _is_compatible_pyarrow_schema(self, data_schema, expected_schema, *, check_nested_nullability=True):
-        return self._python_execution()._is_compatible_pyarrow_schema(
-            data_schema, expected_schema, check_nested_nullability=check_nested_nullability)
-
-    def _write_cols_pyarrow_schema(self, write_cols):
-        return self._python_execution()._write_cols_pyarrow_schema(write_cols)
-
-    def _raise_inconsistent_schema(self, data_schema):
-        return self._python_execution()._raise_inconsistent_schema(data_schema)
 
 
 class BatchTableWrite(TableWrite):

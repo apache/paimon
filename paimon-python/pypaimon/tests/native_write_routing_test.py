@@ -110,7 +110,7 @@ def test_native_postpone_ray_preserves_fixed_bucket_planner(tmp_path, plan, over
 @pytest.mark.parametrize('explicit_plan', [False, True])
 def test_ray_postpone_plans_use_effective_overwrite(tmp_path, native_writer, mode, explicit_plan):
     from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
-    from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+    from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner as PostponeBucketPlanner
 
     table = _table(tmp_path, 'postpone')
     plan = PostponeBucketPlan({('a',): 8}) if explicit_plan else None

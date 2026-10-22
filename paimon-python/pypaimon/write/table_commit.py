@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 from pypaimon.write.backend_dispatch import (
     abort_table_commit, close_table_commit, commit_table_messages, prepare_native_commit,
-    python_commit, truncate_partitions_commit, truncate_table_commit,
+    python_commit, set_python_commit, truncate_partitions_commit, truncate_table_commit,
 )
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback
@@ -87,10 +87,7 @@ class TableCommit:
 
     @file_store_commit.setter
     def file_store_commit(self, commit):
-        from pypaimon.execution.python.write.table_commit import PythonTableCommit
-
-        self._python_commit = (None if commit is None else
-                               PythonTableCommit(commit, self.overwrite_partition))
+        set_python_commit(self, commit)
 
 
 class BatchTableCommit(TableCommit):

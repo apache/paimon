@@ -47,6 +47,7 @@ from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.update_validation import predicate_fields
 from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.execution.python.write.writer.data_writer import DataWriter
@@ -113,7 +114,7 @@ def _divide_ranges(
 
 
 class PythonTableUpdate:
-    """Execute an update using the facade's configuration and legacy hooks."""
+    """Execute an update using the public configuration."""
 
     def __init__(self, context, commit_identifier=BATCH_COMMIT_IDENTIFIER, predicate=None,
                  *, has_callable=False, has_array=False):
@@ -127,26 +128,33 @@ class PythonTableUpdate:
         context = self._context
         columns = context.update_cols if context.update_cols is not None else [
             name for name in data.column_names if name != SpecialFields.ROW_ID.name]
-        return context._new_row_id_updater(self._commit_identifier).update_columns(data, columns)
+        return self._new_row_id_updater(self._commit_identifier).update_columns(data, columns)
 
     def update_by_arrow_batches_with_row_id(self, tables):
-        return self._context._update_by_arrow_batches_with_row_id(tables, self._commit_identifier)
+        return self._update_by_arrow_batches_with_row_id(tables, self._commit_identifier)
 
     def delete_by_row_id(self, row_ids):
-        return self._context._delete_rows_with_python(row_ids)
+        return self._delete_rows_with_python(row_ids)
 
     def update(self, assignments, read_columns):
-        return self._context._execute_predicate_update(
+        return self._execute_predicate_update(
             self._predicate, assignments, self._commit_identifier, read_columns,
             self._has_callable, self._has_array)
 
     def delete(self):
-        return self._context._execute_predicate_delete(self._predicate, self._commit_identifier)
+        return self._execute_predicate_delete(self._predicate, self._commit_identifier)
+
+    def _new_row_id_updater(self, commit_identifier, _precomputed_files_info=None):
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+        context = self._context
+        _authorize_update(context.table)
+        return TableUpdateByRowId._from_python(
+            context.table, context.commit_user, commit_identifier,
+            _precomputed_files_info=_precomputed_files_info)
 
     def _matched_delete_row_ids(
             self, predicate: Optional[Predicate]) -> List[int]:
-        context = self._context
-        scan_table = context._matched_update_scan_table()
+        scan_table = self._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
@@ -175,7 +183,7 @@ class PythonTableUpdate:
                     if c != SpecialFields.ROW_ID.name
                 ]
                 if updater is None:
-                    updater = context._new_row_id_updater(commit_identifier)
+                    updater = self._new_row_id_updater(commit_identifier)
                 updater.update_columns(table, cols)
             return [] if updater is None else updater.commit_messages
         except Exception:
@@ -256,7 +264,7 @@ class PythonTableUpdate:
                     )
             target_field = table_schema.field(col)
             arrays.append(
-                context._assignment_to_array(
+                self._assignment_to_array(
                     value, target_field.type, matched.num_rows
                 )
             )
@@ -336,7 +344,7 @@ class PythonTableUpdate:
         ).with_all_buckets().read_manifest_entries(manifest_list_manager.read_all(snapshot))
 
         for entry in data_entries:
-            message = context._partition_delete_message(
+            message = self._partition_delete_message(
                 messages,
                 tuple(entry.partition.values),
                 entry.bucket,
@@ -344,8 +352,8 @@ class PythonTableUpdate:
             )
             message.deleted_files.append(entry.file)
 
-        for entry in context._partition_index_entries(snapshot, partition_filter):
-            message = context._partition_delete_message(
+        for entry in self._partition_index_entries(snapshot, partition_filter):
+            message = self._partition_delete_message(
                 messages,
                 tuple(entry.partition.values),
                 entry.bucket,
@@ -387,16 +395,16 @@ class PythonTableUpdate:
         context = self._context
         if predicate is None or not context.table.partition_keys:
             return None
-        predicate_fields = context._predicate_fields(predicate)
-        if not predicate_fields:
+        fields = predicate_fields(predicate)
+        if not fields:
             return None
         partition_keys = set(context.table.partition_keys)
-        if not predicate_fields.issubset(partition_keys):
+        if not fields.issubset(partition_keys):
             return None
         partition_index = {
             name: index for index, name in enumerate(context.table.partition_keys)
         }
-        return context._rewrite_predicate_to_partition_indices(
+        return self._rewrite_predicate_to_partition_indices(
             predicate, partition_index
         )
 
@@ -405,10 +413,9 @@ class PythonTableUpdate:
             predicate: Predicate,
             partition_index: Mapping[str, int],
     ) -> Predicate:
-        context = self._context
         if predicate.method in ('and', 'or'):
             return predicate.new_literals([
-                context._rewrite_predicate_to_partition_indices(
+                self._rewrite_predicate_to_partition_indices(
                     child, partition_index,
                 )
                 for child in (predicate.literals or [])
@@ -422,8 +429,7 @@ class PythonTableUpdate:
 
     def _execute_predicate_update(
             self, predicate, assignments, commit_identifier, read_columns, has_callable, has_array):
-        context = self._context
-        scan_table = context._matched_update_scan_table()
+        scan_table = self._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
@@ -441,12 +447,12 @@ class PythonTableUpdate:
             snapshot_id, splits
         )
         table_read = read_builder.new_read()
-        updater = context._new_row_id_updater(commit_identifier, files_info)
+        updater = self._new_row_id_updater(commit_identifier, files_info)
         try:
             if has_array:
                 matched = table_read.to_arrow(splits)
                 if matched.num_rows > 0:
-                    update_table = context._build_predicate_update_table(
+                    update_table = self._build_predicate_update_table(
                         assignments,
                         matched,
                     )
@@ -454,11 +460,11 @@ class PythonTableUpdate:
                         update_table, list(assignments.keys())
                     )
             else:
-                for split in context._predicate_update_file_groups(splits):
+                for split in self._predicate_update_file_groups(splits):
                     matched = table_read.to_arrow([split], parallelism=1)
                     if matched.num_rows == 0:
                         continue
-                    update_table = context._build_predicate_update_table(
+                    update_table = self._build_predicate_update_table(
                         assignments,
                         matched,
                     )
@@ -472,23 +478,23 @@ class PythonTableUpdate:
         return updater.commit_messages
 
     def _execute_predicate_delete(self, predicate, commit_identifier):
-        context = self._context
-        partition_filter = context._partition_only_delete_filter(predicate)
+        partition_filter = self._partition_only_delete_filter(predicate)
         if partition_filter is not None:
-            return context._delete_by_partition_filter(partition_filter)
+            return self._delete_by_partition_filter(partition_filter)
 
-        row_ids = context._matched_delete_row_ids(predicate)
-        return context._delete_by_row_id(row_ids, commit_identifier)
+        row_ids = self._matched_delete_row_ids(predicate)
+        return self._delete_rows_with_python(row_ids)
 
     def _new_python_shard_updator(self, shard_num, total_shard_count):
         context = self._context
         from pypaimon.write.table_update import ShardTableUpdator
-        return ShardTableUpdator(context.table, context.projection, context.update_cols,
-                                 context.commit_user, shard_num, total_shard_count)
+        return ShardTableUpdator._from_python(
+            context.table, context.projection, context.update_cols,
+            context.commit_user, shard_num, total_shard_count)
 
     def _delete_rows_with_python(self, row_ids):
         context = self._context
-        return TableDeleteByRowId(context.table).delete(list(row_ids))
+        return TableDeleteByRowId._from_python(context.table).delete(list(row_ids))
 
 
 class _ShardBatchIterator:
@@ -682,14 +688,14 @@ class ShardTableUpdator:
         context = self._context
         if context.writer is None:
             from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-            context.writer = TableUpdateByRowId(
+            context.writer = TableUpdateByRowId._from_python(
                 context.table, context.commit_user, BATCH_COMMIT_IDENTIFIER,
                 _precomputed_files_info=context._files_info)
 
     def _flush_group(self):
         context = self._context
         if context._group_batches:
-            context._init_writer()
+            self._init_writer()
             # Preserve staged messages if writing fails; they may already have
             # been published. A failed operation cannot later prepare success.
             context._failed = True
@@ -731,7 +737,7 @@ class SingleWriter:
 
     def write(self, data: pa.RecordBatch):
         context = self._context
-        if data.num_rows > context.capacity():
+        if data.num_rows > self.capacity():
             raise Exception("Data num size exceeds capacity.")
         context.written_records_count += data.num_rows
         context.writer.write(data)
@@ -743,7 +749,7 @@ class SingleWriter:
 
     def end(self) -> DataFileMeta:
         context = self._context
-        if context.capacity() != 0:
+        if self.capacity() != 0:
             raise Exception("There still capacity left in the writer.")
         files = context.writer.prepare_commit()
         if len(files) != 1:

@@ -17,6 +17,7 @@
 
 """Native/Python planner parity on persisted snapshots and data files."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import json
 import tempfile
 import unittest
@@ -37,7 +38,6 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 @pytest.mark.native_plan
@@ -310,7 +310,7 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         vector.delete(3)
         # Python's delete API is DE-only. Use its production bitmap writer to
         # create the same index payload for this compacted primary-key fixture.
-        index_entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        index_entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
             GenericRow([], []), 0, {data_file.file_name: vector})
         commit = table.new_batch_write_builder().new_commit()
         try:

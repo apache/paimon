@@ -28,6 +28,7 @@ from parameterized import parameterized
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.arrow_schema import arrow_schemas_compatible, normalize_arrow_strings
 from pypaimon.write.table_write import TableWrite
+from pypaimon.execution.python.write.table_write import PythonTableWrite
 
 
 class ArrowSchemaTest(unittest.TestCase):
@@ -130,7 +131,7 @@ class ArrowSchemaTest(unittest.TestCase):
         if entry == 'batch':
             source = source.to_batches()[0]
 
-        result = writer._prepare_arrow_data(source)
+        result = PythonTableWrite(writer)._prepare_arrow_data(source)
 
         self.assertIsInstance(result, type(source))
         self.assertEqual(result.schema, writer.table_pyarrow_schema)

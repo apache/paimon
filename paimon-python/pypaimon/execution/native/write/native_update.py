@@ -451,6 +451,21 @@ def create_native_delete(table, commit_user):
     return NativeBatchTableUpdate(table, writer)
 
 
+def create_native_row_id_delete(table):
+    """Adapt the direct deletion API to the existing core table updater."""
+    operation = create_native_delete(table, table.new_batch_write_builder().commit_user)
+    return None if operation is None else NativeTableDeleteByRowId(operation)
+
+
+class NativeTableDeleteByRowId:
+
+    def __init__(self, operation):
+        self._operation = operation
+
+    def delete(self, row_ids):
+        return self._operation.delete_by_row_id(row_ids)
+
+
 def _raise_native_row_id_error(error):
     detail = str(error)
     if 'duplicate UPDATE operations' in detail:

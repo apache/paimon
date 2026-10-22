@@ -180,4 +180,5 @@ def test_python_delete_matching_respects_independent_read_backend(tmp_path):
         return original_import(name, *args, **kwargs)
 
     with patch('builtins.__import__', side_effect=no_native):
-        assert updater._matched_delete_row_ids(predicate) == [1]
+        from pypaimon.execution.python.write.table_update import PythonTableUpdate
+        assert PythonTableUpdate(updater)._matched_delete_row_ids(predicate) == [1]

@@ -45,8 +45,8 @@ class TableUpdateOperations:
                 'update_by_row_id', context.table, context.commit_user, commit_identifier)
             if native is not None:
                 return native
-        return TableUpdateByRowId(context.table, context.commit_user, commit_identifier,
-                                  _precomputed_files_info=_precomputed_files_info)
+        return TableUpdateByRowId._from_python(context.table, context.commit_user, commit_identifier,
+                                               _precomputed_files_info=_precomputed_files_info)
 
     def new_shard_updator(self, shard_num: int, total_shard_count: int):
         context = self._context
@@ -69,7 +69,8 @@ class TableUpdateOperations:
                 StreamTableUpdate))
         if native is not None:
             return native
-        return context._new_python_shard_updator(shard_num, total_shard_count)
+        from pypaimon.execution.python.write.table_update import PythonTableUpdate
+        return PythonTableUpdate(context)._new_python_shard_updator(shard_num, total_shard_count)
 
     def _update_by_arrow_with_row_id(self, table: pa.Table, commit_identifier: int) -> List[CommitMessage]:
         context = self._context

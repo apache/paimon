@@ -17,6 +17,7 @@
 
 """Native updates share the Java Blob placeholder and row-id layout."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from contextlib import ExitStack
 from unittest.mock import patch
 from urllib.parse import urlparse
@@ -34,7 +35,6 @@ from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 pytestmark = pytest.mark.native_plan
@@ -87,7 +87,7 @@ def _read(table, descriptors=False, projection=None, resolve_views=True):
 
 def _native_only():
     stack = ExitStack()
-    for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
+    for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
                         (TableUpdate, '_build_predicate_update_table'),
                         (TableUpsertByKey, '_upsert_partition'),
                         (TableUpsertByKey, '_upsert_row_partition'),

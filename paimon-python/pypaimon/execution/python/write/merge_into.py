@@ -477,9 +477,9 @@ def _prepare_commit_messages(
         update_snapshot_table = _copy_at_snapshot(
             table, base_snapshot.id if base_snapshot is not None else None
         )
-        from pypaimon.write.write_builder import _new_update_by_row_id
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-        updater = _new_update_by_row_id(
+        updater = TableUpdateByRowId._from_python(
             update_snapshot_table, commit_user, commit_identifier)
         update_msgs = updater.update_columns(
             update_table, list(update_cols_union)
@@ -490,7 +490,7 @@ def _prepare_commit_messages(
         delete_snapshot_table = _copy_at_snapshot(
             table, base_snapshot.id if base_snapshot is not None else None
         )
-        deleter = TableDeleteByRowId(delete_snapshot_table)
+        deleter = TableDeleteByRowId._from_python(delete_snapshot_table)
         row_id_name = SpecialFields.ROW_ID.name
         delete_msgs = deleter.delete(
             delete_table.column(row_id_name).to_pylist()

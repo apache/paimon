@@ -23,6 +23,7 @@ from unittest import mock
 
 import pyarrow as pa
 
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -51,7 +52,7 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
     }
 
     def _lookup(self, table, keys, key_set, partition=None):
-        return TableUpsertByKey(table, 'lookup', 1)._build_key_to_row_ids_map(
+        return PythonTableUpsert(TableUpsertByKey(table, 'lookup', 1))._build_key_to_row_ids_map(
             keys, partition or {}, key_set)
 
     def _counted_lookup(self, table, keys, key_set):

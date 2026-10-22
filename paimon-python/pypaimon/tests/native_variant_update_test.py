@@ -17,6 +17,7 @@
 
 """Native partial updates retain Java's shredded VARIANT physical layout."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import json
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -32,7 +33,6 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 pytestmark = pytest.mark.native_plan
@@ -106,7 +106,7 @@ def _read(table, native, projection=None):
 
 def _native_only():
     stack = ExitStack()
-    for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
+    for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
                         (TableUpdate, '_build_predicate_update_table'),
                         (TableUpsertByKey, '_upsert_partition')]:
         stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))

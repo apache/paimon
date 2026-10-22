@@ -87,9 +87,10 @@ def _rows(table):
 def _native_only(stack, use_native):
     if use_native:
         for method in (
-                'pypaimon.write.table_update_by_row_id.TableUpdateByRowId._load_existing_files_info',
-                'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_partition',
-                'pypaimon.write.table_delete.TableDeleteByRowId._scan_anchor_ranges',
+                'pypaimon.execution.python.write.table_update_by_row_id.'
+                'PythonTableUpdateByRowId._load_existing_files_info',
+                'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._upsert_partition',
+                'pypaimon.execution.python.write.table_delete.PythonTableDeleteByRowId._scan_anchor_ranges',
                 'pypaimon.write.table_update.ShardTableUpdator',
                 'pypaimon.execution.python.write.merge_into._build_tables',
                 'pypaimon.read.table_read.TableRead.to_arrow'):

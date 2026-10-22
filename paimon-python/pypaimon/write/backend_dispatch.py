@@ -104,8 +104,22 @@ def create_postpone_bucket_planner(table, known_num_buckets=None):
         native = try_prepare_native(prepare)
         if native is not None:
             return native
-    from pypaimon.write.postpone_bucket import PostponeBucketPlanner
-    return PostponeBucketPlanner(table, known_num_buckets=known_num_buckets)
+    from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
+    return PythonPostponeBucketPlanner(table, known_num_buckets=known_num_buckets)
+
+
+def load_postpone_bucket_metadata(table):
+    """Select metadata planning before public bucket arithmetic consumes input."""
+    if table.options.native_write_enabled():
+        def prepare():
+            from pypaimon.execution.native.write.postpone_bucket import create_native_postpone_bucket_planner
+            planner = create_native_postpone_bucket_planner(table)
+            return None if planner is None else planner.current_plan().as_dict()
+        metadata = try_prepare_native(prepare)
+        if metadata is not None:
+            return metadata
+    from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
+    return PythonPostponeBucketPlanner._load_bucket_metadata(table)
 
 
 def dynamic_bucket_data_buckets(table, partition, snapshot):
@@ -164,12 +178,48 @@ def prepare_native_merge_into(*args, **kwargs):
     return create_native_merge_into(*args, **kwargs)
 
 
+def create_row_id_update_execution(owner, table, commit_user, commit_identifier, precomputed=None):
+    """Select one incremental updater before capturing target files."""
+    if precomputed is not None:
+        from pypaimon.write.update_validation import _authorize_update
+        _authorize_update(table)
+    if precomputed is None:
+        native = prepare_native_write_operation('update_by_row_id', table, commit_user, commit_identifier)
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+    return PythonTableUpdateByRowId().initialize(table, commit_user, commit_identifier, precomputed)
+
+
+def create_row_id_delete_execution(owner, table, precomputed=None):
+    """Keep precomputed broadcast metadata within its selected Python executor."""
+    if precomputed is not None:
+        from pypaimon.write.update_validation import _authorize_update
+        _authorize_update(table)
+    if precomputed is None and table.options.native_write_enabled():
+        def prepare():
+            from pypaimon.execution.native.write.native_update import create_native_row_id_delete
+            return create_native_row_id_delete(table)
+        native = try_prepare_native(prepare)
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
+    return PythonTableDeleteByRowId().initialize(table, precomputed)
+
+
 def python_commit(owner):
     """Create Python commit resources only after that backend is selected."""
     if owner._python_commit is None:
         from pypaimon.execution.python.write.table_commit import create_python_commit
         owner._python_commit = create_python_commit(owner)
     return owner._python_commit
+
+
+def set_python_commit(owner, commit):
+    """Install an explicitly supplied Python committer without selecting Native."""
+    from pypaimon.execution.python.write.table_commit import PythonTableCommit
+    owner._python_commit = (None if commit is None else
+                            PythonTableCommit(commit, owner.overwrite_partition))
 
 
 def commit_table_messages(

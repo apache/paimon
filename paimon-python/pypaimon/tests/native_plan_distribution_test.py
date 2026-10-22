@@ -17,6 +17,7 @@
 
 """Distributed native planning must preserve assignment before reader limits."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -33,7 +34,6 @@ from pypaimon.execution.python.read.scan_distribution import java_file_name_shar
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 class _DistributionFixture:
@@ -160,7 +160,7 @@ class _DistributionFixture:
         vector = BitmapDeletionVector()
         for position in deleted_positions:
             vector.delete(position)
-        entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
             GenericRow([], []), 0, {first_file.file_name: vector})
         commit = table.new_batch_write_builder().new_commit()
         try:
@@ -309,7 +309,7 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                         vector = BitmapDeletionVector()
                         vector.delete(0)
                         vectors[files[key].file_name] = vector
-                    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+                    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
                         GenericRow([], []), 0, vectors)
                     commit = table.new_batch_write_builder().new_commit()
                     try:

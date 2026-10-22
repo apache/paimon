@@ -61,21 +61,6 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         from pypaimon.execution.python.write.postpone_batch_table_write import PythonPostponeFixedBucketWrite
         return PythonPostponeFixedBucketWrite(self)
 
-    def _create_file_store_write(self, commit_user):
-        return self._python_execution()._create_file_store_write(commit_user)
-
-    def _create_row_key_extractor(self, static_partition):
-        return self._python_execution()._create_row_key_extractor(static_partition)
-
-    def _write_partition_bucket_batch(self, partition, bucket, data):
-        return self._python_execution()._write_partition_bucket_batch(partition, bucket, data)
-
-    def _write_partition_bucket_row(self, partition, bucket, row, values_by_name):
-        return self._python_execution()._write_partition_bucket_row(partition, bucket, row, values_by_name)
-
-    def _buffer_input(self, data):
-        return self._python_execution()._buffer_input(data)
-
     def write_arrow(self, table: pa.Table, bucket=None):
         return self._python_execution().write_arrow(table, bucket)
 
@@ -84,9 +69,6 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
 
     def write_row(self, row):
         return self._python_execution().write_row(row)
-
-    def _flush_pending_inputs(self):
-        return self._python_execution()._flush_pending_inputs()
 
     def prepare_commit(self) -> List[CommitMessage]:
         return super().prepare_commit()
