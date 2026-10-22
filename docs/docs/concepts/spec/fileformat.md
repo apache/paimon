@@ -277,9 +277,26 @@ Format Options:
 |:---|:---|:---|:---|
 | `vortex.worker-threads` | 4 | Integer | Minimum number of native threads that decode and encode Vortex data in the background. The pool is shared by the whole JVM and only grows. With 0 threads, only the thread that reads or writes a file drives the native work for it. |
 | `vortex.compact-encodings` | false | Boolean | PyPaimon only. Write with the compact Vortex encodings, which make files smaller and reads somewhat slower. |
+| `vortex.write.edition` | core2025.10.0 | String | The Vortex edition that writers use. An edition sets the encodings and layouts that a file can contain. The default is readable by Vortex 0.73, which Paimon 2.1 uses. See the upgrade order below before you set a newer edition. |
 
 Java writers hand at least 8192 rows to Vortex in each batch, because every batch costs a native
 call and becomes a separate chunk. `write-batch-memory` still limits the memory of each batch.
+
+Upgrade and rollback:
+
+Each Vortex edition has a minimum Vortex version that can read it. A newer Vortex version reads the
+files of all older editions, but an older version cannot read a file of an edition that it does not
+know. Paimon 2.1 reads Vortex with Vortex 0.73. With the default `vortex.write.edition`, Java and
+Python writers write files that Paimon 2.1 can read, so you can upgrade writers and readers in any
+order.
+
+To write with a newer edition, for example `core2026.08.3`:
+1. Upgrade all readers of the table, in all engines and in PyPaimon, to a Vortex version that reads
+   the edition.
+2. Then set `vortex.write.edition`.
+
+After a file is written with a newer edition, you cannot roll back the readers to an older Vortex
+version that does not read it. To roll back, first rewrite or restore these files.
 
 Limitations:
 1. Vortex does not support `MAP`, `MULTISET` or `VARIANT` types.

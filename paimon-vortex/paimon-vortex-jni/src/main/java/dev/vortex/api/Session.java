@@ -42,6 +42,14 @@ public final class Session implements AutoCloseable {
         return new Session(ptr);
     }
 
+    /**
+     * Selects the edition that writers of this session use. It replaces the selected edition of
+     * the same family. Reads are not affected: a session reads files of all known editions.
+     */
+    public void enableEdition(String edition) {
+        NativeSession.enableEdition(pointer, edition);
+    }
+
     public long nativePointer() {
         return pointer;
     }

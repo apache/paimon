@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.Pair;
 
+import dev.vortex.api.Session;
 import dev.vortex.api.VortexWriter;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -76,15 +77,16 @@ final class VortexOutput {
         return writable;
     }
 
-    VortexWriter open(Schema arrowSchema, BufferAllocator allocator) throws IOException {
+    VortexWriter open(Session session, Schema arrowSchema, BufferAllocator allocator)
+            throws IOException {
         if (nativeLocation != null) {
             return VortexWriter.create(
-                    VortexSessions.shared(),
+                    session,
                     nativeLocation.getLeft(),
                     arrowSchema,
                     allocator,
                     nativeLocation.getRight());
         }
-        return VortexWriter.create(VortexSessions.shared(), writable, arrowSchema, allocator);
+        return VortexWriter.create(session, writable, arrowSchema, allocator);
     }
 }

@@ -142,7 +142,11 @@ public final class ArrowBatchStream implements AutoCloseable {
                         viewColumns[i] = viewColumn(ArrowArray.wrap(children[i]).snapshot());
                     } else {
                         importColumn(
-                                children[i], layout.children[i], root.getVector(rootIndexes[i]));
+                                children[i],
+                                layout.children[i],
+                                root.getVector(rootIndexes[i]),
+                                0,
+                                (int) snapshot.length);
                     }
                 }
                 root.setRowCount((int) snapshot.length);
@@ -179,23 +183,29 @@ public final class ArrowBatchStream implements AutoCloseable {
         stream.close();
     }
 
-    private void importColumn(long arrayAddress, Layout layout, FieldVector vector) {
+    /**
+     * Imports the rows {@code [start, start + length)} of an array into {@code vector}. {@code
+     * start} is relative to the offset of the array. A list can refer to a child range that does
+     * not start at 0, for example after a filter, so all nested imports take a range.
+     */
+    private void importColumn(
+            long arrayAddress, Layout layout, FieldVector vector, long start, int length) {
+        ArrowArray array = ArrowArray.wrap(arrayAddress);
+        ArrowArray.Snapshot snapshot = array.snapshot();
         if (!layout.hasView) {
-            // Moves the column, and marks it as released so its parent does not release it.
-            Data.importIntoVector(allocator, ArrowArray.wrap(arrayAddress), vector, null);
+            importSlice(array, snapshot, vector, start, length);
             return;
         }
 
-        ArrowArray.Snapshot snapshot = ArrowArray.wrap(arrayAddress).snapshot();
         switch (layout.kind) {
             case VIEW:
-                copyViews(snapshot, (BaseVariableWidthVector) vector);
+                copyViews(snapshot, (BaseVariableWidthVector) vector, start, length);
                 return;
             case STRUCT:
-                importStruct(snapshot, layout, (StructVector) vector);
+                importStruct(snapshot, layout, (StructVector) vector, start, length);
                 return;
             case LIST:
-                importList(snapshot, layout, (ListVector) vector);
+                importList(snapshot, layout, (ListVector) vector, start, length);
                 return;
             default:
                 throw new UnsupportedOperationException(
@@ -203,19 +213,49 @@ public final class ArrowBatchStream implements AutoCloseable {
         }
     }
 
-    private void importStruct(ArrowArray.Snapshot snapshot, Layout layout, StructVector vector) {
-        checkZeroOffset(snapshot);
-        int length = (int) snapshot.length;
+    /**
+     * Moves a column without views into {@code vector}. When only a part of the column is used,
+     * the column is moved into a temporary vector, and the part is transferred from it.
+     */
+    private void importSlice(
+            ArrowArray array,
+            ArrowArray.Snapshot snapshot,
+            FieldVector vector,
+            long start,
+            int length) {
+        // Moves the column, and marks it as released so its parent does not release it.
+        if (start == 0 && length == snapshot.length) {
+            Data.importIntoVector(allocator, array, vector, null);
+            return;
+        }
+
+        try (FieldVector whole = vector.getField().createVector(allocator)) {
+            Data.importIntoVector(allocator, array, whole, null);
+            whole.makeTransferPair(vector).splitAndTransfer((int) start, length);
+        }
+    }
+
+    private void importStruct(
+            ArrowArray.Snapshot snapshot,
+            Layout layout,
+            StructVector vector,
+            long start,
+            int length) {
+        long first = snapshot.offset + start;
         long validity = buffer(snapshot, 0);
 
         long[] children = NativeUtil.toJavaArray(snapshot.children, (int) snapshot.n_children);
         for (int i = 0; i < children.length; i++) {
             importColumn(
-                    children[i], layout.children[i], (FieldVector) vector.getChildByOrdinal(i));
+                    children[i],
+                    layout.children[i],
+                    (FieldVector) vector.getChildByOrdinal(i),
+                    first,
+                    length);
         }
 
         for (int i = 0; i < length; i++) {
-            if (isValid(validity, i)) {
+            if (isValid(validity, first + i)) {
                 vector.setIndexDefined(i);
             } else {
                 vector.setNull(i);
@@ -224,30 +264,38 @@ public final class ArrowBatchStream implements AutoCloseable {
         vector.setValueCount(length);
     }
 
-    private void importList(ArrowArray.Snapshot snapshot, Layout layout, ListVector vector) {
-        checkZeroOffset(snapshot);
-        int length = (int) snapshot.length;
+    /**
+     * Imports a list. Only the child values between the first and the last offset are imported, and
+     * the offsets are rebased to start at 0. A null list keeps the span of its offsets, so the
+     * offsets of the next lists stay correct.
+     */
+    private void importList(
+            ArrowArray.Snapshot snapshot, Layout layout, ListVector vector, long start, int length) {
+        long first = snapshot.offset + start;
         long validity = buffer(snapshot, 0);
-        long offsets = buffer(snapshot, 1);
-        if (length > 0 && MemoryUtil.UNSAFE.getInt(offsets) != 0) {
-            throw new UnsupportedOperationException(
-                    "Cannot import a list whose offsets do not start at 0");
-        }
+        long offsets = buffer(snapshot, 1) + 4L * first;
+
+        // An empty array can export no offsets buffer.
+        int base = length == 0 ? 0 : MemoryUtil.UNSAFE.getInt(offsets);
+        int end = length == 0 ? 0 : MemoryUtil.UNSAFE.getInt(offsets + 4L * length);
+
+        // Allocating the list also allocates its data vector, so do it before the child import.
+        vector.setInitialCapacity(length);
+        vector.allocateNew();
 
         long[] children = NativeUtil.toJavaArray(snapshot.children, (int) snapshot.n_children);
-        importColumn(children[0], layout.children[0], vector.getDataVector());
+        importColumn(children[0], layout.children[0], vector.getDataVector(), base, end - base);
 
-        for (int i = 0; i < length; i++) {
-            if (isValid(validity, i)) {
-                vector.startNewValue(i);
-                int size =
-                        MemoryUtil.UNSAFE.getInt(offsets + 4L * (i + 1))
-                                - MemoryUtil.UNSAFE.getInt(offsets + 4L * i);
-                vector.endValue(i, size);
-            } else {
-                vector.setNull(i);
-            }
+        copyValidity(validity, first, length, vector.getValidityBuffer());
+
+        long outOffsets = vector.getOffsetBuffer().memoryAddress();
+        MemoryUtil.UNSAFE.putInt(outOffsets, 0);
+        for (int i = 1; i <= length; i++) {
+            MemoryUtil.UNSAFE.putInt(
+                    outOffsets + 4L * i, MemoryUtil.UNSAFE.getInt(offsets + 4L * i) - base);
         }
+
+        vector.setLastSet(length - 1);
         vector.setValueCount(length);
     }
 
@@ -256,9 +304,9 @@ public final class ArrowBatchStream implements AutoCloseable {
      * at most 12 bytes holds its bytes inline. A longer view points into one of the variadic data
      * buffers, which follow the validity and view buffers.
      */
-    private static void copyViews(ArrowArray.Snapshot snapshot, BaseVariableWidthVector vector) {
-        int length = (int) snapshot.length;
-        long offset = snapshot.offset;
+    private static void copyViews(
+            ArrowArray.Snapshot snapshot, BaseVariableWidthVector vector, long start, int length) {
+        long offset = snapshot.offset + start;
         long[] buffers = NativeUtil.toJavaArray(snapshot.buffers, (int) snapshot.n_buffers);
         long validity = buffers[0];
         long views = buffers[1] + VIEW_SIZE * offset;

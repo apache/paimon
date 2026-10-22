@@ -419,6 +419,20 @@ class CoreOptions:
             "and reads somewhat slower. Java writers always use the default encodings.")
     )
 
+    VORTEX_WRITE_EDITION: ConfigOption[str] = (
+        ConfigOptions.key("vortex.write.edition")
+        .string_type()
+        .default_value("core2025.10.0")
+        .with_description(
+            "The Vortex edition that writers use. An edition sets the encodings and layouts that "
+            "a file can contain, and each edition has a minimum Vortex version that can read it. "
+            "The default, core2025.10.0, is readable by Vortex 0.73, which Paimon 2.1 uses. Set a "
+            "newer edition, for example core2026.08.3, only after all readers of the table use a "
+            "Vortex version that reads it. After a file is written with a newer edition, older "
+            "readers cannot read it, so a roll back of the readers then also needs a rewrite of "
+            "these files.")
+    )
+
     MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
         ConfigOptions.key("mosaic.num-buckets")
         .int_type()
@@ -1446,6 +1460,9 @@ class CoreOptions:
 
     def vortex_compact_encodings(self, default=None):
         return self.options.get(CoreOptions.VORTEX_COMPACT_ENCODINGS, default)
+
+    def vortex_write_edition(self, default=None):
+        return self.options.get(CoreOptions.VORTEX_WRITE_EDITION, default)
 
     def mosaic_num_buckets(self, default=None):
         return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)

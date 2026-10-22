@@ -106,6 +106,49 @@ class VortexUtilsTest(unittest.TestCase):
         result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
         self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
 
+    def test_table_writes_use_the_old_reader_edition_by_default(self):
+        self.assertEqual(self._written_edition({}), 'core2025.10.0')
+
+    def test_table_option_selects_the_write_edition(self):
+        options = {'vortex.write.edition': 'core2026.08.3'}
+
+        self.assertEqual(self._written_edition(options), 'core2026.08.3')
+
+    def test_unknown_write_edition_is_rejected(self):
+        path = os.path.join(self.temp_dir, 'e.vortex')
+
+        with self.assertRaises(ValueError):
+            vortex_utils.write_vortex_file(self.file_io, path, pa.table({'id': [1]}),
+                                           edition='core1999.01.0')
+
+    def _written_edition(self, options):
+        """Writes a table with ``options`` and returns the edition that the writer was given."""
+        from unittest import mock
+
+        from pypaimon import CatalogFactory, Schema
+
+        catalog = CatalogFactory.create({'warehouse': os.path.join(self.temp_dir, 'wh')})
+        catalog.create_database('db', True)
+        pa_schema = pa.schema([('id', pa.int64())])
+        catalog.create_table('db.t', Schema.from_pyarrow_schema(
+            pa_schema, options=dict(options, **{'file.format': 'vortex'})), False)
+        table = catalog.get_table('db.t')
+
+        with mock.patch.object(vortex_utils, 'write_vortex_file',
+                               wraps=vortex_utils.write_vortex_file) as write:
+            builder = table.new_batch_write_builder()
+            table_write = builder.new_write()
+            commit = builder.new_commit()
+            table_write.write_arrow(pa.table({'id': [1, 2, 3]}, schema=pa_schema))
+            commit.commit(table_write.prepare_commit())
+            table_write.close()
+            commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
+        return write.call_args.kwargs['edition']
+
     def test_reader_slices_native_chunks_to_the_batch_size(self):
         from pypaimon.execution.python.read.reader.format_vortex_reader import FormatVortexReader
         from pypaimon.schema.data_types import AtomicType, DataField

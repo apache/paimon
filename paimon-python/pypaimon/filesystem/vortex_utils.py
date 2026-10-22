@@ -140,15 +140,21 @@ def open_vortex_file(file_io: FileIO, file_path: str) -> Any:
     return vortex_file
 
 
-def write_vortex_file(file_io: FileIO, path: str, data: Any, compact: bool = False) -> None:
+def write_vortex_file(file_io: FileIO, path: str, data: Any, compact: bool = False,
+                      edition: Optional[str] = None) -> None:
     """Write a pyarrow table as a Vortex file, through a shared store client when remote.
 
     ``compact`` selects the compact encodings, which make files smaller and reads slower.
+    ``edition`` selects the Vortex edition, which sets the oldest Vortex version that can read
+    the file. Without it, the default edition of the installed Vortex version is used.
     """
     import vortex
     from vortex.io import VortexWriteOptions
 
     options = VortexWriteOptions.compact() if compact else VortexWriteOptions.default()
+    if edition:
+        options = options.with_edition(edition)
+
     file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, path)
     if store_kwargs:
         vortex_store, key = _store_for(file_path_for_vortex, store_kwargs)

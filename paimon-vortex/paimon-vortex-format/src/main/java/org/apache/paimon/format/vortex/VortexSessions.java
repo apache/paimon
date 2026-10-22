@@ -21,14 +21,22 @@ package org.apache.paimon.format.vortex;
 import dev.vortex.api.Session;
 import dev.vortex.jni.NativeRuntime;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 /**
  * The process-wide Vortex session and native worker pool.
  *
  * <p>A session holds the native registries and the footer cache. It is safe to share across threads
  * and expensive to create, so all readers and writers use one session that lives until the JVM
  * exits.
+ *
+ * <p>The edition that a writer uses is a setting of its session. So writers use one session for
+ * each edition, which also lives until the JVM exits.
  */
 final class VortexSessions {
+
+    private static final ConcurrentMap<String, Session> WRITE_SESSIONS = new ConcurrentHashMap<>();
 
     private static volatile int workerThreads;
 
@@ -36,6 +44,22 @@ final class VortexSessions {
 
     static Session shared() {
         return Holder.SHARED;
+    }
+
+    /** The session for writers of {@code edition}. Throws for an unknown edition. */
+    static Session forWriting(String edition) {
+        return WRITE_SESSIONS.computeIfAbsent(edition, VortexSessions::createWriteSession);
+    }
+
+    private static Session createWriteSession(String edition) {
+        Session session = Session.create();
+        try {
+            session.enableEdition(edition);
+        } catch (RuntimeException e) {
+            session.close();
+            throw new IllegalArgumentException("Unknown Vortex edition: " + edition, e);
+        }
+        return session;
     }
 
     /**

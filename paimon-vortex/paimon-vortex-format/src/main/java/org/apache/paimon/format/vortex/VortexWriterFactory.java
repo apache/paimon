@@ -40,10 +40,13 @@ public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectW
 
     private final Supplier<ArrowFormatCWriter> cWriterSupplier;
     private final int workerThreads;
+    private final String edition;
 
-    public VortexWriterFactory(Supplier<ArrowFormatCWriter> cWriterSupplier, int workerThreads) {
+    public VortexWriterFactory(
+            Supplier<ArrowFormatCWriter> cWriterSupplier, int workerThreads, String edition) {
         this.cWriterSupplier = cWriterSupplier;
         this.workerThreads = workerThreads;
+        this.edition = edition;
     }
 
     @VisibleForTesting
@@ -56,12 +59,17 @@ public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectW
             throws IOException {
         VortexSessions.ensureWorkerThreads(workerThreads);
         return new VortexRecordsWriter(
-                cWriterSupplier.get(), VortexOutput.of(positionOutputStream));
+                cWriterSupplier.get(),
+                VortexOutput.of(positionOutputStream),
+                VortexSessions.forWriting(edition));
     }
 
     @Override
     public FormatWriter create(FileIO fileIO, Path path, String compression) throws IOException {
         VortexSessions.ensureWorkerThreads(workerThreads);
-        return new VortexRecordsWriter(cWriterSupplier.get(), VortexOutput.of(fileIO, path));
+        return new VortexRecordsWriter(
+                cWriterSupplier.get(),
+                VortexOutput.of(fileIO, path),
+                VortexSessions.forWriting(edition));
     }
 }

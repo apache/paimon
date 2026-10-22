@@ -80,10 +80,10 @@ def write_blob_file(file_io, path, data):
         raise RuntimeError("Failed to write blob file {}: {}".format(path, error)) from error
 
 
-def write_vortex_file(file_io, path, data, compact=False):
+def write_vortex_file(file_io, path, data, compact=False, edition=None):
     try:
         from pypaimon.filesystem import vortex_utils
-        vortex_utils.write_vortex_file(file_io, path, data, compact=compact)
+        vortex_utils.write_vortex_file(file_io, path, data, compact=compact, edition=edition)
     except Exception as error:
         file_io.delete_quietly(path)
         raise RuntimeError("Failed to write Vortex file {}: {}".format(path, error)) from error

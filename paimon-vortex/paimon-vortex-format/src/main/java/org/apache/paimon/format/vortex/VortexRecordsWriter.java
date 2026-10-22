@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.io.BundleRecords;
 
+import dev.vortex.api.Session;
 import dev.vortex.api.VortexWriteSummary;
 import dev.vortex.api.VortexWriter;
 import org.apache.arrow.c.ArrowArray;
@@ -73,7 +74,8 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Nullable private VortexWriteSummary summary;
     private boolean closed;
 
-    VortexRecordsWriter(ArrowFormatCWriter arrowWriter, VortexOutput output) throws IOException {
+    VortexRecordsWriter(ArrowFormatCWriter arrowWriter, VortexOutput output, Session session)
+            throws IOException {
         this.arrowWriter = arrowWriter;
         this.output = output.writable();
         this.path = output.name();
@@ -81,6 +83,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         try {
             this.nativeWriter =
                     output.open(
+                            session,
                             arrowWriter.getVectorSchemaRoot().getSchema(),
                             arrowWriter.getAllocator());
         } catch (Throwable t) {
