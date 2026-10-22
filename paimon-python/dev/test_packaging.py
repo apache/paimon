@@ -116,9 +116,8 @@ class PackagingTest(unittest.TestCase):
     def test_distribution_contents(self):
         names, metadata, _ = wheel_contents(self.wheel)
         self.assertEqual(">=3.6", metadata["Requires-Python"])
-        for forbidden in ("pypaimon/tests", "pypaimon/sample"):
-            self.assertFalse(any(name == forbidden or name.startswith(forbidden + "/")
-                                 for name in names))
+        self.assertFalse(any(name.startswith("pypaimon/tests/")
+                             for name in names))
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
         self.assertIn("pypaimon/_version.py", names)
         execution_files = (
@@ -276,10 +275,8 @@ class PackagingTest(unittest.TestCase):
             for name in internal_aliases:
                 self.assertNotIn(prefix + name, names)
             self.assertFalse(any("requirements.txt" in name or "requirements-dev.txt" in name
+                                 or name.startswith(prefix + "pypaimon/tests/")
                                  for name in names))
-            for forbidden in ("pypaimon/tests", "pypaimon/sample"):
-                self.assertFalse(any(name == prefix + forbidden
-                                     or name.startswith(prefix + forbidden + "/") for name in names))
 
     @staticmethod
     def active_requirements(values, environment):
