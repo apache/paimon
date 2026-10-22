@@ -16,11 +16,19 @@
 # under the License.
 
 import logging
+import struct
 from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import (
+    CoreOptions,
+    GlobalIndexSearchMode,
+)
+from pypaimon.execution.python.globalindex.index_freshness import key_indexes_are_fresh
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.read.table_read import TableRead
+from pypaimon.schema.data_types import AtomicType
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
@@ -31,6 +39,34 @@ from pypaimon.write.table_write import StreamTableWrite
 _KeyTuple = Tuple[Any, ...]
 
 logger = logging.getLogger(__name__)
+
+
+def _key_predicate(builder, field, values):
+    # Python equality treats signed zero as the same key, whereas index Bloom
+    # filters can distinguish the serialized floating-point representations.
+    if not isinstance(field.type, AtomicType) or field.type.type.upper() in ('FLOAT', 'DOUBLE'):
+        return None
+    try:
+        serializer = create_serializer(field.type)
+        literals = []
+        for value in values:
+            if value is not None:
+                literal = serializer.deserialize(serializer.serialize(value))
+                # A lossy conversion or incompatible row-key type must keep
+                # the original scan, including all of this column's keys.
+                if literal != value:
+                    return None
+                literals.append(literal)
+    except (ArithmeticError, TypeError, ValueError, struct.error):
+        return None
+
+    predicates = []
+    if literals:
+        predicates.append(builder.equal(field.name, literals[0]) if len(literals) == 1
+                          else builder.is_in(field.name, literals))
+    if None in values:
+        predicates.append(builder.is_null(field.name))
+    return builder.or_predicates(predicates)
 
 
 class PythonTableUpsert:
@@ -223,9 +259,8 @@ class PythonTableUpsert:
             partition_data, input_key_tuples, partition_spec,
         )
 
-        # 3. Scan partition once, keeping key → [_ROW_ID, ...] for keys that
-        #    appear in the input (memory ∝ matched existing rows, not the
-        #    whole partition).
+        # 3. Look up candidate rows using key predicates and available indexes,
+        #    keeping only exact input-key matches.
         key_to_row_ids = context._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
@@ -297,11 +332,10 @@ class PythonTableUpsert:
         Scan the partition in batches and collect key → [_ROW_ID, ...] for
         rows whose composite key is in *input_key_set*.
 
-        The partition spec (if any) is pushed down as an ``and`` of per-key
-        equality predicates so non-matching partitions are pruned by the
-        scanner. The match-key filter itself is applied in Python on each
-        batch — this keeps memory proportional to the input key set rather
-        than the entire partition.
+        Partition and match-key predicates let the scanner prune files and
+        use available scalar indexes. Per-column candidate sets may include
+        extra composite-key combinations; exact tuple matching still happens
+        on each batch. Unindexed data is always included in the lookup.
 
         Args:
             match_keys:     Column names used as the composite match key
@@ -311,17 +345,39 @@ class PythonTableUpsert:
             input_key_set:   Set of composite key tuples from the input data.
         """
         context = self._context
-        read_builder = context.table.new_read_builder()
+        scan_options = {
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
+        }
+        scan_table = context.table.copy_without_time_travel(scan_options)
+        read_builder = scan_table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        sub_predicates = []
 
         if partition_spec:
-            predicate_builder = read_builder.new_predicate_builder()
-            sub_predicates = [
+            sub_predicates.extend([
                 (predicate_builder.is_null(k) if v is None
                  else predicate_builder.equal(k, v))
                 for k, v in partition_spec.items()
-            ]
-            partition_predicate = predicate_builder.and_predicates(sub_predicates)
-            read_builder = read_builder.with_filter(partition_predicate)
+            ])
+        if scan_table.options.global_index_enabled():
+            from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+
+            snapshot = TimeTravelUtil.resolve_snapshot(scan_table)
+            scan_table = scan_table._copy_with_snapshot(snapshot)
+            if not key_indexes_are_fresh(
+                    scan_table, snapshot, match_keys,
+                    predicate_builder.and_predicates(sub_predicates)):
+                scan_table = scan_table.copy_without_time_travel({
+                    CoreOptions.GLOBAL_INDEX_ENABLED.key(): 'false',
+                })
+            read_builder = scan_table.new_read_builder()
+        for i, key in enumerate(match_keys):
+            predicate = _key_predicate(
+                predicate_builder, context.table.field_dict[key],
+                {key_tuple[i] for key_tuple in input_key_set})
+            if predicate is not None:
+                sub_predicates.append(predicate)
+        read_builder.with_filter(predicate_builder.and_predicates(sub_predicates))
 
         scan = read_builder.new_scan()
         splits = scan.plan_all().splits()
@@ -333,7 +389,7 @@ class PythonTableUpsert:
         read_type = key_fields + [SpecialFields.ROW_ID]
 
         table_read = TableRead(
-            table=context.table, predicate=None, read_type=read_type
+            table=scan_table, predicate=None, read_type=read_type
         )
 
         # Stream batches and filter against input_key_set on-the-fly
