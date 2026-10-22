@@ -55,13 +55,13 @@ def _require_v3(info, source):
             % (source, version or None))
 
 
-def _schema_from_info(info):
+def _schema_from_info(info, legacy_vectors=False):
     features = info.get("features")
     if not isinstance(features, dict) or not features:
         raise ValueError("LeRobot metadata features must be a non-empty object.")
 
     return pa.schema([
-        _feature_field(name, feature)
+        _feature_field(name, feature, legacy_vectors)
         for name, feature in features.items()
     ])
 
@@ -124,7 +124,7 @@ def _description(field):
     return field.metadata.get(b"description", b"").decode("utf-8")
 
 
-def _feature_field(name, feature):
+def _feature_field(name, feature, legacy_vectors=False):
     if not isinstance(feature, dict):
         raise ValueError(
             "LeRobot feature %s metadata must be an object." % name)
@@ -143,7 +143,7 @@ def _feature_field(name, feature):
         if pa.types.is_string(scalar_type) and shape not in ((), (1,)):
             raise ValueError(
                 "LeRobot string feature %s must be scalar." % name)
-        arrow_type = _tensor_type(scalar_type, shape)
+        arrow_type = _tensor_type(scalar_type, shape, legacy_vectors)
     description = "LeRobot dtype=%s, shape=%s, names=%s" % (
         dtype,
         json.dumps(list(shape), separators=(",", ":")),
@@ -181,12 +181,10 @@ def _feature_shape(feature, name):
     return result
 
 
-def _tensor_type(scalar_type, shape):
+def _tensor_type(scalar_type, shape, legacy_vectors=False):
     if shape in ((), (1,)):
         return scalar_type
-    if len(shape) == 1:
-        return pa.list_(scalar_type, shape[0])
-    result = pa.list_(scalar_type, shape[-1])
-    for unused_size in reversed(shape[1:-1]):
+    result = pa.list_(scalar_type, shape[-1]) if legacy_vectors else scalar_type
+    for unused_size in (shape[:-1] if legacy_vectors else shape):
         result = pa.list_(result)
-    return pa.list_(result)
+    return result
