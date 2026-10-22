@@ -256,3 +256,91 @@ def test_native_lookup_preserves_query_authorization(frames, denied):
             assert calls
     finally:
         current.close()
+
+
+@pytest.mark.parametrize("option", ["scan.native-plan.enabled", "read.native.enabled"])
+def test_pickled_native_locator_rebuilds_pinned_fallback_once(frames, option):
+    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    frames.add(pa.table({"index": [40], "value": [4]}))
+    current = reader(frames, **{
+        "scan.native-plan.enabled": "false", "read.native.enabled": "false",
+        option: "true"})
+    restored = pickle.loads(pickle.dumps(current))
+    assert restored._locator._splits is None
+    frames.add(pa.table({"index": [60], "value": [6]}))
+    try:
+        with patch("pypaimon.execution.native.read.plan.native_plan",
+                   side_effect=RuntimeError("native unavailable")), \
+                patch.object(DataEvolutionGlobalIndexScanner, "create",
+                             wraps=DataEvolutionGlobalIndexScanner.create) as create:
+            for unused in range(3):
+                result = restored.read_indices([10, 40, 60], ["value", "index"])
+                assert result.column_names == ["value", "index"]
+                assert sorted(result["index"].to_pylist()) == [10, 40]
+                assert sorted(result["value"].to_pylist()) == [1, 4]
+            assert create.call_count == 1
+            assert restored._locator._splits is not None
+    finally:
+        current.close()
+        restored.close()
+
+
+def test_pickled_native_locator_rebuilds_original_projection(tmp_path):
+    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+    from pypaimon.read.table_scan import TableScan
+
+    conn = pm.connect(options={"warehouse": str(tmp_path)})
+    table = conn.create_table("projected_frames", data=pa.table({
+        "index": [10, 20, 30],
+        "value": [1, 2, 3],
+        "secret": [4, 5, 6],
+    }), options={
+        "row-tracking.enabled": "true",
+        "data-evolution.enabled": "true",
+        "global-index.enabled": "true",
+        "bucket": "-1",
+    })
+    table.raw_table.create_global_index("index", index_type="btree")
+    selected = []
+
+    def authorize(columns):
+        selected.append(columns)
+        if "secret" in columns:
+            raise PermissionError("secret column denied")
+        return TableQueryAuthResult(None, None)
+
+    original_init = TableScan.__init__
+
+    def init_with_auth(scan, *args, **kwargs):
+        original_init(scan, *args, **kwargs)
+        scan._query_auth_fn = authorize
+
+    with patch.object(TableScan, "__init__", init_with_auth):
+        current = reader(table, **{
+            "scan.native-plan.enabled": "false",
+            "read.native.enabled": "true",
+        })
+    restored = pickle.loads(pickle.dumps(current))
+    try:
+        assert restored._locator._splits is None
+        with patch.object(TableScan, "__init__", init_with_auth), \
+                patch("pypaimon.execution.native.runtime.native_runtime_available",
+                      return_value=False):
+            result = restored.read_indices([20], ["value"])
+        assert result["value"].to_pylist() == [2]
+        assert selected == [["index", "value"], ["index", "value"]]
+    finally:
+        current.close()
+        restored.close()
+
+
+def test_pickled_python_locator_keeps_fallback_splits(frames):
+    current = reader(frames, **{
+        "scan.native-plan.enabled": "false", "read.native.enabled": "false"})
+    restored = pickle.loads(pickle.dumps(current))
+    try:
+        assert restored._locator._splits is not None
+        assert restored.read_indices([20], ["value"])["value"].to_pylist() == [2]
+    finally:
+        current.close()
+        restored.close()
