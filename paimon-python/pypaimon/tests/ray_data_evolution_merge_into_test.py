@@ -3289,6 +3289,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             row_id_name=plan.row_id_name,
             snapshot_id=plan.snapshot_id,
             callable_input_columns=plan.callable_input_columns,
+            row_id_plan=plan.row_id_plan,
         )
         batch_sizes = []
         real_build_transform = join_module._build_matched_transform

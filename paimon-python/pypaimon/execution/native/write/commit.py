@@ -26,9 +26,27 @@ class NativeTableCommit:
     def commit(self, messages, commit_identifier, snapshot_properties=None):
         kwargs = ({} if snapshot_properties is None else
                   {'snapshot_properties': snapshot_properties})
-        if self._is_batch:
-            return self._native_commit.commit(messages, **kwargs)
-        return self._native_commit.commit(commit_identifier, messages, **kwargs)
+        try:
+            if self._is_batch:
+                return self._native_commit.commit(messages, **kwargs)
+            return self._native_commit.commit(commit_identifier, messages, **kwargs)
+        except Exception as error:
+            self._raise_commit_error(error)
+
+    def check_row_id_conflicts(self, messages, latest_snapshot_id, check_from_snapshot):
+        try:
+            return self._native_commit.check_row_id_conflicts(messages, latest_snapshot_id, check_from_snapshot)
+        except Exception as error:
+            self._raise_commit_error(error)
+
+    @staticmethod
+    def _raise_commit_error(error):
+        from pypaimon.execution.native.write.native_commit import native_commit_error
+
+        converted = native_commit_error(error)
+        if converted is error:
+            raise error
+        raise converted from error
 
     def abort(self, messages):
         return self._native_commit.abort(messages)

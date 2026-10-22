@@ -42,14 +42,10 @@ class TableUpdateOperations:
 
     def _new_row_id_updater(self, commit_identifier: int, _precomputed_files_info=None) -> TableUpdateByRowId:
         context = self._context
-        _authorize_update(context.table)
-        if _precomputed_files_info is None:
-            native = prepare_native_write_operation(
-                'update_by_row_id', context.table, context.commit_user, commit_identifier)
-            if native is not None:
-                return native
-        return TableUpdateByRowId._from_python(context.table, context.commit_user, commit_identifier,
-                                               _precomputed_files_info=_precomputed_files_info)
+        # The public constructor and builders share one selection boundary,
+        # including complete plans transported to distributed workers.
+        return TableUpdateByRowId(context.table, context.commit_user, commit_identifier,
+                                  _precomputed_files_info=_precomputed_files_info)
 
     def new_shard_updator(self, shard_num: int, total_shard_count: int):
         context = self._context

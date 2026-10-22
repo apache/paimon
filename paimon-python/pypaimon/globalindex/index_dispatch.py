@@ -83,9 +83,11 @@ class _VindexReaderExecution:
 
 
 def build_global_index(request, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
-    if execution == "local" and request._table.options.native_write_enabled():
+    if request._table.options.native_write_enabled():
         from pypaimon.execution.native.write.native_index_build import build_native_global_index
-        messages = build_native_global_index(request, partition_filter)
+        messages = build_native_global_index(
+            request, partition_filter, execution=execution, concurrency=concurrency,
+            ray_remote_args=ray_remote_args)
         if messages is not None:
             return messages
     from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder

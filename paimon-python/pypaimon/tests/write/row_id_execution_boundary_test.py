@@ -106,10 +106,8 @@ def test_builder_row_id_fallback_prepares_native_only_once():
 
     table = Mock()
     index = RowIdFileIndex(snapshot_id=7, first_row_ids=[])
-    with patch('pypaimon.write.update_dispatch._authorize_update'), \
-            patch('pypaimon.write.update_dispatch.prepare_native_write_operation', return_value=None) as prepare, \
-            patch('pypaimon.write.backend_dispatch.prepare_native_write_operation',
-                  side_effect=AssertionError('Native prepared twice')), \
+    with patch('pypaimon.write.update_validation._authorize_update'), \
+            patch('pypaimon.write.backend_dispatch.prepare_native_write_operation', return_value=None) as prepare, \
             patch.object(RowIdFileIndex, 'from_table', return_value=index):
         update = BatchTableUpdate(table, 'user').new_update_by_row_id()
     prepare.assert_called_once_with('update_by_row_id', table, 'user', BATCH_COMMIT_IDENTIFIER)
