@@ -1016,9 +1016,22 @@ def _metadata_member(metadata, name, default=None):
     return default if value is None else value
 
 
-def _episode_row(episodes, ordinal):
-    return episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
-        else episodes[ordinal]
+def _episode_rows(episodes, columns):
+    if hasattr(episodes, "select_columns"):
+        columns = [name for name in columns if name in episodes.column_names]
+        if columns:
+            # Avoid formatting wide statistics columns for every episode.
+            projected = episodes.select_columns(columns)
+            for batch in projected.iter(batch_size=1024):
+                for values in zip(*(batch[name] for name in columns)):
+                    yield dict(zip(columns, values))
+        else:
+            for _ in range(len(episodes)):
+                yield {}
+    else:
+        for ordinal in range(len(episodes)):
+            yield episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
+                else episodes[ordinal]
 
 
 def _episode_ranges(metadata, total_frames, total_episodes):
@@ -1031,8 +1044,8 @@ def _episode_ranges(metadata, total_frames, total_episodes):
             % (len(episodes), total_episodes))
     ranges = []
     expected = 0
-    for ordinal in range(total_episodes):
-        row = _episode_row(episodes, ordinal)
+    columns = ("episode_index", "dataset_from_index", "dataset_to_index", "length")
+    for ordinal, row in enumerate(_episode_rows(episodes, columns)):
         try:
             index = operator.index(row["episode_index"])
             begin = operator.index(row["dataset_from_index"])
@@ -1081,7 +1094,7 @@ def _build_frame_validation_context(
         metadata, episode_ranges, fps, tasks, subtasks, timestamp_type):
     task_names = _index_names(tasks, "task_index")
     subtask_names = _index_names(subtasks, "subtask_index")
-    episode_tasks = _episode_tasks(metadata, len(episode_ranges)) \
+    episode_tasks = _episode_tasks(metadata) \
         if episode_ranges is not None else None
     return {
         "episode_ranges": episode_ranges,
@@ -1129,13 +1142,12 @@ def _index_names(values, index_field):
     return result
 
 
-def _episode_tasks(metadata, total_episodes):
+def _episode_tasks(metadata):
     episodes = _metadata_member(metadata, "episodes")
     if episodes is None:
         return None
     result = []
-    for ordinal in range(total_episodes):
-        row = _episode_row(episodes, ordinal)
+    for row in _episode_rows(episodes, ("tasks",)):
         tasks = row.get("tasks") if hasattr(row, "get") else None
         if tasks is None:
             result.append(None)
