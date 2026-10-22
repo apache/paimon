@@ -305,7 +305,7 @@ def _python_read_source(primary=None, cleanup=None):
 
     source = Source()
     read = SimpleNamespace(
-        _check_python_merge_supported=lambda: None,
+        table=SimpleNamespace(is_primary_key_table=False),
         _begin_auth_read=lambda splits: None,
         _blob_as_descriptor=False,
         _blob_view_output_indices=(),

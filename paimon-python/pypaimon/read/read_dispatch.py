@@ -28,6 +28,13 @@ from pypaimon.read.split import Split
 from pypaimon.read.scan_stats import ScanStats
 
 
+def validate_read_backend(read):
+    """Validate the explicitly selected Python backend without loading Native."""
+    if not read.table.options.native_read_enabled():
+        from pypaimon.execution.python.read.merge_engine_support import validate_read
+        validate_read(read)
+
+
 def to_iterator(self, splits: List[Split]) -> Iterator:
     """Lazily read InternalRows, using native reads when available.
 

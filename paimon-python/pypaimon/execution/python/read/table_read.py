@@ -27,6 +27,7 @@ from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform, extract_referenced_fields)
 from pypaimon.data.map_shared_shredding import map_selected_keys_field
+from pypaimon.execution.python.read.merge_engine_support import validate_read
 from pypaimon.read.push_down_utils import (
     exclude_predicate_with_fields, predicate_field_names, rewrite_predicate_indices)
 from pypaimon.read.query_auth_split import QueryAuthSplit
@@ -134,7 +135,7 @@ class PythonTableRead:
 
     def read_rows(self, splits):
         read = self._read
-        read._check_python_merge_supported()
+        validate_read(read)
         limit = read.limit
         count = 0
         for split in splits:
@@ -680,7 +681,7 @@ class PythonTableRead:
         # Raw-convertible splits skip MergeFileSplitRead, so validate before
         # dispatch, including when native setup failed or bindings are absent.
         read = self._read
-        read._check_python_merge_supported()
+        validate_read(read)
         auth_result = None
         if isinstance(split, QueryAuthSplit):
             auth_result = split.auth_result
@@ -826,7 +827,7 @@ class PythonTableRead:
 
     def _materialize(self, splits, schema, parallelism=None, blob_parallelism=1):
         read = self._read
-        read._check_python_merge_supported()
+        validate_read(read)
         effective = read._effective_parallelism(parallelism, len(splits))
         if read._should_run_parallel(splits, effective):
             return self._to_arrow_parallel(splits, schema, effective, blob_parallelism)
@@ -855,7 +856,7 @@ class PythonTableRead:
             ordered: bool = False):
         """Read lazily in split order; Python fallback readers remain serial."""
         read = self._read
-        read._check_python_merge_supported()
+        validate_read(read)
         effective = read._effective_parallelism(parallelism, len(splits))
         if read._should_run_parallel(splits, effective):
             blob_parallelism = read._cap_blob_parallelism(

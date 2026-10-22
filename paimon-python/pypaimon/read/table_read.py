@@ -57,10 +57,9 @@ class TableRead:
         from pypaimon.read.merge_engine_support import check_sequence_field_valid
         if table.is_primary_key_table:
             check_sequence_field_valid(table)
-        self._python_merge_validation_pending = True
         self.table: "FileStoreTable" = table
-        if not table.options.native_read_enabled():
-            self._check_python_merge_supported()
+        from pypaimon.read.read_dispatch import validate_read_backend
+        validate_read_backend(self)
         self.predicate = predicate
         self.read_type = read_type
         self.output_projection = output_projection
@@ -644,12 +643,6 @@ class TableRead:
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
         from pypaimon.read.read_support import convert_rows_to_arrow_batch
         return convert_rows_to_arrow_batch(row_tuples, schema)
-
-    def _check_python_merge_supported(self):
-        if getattr(self, '_python_merge_validation_pending', False):
-            from pypaimon.execution.python.read.merge_engine_support import check_supported
-            check_supported(self.table)
-            self._python_merge_validation_pending = False
 
     def _native_fallback(
         self,
