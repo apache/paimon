@@ -857,6 +857,49 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                     self.assertEqual(
                         np.dtype(bool), np.asarray(stats[stat]).dtype)
 
+    def test_multiframe_int64_statistics_preserve_extrema(self):
+        cases = (
+            ("precision", (2 ** 53 + 1, 2 ** 53 + 3)),
+            ("upper_bound", (2 ** 63 - 2, 2 ** 63 - 1)),
+        )
+        for name, values in cases:
+            with self.subTest(name=name):
+                table_name = "int64_stats_" + name
+                writer = PaimonLeRobotWriter(
+                    self.connection, table_name, fps=10, features={
+                        "observation.counter": {
+                            "dtype": "int64", "shape": (1,), "names": None,
+                        },
+                    })
+                for value in values:
+                    writer.add_frame({
+                        "observation.counter": np.array([value], dtype=np.int64),
+                        "task": "inspect",
+                    })
+                writer.save_episode()
+                writer.finalize()
+
+                rows = self.connection.get_table(table_name).scan().select([
+                    "index", "observation.counter"
+                ]).to_arrow().sort_by("index").to_pylist()
+                self.assertEqual(
+                    list(values),
+                    [row["observation.counter"] for row in rows])
+                episode = _catalog_rows(
+                    self.connection, table_name + "__episodes")[0]
+                stats = {
+                    row["key"]: json.loads(row["value"])
+                    for row in _catalog_rows(self.connection, table_name + "__stats")
+                }["observation.counter"]
+                for stat, expected in (("min", min(values)),
+                                       ("max", max(values))):
+                    episode_value = episode["stats/observation.counter/" + stat][0]
+                    stats_value = stats[stat][0]
+                    self.assertEqual(expected, episode_value)
+                    self.assertEqual(expected, stats_value)
+                    self.assertIsInstance(episode_value, int)
+                    self.assertIsInstance(stats_value, int)
+
     def test_discards_rerecorded_episode_and_finalizes_tail_batch(self):
         writer = PaimonLeRobotWriter(
             self.connection,

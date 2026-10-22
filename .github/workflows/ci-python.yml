@@ -293,9 +293,13 @@ jobs:
           python -m pip install -e './paimon-python[lerobot]' 'lerobot==${{ matrix.lerobot }}' --group ./paimon-python/pyproject.toml:test
           python -m pip check
           python -c 'from lerobot.datasets.lerobot_dataset import LeRobotDataset'
-      - name: Test import, metadata and training reads
+      - name: Test import, training reads and writer statistics
         working-directory: paimon-python
-        run: python -m pytest -q pypaimon/tests/multimodal_lerobot_test.py
+        run: |
+          python -m pytest -q \
+            pypaimon/tests/multimodal_lerobot_test.py \
+            pypaimon/tests/multimodal_lerobot_writer_test.py::PaimonLeRobotWriterTest::test_multiframe_boolean_statistics_preserve_extrema \
+            pypaimon/tests/multimodal_lerobot_writer_test.py::PaimonLeRobotWriterTest::test_multiframe_int64_statistics_preserve_extrema
 
   torch:
     name: PyTorch / Python 3.10
