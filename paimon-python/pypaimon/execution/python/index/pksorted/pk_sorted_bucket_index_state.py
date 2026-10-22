@@ -18,8 +18,8 @@ from dataclasses import dataclass
 
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
-from pypaimon.index.pk.primary_key_index_source_policy import should_read
-from pypaimon.index.pksorted.pk_sorted_index_group import PkSortedIndexGroup
+from pypaimon.execution.python.index.pk.primary_key_index_source_policy import should_read
+from pypaimon.execution.python.index.pksorted.pk_sorted_index_group import PkSortedIndexGroup
 
 
 @dataclass(frozen=True)

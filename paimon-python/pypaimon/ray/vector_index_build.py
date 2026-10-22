@@ -20,13 +20,13 @@
 from pypaimon.execution.python.globalindex.build_plan import split_by_global_index_shard
 from pypaimon.execution.python.globalindex.index_file_utils import new_global_index_file_name
 from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
-from pypaimon.ray.vector_search import _execution_options
+from pypaimon.ray.search_execution import execution_options
 
 
 def validate_build_options(builder, concurrency, ray_remote_args):
     if builder._index_type not in VINDEX_IDENTIFIERS:
         raise ValueError("Ray index building supports only native vector indexes.")
-    concurrency, options = _execution_options(concurrency, ray_remote_args)
+    concurrency, options = execution_options(concurrency, ray_remote_args)
     # Retrying a write task can race with a lost worker writing the same file.
     # A failed build can instead be rerun after its uncommitted outputs close.
     if options.get("max_retries", 0) != 0 or options.get("retry_exceptions", False):

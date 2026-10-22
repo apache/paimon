@@ -184,28 +184,26 @@ def _named_row(table, values, kind=None):
     return row
 
 
-def _captured_writer(table):
-    core = Mock()
+def _selected_writer(table, columns=None):
+    core = Mock(spec_set=['with_blob_uri_reader_factory', 'with_write_type', 'write_arrow', 'close'])
     writer = NativeWrite(table, 'rows', None, True, core)
-    writer.with_write_type(['id'])
-    writer.write_row(_named_row(table, {'id': 111, 'pt': 1}))
-    writer.with_write_type(['value'])
-    core._row_write_columns.return_value = ['id']
+    columns = columns if columns is not None else ['id']
+    writer.with_write_type(columns)
+    values = {'id': 111, 'pt': 1, 'value': 222}
+    writer.write_row(_named_row(table, {name: values[name] for name in dict.fromkeys(columns + ['pt'])}))
     core.write_arrow.reset_mock()
     return writer, core
 
 
-def test_native_full_named_row_retains_captured_columns_and_leaves_unused_blob_untouched(row_table):
+def test_native_full_named_row_encodes_selected_columns_and_leaves_unused_blob_untouched(row_table):
     from pypaimon.table.row.blob import Blob
     blob = Mock(spec=Blob)
     blob.new_input_stream.side_effect = AssertionError('unwritten Blob was opened')
     blob.to_descriptor.side_effect = AssertionError('unwritten Blob was encoded')
-    writer, core = _captured_writer(row_table)
+    writer, core = _selected_writer(row_table)
     try:
         writer.write_row(_named_row(row_table, {'unused': blob, 'value': 333, 'pt': 1, 'id': 222}))
-        metadata = core._row_write_columns.call_args[0][0]
-        assert metadata.schema.names == ['pt']
-        assert metadata.to_pydict() == {'pt': [1]}
+        core.write_arrow.assert_called_once()
         payload = core.write_arrow.call_args[0][0]
         assert payload.schema.names == ['id', 'pt']
         assert payload.to_pydict() == {'id': [222], 'pt': [1]}
@@ -216,11 +214,9 @@ def test_native_full_named_row_retains_captured_columns_and_leaves_unused_blob_u
         writer.close()
 
 
-def test_native_historical_partial_named_row_omits_current_non_null_payload(row_table):
-    writer, core = _captured_writer(row_table)
+def test_native_partial_named_row_omits_unselected_non_null_payload(row_table):
+    writer, core = _selected_writer(row_table)
     try:
-        # This row uses the old bucket's id layout. The new factory's NOT NULL
-        # value is absent, and must not be manufactured as an invalid NULL.
         writer.write_row(_named_row(row_table, {'id': 222, 'pt': 1}))
         payload = core.write_arrow.call_args[0][0]
         assert payload.schema.names == ['id', 'pt']
@@ -229,55 +225,46 @@ def test_native_historical_partial_named_row_omits_current_non_null_payload(row_
         writer.close()
 
 
-@pytest.mark.parametrize('selection', [['value', 'unused'], ['pt', 'id', 'value', 'unused']])
-def test_native_reconfigured_full_row_encodes_only_destination_payloads(row_table, selection):
-    from pypaimon.table.row.blob import Blob
-    blob = Mock(spec=Blob)
-    blob.new_input_stream.side_effect = AssertionError('unwritten Blob was opened')
-    blob.to_descriptor.side_effect = AssertionError('unwritten Blob was encoded')
-    writer, core = _captured_writer(row_table)
+def test_native_type_change_rejected_by_core_preserves_adapter_configuration(row_table):
+    writer, core = _selected_writer(row_table)
     try:
-        writer.with_write_type(selection)
-        writer.write_row(_named_row(row_table, {'pt': 1, 'id': 222, 'value': 333, 'unused': blob}))
-        payload = core.write_arrow.call_args[0][0]
-        assert payload.schema.names == ['id', 'pt']
-        assert payload.to_pydict() == {'id': [222], 'pt': [1]}
-        blob.new_input_stream.assert_not_called()
-        blob.to_descriptor.assert_not_called()
+        failure = ValueError('with_write_type must be called before any write operation')
+        core.with_write_type.side_effect = failure
+        with pytest.raises(RuntimeError, match='before any write') as caught:
+            writer.with_write_type(['value'])
+        assert caught.value.__cause__ is failure
+        assert writer._schema.names == writer._write_cols == ['id']
+        writer.write_row(_named_row(row_table, {'pt': 1, 'id': 222}))
+        assert core.write_arrow.call_args[0][0].to_pydict() == {'id': [222], 'pt': [1]}
     finally:
         writer.close()
 
 
-@pytest.mark.parametrize('full_current_type', [False, True])
-def test_native_historical_row_preserves_captured_column_order(row_table, full_current_type):
-    core = Mock()
-    writer = NativeWrite(row_table, 'ordered', None, True, core)
+@pytest.mark.parametrize('columns', [['id', 'pt'], ['pt', 'id']])
+def test_native_named_row_preserves_selected_column_order(row_table, columns):
+    writer, core = _selected_writer(row_table, columns)
     try:
-        writer.with_write_type(['id', 'pt'])
-        writer.write_row(_named_row(row_table, {'pt': 1, 'id': 111}))
-        writer.with_write_type(row_table.field_names if full_current_type else ['value'])
-        core._row_write_columns.return_value = ['id', 'pt']
         writer.write_row(_named_row(row_table, {'pt': 1, 'id': 222}))
         payload = core.write_arrow.call_args[0][0]
-        assert payload.schema.names == ['id', 'pt']
+        assert payload.schema.names == columns
         assert payload.to_pydict() == {'id': [222], 'pt': [1]}
     finally:
         writer.close()
 
 
-def test_native_full_row_current_not_null_validation_precedes_captured_column_lookup(row_table):
-    writer, core = _captured_writer(row_table)
+def test_native_selected_not_null_validation_precedes_encoding(row_table):
+    writer, core = _selected_writer(row_table, ['value'])
     try:
-        with pytest.raises(ValueError, match='value'):
-            writer.write_row(_named_row(row_table, {'pt': 1, 'id': 222, 'value': None, 'unused': None}))
-        core._row_write_columns.assert_not_called()
+        with patch.object(writer._blob_rows, 'to_batch', side_effect=AssertionError('payload was encoded')):
+            with pytest.raises(ValueError, match='value'):
+                writer.write_row(_named_row(row_table, {'pt': 1, 'id': 222, 'value': None, 'unused': None}))
         core.write_arrow.assert_not_called()
     finally:
         writer.close()
 
 
-def test_native_row_missing_captured_value_fails_before_encoding_or_staging(row_table):
-    writer, core = _captured_writer(row_table)
+def test_native_row_missing_selected_value_fails_before_encoding_or_staging(row_table):
+    writer, core = _selected_writer(row_table)
     try:
         with patch.object(writer._blob_rows, 'to_batch', side_effect=AssertionError('payload was encoded')):
             with pytest.raises(ValueError, match='id'):
@@ -287,31 +274,26 @@ def test_native_row_missing_captured_value_fails_before_encoding_or_staging(row_
         writer.close()
 
 
-def test_native_ignored_row_does_not_query_routing_or_encode_payloads(row_table):
+def test_native_ignored_row_does_not_encode_or_stage_payloads(row_table):
     from pypaimon.table.row.row_kind import RowKind
-    writer, core = _captured_writer(row_table)
+    writer, core = _selected_writer(row_table)
     try:
-        core._row_write_columns.reset_mock()
         with patch.object(writer._blob_rows, 'to_batch', side_effect=AssertionError('ignored payload was encoded')):
             writer.write_row(_named_row(row_table, {'pt': 1, 'id': 222, 'value': 333}, RowKind.UPDATE_BEFORE))
-        core._row_write_columns.assert_not_called()
         core.write_arrow.assert_not_called()
     finally:
         writer.close()
 
 
-def test_native_unpartitioned_row_queries_a_zero_column_metadata_row(tmp_path):
+def test_native_unpartitioned_rows_only_call_the_write_interface(tmp_path):
     table = _table(tmp_path)
-    core = Mock()
-    core._row_write_columns.return_value = ['id']
+    core = Mock(spec_set=['with_write_type', 'write_arrow', 'close'])
     writer = NativeWrite(table, 'rows', None, True, core)
     try:
         writer.with_write_type(['id'])
         writer.write_row(_named_row(table, {'id': 1}))
         writer.write_row(_named_row(table, {'id': 2}))
-        metadata = core._row_write_columns.call_args[0][0]
-        assert metadata.num_rows == 1
-        assert metadata.num_columns == 0
-        assert core.write_arrow.call_args[0][0].column('id').to_pylist() == [2]
+        assert core.write_arrow.call_count == 2
+        assert core.write_arrow.call_args[0][0].to_pydict() == {'id': [2]}
     finally:
         writer.close()

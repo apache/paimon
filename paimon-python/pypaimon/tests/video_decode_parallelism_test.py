@@ -391,6 +391,49 @@ class VideoDecodeParallelismTest(unittest.TestCase):
                 finally:
                     dataset.close()
 
+    def test_single_payload_shared_batch_matches_windows(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _decode_video_windows
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+
+        pixels = torch.arange(10 * 4 * 5 * 3).reshape(10, 4, 5, 3).to(torch.uint8)
+        rows = {i: {"camera": VideoFrameDescriptor("video", 0, 1, i, -1, 0).serialize()}
+                for i in range(10)}
+        windows = ([0, 0, 2], [2, 3, 4], [9, 7, 8], [0, 0, 2])
+        plans = [{"windows": {"camera": indices}} for indices in windows]
+        collator = self.collator()
+        decoder = SimpleNamespace(get_frames_at=lambda indices: SimpleNamespace(
+            data=pixels[indices].permute(0, 3, 1, 2)))
+        original_device = torch.get_default_device()
+        try:
+            with patch.object(collator, "_decoder", return_value=decoder), \
+                    patch("torch.get_num_threads", return_value=1), \
+                    patch.object(torch.Tensor, "share_memory_",
+                                 side_effect=AssertionError("Unexpected storage copy")):
+                for default_device in ("cpu", "meta"):
+                    torch.set_default_device(default_device)
+                    for uint8 in (True, False):
+                        result = _decode_video_windows(
+                            plans, rows, [collator],
+                            {"camera": {"dtype": "video", "shape": [4, 5, 3]}}, uint8,
+                            return_batch=True, share_memory=True)["camera"]
+                        expected = torch.stack([pixels[w].permute(0, 3, 1, 2) for w in windows])
+                        if not uint8:
+                            expected = expected.float().div_(255)
+                        self.assertEqual(result.device.type, "cpu")
+                        self.assertTrue(torch.equal(result, expected))
+                        self.assertTrue(result.is_shared())
+                        self.assertTrue(result.is_contiguous())
+                        saved = result[3].clone()
+                        result[0].zero_()
+                        self.assertTrue(torch.equal(result[3], saved))
+        finally:
+            torch.set_default_device(original_device)
+            collator.close()
+
     def test_real_pyav_payloads_match_serial(self):
         try:
             import av
@@ -442,8 +485,171 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             finally:
                 collator.close()
         self.assertTrue(torch.equal(*outputs))
+        outputs = []
+        single_plans = [{"windows": {"camera": indices}} for indices in (
+            [6, 1, 6], [0, 1, 2], [2, 3, 4], [4, 5, 7])]
+        for replicas in (1, 4):
+            collator = VideoFrameCollator(
+                SimpleNamespace(file_io="test"), video_column="camera",
+                decoder_factory=partial(_open_video_decoder, backend="pyav"),
+                decode_fn=identity, max_open_videos=4)
+            try:
+                with patch("pypaimon.multimodal.video.Blob.from_file", blob), \
+                        patch("torch.get_num_threads", return_value=1):
+                    outputs.append(_decode_video_windows(
+                        single_plans, rows, [collator],
+                        {"camera": {"dtype": "video", "shape": [16, 16, 3]}}, True,
+                        return_batch=True, decode_parallelism=4,
+                        decoders_per_payload=replicas)["camera"])
+                    self.assertEqual(len(collator._decoders), replicas)
+            finally:
+                collator.close()
+        self.assertTrue(torch.equal(*outputs))
+
+    def test_single_payload_windows_reuse_independent_decoders(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _decode_video_windows
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+
+        windows = [[7, 2, 7], [0, 1, 2], [5, 6, 7], [2, 3, 4]]
+        rows = {i: {"camera": VideoFrameDescriptor(
+            "one-video", 0, 1, i, -1, 0).serialize()} for i in range(8)}
+        plans = [{"windows": {"camera": window}} for window in windows]
+        features = {"camera": {"dtype": "video", "shape": [4, 5, 3]}}
+        for parallelism, capacity, replicas, expected in (
+                (1, 4, 4, 1), (4, 1, 4, 1), (2, 4, 4, 2),
+                (4, 4, 1, 1), (4, 4, 4, 4), (8, 8, 16, 4)):
+            with self.subTest(parallelism=parallelism, capacity=capacity, replicas=replicas):
+                collator = self.collator(capacity)
+                created = []
+                barrier = threading.Barrier(expected)
+
+                class Decoder:
+                    def __init__(self, stream):
+                        self.stream = stream
+                        self.closed = False
+                        created.append(self)
+
+                    def get_frames_at(self, indices):
+                        barrier.wait(timeout=10)
+                        # Non-contiguous decoder output exercises layout conversion.
+                        data = torch.tensor(indices, dtype=torch.uint8)[:, None, None, None]
+                        return SimpleNamespace(data=data.expand(-1, 4, 5, 3).permute(0, 3, 1, 2))
+
+                    def close(self):
+                        self.closed = True
+
+                collator.decoder_factory = Decoder
+                try:
+                    with patch("pypaimon.multimodal.video.Blob.from_file", self.streams), \
+                            patch("torch.get_num_threads", return_value=1):
+                        for return_batch in (False, True):
+                            for uint8 in (True, False):
+                                result = _decode_video_windows(
+                                    plans, rows, [collator], features, uint8,
+                                    return_batch=return_batch, share_memory=return_batch,
+                                    decode_parallelism=parallelism,
+                                    decoders_per_payload=replicas)["camera"]
+                                target = torch.tensor(windows, dtype=torch.uint8)[:, :, None, None, None]
+                                target = target.expand(-1, -1, 3, 4, 5)
+                                if not uint8:
+                                    target = target.float() / 255
+                                actual = result if return_batch else torch.stack(result)
+                                self.assertTrue(torch.equal(actual, target))
+                                self.assertTrue(actual.is_contiguous())
+                                if return_batch:
+                                    self.assertTrue(result.is_shared())
+                                result[0].zero_()
+                                self.assertTrue(torch.equal(result[2], target[2]))
+                        self.assertEqual(len(created), expected)
+                        self.assertEqual(len({id(d.stream) for d in created}), expected)
+                finally:
+                    collator.close()
+                self.assertTrue(all(d.closed and d.stream.closed for d in created))
+
+    def test_single_payload_split_bounds_duplicate_frame_requests(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _decode_video_windows
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+
+        features = {"camera": {"dtype": "video", "shape": [4, 5, 3]}}
+
+        def decode(windows):
+            rows = {i: {"camera": VideoFrameDescriptor(
+                "one-video", 0, 1, i, -1, 0).serialize()}
+                for i in {index for window in windows for index in window}}
+            plans = [{"windows": {"camera": window}} for window in windows]
+            collator = self.collator(4)
+            calls = []
+
+            class Decoder:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def get_frames_at(self, indices):
+                    calls.append(tuple(indices))
+                    data = torch.tensor(
+                        indices, dtype=torch.uint8)[:, None, None, None]
+                    return SimpleNamespace(
+                        data=data.expand(-1, 4, 5, 3).permute(0, 3, 1, 2))
+
+                def close(self):
+                    pass
+
+            collator.decoder_factory = Decoder
+            try:
+                with patch("pypaimon.multimodal.video.Blob.from_file", self.streams), \
+                        patch("torch.get_num_threads", return_value=1):
+                    result = _decode_video_windows(
+                        plans, rows, [collator], features, True,
+                        return_batch=True, decode_parallelism=4,
+                        decoders_per_payload=4)["camera"]
+                target = torch.tensor(
+                    windows, dtype=torch.uint8)[:, :, None, None, None]
+                target = target.expand(-1, -1, 3, 4, 5)
+                self.assertTrue(torch.equal(result, target))
+                return calls
+            finally:
+                collator.close()
+
+        repeated = decode([[0, 1, 2]] * 4)
+        self.assertEqual(repeated, [(0, 1, 2)])
+
+        overlapping = decode([list(range(i, i + 8)) for i in range(8)])
+        self.assertEqual(len(overlapping), 2)
+        self.assertEqual(sum(len(indices) for indices in overlapping), 22)
+        self.assertEqual(set().union(*map(set, overlapping)), set(range(15)))
+
+    def test_replica_cache_eviction_and_pickle(self):
+        collator = self.collator(2)
+        descriptor = BlobDescriptor("one-video", 0, 1)
+        with patch("pypaimon.multimodal.video.Blob.from_file", self.streams):
+            first = collator._decoder(descriptor, None, 0)
+            second = collator._decoder(descriptor, None, 1)
+            self.assertIs(collator._decoder(descriptor), first)
+            third = collator._decoder(descriptor, None, 2)
+            self.assertTrue(second.closed)
+            self.assertFalse(first.closed)
+            child = pickle.loads(pickle.dumps(collator))
+            self.assertFalse(child._decoders)
+            child.close()
+            collator.close()
+            self.assertTrue(first.closed and third.closed)
 
     def test_options(self):
+        self.assertEqual(CoreOptions(Options({})).read_video_decoders_per_payload(), 4)
+        self.assertEqual(CoreOptions(Options({"read.video.decoders-per-payload": "1"}))
+                         .read_video_decoders_per_payload(), 1)
+        for value in (0, -1, True, 1.5, "no", "1.5"):
+            with self.subTest(replicas=value), self.assertRaises(ValueError):
+                CoreOptions(Options({"read.video.decoders-per-payload": value})) \
+                    .read_video_decoders_per_payload()
         self.assertEqual(CoreOptions(Options({})).read_video_decode_parallelism(), 16)
         self.assertEqual(CoreOptions(Options({"read.video.decode-parallelism": "1"}))
                          .read_video_decode_parallelism(), 1)

@@ -276,24 +276,25 @@ def test_no_full_text_definition_is_empty_in_every_mode(rest_catalog, mode):
     assert indexes._ids(table) == list(range(8))
 
 
-def test_scan_read_plan_pins_snapshot_and_rejects_other_filters(rest_catalog):
+def test_scan_read_plan_pins_snapshot_and_accepts_reader_filters(rest_catalog):
     catalog, _ = rest_catalog
     table = _table(catalog)
     native = (_native_table(table).new_full_text_search_builder()
               .with_query('content', match_query('paimon')).with_limit(64))
     plan = native.new_full_text_scan().scan()
     before = table.snapshot_manager().get_latest_snapshot().id
-    assert plan.snapshot_id() == before
+    assert plan.snapshot().id() == before
     reader = native.new_full_text_read()
     indexes._append(table, _rows(8, 4), schema=SCHEMA)
     assert set(reader.read_plan(plan).row_ids()) == {0, 1, 2, 4, 5, 6, 7}
-    assert set(native.execute_local().row_ids()) == {0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11}
+    assert set(native.execute().row_ids()) == {0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11}
     predicate = table.new_read_builder().new_predicate_builder().equal('id', 0)
     changed = (_native_table(table).new_full_text_search_builder()
                .with_query('content', match_query('paimon')).with_limit(64))
     changed.with_filter(_predicate_to_native(predicate))
-    with pytest.raises(Exception, match='different table, column or filter'):
-        changed.new_full_text_read().read_plan(plan)
+    filtered = changed.new_full_text_read().read_plan(plan)
+    assert filtered.snapshot_id() == before
+    assert set(filtered.row_ids()) == {0}
     assert indexes._ids(table) == list(range(12))
 
 

@@ -16,13 +16,15 @@
 # under the License.
 
 
+from copy import copy
+
 from pypaimon.table.source.search_types import (PrimaryKeyVectorSearchSplit, PrimaryKeyVectorScanPlan)
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
-from pypaimon.index.pk.primary_key_index_source_policy import (
+from pypaimon.execution.python.index.pk.primary_key_index_source_policy import (
     should_read as _should_read_source)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
@@ -87,7 +89,7 @@ class PrimaryKeyVectorScan(VectorSearchScan):
             lambda entry: _matches(entry, self._vector_column.id, index_type,
                                    self._partition_filter))
         return PrimaryKeyVectorScanPlan(
-            snapshot.id, _bucket_splits(source_splits, entries))
+            snapshot.id, _bucket_splits(source_splits, entries, snapshot.id), snapshot)
 
 
 def _matches(entry, field_id, index_type, partition_filter):
@@ -98,7 +100,7 @@ def _matches(entry, field_id, index_type, partition_filter):
             and (partition_filter is None or partition_filter.test(entry.partition)))
 
 
-def _bucket_splits(source_splits, entries):
+def _bucket_splits(source_splits, entries, snapshot_id=None):
     payloads_by_bucket = {}
     for entry in entries:
         key = (_partition_key(entry.partition), entry.bucket)
@@ -110,7 +112,9 @@ def _bucket_splits(source_splits, entries):
         ranges_by_bucket.setdefault(key, {}).update(ranges)
         previous = combined.get(key)
         if previous is None:
-            combined[key] = split
+            combined[key] = copy(split)
+            if snapshot_id is not None:
+                combined[key].snapshot_id = snapshot_id
             continue
         files = list(previous.files) + list(split.files)
         deletions = None
@@ -118,8 +122,11 @@ def _bucket_splits(source_splits, entries):
                 or split.data_deletion_files is not None):
             deletions = list(previous.data_deletion_files or [None] * len(previous.files))
             deletions.extend(split.data_deletion_files or [None] * len(split.files))
-        combined[key] = DataSplit(files, previous.partition, previous.bucket,
-                                  False, deletions)
+        merged = copy(previous)
+        merged._files = files
+        merged.raw_convertible = False
+        merged.data_deletion_files = deletions
+        combined[key] = merged
 
     result = []
     for split in combined.values():

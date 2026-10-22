@@ -81,7 +81,7 @@ def _assert_ids(table, expected, kind):
               .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute_local())
     assert sorted(result.results()) == expected
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
-              .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute_local())
+              .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute())
     assert sorted(result.row_ids()) == expected
 
 
@@ -135,7 +135,7 @@ def test_native_search_filters_live_null_vectors_with_deletion_vectors(rest_cata
     indexes._commit(table, _build(table, kind, generic._options(kind)))
     options = {'diskann.l_search': '64'} if kind == 'diskann' else {'ivf.nprobe': '64'}
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
-              .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute_local())
+              .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute())
     assert sorted(result.row_ids()) == [1, 4]
     # Python search must also allow fewer hits than the live-row filter's size.
     _assert_ids(table, [1, 4], kind)

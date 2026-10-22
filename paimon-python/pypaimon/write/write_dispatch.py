@@ -149,23 +149,27 @@ class NativeTableWrite:
     def with_write_type(self, write_cols):
         names = validate_write_columns(write_cols)
         if self._python_writer is not None:
-            return self._python_writer.with_write_type(names)
+            self._python_writer.with_write_type(names)
+            return self
         full_names = self._table_schema.names
         if (self.table.is_primary_key_table
                 and not (len(names) == len(full_names) and set(names) == set(full_names))):
-            return self._switch_to_python().with_write_type(names)
+            self._switch_to_python().with_write_type(names)
+            return self
         self._execution.with_write_type(names)
         return self
 
     def with_blob_consumer(self, blob_consumer):
         if self._python_writer is not None:
-            return self._python_writer.with_blob_consumer(blob_consumer)
+            self._python_writer.with_blob_consumer(blob_consumer)
+            return self
         self._execution.with_blob_consumer(blob_consumer)
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
         if self._python_writer is not None:
-            return self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
+            self._python_writer.with_blob_uri_reader_factory(uri_reader_factory)
+            return self
         self._execution.with_blob_uri_reader_factory(uri_reader_factory)
         return self
 

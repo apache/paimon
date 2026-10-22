@@ -27,7 +27,7 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
 
 
-def try_native_hybrid_search(builder):
+def try_native_hybrid_search(builder, executor=None):
     """Qualify before execution; core owns one snapshot, routes and fusion."""
     table = builder._table
     if type(table) is not FileStoreTable:
@@ -41,6 +41,8 @@ def try_native_hybrid_search(builder):
             or not _rest_catalog_supported(table)):
         return None
     builder._validate_search()
+    if executor is not None and not table.options.data_evolution_enabled():
+        raise ValueError('Distributed search supports only data-evolution tables')
     if any(route.is_full_text() for route in builder._routes):
         # Preserve the same typed analyzer normalization used by native full-text.
         options = {'full-text.' + key: value for key, value in NativeFullTextIndexOptions.from_options(
@@ -63,4 +65,14 @@ def try_native_hybrid_search(builder):
         # Qualify strict literal support before executing any route or ranking.
         return None
     # Propagate execution failures: retrying Python can select a newer snapshot.
-    return DictBasedScoredIndexResult(native.execute_local().row_ids())
+    if executor is None:
+        result = native.execute()
+    else:
+        from pypaimon.execution.native.read.search_execution import native_task_executor
+        callback = native_task_executor(table, executor)
+        try:
+            result = native._execute_with_executor(callback)
+        finally:
+            callback.cancel()
+            callback.raise_if_failed()
+    return DictBasedScoredIndexResult(result.row_ids())

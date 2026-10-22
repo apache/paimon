@@ -228,6 +228,13 @@ class HybridSearchBuilder(ABC):
         from pypaimon.execution.python.read.search.hybrid_search import execute_local
         return execute_local(self)
 
+    def execute(self, executor=None) -> ScoredGlobalIndexResult:
+        """Execute complete routes with an optional search-task scheduler."""
+        if executor is None:
+            return self.execute_local()
+        from pypaimon.execution.python.read.search.hybrid_search import execute
+        return execute(self, executor)
+
 
 class HybridSearchBuilderImpl(HybridSearchBuilder):
     """Implementation for HybridSearchBuilder."""
@@ -243,6 +250,12 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
     def execute_local(self) -> ScoredGlobalIndexResult:
         from pypaimon.table.source.search_dispatch import execute_hybrid_search
         return execute_hybrid_search(self)
+
+    def execute(self, executor=None) -> ScoredGlobalIndexResult:
+        if executor is None:
+            return self.execute_local()
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self, executor)
 
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':
         self._limit = limit

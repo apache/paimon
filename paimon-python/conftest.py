@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import os
+from functools import wraps
 
 import pytest
 
@@ -139,6 +140,7 @@ def pytest_configure(config):
         def track_write(method):
             original_write = getattr(NativeTableWrite, method)
 
+            @wraps(original_write)
             def tracked_write(self, data, *args, **kwargs):
                 global _native_write_count
                 native = self._native_writer is not None

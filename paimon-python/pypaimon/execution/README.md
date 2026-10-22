@@ -57,6 +57,7 @@ pypaimon/
   globalindex/                  Public index contracts and backend coordination
     index_dispatch.py           Index selection and Vindex resource ownership
     vindex_input.py             Python SDK/Native callback streams and ownership
+  index/                        Shared index metadata, definitions and input routing
   table/source/
     search_dispatch.py          Search selection and transported-plan coordination
   table/system/                 SystemSplit metadata and common Arrow output
@@ -77,6 +78,7 @@ pypaimon/
       write/                    File writers, committers and update execution
         external_path_provider.py Per-writer external file placement strategies
       globalindex/              Index file codecs, readers, writers and build algorithms
+      index/                    Primary-key index source selection and sorted-index grouping
       merge_engine_dispatch.py  Python merge-function selection
     native/
       runtime.py                Lazy SDK discovery and process safety
@@ -103,6 +105,11 @@ Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.
 `DeletionFile` and `DeletionVectorMeta` remain shared metadata in `table/source`
 and `index`; importing or transporting them does not load either backend.
+
+Primary-key index source selection, payload eligibility and sorted-index coverage
+planning belong to `execution/python/index`. Index definitions, source metadata
+and their wire formats remain in `index`, shared with public builders and Native
+adapters. Native index planning performs source selection and grouping in Rust.
 
 Arrow read schemas and logical type-change rules stay in `schema`. Shared
 numeric, calendar and metadata text helpers stay in `utils`; Native read and
@@ -144,6 +151,30 @@ Ray package. Public Ray helper entry points delegate to those same helpers.
 System-table output applies common Arrow filtering/projection to `SystemSplit`
 results from either metadata provider without creating a Python file reader.
 
+Search readers accept an optional `SearchTaskExecutor` when executing a complete
+plan. `SearchTask` and its dependency/context transport contract stay in
+`table/source/search_execution`; Ray only implements bounded scheduling,
+context sharing and cancellation. It does not inherit a Python search reader
+or select Python on behalf of a Native reader. Python's distributed adapters
+own their index/filter/raw/refinement operations. Native adapters transport
+opaque shared context and task bytes; Core owns both their interpretation and
+global query coordination. The global candidate limit is applied before
+refinement, and full-text raw fallback retains one corpus for BM25 statistics.
+
+Vector and full-text plans are snapshot-and-split data in both backends. The
+Rust SDK constructors accept typed `Snapshot` and search split objects; indexed,
+raw and primary-key splits keep their own fields and index metadata. The Native
+adapter translates ordinary Python plans into these values, including plans
+made by Python scans or sent to another process. Existing snapshot and index
+metadata codecs are private adapters, rather than a public JSON plan protocol.
+Readers own the table, schema, query and filter. Native selection is retained
+after transport, and source subsets never add missing indexes or raw ranges.
+For Native, a plan without a captured snapshot must have no sources and never
+selects latest. Shard callbacks use an internal binding bridge; they are not part of Rust's public
+Plan/Read API. SDK vector, batch-vector, full-text and hybrid builders share
+one `execute()` entry point. PyPaimon's existing public search methods delegate
+to it through the Native adapters.
+
 ## Corresponding execution APIs
 
 Compare the operation's inputs, results and lifecycle when changing a backend.
@@ -183,14 +214,20 @@ Invalid call arguments fail before either executor prepares files.
 Public stream write, update and commit entry points normalize integer-like
 commit identifiers to Java `long` / Rust `i64` before execution starts.
 Write-column selections reject empty selections and duplicate names before
-replacing the current configuration. Like Java, append writers capture their
-write columns and Blob consumer per partition/bucket. Reconfiguration affects
-future bucket writers; existing buckets retain their configuration across
-`prepare_commit` calls. Full-schema inputs project by column name, and batches
-are checked against every target's captured layout before staging any group.
-Native named-row conversion queries Rust for the target columns using only
-routing metadata, so Python does not duplicate bucket state or encode unused
-payloads. Index build/drop requests bind partition
+replacing the current configuration. Append writers keep one ordered write type
+after their first effective write; empty batches and ignored events do not lock
+it. Repeating the same selection is a no-op, while a different selection requires
+a new writer, including after prepares or idle cleanup. Full-schema inputs are
+projected to the selected columns by name. Selected Arrow inputs may also carry
+routing/event fields while retaining the selected column order. Named-row
+conversion encodes selected ordinary and inline reference fields before capturing
+a bucket writer; encoding failures leave the configuration open. Dedicated live
+Blob payloads are consumed only during execution, and unused payloads remain
+untouched.
+Blob consumers are captured per partition/bucket; changes apply to newly created
+writers, and active writers retain their consumer across prepares. Idle writers
+retire at the Java commit boundary, so reopening uses the current consumer.
+Index build/drop requests bind partition
 predicates to the partition layout and reject predicates containing
 non-partition fields.
 

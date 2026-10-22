@@ -114,9 +114,6 @@ jobs:
                                "pypaimon/_version.py", "pypaimon/_full_version"):
                   if prefix + required not in names:
                       raise SystemExit("Missing {} from sdist".format(required))
-              sample_data = "pypaimon/sample/data/data.jsonl"
-              if prefix + sample_data not in names:
-                  raise SystemExit("Missing sample data from sdist")
               for forbidden in ("pypaimon/tests/",):
                   if any(name.startswith(prefix + forbidden) for name in names):
                       raise SystemExit(
@@ -135,8 +132,6 @@ jobs:
               ]
               if not license_files or not notice_files:
                   raise SystemExit("Wheel is missing LICENSE or NOTICE")
-              if "pypaimon/sample/data/data.jsonl" not in names:
-                  raise SystemExit("Wheel is missing sample data")
               for forbidden in ("pypaimon/tests/",):
                   if any(name.startswith(forbidden) for name in names):
                       raise SystemExit(

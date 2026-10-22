@@ -107,14 +107,14 @@ class NativeTableWrite:
                 # schema. It does not configure a PK column-subset writer.
                 return self
             raise ValueError('Column-subset primary-key writes require the Python executor')
-        self._native_writer.with_write_type(names)
+        self._configure_native('with_write_type', names)
         self._schema = pa.schema([self._table_schema.field(name) for name in names])
         self._write_cols = names
         return self
 
     def with_blob_consumer(self, blob_consumer):
         if blob_consumer is None:
-            self._configure_native_blob('with_blob_consumer', None)
+            self._configure_native('with_blob_consumer', None)
             self._blob_consumer = None
             return self
         if not callable(blob_consumer):
@@ -125,25 +125,25 @@ class NativeTableWrite:
             descriptor = None if encoded is None else BlobDescriptor.deserialize(encoded)
             return blob_consumer(field_name, descriptor)
 
-        self._configure_native_blob('with_blob_consumer', consume)
+        self._configure_native('with_blob_consumer', consume)
         self._blob_consumer = blob_consumer
         return self
 
     def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
+            raise TypeError('URI reader factory must provide callable create')
         if self._blob_rows is not None:
-            if uri_reader_factory is not None and not callable(getattr(uri_reader_factory, 'create', None)):
-                raise TypeError('URI reader factory must provide callable create')
             # Only core knows whether RowKind filtering accepted any rows or a
             # postpone writer buffered data. Validate before changing the live
             # bridge's fallback, including when clearing the application factory.
-            self._configure_native_blob('with_blob_uri_reader_factory', self._blob_rows)
+            self._configure_native('with_blob_uri_reader_factory', self._blob_rows)
             self._blob_rows.fallback = uri_reader_factory
         else:
-            self._configure_native_blob('with_blob_uri_reader_factory', uri_reader_factory)
+            self._configure_native('with_blob_uri_reader_factory', uri_reader_factory)
         self._blob_uri_reader_factory = uri_reader_factory
         return self
 
-    def _configure_native_blob(self, method, value):
+    def _configure_native(self, method, value):
         try:
             getattr(self._native_writer, method)(value)
         except ValueError as error:
@@ -182,7 +182,7 @@ class NativeTableWrite:
         if len(set(names)) == len(names) and all(name in self._table_schema.names for name in names):
             expected = pa.schema([self._table_schema.field(name) for name in names])
             if arrow_schemas_compatible(data.schema, expected, **compatible):
-                # Core validates the destination's current or captured layout.
+                # Core validates the selected write type and routing columns.
                 # Python checks only the declared types of transported fields.
                 return data
         raise ValueError(
@@ -209,41 +209,21 @@ class NativeTableWrite:
         logical_columns = self._write_cols if full_row else list(values)
         if skip_write_row(self.table, values, row.get_row_kind(), logical_columns):
             return
-        if self._write_cols is not None or (self._written and not self.table.is_primary_key_table):
+        require_columns(values, names, 'write_row')
+        if self._write_cols is not None:
             routing = list(self.table.partition_keys)
             if ((self.table.bucket_mode() == BucketMode.HASH_FIXED and self.table.options.bucket() > 1)
                     or isinstance(self, NativePostponeFixedBucketTableWrite)):
                 routing.extend(self.table.table_schema.bucket_keys)
             routing = list(dict.fromkeys(routing))
-            require_columns(values, routing, 'write_row')
-            captured = names
-            if self._written and not self.table.is_primary_key_table:
-                if routing:
-                    metadata = row_values_to_arrow_table(
-                        values, self.table.table_schema.fields, routing).to_batches()[0]
-                else:
-                    from pypaimon.utils.arrow_utils import zero_column_batch
-                    metadata = zero_column_batch(1)
-                captured = self._native_writer._row_write_columns(metadata)
-            require_columns(values, captured, 'write_row')
             row_kind_field = self.table.options.options.to_map().get('rowkind.field')
             if row_kind_field is not None:
                 routing.append(row_kind_field)
             require_columns(values, routing, 'write_row')
-            if captured != names:
-                # A historical named row carries its captured columns plus
-                # routing metadata. Preserve its declared column order even if
-                # routing adds no extra fields. Current-type NOT NULL checks
-                # have already run above; unused payloads need no encoding.
-                names = list(captured) + [name for name in self._table_schema.names
-                                          if name in routing and name not in captured]
-            elif full_row or not set(routing).issubset(names):
-                retained = set(captured) | set(routing)
-                names = self._table_schema.names
-                # Unwritten payloads remain untouched, including live Blobs.
-                values = {name: values.get(name) if name in retained else None for name in names}
-        else:
-            require_columns(values, names, 'write_row')
+            # Keep the selected order, followed by routing/event fields. Values
+            # outside this transport remain untouched, including live Blobs.
+            names = list(names) + [name for name in self._table_schema.names
+                                   if name in routing and name not in names]
         try:
             data = (self._blob_rows.to_batch(self.table, [values], names)
                     if self._blob_rows is not None else

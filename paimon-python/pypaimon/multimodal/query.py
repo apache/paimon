@@ -607,9 +607,9 @@ class _PreFilterQuery(ScanQuery):
         until the Dataset has finished executing.
         """
         from pypaimon.ray.search_result import read_search_result
-        from pypaimon.ray.vector_search import _execution_options
+        from pypaimon.ray.search_execution import execution_options
 
-        concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
+        concurrency, remote_args = execution_options(concurrency, ray_remote_args)
         query = self._for_execution()
         if execution == "ray":
             result = query._execute_ray(concurrency, remote_args)
@@ -861,9 +861,9 @@ class BatchVectorQuery(_PreFilterQuery):
         """Return one lazy Ray Dataset per query, with distributed row lookup."""
         from pypaimon.ray.batch_vector_search import _execute_batch_vector_search
         from pypaimon.ray.search_result import read_search_result
-        from pypaimon.ray.vector_search import _execution_options
+        from pypaimon.ray.search_execution import execution_options
 
-        concurrency, remote_args = _execution_options(concurrency, ray_remote_args)
+        concurrency, remote_args = execution_options(concurrency, ray_remote_args)
         query = self._for_execution()
         if execution == "ray":
             results = _execute_batch_vector_search(

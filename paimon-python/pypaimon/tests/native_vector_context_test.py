@@ -49,8 +49,8 @@ def test_unused_context_attributes_preserve_native_vector_execution(option, batc
     native_table.new_vector_search_builder.return_value = core
     native_table.new_batch_vector_search_builder.return_value = core
     expected = [{7: -0.25, 9: -1.5}, {11: -2.0}]
-    core.execute_local.return_value.row_ids.return_value = expected[0]
-    core.execute_batch_local.return_value = [Mock(row_ids=Mock(return_value=scores)) for scores in expected]
+    core.execute.return_value = ([Mock(row_ids=Mock(return_value=scores)) for scores in expected]
+                                 if batch else Mock(row_ids=Mock(return_value=expected[0])))
     queries = [[1.0, 0.0], [0.0, 1.0]] if batch else [1.0, 0.0]
     with patch.object(loader, 'load', side_effect=AssertionError('Python catalog was reconstructed')), \
             patch.object(native_vector_search, 'native_runtime_available', return_value=True), \
@@ -66,13 +66,12 @@ def test_unused_context_attributes_preserve_native_vector_execution(option, batc
     unused.assert_not_called()
     if batch:
         core.with_query_vectors.assert_called_once_with(queries)
-        core.execute_batch_local.assert_called_once_with()
-        core.execute_local.assert_not_called()
         results = result
     else:
         core.with_query_vector.assert_called_once_with(queries)
-        core.execute_local.assert_called_once_with()
-        core.execute_batch_local.assert_not_called()
         results = [result]
         expected = expected[:1]
+    core.execute.assert_called_once_with()
+    core.execute_local.assert_not_called()
+    core.execute_batch_local.assert_not_called()
     assert [{row_id: item.score_getter()(row_id) for row_id in item.results()} for item in results] == expected

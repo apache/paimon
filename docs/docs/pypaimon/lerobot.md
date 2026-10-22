@@ -259,6 +259,11 @@ Each open decoder uses memory and a file handle, so usage grows with cameras and
 `read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
 Dataset worker (default: 16). Set it to 1 for serial decoding. Parallel decoding
 applies to video windows without `image_transforms` and uses more CPU and memory.
+`read.video.decoders-per-payload` (default: 4) also splits single-video windows across
+independent cached decoders, within those limits. Set it to 1 to disable this splitting;
+the reader automatically reduces the decoder count when overlapping windows would add
+more than 50% duplicate frame requests. Additional decoders can increase initialization
+cost and repeated reads.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 

@@ -18,7 +18,9 @@
 """Native CI instrumentation preserves the public mutation API."""
 
 import importlib.util
+import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -28,6 +30,34 @@ from pypaimon.write.table_commit import BatchTableCommit, TableCommit
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
               pytest.mark.python_write, pytest.mark.python_commit]
+
+
+def test_native_write_tracking_preserves_signature_and_forwards_bucket(monkeypatch):
+    from pypaimon.execution.native.write.native_write import NativeTableWrite
+
+    path = Path(__file__).resolve().parents[2] / 'conftest.py'
+    spec = importlib.util.spec_from_file_location('native_write_instrumentation', str(path))
+    instrumentation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(instrumentation)
+    for key in ('PLAN', 'READ', 'COMMIT', 'UPDATE'):
+        monkeypatch.setenv('PYPAIMON_TEST_NATIVE_' + key, '0')
+    monkeypatch.setenv('PYPAIMON_TEST_NATIVE_WRITE', '1')
+    calls = []
+    result = object()
+
+    def write_arrow_batch(self, data, bucket=None):
+        calls.append((data, bucket))
+        return result
+
+    monkeypatch.setattr(NativeTableWrite, 'write_arrow_batch', write_arrow_batch)
+    instrumentation.pytest_configure(Mock())
+    instrumentation._force_native_write_for_test = True
+    assert inspect.signature(NativeTableWrite.write_arrow_batch) == inspect.signature(write_arrow_batch)
+    data = SimpleNamespace(num_rows=1)
+    writer = SimpleNamespace(_native_writer=object())
+    assert NativeTableWrite.write_arrow_batch(writer, data, bucket=7) is result
+    assert calls == [(data, 7)]
+    assert instrumentation._native_write_count == 1
 
 
 @pytest.mark.parametrize('operation,args', [
