@@ -3163,6 +3163,16 @@ public class CoreOptions implements Serializable {
                             "The batch size for lateral vector search. Each batch executes vector "
                                     + "topK search and table lookup for multiple query vectors.");
 
+    public static final ConfigOption<Integer> PK_INDEX_BUILD_PARALLELISM =
+            key("pk-index.build.parallelism")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "The maximum number of concurrent primary-key index build tasks per "
+                                    + "writer instance, shared by its index columns and buckets. "
+                                    + "Must be greater than zero. Increasing this value may increase "
+                                    + "memory and I/O usage.");
+
     public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMNS =
             key("pk-vector.index.columns")
                     .stringType()
@@ -4988,6 +4998,16 @@ public class CoreOptions implements Serializable {
 
     public boolean primaryKeyFMIndexEnabled() {
         return options.getOptional(PK_FM_INDEX_COLUMNS).isPresent();
+    }
+
+    public int primaryKeyIndexBuildParallelism() {
+        int parallelism = options.get(PK_INDEX_BUILD_PARALLELISM);
+        checkArgument(
+                parallelism > 0,
+                "%s must be greater than zero, but is %s.",
+                PK_INDEX_BUILD_PARALLELISM.key(),
+                parallelism);
+        return parallelism;
     }
 
     public List<String> primaryKeyVectorIndexColumns() {

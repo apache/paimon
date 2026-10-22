@@ -1393,6 +1393,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Comma-separated character columns indexed by primary-key full-text indexes. The first release supports exactly one column.</td>
         </tr>
         <tr>
+            <td><h5>pk-index.build.parallelism</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent primary-key index build tasks per writer instance, shared by its index columns and buckets. Must be greater than zero. Increasing this value may increase memory and I/O usage.</td>
+        </tr>
+        <tr>
             <td><h5>pk-multivalue.index.columns</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

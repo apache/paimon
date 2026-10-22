@@ -183,6 +183,18 @@ public class BucketedVectorIndexMaintainer {
             activeSourceFiles.clear();
             activeSourceFiles.putAll(nextSources);
 
+            // A source transition retires its old coverage before starting replacement builds.
+            // Non-blocking preparation can then publish the data transition without stale indexes.
+            removeSegments(
+                    PkVectorBucketIndexState.fromActiveDataFiles(
+                                    vectorFieldId,
+                                    algorithm,
+                                    new ArrayList<>(activeSourceFiles.values()),
+                                    annSegments)
+                            .staleSegments(),
+                    created,
+                    removed);
+
             while (true) {
                 Optional<CompletedBuild> completed = finishPendingBuild(waitCompaction);
                 if (completed.isPresent()) {
