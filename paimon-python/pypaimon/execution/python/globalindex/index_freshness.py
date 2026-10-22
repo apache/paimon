@@ -42,10 +42,16 @@ def key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
         key_ids = {table.field_dict[key].id for key in match_keys}
         partition_filter = trim_and_transform_predicate(
             partition_predicate, table.field_names, table.partition_keys)
+        native_planning = table.options.native_read_enabled() or table.options.native_plan_enabled()
 
         def relevant_index(entry):
             meta = entry.index_file.global_index_meta
-            return (is_supported_scalar_index(entry.index_file)
+            # Native planning can use more index types, including composite
+            # BTree, even when Python performs the final key matching.
+            supported = (is_supported_scalar_index(entry.index_file)
+                         or (native_planning and meta is not None
+                             and entry.index_file.index_type.lower() in ('btree', 'bitmap', 'fm', 'multivalue')))
+            return (supported
                     and bool(key_ids.intersection(
                         [meta.index_field_id] + (meta.extra_field_ids or [])))
                     and (partition_filter is None or partition_filter.test(entry.partition)))

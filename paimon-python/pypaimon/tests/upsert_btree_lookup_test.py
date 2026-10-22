@@ -392,6 +392,61 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
             self.assertTrue(key_indexes_are_fresh(table, snapshot, ['id'], None))
         self.assertEqual(calls, size)
 
+    def test_ignore_freshness_checks_native_composite_indexes(self):
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+
+        table, snapshot, split, original_index = self._freshness_metadata()
+        original_meta = original_index.index_file.global_index_meta
+        baseline = DataEvolutionIndexSourceMeta.deserialize(original_meta.source_meta).scan_snapshot_id
+        key_id = table.field_dict['id'].id
+        payload_id = table.field_dict['payload'].id
+        for flag in (None, 'read.native.enabled', 'scan.native-plan.enabled'):
+            scan_table = table.copy_without_time_travel({flag: 'true'} if flag else {})
+            for first_id, extra_ids in ((key_id, [payload_id]), (payload_id, [key_id])):
+                for sequence in (baseline, snapshot.id):
+                    for source in (original_meta.source_meta, None):
+                        with self.subTest(flag=flag, first_id=first_id,
+                                          sequence=sequence, source=source):
+                            file = replace(split.files[0], max_sequence_number=snapshot.id,
+                                           write_cols=['id', 'payload'],
+                                           write_cols_sequences=[sequence, baseline])
+                            plan = Plan([DataSplit([file], split.partition, split.bucket)], snapshot.id)
+                            index = replace(original_index, index_file=replace(
+                                original_index.index_file, global_index_meta=replace(
+                                    original_meta, index_field_id=first_id,
+                                    extra_field_ids=extra_ids, source_meta=source)))
+                            # Keep the real IndexFileHandler.scan callback so
+                            # unsupported-index filtering cannot be bypassed.
+                            with mock.patch.object(IndexManifestFile, 'read', return_value=[index]), \
+                                    mock.patch.object(TableScan, 'plan_all', return_value=plan):
+                                self.assertEqual(key_indexes_are_fresh(
+                                    scan_table, snapshot, ['id'], None),
+                                    flag is None or (source is not None and sequence <= baseline))
+
+    def test_ignore_freshness_checks_native_scalar_index_types(self):
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+
+        table, snapshot, split, original_index = self._freshness_metadata()
+        baseline = DataEvolutionIndexSourceMeta.deserialize(
+            original_index.index_file.global_index_meta.source_meta).scan_snapshot_id
+        # A nullable string key can use an FM index for IS NULL lookups.
+        file = replace(split.files[0], max_sequence_number=snapshot.id,
+                       write_cols=['id', 'payload'], write_cols_sequences=[baseline, snapshot.id])
+        plan = Plan([DataSplit([file], split.partition, split.bucket)], snapshot.id)
+        for flag in (None, 'read.native.enabled', 'scan.native-plan.enabled'):
+            scan_table = table.copy_without_time_travel({flag: 'true'} if flag else {})
+            for index_type in ('bitmap', 'BITMAP', 'fm', 'FM', 'multivalue', 'MULTIVALUE'):
+                with self.subTest(flag=flag, index_type=index_type):
+                    index = replace(original_index, index_file=replace(
+                        original_index.index_file, index_type=index_type, global_index_meta=replace(
+                            original_index.index_file.global_index_meta,
+                            index_field_id=table.field_dict['payload'].id)))
+                    with mock.patch.object(IndexManifestFile, 'read', return_value=[index]), \
+                            mock.patch.object(TableScan, 'plan_all', return_value=plan):
+                        self.assertEqual(key_indexes_are_fresh(
+                            scan_table, snapshot, ['payload'], None),
+                            flag is None and index_type != 'bitmap')
+
     def test_ignore_freshness_checks_nested_ranges_and_group_boundaries(self):
         table, snapshot, split, original_index = self._freshness_metadata()
         original_file = split.files[0]
