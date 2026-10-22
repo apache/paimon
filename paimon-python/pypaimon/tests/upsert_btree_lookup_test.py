@@ -16,13 +16,20 @@
 # under the License.
 
 import datetime
+from dataclasses import replace
 from decimal import Decimal
 import unittest
 from unittest import mock
 
 import pyarrow as pa
 
+from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
+from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.execution.python.write.table_upsert_by_key import _key_indexes_are_fresh
+from pypaimon.read.plan import Plan
+from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
+from pypaimon.read.table_scan import TableScan
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.data_evolution_test_helpers import BatchModeMixin, DataEvolutionTestBase
@@ -251,3 +258,116 @@ class UpsertBTreeLookupTest(BatchModeMixin, DataEvolutionTestBase, unittest.Test
                 self.assertEqual(sorted((r['id'], r['payload']) for r in rows), [
                     (2, 'keep'), (3, 'new'), (3, 'new'),
                 ])
+
+    def test_ignore_index_updates_keep_fresh_key_pruning(self):
+        for payload_updated in (False, True):
+            with self.subTest(payload_updated=payload_updated):
+                table = self._create_table(options={
+                    **self.table_options, 'global-index.column-update-action': 'IGNORE',
+                })
+                self._write_arrow(table, pa.table({
+                    'id': list(range(0, 32, 2)), 'payload': ['old'] * 16,
+                }, schema=self.pa_schema))
+                source_snapshot = table.snapshot_manager().get_latest_snapshot()
+                self.assertGreater(table.create_global_index('id', index_type='btree'), 0)
+                for entry in IndexFileHandler(table).scan(None):
+                    self.assertEqual(DataEvolutionIndexSourceMeta.deserialize(
+                        entry.index_file.global_index_meta.source_meta).scan_snapshot_id,
+                        source_snapshot.id)
+                if payload_updated:
+                    builder = table.new_batch_write_builder()
+                    messages = builder.new_update().with_update_type(['payload']).update_by_arrow_with_row_id(
+                        pa.table({'_ROW_ID': pa.array([5], type=pa.int64()),
+                                  'payload': ['updated']}))
+                    commit = builder.new_commit()
+                    try:
+                        commit.commit(messages)
+                    finally:
+                        commit.close()
+                self.assertEqual(self._counted_lookup(table, ['id'], {(10,)}), (
+                    {(10,): [5]}, [5]))
+                # This absent key is inside the file's min/max range. A
+                # still-fresh index can establish absence without a data read.
+                self.assertEqual(self._counted_lookup(table, ['id'], {(11,)}), ({}, []))
+
+    def test_ignore_index_updates_untrusted_source_falls_back(self):
+        table = self._create_table(options={
+            **self.table_options, 'global-index.column-update-action': 'IGNORE',
+        })
+        self._write_arrow(table, pa.table({
+            'id': list(range(0, 32, 2)), 'payload': ['old'] * 16,
+        }, schema=self.pa_schema))
+        self.assertGreater(table.create_global_index('id', index_type='btree'), 0)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = IndexFileHandler(table).scan(snapshot)
+        self.assertTrue(entries)
+        sources = [None, b'unknown', b'DEIX',
+                   DataEvolutionIndexSourceMeta(snapshot.id + 1).serialize()]
+        for source in sources:
+            with self.subTest(source=source):
+                untrusted_entries = [replace(
+                    entry,
+                    index_file=replace(
+                        entry.index_file,
+                        global_index_meta=replace(
+                            entry.index_file.global_index_meta, source_meta=source)))
+                    for entry in entries]
+                with mock.patch.object(IndexFileHandler, 'scan', return_value=untrusted_entries):
+                    self.assertEqual(self._counted_lookup(table, ['id'], {(10,)}), (
+                        {(10,): [5]}, list(range(16))))
+
+    def test_ignore_index_updates_use_compacted_column_sequences(self):
+        table = self._create_table(options={
+            **self.table_options, 'global-index.column-update-action': 'IGNORE',
+        })
+        self._write_arrow(table, pa.table({
+            'id': [1, 2, 3], 'payload': ['old'] * 3,
+        }, schema=self.pa_schema))
+        baseline = table.snapshot_manager().get_latest_snapshot().id
+        table.create_global_index('id', index_type='btree')
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        table = table._copy_with_snapshot(snapshot)
+        split = table.new_read_builder().new_scan().plan_all_files().splits()[0]
+        original_file = split.files[0]
+        # Model a compaction which rewrote the full schema after a payload
+        # update. Its overall sequence is new, but the key sequence is old.
+        cases = [([baseline, snapshot.id], True), ([snapshot.id, snapshot.id], False),
+                 (None, False), ([baseline], False), ([0, snapshot.id], False),
+                 ([snapshot.id + 1, snapshot.id], False)]
+        for write_cols in (None, ['id', 'payload']):
+            for sequences, expected in cases:
+                with self.subTest(write_cols=write_cols, sequences=sequences):
+                    file = replace(original_file, max_sequence_number=snapshot.id,
+                                   write_cols=write_cols, write_cols_sequences=sequences)
+                    plan = Plan([DataSplit([file], split.partition, split.bucket)], snapshot.id)
+                    with mock.patch.object(TableScan, 'plan_all_files', return_value=plan):
+                        self.assertEqual(_key_indexes_are_fresh(
+                            table, snapshot, ['id'], None), expected)
+        # Updates outside this index's row range cannot stale its key values.
+        disjoint = replace(original_file, first_row_id=3, max_sequence_number=snapshot.id)
+        plan = Plan([DataSplit([disjoint], split.partition, split.bucket)], snapshot.id)
+        with mock.patch.object(TableScan, 'plan_all_files', return_value=plan):
+            self.assertTrue(_key_indexes_are_fresh(table, snapshot, ['id'], None))
+
+    def test_ignore_index_rebuild_restores_key_pruning(self):
+        table = self._create_table(options={
+            **self.table_options, 'global-index.column-update-action': 'IGNORE',
+        })
+        self._write_arrow(table, pa.table({
+            'id': list(range(0, 32, 2)), 'payload': ['old'] * 16,
+        }, schema=self.pa_schema))
+        table.create_global_index('id', index_type='btree')
+        builder = table.new_batch_write_builder()
+        messages = builder.new_update().with_update_type(['id']).update_by_arrow_with_row_id(
+            pa.table({'_ROW_ID': pa.array([5], type=pa.int64()),
+                      'id': pa.array([99], type=pa.int32())}))
+        commit = builder.new_commit()
+        try:
+            commit.commit(messages)
+        finally:
+            commit.close()
+        self.assertEqual(self._counted_lookup(table, ['id'], {(99,)}), (
+            {(99,): [5]}, list(range(16))))
+        table.drop_global_index('id', index_type='btree')
+        table.create_global_index('id', index_type='btree')
+        self.assertEqual(self._counted_lookup(table, ['id'], {(99,)}), ({(99,): [5]}, [5]))

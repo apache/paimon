@@ -69,6 +69,86 @@ def _key_predicate(builder, field, values):
     return builder.or_predicates(predicates)
 
 
+def _key_indexes_are_fresh(table, snapshot, match_keys, partition_predicate):
+    """Prove indexed match keys have not changed since their build snapshot."""
+    if snapshot is None or not match_keys:
+        return True
+    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+        is_supported_scalar_index,
+    )
+    from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
+    from pypaimon.index.index_file_handler import IndexFileHandler
+    from pypaimon.read.push_down_utils import trim_and_transform_predicate
+    from pypaimon.utils.range import Range
+
+    try:
+        key_ids = {table.field_dict[key].id for key in match_keys}
+        partition_filter = trim_and_transform_predicate(
+            partition_predicate, table.field_names, table.partition_keys)
+
+        def relevant_index(entry):
+            meta = entry.index_file.global_index_meta
+            return (is_supported_scalar_index(entry.index_file)
+                    and bool(key_ids.intersection(
+                        [meta.index_field_id] + (meta.extra_field_ids or [])))
+                    and (partition_filter is None or partition_filter.test(entry.partition)))
+
+        indexes = IndexFileHandler(table).scan(snapshot, relevant_index)
+        if not indexes:
+            return True
+        baselines = []
+        for index in indexes:
+            meta = index.index_file.global_index_meta
+            source = DataEvolutionIndexSourceMeta.deserialize(meta.source_meta)
+            if source.scan_snapshot_id > snapshot.id or meta.row_range_start > meta.row_range_end:
+                return False
+            baselines.append((index, source.scan_snapshot_id))
+
+        # Inspect active file metadata before either key stats or an index can
+        # hide the files containing changed keys. Both plans use this snapshot.
+        builder = table.copy_without_time_travel({
+            CoreOptions.GLOBAL_INDEX_ENABLED.key(): 'false',
+        }).new_read_builder().with_filter(partition_predicate)
+        files_by_group = {}
+        for split in builder.new_scan().plan_all_files().splits():
+            files = files_by_group.setdefault((tuple(split.partition.values), split.bucket), {})
+            files.update((file.file_name, file) for file in split.files)
+
+        schema = table.table_schema
+        known_names = set(table.field_names) | SpecialFields.SYSTEM_FIELD_NAMES
+        for index, baseline in baselines:
+            meta = index.index_file.global_index_meta
+            indexed_keys = key_ids.intersection([meta.index_field_id] + (meta.extra_field_ids or []))
+            index_range = Range(meta.row_range_start, meta.row_range_end)
+            for file in files_by_group.get((tuple(index.partition.values), index.bucket), {}).values():
+                row_range = file.row_id_range()
+                if row_range is None:
+                    return False
+                if not index_range.overlaps(row_range):
+                    continue
+                # Historical schemas are outside this optimization's proof.
+                if file.schema_id != schema.id:
+                    return False
+                if file.write_cols is not None and (
+                        any(name not in known_names for name in file.write_cols)
+                        or len(file.write_cols) != len(set(file.write_cols))):
+                    return False
+                fields = schema.data_file_fields(file.write_cols)
+                sequences = file.write_cols_sequences
+                for position, field in enumerate(fields):
+                    if field.id not in indexed_keys:
+                        continue
+                    sequence = (sequences[position]
+                                if sequences is not None and len(sequences) == len(fields)
+                                else file.max_sequence_number)
+                    if sequence <= 0 or sequence > file.max_sequence_number or sequence > baseline:
+                        return False
+        return True
+    except Exception:
+        logger.debug("Cannot verify upsert key index freshness; scanning without indexes.", exc_info=True)
+        return False
+
+
 class PythonTableUpsert:
     """Python partition matching, deduplication and file rewriting."""
 
@@ -348,11 +428,6 @@ class PythonTableUpsert:
         scan_options = {
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
         }
-        # IGNORE can retain old indexed key values after a row update. FULL
-        # only covers unindexed ranges; it cannot recover these stale matches.
-        if (context.table.options.global_index_column_update_action()
-                == GlobalIndexColumnUpdateAction.IGNORE):
-            scan_options[CoreOptions.GLOBAL_INDEX_ENABLED.key()] = 'false'
         scan_table = context.table.copy_without_time_travel(scan_options)
         read_builder = scan_table.new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
@@ -364,6 +439,20 @@ class PythonTableUpsert:
                  else predicate_builder.equal(k, v))
                 for k, v in partition_spec.items()
             ])
+        if (scan_table.options.global_index_enabled()
+                and scan_table.options.global_index_column_update_action()
+                == GlobalIndexColumnUpdateAction.IGNORE):
+            from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+
+            snapshot = TimeTravelUtil.resolve_snapshot(scan_table)
+            scan_table = scan_table._copy_with_snapshot(snapshot)
+            if not _key_indexes_are_fresh(
+                    scan_table, snapshot, match_keys,
+                    predicate_builder.and_predicates(sub_predicates)):
+                scan_table = scan_table.copy_without_time_travel({
+                    CoreOptions.GLOBAL_INDEX_ENABLED.key(): 'false',
+                })
+            read_builder = scan_table.new_read_builder()
         for i, key in enumerate(match_keys):
             predicate = _key_predicate(
                 predicate_builder, context.table.field_dict[key],
@@ -382,7 +471,7 @@ class PythonTableUpsert:
         read_type = key_fields + [SpecialFields.ROW_ID]
 
         table_read = TableRead(
-            table=context.table, predicate=None, read_type=read_type
+            table=scan_table, predicate=None, read_type=read_type
         )
 
         # Stream batches and filter against input_key_set on-the-fly
