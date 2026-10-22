@@ -527,8 +527,71 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks).hasSize(2);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(0).file(), entries.get(2).file());
+        assertThat(tasks.get(1)).isInstanceOf(DataEvolutionVectorCompactTask.class);
         assertThat(tasks.get(1).compactBefore())
                 .containsExactly(entries.get(1).file(), entries.get(3).file());
+    }
+
+    @Test
+    public void testCompactPlannerCompactsVectorStoreFilesWithinOneDataFile() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeVectorStoreEntry("v1.vector.json", 0L, 50L, 10));
+        entries.add(makeVectorStoreEntry("v2.vector.json", 50L, 50L, 10));
+
+        List<DataEvolutionCompactTask> tasks =
+                vectorStorePlanner(1024, 1024, 2).compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.VECTOR);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+
+        tasks = vectorStorePlanner(1024, 1024, 3).compactPlan(entries);
+        assertThat(tasks).isEmpty();
+    }
+
+    @Test
+    public void testCompactPlannerSkipsVectorFieldMissingForPartOfRange() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeVectorStoreEntry("v1.vector.json", 0L, 100L, 1, 10, Arrays.asList("vec")));
+        entries.add(makeVectorStoreEntry("v2.vector.json", 50L, 50L, 2, 10, Arrays.asList("vec2")));
+
+        assertThat(vectorStorePlanner(1024, 1024, 2).compactPlan(entries)).isEmpty();
+
+        entries.add(makeVectorStoreEntry("v3.vector.json", 0L, 50L, 3, 10, Arrays.asList("vec2")));
+        List<DataEvolutionCompactTask> tasks =
+                vectorStorePlanner(1024, 1024, 2).compactPlan(entries);
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactlyInAnyOrder(
+                        entries.get(1).file(), entries.get(2).file(), entries.get(3).file());
+    }
+
+    @Test
+    public void testCompactPlannerIgnoresDroppedVectorFieldCoverage() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeVectorStoreEntry("v1.vector.json", 0L, 100L, 1, 10, Arrays.asList("vec")));
+        entries.add(
+                makeVectorStoreEntry(
+                        "v2.vector.json", 50L, 50L, 2, 10, Arrays.asList("vec", "dropped")));
+
+        List<DataEvolutionCompactTask> tasks =
+                vectorStorePlanner(1024, 1024, 2).compactPlan(entries);
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+
+        List<ManifestEntry> droppedOnly =
+                Arrays.asList(
+                        makeEntry("file1.parquet", 0L, 100L, 100),
+                        makeVectorStoreEntry(
+                                "v1.vector.json", 0L, 50L, 1, 10, Arrays.asList("dropped")),
+                        makeVectorStoreEntry(
+                                "v2.vector.json", 50L, 50L, 2, 10, Arrays.asList("dropped")));
+        assertThat(vectorStorePlanner(1024, 1024, 2).compactPlan(droppedOnly)).isEmpty();
     }
 
     @Test
@@ -954,19 +1017,23 @@ public class DataEvolutionCompactCoordinatorTest {
 
     private ManifestEntry makeVectorStoreEntry(
             String fileName, long firstRowId, long rowCount, long fileSize) {
+        return makeVectorStoreEntry(
+                fileName, firstRowId, rowCount, 0, fileSize, Collections.singletonList("vec"));
+    }
+
+    private ManifestEntry makeVectorStoreEntry(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSeq,
+            long fileSize,
+            List<String> writeCols) {
         return ManifestEntry.create(
                 FileKind.ADD,
                 BinaryRow.EMPTY_ROW,
                 0,
                 0,
-                createDataFileMeta(
-                        fileName,
-                        firstRowId,
-                        rowCount,
-                        0,
-                        fileSize,
-                        0,
-                        Collections.singletonList("vec")));
+                createDataFileMeta(fileName, firstRowId, rowCount, maxSeq, fileSize, 0, writeCols));
     }
 
     private DataFileMeta createDataFileMeta(
@@ -1042,8 +1109,25 @@ public class DataEvolutionCompactCoordinatorTest {
 
     private DataEvolutionCompactCoordinator.CompactPlanner vectorStorePlanner(
             long targetFileSize, long openFileCost, long compactMinFileNum) {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "vec", DataTypes.VECTOR(2, DataTypes.FLOAT())),
+                                new DataField(2, "vec2", DataTypes.VECTOR(2, DataTypes.FLOAT())),
+                                new DataField(
+                                        3, "dropped", DataTypes.VECTOR(2, DataTypes.FLOAT()))));
         return new DataEvolutionCompactCoordinator.CompactPlanner(
-                false, true, targetFileSize, openFileCost, compactMinFileNum);
+                false,
+                true,
+                Long.MAX_VALUE,
+                targetFileSize,
+                targetFileSize,
+                openFileCost,
+                compactMinFileNum,
+                schemaId -> rowType,
+                null,
+                new HashSet<>(Arrays.asList(1, 2)));
     }
 
     private RowType rowType(DataField... fields) {
@@ -1099,6 +1183,38 @@ public class DataEvolutionCompactCoordinatorTest {
 
         assertThat(deserialized).isEqualTo(task);
         assertThat(deserialized.type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
+    }
+
+    @Test
+    public void testSerializerVectorTask() throws IOException {
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.vector.json", 0L, 100L, 0, 1024),
+                        createDataFileMeta("file2.vector.json", 100L, 100L, 0, 1024));
+
+        DataEvolutionCompactTask task =
+                new DataEvolutionVectorCompactTask(BinaryRow.EMPTY_ROW, files);
+
+        byte[] bytes = serializer.serialize(task);
+        DataEvolutionCompactTask deserialized =
+                serializer.deserialize(serializer.getVersion(), bytes);
+
+        assertThat(deserialized).isEqualTo(task);
+        assertThat(deserialized.type()).isEqualTo(DataEvolutionCompactTask.TaskType.VECTOR);
+    }
+
+    @Test
+    public void testVectorCompactTaskRejectsNonVectorFiles() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.vector.json", 0L, 10L, 0, 1024),
+                        createDataFileMeta("file2.parquet", 10L, 10L, 0, 1024));
+
+        assertThatThrownBy(() -> new DataEvolutionVectorCompactTask(BinaryRow.EMPTY_ROW, files))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only contain vector-store files");
     }
 
     @Test

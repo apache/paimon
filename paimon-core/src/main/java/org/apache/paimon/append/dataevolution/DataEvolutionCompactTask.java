@@ -23,10 +23,17 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.DataEvolutionUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,9 +41,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
+import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Base class for data evolution table compaction tasks. */
@@ -132,6 +141,60 @@ public abstract class DataEvolutionCompactTask {
                                         "Cannot get max sequence id from compact before files."));
     }
 
+    @Nullable
+    protected long[] compactedWriteColsSequences(FileStoreTable table, DataFileMeta outputFile) {
+        SchemaManager schemaManager = table.schemaManager();
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
+        Function<Long, TableSchema> schemaLoader =
+                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaManager::schema);
+        Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache = new HashMap<>();
+
+        Map<Integer, Long> fieldMaxSequences = new HashMap<>();
+        for (DataFileMeta input : compactBefore) {
+            List<DataField> inputFields =
+                    fileFieldsCache.computeIfAbsent(
+                            Pair.of(input.schemaId(), input.writeCols()),
+                            key -> fileFields(schemaLoader, input));
+            long[] inputWriteColsSequences = input.writeColsSequences();
+            for (int inputPosition = 0; inputPosition < inputFields.size(); inputPosition++) {
+                fieldMaxSequences.merge(
+                        inputFields.get(inputPosition).id(),
+                        fieldMaxSequenceNumber(
+                                input, inputWriteColsSequences, inputPosition, inputFields.size()),
+                        Math::max);
+            }
+        }
+
+        long fallbackSequence = outputFile.maxSequenceNumber();
+        List<DataField> outputFields =
+                fileFieldsCache.computeIfAbsent(
+                        Pair.of(outputFile.schemaId(), outputFile.writeCols()),
+                        key -> fileFields(schemaLoader, outputFile));
+        boolean allEqualToFileMax =
+                outputFields.stream()
+                        .allMatch(
+                                field ->
+                                        fieldMaxSequences.getOrDefault(field.id(), fallbackSequence)
+                                                == fallbackSequence);
+        if (allEqualToFileMax) {
+            return null;
+        }
+
+        long[] result = new long[outputFields.size()];
+        for (int outputPosition = 0; outputPosition < outputFields.size(); outputPosition++) {
+            result[outputPosition] =
+                    fieldMaxSequences.getOrDefault(
+                            outputFields.get(outputPosition).id(), fallbackSequence);
+        }
+        return result;
+    }
+
+    private static List<DataField> fileFields(
+            Function<Long, TableSchema> schemaLoader, DataFileMeta file) {
+        TableSchema fileSchema = schemaLoader.apply(file.schemaId());
+        return DataEvolutionUtils.fileFields(fileSchema, file);
+    }
+
     @Override
     public int hashCode() {
         return Objects.hash(partition, compactBefore, compactAfter);
@@ -163,7 +226,8 @@ public abstract class DataEvolutionCompactTask {
     public enum TaskType {
         NORMAL(0),
         BLOB(1),
-        MATERIALIZE_DELETION(2);
+        MATERIALIZE_DELETION(2),
+        VECTOR(3);
 
         private final int code;
 

@@ -680,13 +680,13 @@ public class CompactProcedure extends BaseProcedure {
                                                 table,
                                                 partitionPredicate,
                                                 table.coreOptions().blobCompactionEnabled(),
-                                                false,
+                                                table.coreOptions().vectorCompactionEnabled(),
                                                 planningSnapshot)
                                         : new DataEvolutionCompactCoordinator(
                                                 table,
                                                 partitionPredicate,
                                                 table.coreOptions().blobCompactionEnabled(),
-                                                false,
+                                                table.coreOptions().vectorCompactionEnabled(),
                                                 planningSnapshot,
                                                 candidateFilesPerBatch);
                         coordinator.withCompletedNormalFiles(completedNormalFiles);
