@@ -399,7 +399,7 @@ def test_empty_restore_does_not_apply_select_policy_to_python_writes(tmp_path, o
             authorize.assert_not_called()
             # Only the explicit whole-table read requires an unrestricted grant.
             with pytest.raises(TableNoPermissionException):
-                table.new_read_builder().new_scan().plan_all_files()
+                table.new_read_builder().new_scan().plan_all()
         builder.new_commit().commit(messages)
     finally:
         writer.close()

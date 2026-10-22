@@ -28,6 +28,13 @@ from pypaimon.read.split import Split
 from pypaimon.read.scan_stats import ScanStats
 
 
+def validate_read_backend(read):
+    """Validate the explicitly selected Python backend without loading Native."""
+    if not read.table.options.native_read_enabled():
+        from pypaimon.execution.python.read.merge_engine_support import validate_read
+        validate_read(read)
+
+
 def to_iterator(self, splits: List[Split]) -> Iterator:
     """Lazily read InternalRows, using native reads when available.
 
@@ -149,9 +156,6 @@ def plan_scan(self) -> Plan:
         if native is not None:
             return native
     auth_result = self._TableScan__auth_query()
-    if self._query_auth_fn is not None and self._file_scanner is not None:
-        from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
-        prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
     # The native planner bypasses the auth-aware file scanner. Resolve auth
     # before selecting a planning backend.
     if (not native_auth and auth_result is None and self._native_requested()
@@ -163,8 +167,56 @@ def plan_scan(self) -> Plan:
     return PythonTableScan(self).plan(auth_result)
 
 
-def plan_all_files(self) -> Plan:
-    """Plan matching files including L0 and all data-evolution column files.
+def new_file_scanner(scan):
+    """Create public file configuration without constructing either executor."""
+    from pypaimon.read.file_scanner import FileScanner
+    return FileScanner(scan)
+
+
+def python_file_scanner(scan):
+    """Enter the selected Python executor's internal file scanner."""
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    return PythonTableScan(scan)._file_scanner()
+
+
+def file_scan_has_bucket_pruning(scan):
+    """Inspect Python statistics only after that backend planned the scan."""
+    scanner = python_file_scanner(scan)
+    return scanner._bucket_selector is not None or scanner.only_read_real_buckets
+
+
+def plan_files(scanner):
+    """Plan raw file metadata only with unrestricted whole-table permission."""
+    scan = scanner._scan
+    if scan._native_requested():
+        from pypaimon.execution.native.table import _native_query_auth_supported
+        # Raw file metadata precedes query result transformations. Do not let
+        # their capability checks (shuffle, global indexes or slices) select
+        # Python for an operation which does not consume those settings.
+        native_supported = _native_query_auth_supported(scan.table)
+    else:
+        native_supported = False
+    if native_supported:
+        from pypaimon.execution.native.read.plan import NativeTableScan
+        result = NativeTableScan(scan).plan_files(scanner.skip_level0, scanner.only_read_real_buckets)
+        if result is not None:
+            entries, snapshot_id = result
+            scanner._scanned_snapshot = None
+            scanner._scanned_snapshot_id = snapshot_id
+            return entries
+    if scan._TableScan__auth_query(all_columns=True) is not None:
+        raise TableNoPermissionException(scan.table.identifier)
+    from pypaimon.execution.python.read.table_scan import PythonTableScan
+    # Let the selected executor refresh cached rules for this unrestricted scope.
+    source = PythonTableScan(scan)._scanner(None)
+    entries = source.plan_files()
+    scanner._scanned_snapshot = source._scanned_snapshot
+    scanner._scanned_snapshot_id = source._scanned_snapshot_id
+    return entries
+
+
+def plan_all(self) -> Plan:
+    """Plan splits including L0 and all matching data-evolution column files.
 
     Existing filters and limits still apply. Query authorization must be
     unrestricted, as required by writer restore, overwrite and indexing.
@@ -181,7 +233,7 @@ def plan_all_files(self) -> Plan:
     if self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
     from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).plan_all_files()
+    return PythonTableScan(self).plan_all()
 
 
 def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
@@ -199,9 +251,6 @@ def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
         if native is not None:
             return native
     auth_result = self._TableScan__auth_query()
-    if self._query_auth_fn is not None and self._file_scanner is not None:
-        from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
-        prune_scanner_by_auth(self.table, self._file_scanner, auth_result)
     if (not native_auth and auth_result is None and self._native_requested()
             and self._native_plan_supported()):
         from pypaimon.execution.native.read.plan import NativeTableScan
@@ -213,36 +262,48 @@ def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
 
 
 def new_streaming_scan(self):
-    """Create a stateful streaming scan using the configured backend."""
-    from pypaimon.write.backend_dispatch import propagate_fork_safety_error
-
+    """Create the public streaming facade with this builder's read request."""
     projection = self._projection_builder()
     projection._validate_map_key_filter()
-    if self.table.options.native_plan_enabled():
+    from pypaimon.read.streaming_table_scan import StreamTableScan
+    return StreamTableScan(
+        self.table, predicate=self._predicate, read_type=projection.read_type(),
+        poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
+        consumer_id=self._consumer_id)
+
+
+def create_streaming_scan(scan, poll_interval_ms=1000, prefetch_enabled=True,
+                          diff_threshold=10):
+    """Prepare one executor before any frame or checkpoint is consumed."""
+    from pypaimon.write.backend_dispatch import propagate_fork_safety_error
+
+    if native_plan_requested(scan):
         from pypaimon.execution.native.table import _native_query_auth_supported
-        native_supported = _native_query_auth_supported(self.table)
+        native_supported = _native_query_auth_supported(scan.table)
     else:
         native_supported = False
     if native_supported:
         try:
             from pypaimon.execution.native.read.streaming_table_scan import StreamTableScan
             return StreamTableScan(
-                self.table, predicate=self._predicate, read_type=projection.read_type(),
-                poll_interval_ms=self._poll_interval_ms, bucket_filter=self._bucket_filter,
-                consumer_id=self._consumer_id)
+                scan.table, predicate=scan.predicate, read_type=scan._read_type,
+                poll_interval_ms=poll_interval_ms, bucket_filter=scan._bucket_filter,
+                consumer_id=scan._consumer_id)
         except Exception as error:
             propagate_fork_safety_error(error)
             logging.warning("Cannot create Native stream scan, using Python: %s", error)
     from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
-    scan = AsyncStreamingTableScan(
-        table=self.table,
-        predicate=self._predicate,
-        poll_interval_ms=self._poll_interval_ms,
-        bucket_filter=self._bucket_filter,
-        consumer_id=self._consumer_id
+    execution = AsyncStreamingTableScan(
+        table=scan.table,
+        predicate=scan.predicate,
+        poll_interval_ms=poll_interval_ms,
+        bucket_filter=scan._bucket_filter,
+        prefetch_enabled=prefetch_enabled,
+        diff_threshold=diff_threshold,
+        consumer_id=scan._consumer_id
     )
-    scan._read_type = projection.read_type()
-    return scan
+    execution._read_type = scan._read_type
+    return execution
 
 
 def native_plan_requested(scan) -> bool:

@@ -649,8 +649,10 @@ def test_native_callbacks_keep_python_context_and_allow_native_read(
             assert all(isinstance(entry, ManifestEntry) for entry in context.commit_entries)
             assert all(isinstance(entry.partition, GenericRow) for entry in context.commit_entries)
             # Re-enter Rust's runtime from the Python callback after publication.
-            with patch('pypaimon.read.table_read.TableRead._create_split_read',
-                       side_effect=AssertionError('callback read fell back')):
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('callback read fell back')
+            ):
                 calls.append((context, _rows(table)))
 
     commit = builder.new_commit()

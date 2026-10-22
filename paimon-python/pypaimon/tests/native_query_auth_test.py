@@ -87,8 +87,10 @@ def _read(table, native, projection=None, predicate=None, limit=None):
         if native:
             stack.enter_context(patch.object(scan.file_scanner, 'scan',
                                              side_effect=AssertionError('Native plan fell back')))
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                      side_effect=AssertionError('Native read fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Native read fell back')
+            ))
         plan = scan.plan()
         return builder.new_read().to_arrow(plan.splits())
 

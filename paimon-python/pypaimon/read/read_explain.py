@@ -198,8 +198,8 @@ def _bucket_pruning(stats: ScanStats, scan: TableScan) -> Optional[PruningStat]:
     # HASH_FIXED predicate-driven selector OR the POSTPONE_BUCKET
     # synthetic-bucket skip. Tables with neither (e.g. BUCKET_UNAWARE
     # append) leave this counter as ``None``.
-    fs = scan.file_scanner
-    if fs._bucket_selector is None and not fs.only_read_real_buckets:
+    from pypaimon.read.read_dispatch import file_scan_has_bucket_pruning
+    if not file_scan_has_bucket_pruning(scan):
         return None
     return PruningStat(before=stats.entries_after_partition, after=stats.entries_after_bucket)
 

@@ -28,6 +28,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 import pypaimon.multimodal as pmm
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.multimodal import source_col
 from pypaimon.common.json_util import JSON
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -995,7 +996,7 @@ class MultimodalTableTest(unittest.TestCase):
             for key in ("other/a", "other/b", "images/a", "images/b", "images/c", "images/d")
         ])
         store = table.blobs(column="image")
-        original = TableRead._arrow_batch_generator
+        original = PythonTableRead._arrow_batch_generator
         batches, closed = [], []
 
         def tracked_read(read, *args, **kwargs):
@@ -1009,7 +1010,7 @@ class MultimodalTableTest(unittest.TestCase):
                 closed.append(True)
 
         with patch.object(TableRead, "to_arrow", side_effect=AssertionError("full read")), \
-                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+                patch.object(PythonTableRead, "_arrow_batch_generator", tracked_read):
             self.assertEqual([], store.list_objects(limit=0))
             self.assertEqual([], batches)
             listed = store.list_objects(prefix="images/", limit=1, columns=["owner"])
@@ -1549,7 +1550,7 @@ class MultimodalTableTest(unittest.TestCase):
                 closed.append(True)
 
         with patch(
-                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                "pypaimon.execution.python.read.table_read.PythonTableRead._arrow_batch_generator",
                 new=batches), patch(
                     "pypaimon.read.read_support."
                     "_RECORD_BATCH_READER_FROM_STREAM", None):
@@ -1560,7 +1561,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         closed.clear()
         with patch(
-                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                "pypaimon.execution.python.read.table_read.PythonTableRead._arrow_batch_generator",
                 new=batches):
             reader = users.scan().select("id").to_arrow_batch_reader()
             reader.read_next_batch()
@@ -2183,7 +2184,7 @@ class MultimodalTableTest(unittest.TestCase):
                 "id": pa.int32(), "image": pa.large_binary(),
             }), options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "1"}))
         table.add([{"id": i, "image": b"body"} for i in range(3)])
-        original = TableRead._arrow_batch_generator
+        original = PythonTableRead._arrow_batch_generator
         closed = []
 
         def tracked_read(read, *args, **kwargs):
@@ -2195,7 +2196,7 @@ class MultimodalTableTest(unittest.TestCase):
                 closed.append(True)
 
         with patch.object(TableRead, "_try_native_batches", return_value=None), \
-                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+                patch.object(PythonTableRead, "_arrow_batch_generator", tracked_read):
             stream = table.scan().stream_blobs("image")
             next(stream)
             stream.close()

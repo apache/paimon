@@ -81,7 +81,7 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
             if not _rest_catalog_supported(source) or not _native_query_auth_supported(source):
                 return None
             # A source is a read, not a write. Core obtains a fresh REST grant
-            # and requires it to be unrestricted, as Python plan_all_files does.
+            # and requires it to be unrestricted, as Python plan_all does.
             native_source = _native_table(source)
         else:
             native_source = create_native_write_table(source)

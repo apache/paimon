@@ -98,8 +98,18 @@ Neither backend imports the other. Native adapters do not construct or retain
 Python executors. Python implementations do not load the optional Native SDK
 just because it is installed. Planning, reading, writing and committing retain
 independent options; shared plans and commit messages connect those stages.
-Explicit access to an existing Python scanner/router/committer property selects
-that implementation. Ordinary configuration and metadata inspection do not.
+The public `TableScan.file_scanner`, `AsyncStreamingTableScan` and
+`StreamTableScan` are backend-neutral facades, including direct construction.
+Accessing file configuration does not construct a Python scanner. File plans
+require unrestricted whole-table authorization because they expose raw file
+metadata. Internal writer metadata restoration uses the selected executor's
+private scanner and retains its write authorization boundary.
+
+Manifest-source and follow-up-scanner callbacks belong to Python execution
+internals. Public scanner configuration selects the existing snapshot, delta
+or changelog strategies without accepting custom scanner callbacks. Explicit
+Python router/committer properties retain their implementation-specific APIs.
+Ordinary configuration and metadata inspection do not select that backend.
 
 Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.
@@ -200,7 +210,7 @@ Message conversion happens during preparation; publication uses the selected
 executor's prepared messages. Batch/stream binding details stay in the Native
 adapter, and overwrite details stay in each backend.
 
-Both batch scanners expose `plan(auth_result=None)`, `plan_all_files()` and
+Both batch scanners expose `plan(auth_result=None)`, `plan_all()` and
 `scan_with_stats(auth_result=None)`. Both readers expose `read_rows(splits)` and
 `read_batches(splits, schema, parallelism=None, blob_parallelism=1,
 ordered=False)`. Output materialization and Python parallel-read helpers are

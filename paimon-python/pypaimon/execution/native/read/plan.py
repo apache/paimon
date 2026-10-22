@@ -22,14 +22,13 @@ from dataclasses import replace
 from typing import List, Optional, Tuple
 
 from pypaimon.common.identifier import UNKNOWN_DATABASE
-from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scan_request import ScanRequest
 from pypaimon.read import split_serializer
 
@@ -56,6 +55,7 @@ def native_plan(
         shard: Optional[Tuple[int, int]] = None,
         partition_predicate: Optional[Predicate] = None,
         global_index_result=None,
+        file_filters: Optional[Tuple[bool, bool]] = None,
         all_files: bool = False) -> Plan:
     """Plan with pypaimon_rust, preserving snapshot metadata.
 
@@ -84,6 +84,8 @@ def native_plan(
         scan = builder.new_incremental_scan(*incremental_range)
     else:
         scan = builder.new_incremental_scan(*incremental_range, incremental_mode)
+    if file_filters is not None:
+        scan = scan.with_file_filters(*file_filters)
     if global_index_result is not None and not table.options.query_auth_enabled:
         # A PK result already selected a snapshot and physical files. Java's
         # PrimaryKeyBatchScan returns those selections before ordinary planning.
@@ -120,7 +122,7 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    rust_plan = scan.plan_all_files() if all_files else scan.plan()
+    rust_plan = scan.plan_all() if all_files else scan.plan()
     return _from_native_plan(table, rust_plan)
 
 
@@ -168,8 +170,27 @@ class NativeTableScan:
         # Core requests and captures query authorization with its own plan.
         return self._plan()
 
-    def plan_all_files(self):
+    def plan_all(self):
         return self._plan(all_files=True)
+
+    def plan_files(self, skip_level0, only_read_real_buckets):
+        """Plan complete file metadata before query result transformations."""
+        try:
+            request = self._scan._scan_request()
+            builder = native_builder._configure_native_read_builder(
+                native_builder._native_read_builder(self._scan.table),
+                request.predicate, None, None)
+            if request.partition_filter is not None:
+                builder = builder.with_partition_filter(native_builder._predicate_to_native(
+                    request.partition_key_predicate))
+            plan = builder.new_scan().with_file_filters(
+                skip_level0, only_read_real_buckets).plan_files()
+            from pypaimon.execution.native.read.file_scan import from_native_file_plan
+            return from_native_file_plan(self._scan.table, plan)
+        except Exception as error:
+            runtime._raise_if_native_fork_safety_error(error)
+            logger.warning("Native file planning failed, falling back to Python: %s", error)
+            return None
 
     def scan_with_stats(self, auth_result=None):
         # Preserve explicit facade hooks while Core records counters as part
@@ -272,12 +293,8 @@ class NativeTableScan:
             has_distribution = (request.idx_of_this_subtask is not None
                                 or request.start_pos_of_this_subtask is not None)
             extra_options = {}
-            if scan.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
-                if request.incremental_snapshot_range is None:
-                    return Plan([], _scan_stats=ScanStats.empty_native(request.read_limit))
-                extra_options['incremental_range'] = request.incremental_snapshot_range
-                if scan.table.options.changelog_producer() != ChangelogProducer.NONE:
-                    extra_options['incremental_mode'] = 'changelog'
+            # Core resolves timestamp options after authorization, including
+            # empty windows. Never preselect snapshots with Python here.
             chunk_shuffle = request.chunk_shuffle
             if chunk_shuffle is not None:
                 extra_options['chunk_shuffle'] = chunk_shuffle
@@ -296,6 +313,8 @@ class NativeTableScan:
             row_ranges = list(request.row_ranges) if request.row_ranges is not None else None
             if request.global_index_result is not None:
                 extra_options['global_index_result'] = request.global_index_result
+            if request.file_filters is not None:
+                extra_options['file_filters'] = request.file_filters
             if request.partition_filter is not None:
                 # Explicit partition selectors are scan-only. Keep the ordinary
                 # row predicate separate so core can apply Java's override and

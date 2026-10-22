@@ -22,6 +22,7 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
@@ -456,7 +457,7 @@ def test_pending_and_real_buckets_coexist_without_rewriting_history(
                 assert table.file_io.exists(file.file_path)
         # Ordinary reads expose real buckets; committed pending rows await assignment.
         assert _rows(table) == [dict(id=1, p='a', v=10)]
-        scanner = table.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(table.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.with_all_buckets().read_manifest_entries(manifests)
         assert {entry.bucket for entry in entries} == {-2, fixed_messages[0].bucket}

@@ -110,7 +110,10 @@ def _read(table, projection, row_id, native=True):
     splits = builder.new_scan().plan().splits()
     if native:
         # Fail if a successful assertion actually used Python's ROW decoder.
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python fallback')
+        ):
             return read.to_arrow(splits)
     return read.to_arrow(splits)
 
@@ -379,7 +382,10 @@ def test_bitmap_and_limit_select_expected_source_without_requested_row_ranges(tm
     else:
         builder.with_limit(1)
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         actual = read.to_arrow(builder.new_scan().plan().splits())
     expected_id = 5 if mode == 'bitmap' else 0
     assert actual.to_pydict() == {'id': [expected_id], 'value': ['v%d' % expected_id]}

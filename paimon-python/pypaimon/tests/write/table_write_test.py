@@ -24,6 +24,7 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.arrow_schema import read_arrow_schema
 import pyarrow as pa
@@ -1515,7 +1516,7 @@ class TableWriteTest(unittest.TestCase):
             self.assertEqual({2}, {m.total_buckets for m in messages})
             fixed_commit.commit(messages)
 
-        scanner = fixed.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(fixed.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.manifest_file_manager.read_entries_parallel(
             manifests, drop_stats=False

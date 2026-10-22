@@ -94,8 +94,10 @@ def _read(table, native_scan, native_read, streaming=False, snapshot=None):
     read = builder.new_read()
     with ExitStack() as stack:
         if native_read:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         if streaming:
             reader = read.to_arrow_batch_reader(plan.splits())
             try:

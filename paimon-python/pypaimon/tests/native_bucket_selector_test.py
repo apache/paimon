@@ -48,8 +48,10 @@ def _selected(table, predicate, native, stats=True, partition_filter=None, limit
                                              side_effect=AssertionError('Native scan fell back')))
             stack.enter_context(patch.object(scan.file_scanner, 'scan_with_stats',
                                              side_effect=AssertionError('Native statistics fell back')))
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                      side_effect=AssertionError('Native read fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Native read fell back')
+            ))
         if stats:
             plan, counters = scan.scan_with_stats()
             assert plan.stats() is counters

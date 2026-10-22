@@ -278,7 +278,7 @@ def test_prefetch_failure_is_not_hidden_or_advanced(tmp_path):
     future = Future()
     failure = OSError('prefetch manifest unavailable')
     future.set_exception(failure)
-    scan._prefetch_future = future
+    scan._execution._prefetch_future = future
     try:
         with pytest.raises(OSError) as caught:
             scan.plan()
@@ -303,7 +303,7 @@ def test_restoring_during_prefetch_does_not_apply_its_stale_result(tmp_path):
         return original_result(timeout=5)
 
     future.result = result
-    scan._prefetch_future = future
+    scan._execution._prefetch_future = future
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
             planning = executor.submit(scan.plan)
@@ -314,7 +314,7 @@ def test_restoring_during_prefetch_does_not_apply_its_stale_result(tmp_path):
                 planning.result(timeout=5)
         assert scan.checkpoint() == 7
         assert scan.watermark() is None
-        assert scan._prefetch_future is None
+        assert scan._execution._prefetch_future is None
     finally:
         scan.close()
 

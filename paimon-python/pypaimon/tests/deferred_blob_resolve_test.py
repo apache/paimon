@@ -27,6 +27,7 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.execution.python.read.reader.format_blob_reader import (BlobRecordIterator)
@@ -249,7 +250,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
         table_read = read_builder.new_read()
         with patch.object(
-                table_read,
+                PythonTableRead,
                 "_to_arrow_parallel",
                 side_effect=AssertionError("deferred LIMIT must run serially"),
         ) as parallel_read:
@@ -273,9 +274,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         table_read = read_builder.new_read()
 
         with patch.object(
-                table_read,
+                PythonTableRead,
                 "_to_arrow_parallel",
-                wraps=table_read._to_arrow_parallel,
+                autospec=True,
+                side_effect=PythonTableRead._to_arrow_parallel,
         ) as parallel_read:
             result = table_read.to_arrow(splits, parallelism=4)
 

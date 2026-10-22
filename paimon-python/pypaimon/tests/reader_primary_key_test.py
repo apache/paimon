@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 import pyarrow as pa
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.common.options.core_options import CoreOptions
@@ -549,10 +550,11 @@ class PkReaderTest(unittest.TestCase):
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
-        manifest_list_manager = table_scan.file_scanner.manifest_list_manager
+        file_scanner = PythonTableScan(table_scan)._file_scanner()
+        manifest_list_manager = file_scanner.manifest_list_manager
         manifest_files = manifest_list_manager.read_all(latest_snapshot)
 
-        manifest_file_manager = table_scan.file_scanner.manifest_file_manager
+        manifest_file_manager = file_scanner.manifest_file_manager
         creation_times_found = []
         for manifest_file_meta in manifest_files:
             entries = manifest_file_manager.read(manifest_file_meta.file_name, drop_stats=False)

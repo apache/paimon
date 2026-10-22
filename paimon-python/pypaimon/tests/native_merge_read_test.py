@@ -71,7 +71,10 @@ def test_native_merge_reads_configurations_outside_python_subset(tmp_path, optio
     builder = table.new_read_builder()
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         if streaming:
             batches = read.to_arrow_batch_reader(splits)
             try:
@@ -114,7 +117,9 @@ def test_unsupported_python_merge_fails_before_raw_split_dispatch(
     else:
         failure = patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                         side_effect=RuntimeError('native setup failed'))
-    with failure, patch.object(read, '_create_split_read') as dispatch:
+    with failure, patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read'
+    ) as dispatch:
         with pytest.raises(NotImplementedError, match='sequence-group'):
             if api == 'arrow':
                 read.to_arrow(splits, parallelism=parallelism)

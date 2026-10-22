@@ -103,7 +103,10 @@ def _table(tmp_path, kind, external=False, extra=None, payload_type=None):
 def _read(table):
     builder = table.new_read_builder()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         return sorted(read.to_arrow(builder.new_scan().plan().splits()).to_pylist(), key=lambda row: row['id'])
 
 

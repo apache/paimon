@@ -84,8 +84,10 @@ def _read(table, splits, predicate, native, limit=None):
     read = builder.new_read()
     with ExitStack() as guards:
         if native:
-            guards.enter_context(patch.object(read, '_create_split_read',
-                                              side_effect=AssertionError('Python read fallback')))
+            guards.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         data = read.to_arrow(splits, parallelism=1)
     assert data.column_names == ['id']
     return sorted(data['id'].to_pylist())

@@ -81,7 +81,10 @@ def _read(table, native, projection=None, filtered=False, limit=None):
     read = builder.new_read()
     splits = builder.new_scan().plan().splits()
     if native:
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python video read fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python video read fallback')
+        ):
             return read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()
     return read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()
 
@@ -167,7 +170,10 @@ def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_pat
                          total_buckets=split.total_buckets)
     expected = [dict(row) for row in before]
     expected[1]['left'] = None
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         for result in (read.to_arrow([combined]), read.to_arrow_batch_reader([combined]).read_all()):
             assert result.to_pylist() == expected
 

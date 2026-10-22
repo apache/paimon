@@ -289,7 +289,10 @@ def test_native_collection_projection_keeps_selected_blob_keys(tmp_path, project
         read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         if native:
-            with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python fallback')
+            ):
                 result = read.to_arrow(splits)
         else:
             expected = read.to_arrow(splits)

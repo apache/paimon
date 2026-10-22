@@ -324,7 +324,7 @@ class PythonTableUpsert:
             read_builder = read_builder.with_filter(partition_predicate)
 
         scan = read_builder.new_scan()
-        splits = scan.plan_all_files().splits()
+        splits = scan.plan_all().splits()
         if not splits:
             return {}
 

@@ -23,6 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
@@ -77,7 +78,7 @@ def test_initial_frame_selects_only_published_changelog_levels(tmp_path, produce
     table, snapshot = _initial_level_table(tmp_path, [0, 1, 2, 5, 2147483646])
     table = table.copy(dict(options, **{'changelog-producer': producer}))
     builder = table.new_stream_read_builder()
-    scan = builder.new_streaming_scan()
+    scan = AsyncStreamingTableScan(table)
     try:
         plan = scan._create_initial_plan(snapshot)
         assert plan.snapshot_id == snapshot.id
@@ -85,7 +86,7 @@ def test_initial_frame_selects_only_published_changelog_levels(tmp_path, produce
         assert sorted(row['id'] for row in builder.new_read().to_arrow(plan.splits()).to_pylist()) == expected
         assert all(not split.is_streaming for split in plan.splits())
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('producer', ['lookup', 'full-compaction'])
@@ -93,11 +94,11 @@ def test_initial_frame_with_only_level_zero_is_empty(tmp_path, producer):
     table, snapshot = _initial_level_table(tmp_path, [0])
     table = table.copy({'changelog-producer': producer})
     builder = table.new_stream_read_builder()
-    scan = builder.new_streaming_scan()
+    scan = AsyncStreamingTableScan(table)
     try:
         plan = scan._create_initial_plan(snapshot)
         assert plan.snapshot_id == snapshot.id
         assert plan.splits() == []
         assert builder.new_read().to_arrow(plan.splits()).num_rows == 0
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()

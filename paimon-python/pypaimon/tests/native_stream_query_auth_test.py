@@ -28,7 +28,7 @@ from pypaimon import Schema
 from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.consumer.consumer_manager import ConsumerManager
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan, StreamTableScan
+from pypaimon.read.streaming_table_scan import StreamTableScan
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
@@ -101,8 +101,10 @@ def _rows(builder, plan, native):
     reader = builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(reader, '_create_split_read',
-                                             side_effect=AssertionError('Native read fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Native read fell back')
+            ))
         result = reader.to_arrow(plan.splits()).to_pylist()
     return sorted(result, key=repr)
 
@@ -111,18 +113,13 @@ def _frame(builder, native, snapshot=None):
     with patch('pypaimon.execution.python.read.streaming_table_scan.AsyncStreamingTableScan',
                side_effect=AssertionError('Native stream fell back')) if native else ExitStack():
         scan = builder.new_streaming_scan()
-    if native:
+    try:
         assert isinstance(scan, StreamTableScan)
         if snapshot is not None:
             scan.restore(snapshot.id)
         return scan.plan()
-    try:
-        if snapshot is None:
-            snapshot = builder.table.snapshot_manager().get_latest_snapshot()
-            return scan._create_initial_plan(snapshot)
-        return scan._create_follow_up_plan(snapshot)
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('kinds', [False, True])
@@ -220,9 +217,31 @@ def test_combined_timestamp_events_apply_auth_and_masked_filter_before_limit(sou
         reader = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(reader, '_create_split_read',
-                                                 side_effect=AssertionError('Native incremental read fell back')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Native incremental read fell back')
+                ))
             assert reader.to_arrow(plan.splits()).to_pylist() == [{'id': 5}]
+
+
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
+@pytest.mark.parametrize('window', ['equal', 'future'])
+def test_empty_timestamp_windows_cannot_bypass_authorization(source, method, window):
+    _, table, server, _ = source
+    timestamp = table.snapshot_manager().get_latest_snapshot().time_millis
+    bounds = (timestamp, timestamp) if window == 'equal' else (timestamp + 1000, timestamp + 2000)
+    denied = server._mock_response(ErrorResponse('TABLE', 't', 'permission denied', 403), 403)
+    for native in (False, True):
+        selected = table.copy({
+            'scan.native-plan.enabled': str(native).lower(),
+            'read.native.enabled': str(native).lower(),
+            'incremental-between-timestamp': '{},{}'.format(*bounds),
+        })
+        with patch.object(server, '_table_query_auth_handle', return_value=denied):
+            scan = selected.new_read_builder().new_scan()
+            with patch.object(scan, '_create_file_scanner', side_effect=AssertionError('Python scanner ran')):
+                with pytest.raises(Exception, match='403|permission|denied'):
+                    getattr(scan, method)()
 
 
 @pytest.mark.parametrize('custom_policy', ['subclass', 'instance'])
@@ -245,12 +264,11 @@ def test_custom_authorization_environment_keeps_its_python_policy(source, custom
     selected.catalog_environment = custom
     builder = selected.new_stream_read_builder().with_projection(['id'])
     scan = builder.new_streaming_scan()
-    assert isinstance(scan, AsyncStreamingTableScan)
+    assert isinstance(scan, StreamTableScan)
     try:
-        snapshot = selected.snapshot_manager().get_latest_snapshot()
-        assert _rows(builder, scan._create_initial_plan(snapshot), False) == [{'id': 2}]
+        assert _rows(builder, scan.plan(), False) == [{'id': 2}]
     finally:
-        scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('native', [False, True])

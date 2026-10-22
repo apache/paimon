@@ -160,7 +160,7 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
             if native_read_enabled:
                 assert native_runtime_available()
                 with patch(
-                        'pypaimon.read.table_read.TableRead._create_split_read',
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                         side_effect=AssertionError('Python reader was used')):
                     rows = read_builder.new_read().to_arrow([split]).to_pylist()
             else:

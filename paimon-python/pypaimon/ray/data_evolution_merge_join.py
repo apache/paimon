@@ -200,7 +200,7 @@ def build_self_merge_update_plan(
     read_builder = scan_table.new_read_builder().with_projection(projection)
     if scan_predicate is not None:
         read_builder.with_filter(scan_predicate)
-    scan_plan = read_builder.new_scan().plan_all_files()
+    scan_plan = read_builder.new_scan().plan_all()
     planned_snapshot_id = (
         scan_plan.snapshot_id
         if scan_plan.snapshot_id is not None else -1

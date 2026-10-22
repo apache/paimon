@@ -89,11 +89,14 @@ def _rows(table, native):
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
                           'read.native.enabled': str(native).lower()}).new_read_builder()
     scan = builder.new_scan()
-    splits = (scan.plan_all_files() if table.is_primary_key_table
+    splits = (scan.plan_all() if table.is_primary_key_table
               and table.options.merge_engine() == MergeEngine.FIRST_ROW else scan.plan()).splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()

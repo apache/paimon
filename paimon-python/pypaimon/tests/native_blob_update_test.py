@@ -78,7 +78,10 @@ def _read(table, descriptors=False, projection=None, resolve_views=True):
         builder.with_projection(projection)
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         return read.to_arrow(splits).sort_by('id').to_pylist()
 
 
@@ -666,8 +669,11 @@ def test_view_prescan_keeps_inline_descriptor_predicate(tmp_path, native_rest_ca
         read_builder.with_filter(PredicateBuilder(view.fields).equal('reference', reference))
         plan = read_builder.new_scan().plan()
         read = read_builder.new_read()
-        with (patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback'))
-              if native else ExitStack()):
+        guard = (patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ) if native else ExitStack())
+        with guard:
             rows = read.to_arrow(plan.splits()).to_pylist()
             assert len(rows) == 1 and rows[0]['id'] == 0
             actual = BlobDescriptor.deserialize(rows[0]['payload'])

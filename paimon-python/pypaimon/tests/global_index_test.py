@@ -23,6 +23,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
@@ -233,6 +234,7 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
+    @pytest.mark.python_plan
     def test_full_fallback_groups_are_pruned_before_split_packing(self):
         from pypaimon.execution.python.read.scanner.file_scanner import (_GlobalIndexPlanningResult)
 
@@ -278,17 +280,17 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             )
 
             baseline_scan = read_builder.new_scan()
-            baseline_scan.file_scanner._global_index_result = index_plan
-            baseline_scan.file_scanner.predicate_for_stats = None
+            PythonTableScan(baseline_scan)._file_scanner()._global_index_result = index_plan
+            PythonTableScan(baseline_scan)._file_scanner().predicate_for_stats = None
             baseline_plan = baseline_scan.plan()
 
             scan = read_builder.new_scan()
-            scan.file_scanner._global_index_result = index_plan
+            PythonTableScan(scan)._file_scanner()._global_index_result = index_plan
             plan = scan.plan()
 
             stats_scan = read_builder.new_scan()
-            stats_scan.file_scanner._global_index_result = index_plan
-            stats_plan, stats = stats_scan.file_scanner.scan_with_stats()
+            PythonTableScan(stats_scan)._file_scanner()._global_index_result = index_plan
+            stats_plan, stats = PythonTableScan(stats_scan)._file_scanner().scan_with_stats()
 
             self.assertEqual(
                 10,
