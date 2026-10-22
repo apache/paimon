@@ -40,6 +40,8 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -55,16 +57,16 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Coordinates all source-backed primary-key indexes for one bucket. */
 public final class BucketedPrimaryKeyIndexMaintainer {
 
-    @Nullable private final BucketedVectorIndexMaintainer vectorMaintainer;
+    private final List<BucketedVectorIndexMaintainer> vectorMaintainers;
     @Nullable private final BucketedFullTextIndexMaintainer fullTextMaintainer;
     private final List<BucketedSortedIndexMaintainer> sortedMaintainers;
     private int nextSortedMaintainerIndex;
 
     private BucketedPrimaryKeyIndexMaintainer(
-            @Nullable BucketedVectorIndexMaintainer vectorMaintainer,
+            List<BucketedVectorIndexMaintainer> vectorMaintainers,
             @Nullable BucketedFullTextIndexMaintainer fullTextMaintainer,
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
-        this.vectorMaintainer = vectorMaintainer;
+        this.vectorMaintainers = Collections.unmodifiableList(new ArrayList<>(vectorMaintainers));
         this.fullTextMaintainer = fullTextMaintainer;
         List<BucketedSortedIndexMaintainer> sorted = new ArrayList<>(sortedMaintainers);
         sorted.sort(Comparator.comparingInt(BucketedSortedIndexMaintainer::fieldId));
@@ -74,19 +76,19 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     public static BucketedPrimaryKeyIndexMaintainer ofVector(
             BucketedVectorIndexMaintainer vectorMaintainer) {
         return new BucketedPrimaryKeyIndexMaintainer(
-                vectorMaintainer, null, Collections.emptyList());
+                Collections.singletonList(vectorMaintainer), null, Collections.emptyList());
     }
 
     public static BucketedPrimaryKeyIndexMaintainer ofFullText(
             BucketedFullTextIndexMaintainer fullTextMaintainer) {
         return new BucketedPrimaryKeyIndexMaintainer(
-                null, fullTextMaintainer, Collections.emptyList());
+                Collections.emptyList(), fullTextMaintainer, Collections.emptyList());
     }
 
     public static BucketedPrimaryKeyIndexMaintainer of(
             BucketedVectorIndexMaintainer vectorMaintainer,
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
-        return new BucketedPrimaryKeyIndexMaintainer(vectorMaintainer, null, sortedMaintainers);
+        return of(vectorMaintainer, null, sortedMaintainers);
     }
 
     public static BucketedPrimaryKeyIndexMaintainer of(
@@ -94,12 +96,25 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             @Nullable BucketedFullTextIndexMaintainer fullTextMaintainer,
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
         return new BucketedPrimaryKeyIndexMaintainer(
-                vectorMaintainer, fullTextMaintainer, sortedMaintainers);
+                vectorMaintainer == null
+                        ? Collections.emptyList()
+                        : Collections.singletonList(vectorMaintainer),
+                fullTextMaintainer,
+                sortedMaintainers);
+    }
+
+    public static BucketedPrimaryKeyIndexMaintainer ofVectors(
+            List<BucketedVectorIndexMaintainer> vectorMaintainers,
+            @Nullable BucketedFullTextIndexMaintainer fullTextMaintainer,
+            List<BucketedSortedIndexMaintainer> sortedMaintainers) {
+        return new BucketedPrimaryKeyIndexMaintainer(
+                vectorMaintainers, fullTextMaintainer, sortedMaintainers);
     }
 
     public static BucketedPrimaryKeyIndexMaintainer ofSorted(
             List<BucketedSortedIndexMaintainer> sortedMaintainers) {
-        return new BucketedPrimaryKeyIndexMaintainer(null, null, sortedMaintainers);
+        return new BucketedPrimaryKeyIndexMaintainer(
+                Collections.emptyList(), null, sortedMaintainers);
     }
 
     public synchronized void prepareCommit(
@@ -107,14 +122,14 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             CompactIncrement compactIncrement,
             boolean waitCompaction)
             throws Exception {
-        BucketedVectorIndexMaintainer.VectorIndexCommit vectorCommit = null;
+        List<BucketedVectorIndexMaintainer.VectorIndexCommit> vectorCommits = new ArrayList<>();
         BucketedFullTextIndexMaintainer.FullTextIndexCommit fullTextCommit = null;
         List<BucketedSortedIndexMaintainer.SortedIndexCommit> sortedCommits = new ArrayList<>();
         try {
-            if (vectorMaintainer != null) {
-                vectorCommit =
-                        vectorMaintainer.prepareCommit(
-                                appendIncrement, compactIncrement, waitCompaction);
+            for (BucketedVectorIndexMaintainer maintainer : vectorMaintainers) {
+                vectorCommits.add(
+                        maintainer.prepareCommit(
+                                appendIncrement, compactIncrement, waitCompaction));
             }
             if (fullTextMaintainer != null) {
                 fullTextCommit =
@@ -128,8 +143,8 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                 prepareSortedNonBlocking(appendIncrement, compactIncrement, sortedCommits);
             }
 
-            if (vectorCommit != null) {
-                mergeVectorCommit(appendIncrement, compactIncrement, vectorCommit);
+            for (BucketedVectorIndexMaintainer.VectorIndexCommit commit : vectorCommits) {
+                mergeVectorCommit(appendIncrement, compactIncrement, commit);
             }
             if (fullTextCommit != null) {
                 mergeFullTextCommit(appendIncrement, compactIncrement, fullTextCommit);
@@ -144,8 +159,8 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             if (fullTextCommit != null) {
                 fullTextCommit.abort(failure);
             }
-            if (vectorCommit != null) {
-                vectorCommit.abort(failure);
+            for (int i = vectorCommits.size() - 1; i >= 0; i--) {
+                vectorCommits.get(i).abort(failure);
             }
             if (failure instanceof Exception) {
                 throw (Exception) failure;
@@ -287,8 +302,10 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     }
 
     public boolean buildNotCompleted() {
-        if (vectorMaintainer != null && vectorMaintainer.buildNotCompleted()) {
-            return true;
+        for (BucketedVectorIndexMaintainer maintainer : vectorMaintainers) {
+            if (maintainer.buildNotCompleted()) {
+                return true;
+            }
         }
         if (fullTextMaintainer != null && fullTextMaintainer.buildNotCompleted()) {
             return true;
@@ -297,8 +314,11 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     }
 
     public void withExecutor(ExecutorService executor) {
-        if (vectorMaintainer != null) {
-            vectorMaintainer.withExecutor(executor);
+        checkArgument(
+                !buildNotCompleted(),
+                "Cannot replace executor during primary-key index maintenance.");
+        for (BucketedVectorIndexMaintainer maintainer : vectorMaintainers) {
+            maintainer.withExecutor(executor);
         }
         if (fullTextMaintainer != null) {
             fullTextMaintainer.withExecutor(executor);
@@ -309,14 +329,20 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     }
 
     public void close() {
-        if (vectorMaintainer != null) {
-            vectorMaintainer.close();
+        List<AutoCloseable> closeables = new ArrayList<>();
+        for (BucketedVectorIndexMaintainer maintainer : vectorMaintainers) {
+            closeables.add(maintainer::close);
         }
         if (fullTextMaintainer != null) {
-            fullTextMaintainer.close();
+            closeables.add(fullTextMaintainer::close);
         }
         for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            maintainer.close();
+            closeables.add(maintainer::close);
+        }
+        try {
+            IOUtils.closeAll(closeables);
+        } catch (Exception e) {
+            ExceptionUtils.rethrow(e);
         }
     }
 
@@ -324,24 +350,27 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     public static final class Factory {
 
         private final IndexFileHandler handler;
-        @Nullable private final BucketedVectorIndexMaintainer.Factory vectorFactory;
+        private final List<BucketedVectorIndexMaintainer.Factory> vectorFactories;
         @Nullable private final FullTextDefinitionFactory fullTextFactory;
         private final List<SortedDefinitionFactory> sortedFactories;
 
         private Factory(
                 IndexFileHandler handler,
-                @Nullable BucketedVectorIndexMaintainer.Factory vectorFactory,
+                List<BucketedVectorIndexMaintainer.Factory> vectorFactories,
                 @Nullable FullTextDefinitionFactory fullTextFactory,
                 List<SortedDefinitionFactory> sortedFactories) {
             this.handler = handler;
-            this.vectorFactory = vectorFactory;
+            this.vectorFactories = Collections.unmodifiableList(new ArrayList<>(vectorFactories));
             this.fullTextFactory = fullTextFactory;
             this.sortedFactories = Collections.unmodifiableList(new ArrayList<>(sortedFactories));
         }
 
         public static Factory ofVector(BucketedVectorIndexMaintainer.Factory vectorFactory) {
             return new Factory(
-                    vectorFactory.indexFileHandler(), vectorFactory, null, Collections.emptyList());
+                    vectorFactory.indexFileHandler(),
+                    Collections.singletonList(vectorFactory),
+                    null,
+                    Collections.emptyList());
         }
 
         public static Factory create(
@@ -350,7 +379,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                 TableSchema schema) {
             CoreOptions coreOptions = new CoreOptions(schema.options());
             Map<String, DataField> fields = schema.nameToFieldMap();
-            BucketedVectorIndexMaintainer.Factory vectorFactory = null;
+            List<BucketedVectorIndexMaintainer.Factory> vectorFactories = new ArrayList<>();
             FullTextDefinitionFactory fullTextFactory = null;
             List<SortedDefinitionFactory> sortedFactories = new ArrayList<>();
             for (PrimaryKeyIndexDefinition definition :
@@ -362,10 +391,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                         definition.column());
                 switch (definition.family()) {
                     case VECTOR:
-                        checkArgument(
-                                vectorFactory == null,
-                                "Only one primary-key vector index is supported.");
-                        vectorFactory =
+                        vectorFactories.add(
                                 new BucketedVectorIndexMaintainer.Factory(
                                                 handler,
                                                 readerFactoryBuilder,
@@ -373,7 +399,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                                 coreOptions.primaryKeyVectorDistanceMetric(
                                                         definition.column()),
                                                 definition.indexType())
-                                        .withIndexOptions(definition.options());
+                                        .withIndexOptions(definition.options()));
                         break;
                     case BTREE:
                     case BITMAP:
@@ -409,9 +435,11 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                 }
             }
             checkArgument(
-                    vectorFactory != null || fullTextFactory != null || !sortedFactories.isEmpty(),
+                    !vectorFactories.isEmpty()
+                            || fullTextFactory != null
+                            || !sortedFactories.isEmpty(),
                     "No primary-key index definition is configured.");
-            return new Factory(handler, vectorFactory, fullTextFactory, sortedFactories);
+            return new Factory(handler, vectorFactories, fullTextFactory, sortedFactories);
         }
 
         public IndexFileHandler indexFileHandler() {
@@ -456,16 +484,17 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                     restoredDataFiles == null ? Collections.emptyList() : restoredDataFiles;
             List<IndexFileMeta> payloads =
                     restoredPayloads == null ? Collections.emptyList() : restoredPayloads;
-            BucketedVectorIndexMaintainer vector =
-                    vectorFactory == null
-                            ? null
-                            : vectorFactory.create(
-                                    partition,
-                                    bucket,
-                                    dataFiles,
-                                    payloads,
-                                    executor,
-                                    deletionVectorFactory);
+            List<BucketedVectorIndexMaintainer> vectors = new ArrayList<>();
+            for (BucketedVectorIndexMaintainer.Factory factory : vectorFactories) {
+                vectors.add(
+                        factory.create(
+                                partition,
+                                bucket,
+                                dataFiles,
+                                payloads,
+                                executor,
+                                deletionVectorFactory));
+            }
             BucketedFullTextIndexMaintainer fullText =
                     fullTextFactory == null
                             ? null
@@ -478,7 +507,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                 handler, partition, bucket, dataFiles, payloads, executor,
                                 ioManager));
             }
-            return new BucketedPrimaryKeyIndexMaintainer(vector, fullText, sorted);
+            return new BucketedPrimaryKeyIndexMaintainer(vectors, fullText, sorted);
         }
 
         private static final class FullTextDefinitionFactory {
