@@ -177,14 +177,25 @@ def test_changed_file_partition_selection_is_included_in_query_authorization(tab
 
 
 @pytest.mark.parametrize('native_auth', [False, True])
-def test_cleared_partition_pruning_falls_back_before_losing_authorization_columns(table, native_auth):
+@pytest.mark.parametrize('original_partition_filter', [False, True])
+def test_clearing_partition_selector_restores_derived_pruning_without_native_fallback(
+        table, native_auth, original_partition_filter):
+    _append(table, [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}])
+    predicates = table.new_read_builder().new_predicate_builder()
+    predicate = predicates.equal('pt', 'a')
+    expected = table.new_read_builder().with_filter(predicate).new_scan().plan()
     table = table.copy({'scan.native-plan.enabled': 'true', 'read.native.enabled': 'false',
                         'query-auth.enabled': str(native_auth).lower()})
-    _append(table, [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}])
     builder = table.new_read_builder()
-    builder.with_filter(builder.new_predicate_builder().equal('pt', 'a')).with_projection(['id'])
+    builder.with_filter(predicate).with_projection(['id'])
+    if original_partition_filter:
+        builder.with_partition_filter(predicates.equal('pt', 'b'))
     scan = builder.new_scan()
     scan.file_scanner.partition_key_predicate = None
+    request = scan._scan_request()
+    assert request.partition_key_predicate == predicate.new_index(0)
+    assert request.explicit_partition_filter is False
+    assert request.partition_filter is None
     requested = []
 
     def authorize(columns):
@@ -194,11 +205,15 @@ def test_cleared_partition_pruning_falls_back_before_losing_authorization_column
     scan._query_auth_fn = authorize
     with patch.object(scan, '_native_plan_supported', return_value=True), \
             patch('pypaimon.execution.native.read.plan.native_plan',
-                  side_effect=AssertionError('Cleared pruning reached Native')) as native:
+                  return_value=expected) as native, \
+            patch('pypaimon.execution.python.read.table_scan.FileScanner',
+                  side_effect=AssertionError('Native planning initialized Python')):
         plan = scan.plan()
-    native.assert_not_called()
-    assert requested == [{'id', 'pt'}]
-    assert {split.partition.values[0] for split in plan.splits()} == {'a', 'b'}
+    native.assert_called_once()
+    assert native.call_args[1]['predicate'] == predicate
+    assert 'partition_predicate' not in native.call_args[1]
+    assert requested == ([] if native_auth else [{'id', 'pt'}])
+    assert {split.partition.values[0] for split in plan.splits()} == {'a'}
     assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [{'id': 1}]
 
 
@@ -214,12 +229,12 @@ def test_raw_file_partition_selection_overrides_the_derived_filter(
         predicates.greater_than('id', 0), predicates.equal('pt', 'a')])
     builder.with_filter(predicate)
     if original_partition_filter:
-        builder.with_partition_filter(predicates.equal('pt', 'a'))
+        builder.with_partition_filter(predicates.equal('pt', 'b'))
     scan = builder.new_scan()
     scanner = scan.file_scanner
     scanner.partition_key_predicate = (
         None if selected_partition is None else predicates.equal('pt', selected_partition).new_index(0))
-    expected = ['a', 'b'] if selected_partition is None else ['b']
+    expected = ['a'] if selected_partition is None else ['b']
     assert sorted(entry.partition.values[0] for entry in scanner.plan_files()) == expected
     assert scan._scan_request().read_predicate == predicate
     rows = builder.new_read().to_arrow(scan.plan().splits()).to_pylist()
@@ -233,9 +248,11 @@ def test_raw_file_partition_selection_overrides_the_derived_filter(
     with patch('pypaimon.execution.native.read.builder._native_read_builder', return_value=native), \
             patch('pypaimon.execution.native.read.file_scan.from_native_file_plan', return_value=([], 1)):
         assert NativeTableScan(scan).plan_files(False, False) == ([], 1)
+    native.with_filter.assert_called_once_with({
+        'method': 'and', 'children': [
+            {'method': 'greaterThan', 'field': 'id', 'literals': [0]},
+            {'method': 'equal', 'field': 'pt', 'literals': ['a']}]})
     if selected_partition is None:
-        native.with_filter.assert_called_once_with({
-            'method': 'greaterThan', 'field': 'id', 'literals': [0]})
         native.with_partition_filter.assert_not_called()
     else:
         native.with_partition_filter.assert_called_once_with({
@@ -244,13 +261,12 @@ def test_raw_file_partition_selection_overrides_the_derived_filter(
 
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 1)) as plan:
         result = NativeTableScan(scan).plan()
+    assert result.snapshot_id == 1
+    assert plan.call_args[1]['predicate'] == predicate
     if selected_partition is not None:
-        assert result.snapshot_id == 1
-        assert plan.call_args[1]['predicate'] == predicate
         assert plan.call_args[1]['partition_predicate'] == scanner.partition_key_predicate
     else:
-        assert result is None
-        plan.assert_not_called()
+        assert 'partition_predicate' not in plan.call_args[1]
 
 
 @pytest.mark.parametrize('original_partition_filter', [False, True])
@@ -262,14 +278,16 @@ def test_file_partition_selection_is_independent_of_later_row_filters(
     builder = table.new_read_builder()
     predicates = builder.new_predicate_builder()
     if original_partition_filter:
-        builder.with_partition_filter(predicates.equal('pt', 'a'))
+        builder.with_partition_filter(predicates.equal('pt', 'b'))
     scan = builder.new_scan()
     scanner = scan.file_scanner
     selector = None if selected_partition is None else predicates.equal('pt', selected_partition).new_index(0)
     scanner.partition_key_predicate = selector
     scanner.predicate = predicates.equal('pt', 'a')
-    assert scanner.partition_key_predicate is selector
-    expected = ['a', 'b'] if selected_partition is None else ['b']
+    assert scanner.partition_key_predicate == (
+        predicates.equal('pt', 'a').new_index(0) if selector is None else selector)
+    assert scanner._explicit_partition_filter is (selector is not None)
+    expected = ['a'] if selected_partition is None else ['b']
     assert sorted(entry.partition.values[0] for entry in scanner.plan_files()) == expected
 
 

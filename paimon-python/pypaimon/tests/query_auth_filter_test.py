@@ -319,7 +319,9 @@ def test_file_partition_selection_survives_masked_predicate_pruning(
     scan.file_scanner.partition_key_predicate = (
         None if selected_partition is None else predicates.equal('secret', selected_partition).new_index(0))
     plan = scan.plan()
-    expected = {'alpha', 'beta', 'gamma'} if selected_partition is None else {'beta'}
+    expected = ({'alpha'} if derived_partition else {'alpha', 'beta', 'gamma'})
+    if selected_partition is not None:
+        expected = {'beta'}
     assert {split.partition.values[0] for split in plan.splits()} == expected
     expected_ids = [1] if derived_partition else [1, 2, 3]
     if selected_partition is not None:

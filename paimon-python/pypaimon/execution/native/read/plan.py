@@ -29,7 +29,7 @@ from pypaimon.execution.native import table as native_table
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
-from pypaimon.read.scan_request import ScanRequest, scan_partition_predicate
+from pypaimon.read.scan_request import ScanRequest
 from pypaimon.read import split_serializer
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ class NativeTableScan:
             request = self._scan._scan_request()
             builder = native_builder._configure_native_read_builder(
                 native_builder._native_read_builder(self._scan.table),
-                request.file_pruning_predicate(request.predicate), None, None)
+                request.predicate, None, None)
             if request.partition_filter is not None:
                 builder = builder.with_partition_filter(native_builder._predicate_to_native(
                     request.partition_key_predicate))
@@ -290,13 +290,6 @@ class NativeTableScan:
         scan = self._scan
         try:
             request = scan._scan_request()
-            if (request.explicit_partition_filter and request.partition_key_predicate is None
-                    and request.read_predicate is not None and request.partition_keys
-                    and scan_partition_predicate(scan.table, request.read_predicate, None) is not None):
-                # Core's None selector restores derived partition pruning.
-                # Keep the complete row predicate for query authorization and
-                # let Python handle callers explicitly clearing that pruning.
-                return None
             has_distribution = (request.idx_of_this_subtask is not None
                                 or request.start_pos_of_this_subtask is not None)
             extra_options = {}

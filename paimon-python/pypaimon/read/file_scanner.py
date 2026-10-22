@@ -72,6 +72,13 @@ class FileScanner:
 
     def __setattr__(self, name, value):
         initialized = self.__dict__.get('_initialized', False)
+        if initialized and name == 'partition_key_predicate':
+            object.__setattr__(self, '_explicit_partition_filter', value is not None)
+            if value is None:
+                # Like ReadBuilder.withPartitionFilter(null), remove the
+                # explicit selection and derive pruning from the row filter.
+                object.__setattr__(self, '_partition_predicate', None)
+                value = scan_partition_predicate(self.table, self.predicate, None)
         object.__setattr__(self, name, value)
         if initialized and name in self._CONFIGURATION_FIELDS:
             if name == 'predicate':
@@ -79,8 +86,6 @@ class FileScanner:
                 if not self._explicit_partition_filter:
                     object.__setattr__(self, 'partition_key_predicate', scan_partition_predicate(
                         self.table, value, self._partition_predicate))
-            if name == 'partition_key_predicate':
-                object.__setattr__(self, '_explicit_partition_filter', True)
             if name in ('skip_level0', 'only_read_real_buckets'):
                 self._policy_overrides.add(name)
             self._invalidate_python_scanner()
