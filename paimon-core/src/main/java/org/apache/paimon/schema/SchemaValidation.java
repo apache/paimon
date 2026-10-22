@@ -206,7 +206,8 @@ public class SchemaValidation {
                             "Can not set %s on table without primary keys, please define primary keys.",
                             CHANGELOG_PRODUCER.key()));
         }
-        if (!options.changelogPreserveFieldOnRetract().isEmpty()) {
+        List<String> preserveFields = options.changelogPreserveFieldOnRetract();
+        if (!preserveFields.isEmpty()) {
             checkArgument(
                     options.mergeEngine() == MergeEngine.DEDUPLICATE,
                     "'%s' is only supported with 'merge-engine' = 'deduplicate'.",
@@ -215,6 +216,13 @@ public class SchemaValidation {
                     changelogProducer == ChangelogProducer.LOOKUP,
                     "'%s' is only supported with 'changelog-producer' = 'lookup'.",
                     CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key());
+            for (String field : preserveFields) {
+                checkArgument(
+                        schema.fieldNames().contains(field),
+                        "Column '%s' specified in '%s' can not be found in table schema.",
+                        field,
+                        CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key());
+            }
         }
         if (options.streamingReadOverwrite()
                 && (changelogProducer == ChangelogProducer.FULL_COMPACTION
