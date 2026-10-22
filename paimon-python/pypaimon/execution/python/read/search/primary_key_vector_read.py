@@ -35,7 +35,9 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 class PrimaryKeyVectorRead(DataEvolutionVectorRead):
     """Search PK vector payloads and localize payload row ids to data files."""
 
-    def read_plan(self, plan):
+    def read_plan(self, plan, executor=None):
+        if executor is not None:
+            return self._with_executor(executor).read_plan(plan)
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
         self._index_metric = None

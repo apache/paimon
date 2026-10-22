@@ -19,11 +19,12 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.split import DataSplit
 from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
+from pypaimon.table.source.search_execution import SearchTaskExecutor
 
 
 class VectorSearchScanPlan:
@@ -54,9 +55,14 @@ class VectorSearchScan(ABC):
 class VectorSearchRead(ABC):
     """Vector search read to read index files."""
 
-    def read_plan(self, plan):
-        # type: (VectorSearchScanPlan) -> GlobalIndexResult
-        return self._read(plan.splits(), plan.snapshot())
+    def read_plan(self, plan, executor=None):
+        # type: (VectorSearchScanPlan, Optional[SearchTaskExecutor]) -> GlobalIndexResult
+        """Execute the complete captured plan with an optional task scheduler."""
+        reader = self if executor is None else self._with_executor(executor)
+        return reader._read(plan.splits(), plan.snapshot())
+
+    def _with_executor(self, executor):
+        raise NotImplementedError('This vector reader does not support task execution')
 
     def read(self, splits):
         # type: (List[VectorSearchSplit]) -> GlobalIndexResult
@@ -70,9 +76,14 @@ class VectorSearchRead(ABC):
 class BatchVectorSearchRead(ABC):
     """Batch vector search read to read index files."""
 
-    def read_batch_plan(self, plan):
-        # type: (VectorSearchScanPlan) -> List[GlobalIndexResult]
-        return self._read_batch(plan.splits(), plan.snapshot())
+    def read_batch_plan(self, plan, executor=None):
+        # type: (VectorSearchScanPlan, Optional[SearchTaskExecutor]) -> List[GlobalIndexResult]
+        """Execute all queries over the captured plan, retaining input order."""
+        reader = self if executor is None else self._with_executor(executor)
+        return reader._read_batch(plan.splits(), plan.snapshot())
+
+    def _with_executor(self, executor):
+        raise NotImplementedError('This batch vector reader does not support task execution')
 
     def read_batch(self, splits):
         # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
@@ -108,8 +119,13 @@ class FullTextScan(ABC):
 class FullTextRead(ABC):
     """Full-text read to read index files."""
 
-    def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
-        return self.read(plan.splits())
+    def read_plan(self, plan: FullTextScanPlan, executor: Optional[SearchTaskExecutor] = None) -> GlobalIndexResult:
+        """Execute a complete plan, keeping corpus-wide ranking in the backend."""
+        reader = self if executor is None else self._with_executor(executor)
+        return reader.read(plan.splits())
+
+    def _with_executor(self, executor):
+        raise NotImplementedError('This full-text reader does not support task execution')
 
     @abstractmethod
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
@@ -125,8 +141,10 @@ class PrimaryKeyVectorSearchSplit:
 
 
 class PrimaryKeyVectorScanPlan(VectorSearchScanPlan):
-    def __init__(self, snapshot_id, splits):
-        super().__init__(splits)
+    def __init__(self, snapshot_id, splits, snapshot=None):
+        if snapshot is not None and snapshot.id != snapshot_id:
+            raise ValueError('Primary-key plan snapshot ID does not match its captured snapshot')
+        super().__init__(splits, snapshot)
         self.snapshot_id = snapshot_id
 
 
@@ -139,6 +157,8 @@ class PrimaryKeyFullTextSearchSplit:
 
 
 class PrimaryKeyFullTextScanPlan(FullTextScanPlan):
-    def __init__(self, snapshot_id, splits):
-        super().__init__(splits)
+    def __init__(self, snapshot_id, splits, snapshot=None):
+        if snapshot is not None and snapshot.id != snapshot_id:
+            raise ValueError('Primary-key plan snapshot ID does not match its captured snapshot')
+        super().__init__(splits, snapshot)
         self.snapshot_id = snapshot_id

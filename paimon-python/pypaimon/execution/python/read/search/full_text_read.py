@@ -68,8 +68,12 @@ class DataEvolutionFullTextRead(FullTextRead):
         self._partition_filter = partition_filter
         self._filter = filter_
 
-    def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
-        reader = copy(self)
+    def _with_executor(self, executor):
+        from pypaimon.execution.python.read.search.distributed_search import create_distributed_reader
+        return create_distributed_reader(self, executor)
+
+    def read_plan(self, plan: FullTextScanPlan, executor=None) -> GlobalIndexResult:
+        reader = copy(self if executor is None else self._with_executor(executor))
         reader._table = global_index_live_row_filter.table_at_snapshot(self._table, plan.snapshot())
         reader._snapshot = plan.snapshot()
         return reader.read(plan.splits())

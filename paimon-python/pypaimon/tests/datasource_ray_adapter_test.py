@@ -171,7 +171,7 @@ def test_ray_read_tasks_preserve_overridden_split_grouping_and_metadata():
     assert len(tasks) == 1
     assert tasks[0].metadata.num_rows == 2
     assert tasks[0].metadata.size_bytes == 10
-    assert tasks[0].metadata.input_files == ['file.parquet']
+    assert list(tasks[0].metadata.input_files) == ['file.parquet']
 
 
 def test_public_datasource_configuration_is_lazy_and_pickles_at_original_paths():

@@ -6291,13 +6291,17 @@ class BlobConsumerTest(unittest.TestCase):
             data = Blob.from_descriptor(uri_reader, desc).to_data()
             self.assertEqual(data, blob_bytes)
 
-    def test_blob_consumer_after_write_raises(self):
-        """Setting consumer after data has been written must raise."""
+    def test_blob_consumer_changes_apply_to_new_partition_writers(self):
+        """Existing writers retain their consumer when the factory changes."""
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.table.row.blob import Blob
+
         pa_schema = pa.schema([
             ('id', pa.int32()),
+            ('pt', pa.int32()),
             ('blob_data', pa.large_binary()),
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema, options={
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['pt'], options={
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
         })
@@ -6306,15 +6310,29 @@ class BlobConsumerTest(unittest.TestCase):
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        received = []
 
-        writer.write_arrow(pa.Table.from_pydict({
-            'id': [1],
-            'blob_data': [b'data'],
-        }, schema=pa_schema))
+        def consumer(field, descriptor):
+            received.append((field, descriptor))
+            return False
 
-        with self.assertRaises(RuntimeError):
-            writer.with_blob_consumer(lambda f, d: False)
-        writer.close()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [1], 'pt': [1], 'blob_data': [b'old'],
+            }, schema=pa_schema))
+            self.assertIs(writer.with_blob_consumer(consumer), writer)
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [2, 3], 'pt': [1, 2], 'blob_data': [b'existing', b'new'],
+            }, schema=pa_schema))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0][0], 'blob_data')
+        blob = Blob.from_descriptor(FileUriReader(table.file_io), received[0][1])
+        self.assertEqual(blob.to_data(), b'new')
 
 
 if __name__ == '__main__':

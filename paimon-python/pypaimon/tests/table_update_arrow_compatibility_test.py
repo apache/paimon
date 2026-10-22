@@ -63,10 +63,11 @@ def test_predicate_assignment_struct_cast(wrap_type, wrap_value, chunked, projec
     else:
         try:
             expected = values.cast(target).to_pylist()
-        except pa.ArrowNotImplementedError:
-            # Older Arrow versions do not implement STRUCT casts.
-            with pytest.raises(pa.ArrowNotImplementedError):
+        except (pa.ArrowNotImplementedError, pa.ArrowTypeError) as error:
+            # Older Arrow versions reject unsupported STRUCT field projections.
+            with pytest.raises(type(error)) as raised:
                 BatchTableUpdate._assignment_to_array(values, target, 2)
+            assert str(raised.value) == str(error)
             return
         result = BatchTableUpdate._assignment_to_array(values, target, 2)
         assert result.type == target

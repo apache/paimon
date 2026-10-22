@@ -17,11 +17,9 @@
 
 """Coordinate search execution and transport without coupling the backends.
 
-A live compatible plan executes in Rust. Transported plans and explicit split
-reads select Python lazily. An execution error never triggers another search.
+The selected backend consumes ordinary snapshot-and-split plans, including
+transported plans. An execution error never triggers another search.
 """
-
-from copy import copy
 
 
 class _SearchScan:
@@ -49,37 +47,27 @@ class _SearchRead:
             self._python_executor = self._python_factory()
         return self._python_executor
 
-    def _reader_for_plan(self, plan):
-        reader = copy(self._python_reader())
-        if plan.snapshot() is not None:
-            reader._table = reader._table._copy_with_snapshot(plan.snapshot())
-        return reader
+    def read_plan(self, plan, executor=None):
+        return (self._native_reader.read_plan(plan) if executor is None else
+                self._native_reader.read_plan(plan, executor=executor))
 
-    def read_plan(self, plan):
-        native = self._native_reader.resolve_plan(plan)
-        if native is not None:
-            return self._native_reader.read_plan(native)
-        return self._reader_for_plan(plan).read_plan(plan)
-
-    def read_batch_plan(self, plan):
-        native = self._native_reader.resolve_plan(plan)
-        if native is not None:
-            return self._native_reader.read_batch_plan(native)
-        return self._reader_for_plan(plan).read_batch_plan(plan)
+    def read_batch_plan(self, plan, executor=None):
+        return (self._native_reader.read_batch_plan(plan) if executor is None else
+                self._native_reader.read_batch_plan(plan, executor=executor))
 
 
 class _SplitSearchRead(_SearchRead):
     def read(self, splits):
-        return self._python_reader().read(splits)
+        return self._native_reader.read(splits)
 
 
 class _BatchSearchRead(_SearchRead):
     def read_batch(self, splits):
-        return self._python_reader().read_batch(splits)
+        return self._native_reader.read_batch(splits)
 
 
 def python_search_reader(reader):
-    """Select Python explicitly for Ray split workers or plan comparisons."""
+    """Select Python explicitly for backend parity and transported-plan checks."""
     return reader._python_reader() if isinstance(reader, _SearchRead) else reader
 
 
@@ -144,11 +132,12 @@ def execute_full_text_search(builder):
     return builder.new_full_text_read().read_plan(builder.new_full_text_scan().scan())
 
 
-def execute_hybrid_search(builder):
+def execute_hybrid_search(builder, executor=None):
     if _native_requested(builder):
         from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
-        result = try_native_hybrid_search(builder)
+        result = (try_native_hybrid_search(builder) if executor is None else
+                  try_native_hybrid_search(builder, executor=executor))
         if result is not None:
             return result
-    from pypaimon.execution.python.read.search.hybrid_search import execute_local
-    return execute_local(builder)
+    from pypaimon.execution.python.read.search.hybrid_search import execute
+    return execute(builder, executor)

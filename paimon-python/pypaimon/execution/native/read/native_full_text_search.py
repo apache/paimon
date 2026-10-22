@@ -75,7 +75,7 @@ def try_native_full_text_search(builder):
     table = builder._table
     primary_key = builder._primary_key_full_text_definition() is not None
     # Once execution starts, propagate errors instead of running a second search.
-    result = native.execute_local()
+    result = native.execute()
     if primary_key:
         return PrimaryKeyScoredResult._from_native(table, result)
     return DictBasedScoredIndexResult(result.row_ids())

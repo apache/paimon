@@ -19,7 +19,8 @@
 
 import heapq
 from copy import copy
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, as_completed, wait
+from threading import Event
 from typing import List
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
@@ -33,6 +34,49 @@ from pypaimon.table.source.hybrid_search_builder import (
 
 _MAX_ROUTE_WORKERS = 4
 _RRF_K = 60.0
+
+
+def execute(self, executor=None):
+    if executor is None:
+        return execute_local(self)
+    executor = executor.with_concurrency(executor.concurrency)
+    # Pin once before route planning moves onto separate driver threads.
+    routes = self.route_builders()
+    workers = min(executor.concurrency, len(routes))
+    route_concurrency = executor.concurrency // max(1, workers)
+
+    def execute_route(route):
+        child = executor.with_concurrency(route_concurrency)
+        builder = route.search_builder
+        if route.route.is_vector():
+            plan = builder.new_vector_search_scan().scan()
+            return builder.new_vector_search_read().read_plan(plan, executor=child)
+        plan = builder.new_full_text_scan().scan()
+        return builder.new_full_text_read().read_plan(plan, executor=child)
+
+    if workers <= 1:
+        return self.rank([self.to_route_result(route, execute_route(route)) for route in routes])
+
+    cancelled = Event()
+
+    def run(route):
+        with executor.cancellation_scope(cancelled):
+            return execute_route(route)
+
+    results = [None] * len(routes)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {}
+        try:
+            for ordinal, route in enumerate(routes):
+                futures[pool.submit(run, route)] = ordinal
+            for future in as_completed(futures):
+                ordinal = futures[future]
+                results[ordinal] = self.to_route_result(routes[ordinal], future.result())
+        finally:
+            cancelled.set()
+            for future in futures:
+                future.cancel()
+    return self.rank(results)
 
 
 def execute_local(self) -> ScoredGlobalIndexResult:

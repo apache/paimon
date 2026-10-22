@@ -15,11 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
 
 pytest.importorskip("ray")
+
+from pypaimon.ray.search_execution import RaySearchTaskExecutor
+from pypaimon.tests.search_execution_test_helpers import task_parts
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.execution.python.read.search.vector_search_read import AbstractVectorSearchReadImpl
@@ -38,14 +42,14 @@ def test_ray_applies_exact_row_filter_before_worker_top_k(table, ray_cluster, ba
     scalar_index(table)
     table.raw_table = table.raw_table.copy({
         "vector-index.search-mode": mode, "global-index.filter.refine-from-data": str(refine).lower()})
-    from pypaimon.ray import batch_vector_search, vector_search
     from pypaimon.execution.python.read.search import global_index_live_row_filter
 
-    module = batch_vector_search if batch else vector_search
-    original_map = module._map_tasks
+    original_map = RaySearchTaskExecutor.map
     calls = []
 
-    def record(worker, context, items, *args):
+    def record(executor, tasks, ordered=False):
+        worker, context, items = task_parts(tasks)
+
         def checked(context, split, scalar_filter=None):
             # These patches run in the actual Ray worker, not on the driver.
             original = AbstractVectorSearchReadImpl._matching_candidate_rows
@@ -73,11 +77,13 @@ def test_ray_applies_exact_row_filter_before_worker_top_k(table, ray_cluster, ba
                 result = worker(context, split, scalar_filter)
             return result, observed
 
-        for ordinal, (result, observed) in original_map(checked, context, items, *args):
+        mapped = original_map(executor, [replace(task, operation=checked) for task in tasks],
+                              ordered=ordered)
+        for ordinal, (result, observed) in mapped:
             calls.extend(observed)
             yield ordinal, result
 
-    with patch.object(module, "_map_tasks", record), \
+    with patch.object(RaySearchTaskExecutor, "map", record), \
             patch.object(AbstractVectorSearchReadImpl, "_pre_filters",
                          side_effect=AssertionError("driver must not build filters")), \
             patch.object(global_index_live_row_filter, "live_rows",
@@ -95,7 +101,6 @@ def test_ray_applies_exact_row_filter_before_worker_top_k(table, ray_cluster, ba
 def test_worker_filters_overlapping_scalar_shards_at_planned_snapshot(tmp_path, ray_cluster, batch, kind):
     import pyarrow as pa
     import pypaimon.multimodal as pm
-    from pypaimon.ray import batch_vector_search, vector_search
 
     pytest.importorskip("paimon_vindex")
     schema = pa.schema([("id", pa.int64()), ("name", pa.string()),
@@ -120,17 +125,16 @@ def test_worker_filters_overlapping_scalar_shards_at_planned_snapshot(tmp_path, 
     expected = [{"id": 0}, {"id": 4}, {"id": 6}]
     expected = [expected, expected] if batch else expected
     assert search.to_list() == expected
-    module = batch_vector_search if batch else vector_search
-    original_map = module._map_tasks
+    original_map = RaySearchTaskExecutor.map
     dispatched = []
 
-    def commit_before_workers(worker, context, splits, *args):
+    def commit_before_workers(executor, tasks, ordered=False):
         if not dispatched:
             table.delete("id = 0")
             dispatched.append(True)
-        return original_map(worker, context, splits, *args)
+        return original_map(executor, tasks, ordered=ordered)
 
-    with patch.object(module, "_map_tasks", commit_before_workers), \
+    with patch.object(RaySearchTaskExecutor, "map", commit_before_workers), \
             patch.object(AbstractVectorSearchReadImpl, "_pre_filters",
                          side_effect=AssertionError("driver filter")):
         result = search.to_list(execution="ray", concurrency=2)
@@ -148,7 +152,7 @@ def test_shared_scalar_index_is_evaluated_once_on_ray(table, tmp_path, ray_clust
     from pathlib import Path
 
     import pyarrow as pa
-    from pypaimon.ray import vector_search
+    from pypaimon.execution.python.read.search import distributed_vector_search
 
     schema = pa.schema([("id", pa.int64()), ("name", pa.string()),
                         ("embedding", pa.list_(pa.float32(), 2))])
@@ -162,14 +166,14 @@ def test_shared_scalar_index_is_evaluated_once_on_ray(table, tmp_path, ray_clust
         options["btree-index.fallback-scan-max-size"] = "0 b"
     table.raw_table = table.raw_table.copy(options)
     marker = str(tmp_path / "scalar-evaluations")
-    original = vector_search._prepare_scalar_filter
+    original = distributed_vector_search._prepare_scalar_filter
 
     def record(context, split):
         with open(marker, "a") as output:
             output.write(str(os.getpid()) + "\n")
         return original(context, split)
 
-    with patch.object(vector_search, "_prepare_scalar_filter", record), \
+    with patch.object(distributed_vector_search, "_prepare_scalar_filter", record), \
             patch.object(AbstractVectorSearchReadImpl, "_scalar_index_result",
                          side_effect=AssertionError("driver scalar evaluation")):
         # Each task requires the whole two-CPU cluster. Pending searches must

@@ -157,7 +157,7 @@ def test_scan_plan_is_reusable_and_snapshot_pinned(vector_table):
     builder = table.new_vector_search_builder().with_vector_column('embedding')
     scan = builder.new_vector_search_scan()
     plan = scan.scan()
-    snapshot = plan.snapshot_id()
+    snapshot = plan.snapshot().id()
     _write(vector_table, [{'id': 7, 'embedding': [1, 0], 'pt': 0}])
     builder.with_limit(10).with_query_vector([1, 0])
     reader = builder.new_vector_search_read()
@@ -165,12 +165,14 @@ def test_scan_plan_is_reusable_and_snapshot_pinned(vector_table):
     assert result.snapshot_id() == snapshot
     assert len(result) == 5
     assert reader.read_plan(plan).row_ids() == result.row_ids()
-    assert len(builder.execute_local()) == 6
+    assert len(builder.execute()) == 6
     filtered = table.new_vector_search_builder().with_vector_column('embedding').with_query_vector([1, 0]).with_limit(2)
     predicate = vector_table.new_read_builder().new_predicate_builder().equal('id', 1)
     filtered.with_filter(_predicate_to_native(predicate))
-    with pytest.raises(Exception, match='plan.*reader|context|different'):
-        filtered.new_vector_search_read().read_plan(plan)
+    selected = filtered.new_vector_search_read().read_plan(plan)
+    assert selected.snapshot_id() == snapshot
+    assert [value for batch in selected.new_read_builder().with_projection(['id']).read()
+            for value in batch.column('id').to_pylist()] == [1]
 
 
 @pytest.fixture
@@ -308,7 +310,7 @@ def test_mixed_index_metrics_are_rejected(vector_table, filtered, mode):
             if filtered:
                 direct.with_filter(_predicate_to_native(predicate))
             with pytest.raises(Exception, match='Cannot merge vector indexes with different metrics'):
-                direct.execute_local()
+                direct.execute()
         builders = [_single(table), table.new_batch_vector_search_builder().with_vector_column('embedding')
                     .with_query_vectors([[1, 0], [0, 1]]).with_limit(3)]
         for builder in builders:
@@ -389,7 +391,7 @@ def test_unevaluable_scalar_filter_scores_indexed_ranges_raw(vector_table, mode)
     assert all(len(scores) == 3 for scores in expected)
     direct_table = _native_table(native)
     direct = configure(direct_table.new_batch_vector_search_builder().with_vector_column('embedding')
-                       .with_query_vectors(queries).with_limit(3), direct=True).execute_batch_local()
+                       .with_query_vectors(queries).with_limit(3), direct=True).execute()
     for result, scores in zip(direct, expected):
         _assert_scores(result.row_ids(), scores)
     with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
@@ -453,7 +455,7 @@ def test_scalar_candidates_obey_refinement_switch(rest_catalog, mode, refine, un
     direct_table = _native_table(native)
     for query, scores in zip(queries, expected):
         result = configure(direct_table.new_vector_search_builder().with_vector_column('embedding')
-                           .with_query_vector(vector=query).with_limit(1), direct=True).execute_local()
+                           .with_query_vector(vector=query).with_limit(1), direct=True).execute()
         _assert_scores(result.row_ids(), scores)
     with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
             patch.object(BatchVectorSearchReadImpl, 'read_batch_plan', side_effect=AssertionError('Python search ran')):
@@ -488,7 +490,7 @@ def test_partition_filter_does_not_make_exact_scalar_index_inexact(vector_table,
     expected = _scores(configure(_single(classic)).execute_local())
     assert len(expected) == 1
     direct = configure(_native_table(native).new_vector_search_builder().with_vector_column('embedding')
-                       .with_query_vector(vector=[1, 0]).with_limit(3), direct=True).execute_local()
+                       .with_query_vector(vector=[1, 0]).with_limit(3), direct=True).execute()
     _assert_scores(direct.row_ids(), expected)
     with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
             patch.object(BatchVectorSearchReadImpl, 'read_batch_plan', side_effect=AssertionError('Python search ran')):
@@ -548,7 +550,7 @@ def test_unsupported_conjunct_on_same_indexed_field_is_not_exact(rest_catalog, m
     for predicate, count in [(is_null, 1), (impossible, 0)]:
         direct = (direct_table.new_vector_search_builder().with_vector_column('embedding')
                   .with_query_vector(vector=[1, 0]).with_limit(2)
-                  .with_filter(_predicate_to_native(predicate)).execute_local())
+                  .with_filter(_predicate_to_native(predicate)).execute())
         assert len(direct) == count
         with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
                 patch.object(BatchVectorSearchReadImpl, 'read_batch_plan',
@@ -602,10 +604,10 @@ def test_scalar_unindexed_ranges_follow_both_search_modes(
     direct_table = _native_table(native)
     for query, scores in zip(queries, expected):
         result = configure(direct_table.new_vector_search_builder().with_vector_column('embedding')
-                           .with_query_vector(vector=query).with_limit(10), direct=True).execute_local()
+                           .with_query_vector(vector=query).with_limit(10), direct=True).execute()
         _assert_scores(result.row_ids(), scores)
     direct_batch = configure(direct_table.new_batch_vector_search_builder().with_vector_column('embedding')
-                             .with_query_vectors(queries).with_limit(10), direct=True).execute_batch_local()
+                             .with_query_vectors(queries).with_limit(10), direct=True).execute()
     for result, scores in zip(direct_batch, expected):
         _assert_scores(result.row_ids(), scores)
     with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \
@@ -674,7 +676,7 @@ def test_raw_scalar_prefilter_keeps_uncovered_rows_with_overlapping_scalar_file(
     assert [len(scores) for scores in expected] == [2, 2]
     direct_table = _native_table(native)
     direct = configure(direct_table.new_batch_vector_search_builder().with_vector_column('embedding')
-                       .with_query_vectors(queries).with_limit(10), direct=True).execute_batch_local()
+                       .with_query_vectors(queries).with_limit(10), direct=True).execute()
     for result, scores in zip(direct, expected):
         _assert_scores(result.row_ids(), scores)
     with patch.object(DataEvolutionVectorRead, 'read_plan', side_effect=AssertionError('Python search ran')), \

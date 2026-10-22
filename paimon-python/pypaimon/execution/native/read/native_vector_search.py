@@ -70,10 +70,10 @@ def try_native_vector_search(builder, queries, batch=False):
     # against a potentially newer snapshot.
     if batch:
         native.with_query_vectors(queries)
-        results = native.execute_batch_local()
+        results = native.execute()
         return [DictBasedScoredIndexResult(result.row_ids()) for result in results]
     native.with_query_vector(queries)
-    result = native.execute_local()
+    result = native.execute()
     if builder._is_primary_key_vector_search():
         return PrimaryKeyScoredResult._from_native(table, result)
     return DictBasedScoredIndexResult(result.row_ids())

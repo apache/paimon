@@ -110,6 +110,52 @@ def test_invalid_blob_configuration_keeps_the_configured_consumer(tmp_path):
         writer.close()
 
 
+@pytest.mark.parametrize('row_bridge', [False, True])
+def test_native_uri_reader_factory_validation_precedes_core_configuration(tmp_path, row_bridge):
+    core = Mock()
+    writer = NativeWrite(_table(tmp_path), 'job', None, False, core)
+    factory = Mock()
+    if row_bridge:
+        writer._blob_rows = Mock()
+    try:
+        assert writer.with_blob_uri_reader_factory(factory) is writer
+        core.with_blob_uri_reader_factory.reset_mock()
+        with pytest.raises(TypeError, match='factory must provide callable create'):
+            writer.with_blob_uri_reader_factory(42)
+        assert writer._blob_uri_reader_factory is factory
+        if row_bridge:
+            assert writer._blob_rows.fallback is factory
+        core.with_blob_uri_reader_factory.assert_not_called()
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize('method,attribute', [
+    ('with_write_type', 'write_cols'),
+    ('with_blob_consumer', 'blob_consumer'),
+    ('with_blob_uri_reader_factory', 'blob_uri_reader_factory'),
+])
+def test_native_facade_configuration_keeps_identity_after_python_selection(tmp_path, method, attribute):
+    from pypaimon.write.write_dispatch import NativeTableWrite
+
+    table = _table(tmp_path)
+    core = Mock()
+    writer = NativeTableWrite(table, 'job', None, False, core)
+    try:
+        store = writer.file_store_write
+        value = ['value'] if method == 'with_write_type' else Mock()
+        reset = table.field_names if method == 'with_write_type' else None
+        configure = getattr(writer, method)
+        assert configure(value) is writer
+        assert getattr(store, attribute) == value
+        assert configure(reset) is writer
+        assert getattr(store, attribute) is None
+        getattr(core, method).assert_not_called()
+    finally:
+        writer.close()
+    core.close.assert_called_once_with()
+
+
 def test_python_delete_matching_respects_independent_read_backend(tmp_path):
     table = _table(tmp_path, {'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
                               'deletion-vectors.enabled': 'true'})
