@@ -283,6 +283,9 @@ Offsets must align to the regular frame grid within the tolerance; this API
 does not search actual timestamps or interpolate missing frames. Do not combine
 `delta_timestamps`, `frame_offsets`, and `window_size`.
 
+To align separate streams by recorded timestamps, use the `join_asof`,
+`interpolate`, or `join_window` APIs described in [As-of joins](#as-of-joins).
+
 `column_transforms` receive one padded Python list per projected column. This is
 where applications define tensor dtype and shape or decode BLOB bytes. Even
 singleton windows retain the time dimension. `images_to_tensor` returns TCHW
