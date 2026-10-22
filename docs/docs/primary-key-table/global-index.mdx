@@ -299,6 +299,7 @@ not cover a query on `text_embedding`.
 
 | Option | Default | Description |
 |---|---|---|
+| `pk-index.build.parallelism` | `1` | Maximum concurrent primary-key index build tasks per writer instance. Must be positive. |
 | `pk-vector.index.columns` | Not set | Comma-separated vector columns which own independent vector indexes. |
 | `fields.<column>.pk-vector.index.type` | Required | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann`. |
 | `fields.<column>.pk-vector.distance.metric` | `inner_product` | Distance metric: `l2`, `cosine`, or `inner_product`. |
@@ -329,6 +330,18 @@ For algorithm-specific options, see the corresponding
 in the [`paimon-full-text` README](https://github.com/apache/paimon/blob/master/paimon-full-text/README.md).
 
 ## Maintenance and Coverage
+
+Set `pk-index.build.parallelism` to `2`, for example, to allow two primary-key index build tasks
+to run concurrently within one writer instance. The default is `1`. Vector, Full Text, BTree,
+Bitmap, Multivalue, and FM indexes share this limit across that writer's columns and buckets.
+It is not the Flink or Spark job parallelism.
+
+Blocking commits start all configured indexes before waiting for their results. Non-blocking
+commits start builds and collect finished results without waiting; outstanding builds are
+collected by later commits. If an index fails during preparation, the coordinator rolls back
+that preparation, cancels outstanding builds, and cleans up uncommitted outputs. Previously
+committed snapshots remain valid. More concurrent builds can increase memory and I/O usage;
+each index implementation may also use its own internal threads.
 
 Paimon builds primary-key indexes from complete `COMPACT` data files above Level 0. An index group
 stores the source file names and row counts required to map index results back to physical rows.

@@ -123,12 +123,15 @@ class PrimaryKeyIndexWriteTest {
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment,state");
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
         options.put("fields.embedding.pk-vector.index.type", "hnsw");
+        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "full_text");
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), "2");
 
         List<DataField> fields =
                 new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
         fields.add(new DataField(7, "score", DataTypes.BIGINT()));
         fields.add(new DataField(8, "state", DataTypes.INT()));
         fields.add(new DataField(9, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        fields.add(new DataField(10, "full_text", DataTypes.STRING()));
         TestFileStore store = createStore(options, new RowType(fields));
         KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
         write.withIOManager(ioManager);
@@ -138,11 +141,26 @@ class PrimaryKeyIndexWriteTest {
         AbstractFileStoreWrite.WriterContainer<KeyValue> container =
                 write.createWriterContainer(generator.getPartition(record), 1);
 
-        Object vectorMaintainer =
-                readField(container.primaryKeyIndexMaintainer, "vectorMaintainer");
-        assertThat(vectorMaintainer).isNotNull();
+        List<?> vectorMaintainers =
+                (List<?>) readField(container.primaryKeyIndexMaintainer, "vectorMaintainers");
+        assertThat(vectorMaintainers).hasSize(1);
+        Object vectorMaintainer = vectorMaintainers.get(0);
         assertThat((List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers"))
                 .hasSize(4);
+
+        Object executor = readField(vectorMaintainer, "executor");
+        Object fullText = readField(container.primaryKeyIndexMaintainer, "fullTextMaintainer");
+        assertThat(readField(fullText, "executor")).isSameAs(executor);
+        for (Object sorted :
+                (List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers")) {
+            assertThat(readField(sorted, "executor")).isSameAs(executor);
+        }
+        AbstractFileStoreWrite.WriterContainer<KeyValue> otherBucket =
+                write.createWriterContainer(generator.getPartition(record), 2);
+        Object otherVector =
+                ((List<?>) readField(otherBucket.primaryKeyIndexMaintainer, "vectorMaintainers"))
+                        .get(0);
+        assertThat(readField(otherVector, "executor")).isSameAs(executor);
 
         BitmapDeletionVector deletionVector = new BitmapDeletionVector();
         deletionVector.delete(1);

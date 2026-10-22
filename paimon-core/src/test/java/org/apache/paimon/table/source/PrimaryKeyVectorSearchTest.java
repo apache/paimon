@@ -42,6 +42,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -87,9 +89,12 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         return builder.build();
     }
 
-    @Test
-    void testIndependentVectorIndexesSurviveReopenAndCompaction() throws Exception {
-        catalog.createTable(identifier(), multipleVectorSchema(2, "l2", "l2"), false);
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testIndependentVectorIndexesSurviveReopenAndCompaction(int buildParallelism)
+            throws Exception {
+        catalog.createTable(
+                identifier(), multipleVectorSchema(2, "l2", "l2", buildParallelism), false);
         FileStoreTable table = getTableDefault();
         write(
                 table,
@@ -131,9 +136,12 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                 .containsExactlyInAnyOrder(1, 2);
     }
 
-    @Test
-    void testIndependentVectorIndexesWithDifferentDimensionsAndMetrics() throws Exception {
-        catalog.createTable(identifier(), multipleVectorSchema(3, "l2", "cosine"), false);
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testIndependentVectorIndexesWithDifferentDimensionsAndMetrics(int buildParallelism)
+            throws Exception {
+        catalog.createTable(
+                identifier(), multipleVectorSchema(3, "l2", "cosine", buildParallelism), false);
         FileStoreTable table = getTableDefault();
         write(table, ioManager, GenericRow.of(1, vector(1, 0), vector(1, 1, 0)));
         write(table, ioManager, GenericRow.of(2, vector(2, 0), vector(10, 0, 0)));
@@ -158,9 +166,11 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         assertThat(readIds(reopened, results.get(1))).containsExactly(1);
     }
 
-    @Test
-    void testCompactionBackfillsAddedVectorIndexWithoutNewData() throws Exception {
-        Schema schema = multipleVectorSchema(2, "l2", "l2");
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void testCompactionBackfillsAddedVectorIndexWithoutNewData(int buildParallelism)
+            throws Exception {
+        Schema schema = multipleVectorSchema(2, "l2", "l2", buildParallelism);
         schema.options().put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "image_embedding");
         schema.options().remove("fields.text_embedding.pk-vector.index.type");
         catalog.createTable(identifier(), schema, false);
@@ -225,12 +235,16 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         completedPayloads.stream().map(IndexFileMeta::fileName).collect(toList()));
     }
 
-    private Schema multipleVectorSchema(int textDimension, String imageMetric, String textMetric) {
+    private Schema multipleVectorSchema(
+            int textDimension, String imageMetric, String textMetric, int buildParallelism) {
         return Schema.newBuilder()
                 .column("id", DataTypes.INT())
                 .column("image_embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()))
                 .column("text_embedding", DataTypes.VECTOR(textDimension, DataTypes.FLOAT()))
                 .primaryKey("id")
+                .option(
+                        CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(),
+                        String.valueOf(buildParallelism))
                 .option(CoreOptions.BUCKET.key(), "1")
                 .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
                 .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "image_embedding,text_embedding")

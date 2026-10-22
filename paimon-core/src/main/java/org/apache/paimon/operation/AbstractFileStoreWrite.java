@@ -716,7 +716,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private ExecutorService primaryKeyIndexExecutor() {
         if (lazyPrimaryKeyIndexExecutor == null) {
             lazyPrimaryKeyIndexExecutor =
-                    Executors.newSingleThreadExecutor(
+                    Executors.newFixedThreadPool(
+                            options.primaryKeyIndexBuildParallelism(),
                             new ExecutorThreadFactory(
                                     Thread.currentThread().getName() + "-primary-key-index"));
         }

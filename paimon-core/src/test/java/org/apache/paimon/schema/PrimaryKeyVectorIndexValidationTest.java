@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
@@ -54,6 +55,7 @@ class PrimaryKeyVectorIndexValidationTest {
     @Test
     void testSupportsMultiplePrimaryKeyVectorIndexColumns() {
         Map<String, String> options = multipleIndexOptions();
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), "2");
         options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), " embedding , other_embedding ");
         options.put("fields.embedding.pk-vector.distance.metric", "cosine");
         options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":64}");
@@ -61,6 +63,20 @@ class PrimaryKeyVectorIndexValidationTest {
         options.put("fields.other_embedding.pk-vector.index.options", "{\"nlist\":128}");
 
         assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,true", "-1,true", "0,false", "-1,false"})
+    void testRejectsNonPositiveIndexBuildParallelism(int parallelism, boolean vectorIndex) {
+        Map<String, String> options = multipleIndexOptions();
+        if (!vectorIndex) {
+            options.remove(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
+            options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "payload");
+        }
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), String.valueOf(parallelism));
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("pk-index.build.parallelism must be greater than zero");
     }
 
     @Test

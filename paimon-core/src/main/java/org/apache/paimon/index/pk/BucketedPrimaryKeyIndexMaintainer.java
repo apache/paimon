@@ -51,6 +51,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -60,7 +61,6 @@ public final class BucketedPrimaryKeyIndexMaintainer {
     private final List<BucketedVectorIndexMaintainer> vectorMaintainers;
     @Nullable private final BucketedFullTextIndexMaintainer fullTextMaintainer;
     private final List<BucketedSortedIndexMaintainer> sortedMaintainers;
-    private int nextSortedMaintainerIndex;
 
     private BucketedPrimaryKeyIndexMaintainer(
             List<BucketedVectorIndexMaintainer> vectorMaintainers,
@@ -122,45 +122,25 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             CompactIncrement compactIncrement,
             boolean waitCompaction)
             throws Exception {
-        List<BucketedVectorIndexMaintainer.VectorIndexCommit> vectorCommits = new ArrayList<>();
-        BucketedFullTextIndexMaintainer.FullTextIndexCommit fullTextCommit = null;
-        List<BucketedSortedIndexMaintainer.SortedIndexCommit> sortedCommits = new ArrayList<>();
+        List<Runnable> commits = new ArrayList<>();
+        List<Consumer<Throwable>> aborts = new ArrayList<>();
         try {
-            for (BucketedVectorIndexMaintainer maintainer : vectorMaintainers) {
-                vectorCommits.add(
-                        maintainer.prepareCommit(
-                                appendIncrement, compactIncrement, waitCompaction));
+            // Start all indexes before waiting. Retain both rounds for reverse-order rollback,
+            // and merge changes only after every index has prepared successfully.
+            int indexCount =
+                    vectorMaintainers.size()
+                            + sortedMaintainers.size()
+                            + (fullTextMaintainer == null ? 0 : 1);
+            if (waitCompaction && indexCount > 1) {
+                prepareIndexes(appendIncrement, compactIncrement, false, commits, aborts);
             }
-            if (fullTextMaintainer != null) {
-                fullTextCommit =
-                        fullTextMaintainer.prepareCommit(
-                                appendIncrement, compactIncrement, waitCompaction);
-            }
-
-            if (waitCompaction) {
-                prepareSortedBlocking(appendIncrement, compactIncrement, sortedCommits);
-            } else {
-                prepareSortedNonBlocking(appendIncrement, compactIncrement, sortedCommits);
-            }
-
-            for (BucketedVectorIndexMaintainer.VectorIndexCommit commit : vectorCommits) {
-                mergeVectorCommit(appendIncrement, compactIncrement, commit);
-            }
-            if (fullTextCommit != null) {
-                mergeFullTextCommit(appendIncrement, compactIncrement, fullTextCommit);
-            }
-            for (BucketedSortedIndexMaintainer.SortedIndexCommit sortedCommit : sortedCommits) {
-                mergeSortedCommit(appendIncrement, compactIncrement, sortedCommit);
+            prepareIndexes(appendIncrement, compactIncrement, waitCompaction, commits, aborts);
+            for (Runnable commit : commits) {
+                commit.run();
             }
         } catch (Throwable failure) {
-            for (int i = sortedCommits.size() - 1; i >= 0; i--) {
-                sortedCommits.get(i).abort(failure);
-            }
-            if (fullTextCommit != null) {
-                fullTextCommit.abort(failure);
-            }
-            for (int i = vectorCommits.size() - 1; i >= 0; i--) {
-                vectorCommits.get(i).abort(failure);
+            for (int i = aborts.size() - 1; i >= 0; i--) {
+                aborts.get(i).accept(failure);
             }
             if (failure instanceof Exception) {
                 throw (Exception) failure;
@@ -172,58 +152,32 @@ public final class BucketedPrimaryKeyIndexMaintainer {
         }
     }
 
-    private void prepareSortedBlocking(
+    private void prepareIndexes(
             DataIncrement appendIncrement,
             CompactIncrement compactIncrement,
-            List<BucketedSortedIndexMaintainer.SortedIndexCommit> commits)
+            boolean waitCompaction,
+            List<Runnable> commits,
+            List<Consumer<Throwable>> aborts)
             throws Exception {
-        BucketedSortedIndexMaintainer active = activeSortedMaintainer();
-        for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            commits.add(
-                    maintainer.prepareCommit(
-                            appendIncrement, compactIncrement, true, maintainer == active));
+        for (BucketedVectorIndexMaintainer maintainer : vectorMaintainers) {
+            BucketedVectorIndexMaintainer.VectorIndexCommit commit =
+                    maintainer.prepareCommit(appendIncrement, compactIncrement, waitCompaction);
+            aborts.add(commit::abort);
+            commits.add(() -> mergeVectorCommit(appendIncrement, compactIncrement, commit));
+        }
+        if (fullTextMaintainer != null) {
+            BucketedFullTextIndexMaintainer.FullTextIndexCommit commit =
+                    fullTextMaintainer.prepareCommit(
+                            appendIncrement, compactIncrement, waitCompaction);
+            aborts.add(commit::abort);
+            commits.add(() -> mergeFullTextCommit(appendIncrement, compactIncrement, commit));
         }
         for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            if (maintainer != active) {
-                commits.add(
-                        maintainer.prepareCommit(appendIncrement, compactIncrement, true, true));
-            }
+            BucketedSortedIndexMaintainer.SortedIndexCommit commit =
+                    maintainer.prepareCommit(appendIncrement, compactIncrement, waitCompaction);
+            aborts.add(commit::abort);
+            commits.add(() -> mergeSortedCommit(appendIncrement, compactIncrement, commit));
         }
-    }
-
-    private void prepareSortedNonBlocking(
-            DataIncrement appendIncrement,
-            CompactIncrement compactIncrement,
-            List<BucketedSortedIndexMaintainer.SortedIndexCommit> commits)
-            throws Exception {
-        for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            commits.add(maintainer.prepareCommit(appendIncrement, compactIncrement, false, false));
-        }
-        if (activeSortedMaintainer() != null) {
-            return;
-        }
-
-        int count = sortedMaintainers.size();
-        for (int offset = 0; offset < count; offset++) {
-            int index = (nextSortedMaintainerIndex + offset) % count;
-            BucketedSortedIndexMaintainer maintainer = sortedMaintainers.get(index);
-            if (maintainer.hasPendingMaintenance()) {
-                commits.add(
-                        maintainer.prepareCommit(appendIncrement, compactIncrement, false, true));
-                nextSortedMaintainerIndex = (index + 1) % count;
-                break;
-            }
-        }
-    }
-
-    @Nullable
-    private BucketedSortedIndexMaintainer activeSortedMaintainer() {
-        for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
-            if (maintainer.buildNotCompleted()) {
-                return maintainer;
-            }
-        }
-        return null;
     }
 
     private static void mergeSortedCommit(
@@ -310,7 +264,12 @@ public final class BucketedPrimaryKeyIndexMaintainer {
         if (fullTextMaintainer != null && fullTextMaintainer.buildNotCompleted()) {
             return true;
         }
-        return activeSortedMaintainer() != null;
+        for (BucketedSortedIndexMaintainer maintainer : sortedMaintainers) {
+            if (maintainer.buildNotCompleted()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void withExecutor(ExecutorService executor) {
