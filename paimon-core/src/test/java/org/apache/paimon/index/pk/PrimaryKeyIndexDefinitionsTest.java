@@ -41,6 +41,65 @@ class PrimaryKeyIndexDefinitionsTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void testCreatesIndependentVectorDefinitionsAndLeavesOtherVectorsUnindexed(
+            boolean sharedOptions) {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                columnsKey(sharedOptions ? "ivf-flat" : "vector", sharedOptions),
+                " text_embedding , image_embedding ");
+        if (!sharedOptions) {
+            options.put("fields.image_embedding.pk-vector.index.type", "ivf-flat");
+            options.put("fields.text_embedding.pk-vector.index.type", "ivf-flat");
+        }
+        String suffix = sharedOptions ? "index-options" : "pk-vector.index.options";
+        options.put(
+                "fields.image_embedding." + suffix,
+                "{\"nlist\":64,\"distance.metric\":\"cosine\"}");
+        options.put(
+                "fields.text_embedding." + suffix, "{\"nlist\":128,\"distance.metric\":\"l2\"}");
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(
+                                        1,
+                                        "image_embedding",
+                                        DataTypes.VECTOR(2, DataTypes.FLOAT())),
+                                new DataField(
+                                        2,
+                                        "text_embedding",
+                                        DataTypes.VECTOR(3, DataTypes.FLOAT())),
+                                new DataField(
+                                        3,
+                                        "stored_embedding",
+                                        DataTypes.VECTOR(4, DataTypes.FLOAT()))),
+                        3,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+
+        List<PrimaryKeyIndexDefinition> definitions =
+                PrimaryKeyIndexDefinitions.create(schema).definitions();
+
+        assertThat(definitions)
+                .extracting(PrimaryKeyIndexDefinition::column)
+                .containsExactly("image_embedding", "text_embedding");
+        assertThat(definitions)
+                .extracting(PrimaryKeyIndexDefinition::fieldId)
+                .containsExactly(1, 2);
+        assertThat(definitions)
+                .extracting(PrimaryKeyIndexDefinition::family)
+                .containsOnly(PrimaryKeyIndexDefinition.Family.VECTOR);
+        assertThat(definitions.get(0).options().get("ivf-flat.nlist")).isEqualTo("64");
+        assertThat(definitions.get(0).options().get("ivf-flat.metric")).isEqualTo("cosine");
+        assertThat(definitions.get(1).options().get("ivf-flat.nlist")).isEqualTo("128");
+        assertThat(definitions.get(1).options().get("ivf-flat.metric")).isEqualTo("l2");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void testCreatesMixedDefinitionsInSchemaFieldOrder(boolean sharedOptions) {
         Map<String, String> options = new HashMap<>();
         options.put(columnsKey(sharedOptions ? "ivf-pq" : "vector", sharedOptions), "embedding");

@@ -261,6 +261,32 @@ TBLPROPERTIES (
 
 </details>
 
+### Index Multiple Vector Columns
+
+List the vector columns in `global-index.<type>.index-columns` and configure field overrides
+with `fields.<column>.index-options`. For example, this Flink table indexes image and text
+embeddings independently:
+
+```sql
+CREATE TABLE multimodal_items (
+    id BIGINT,
+    image_embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;512',
+    text_embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'global-index.ivf-flat.index-columns' = 'image_embedding,text_embedding',
+    'fields.image_embedding.index-options' = '{"nlist":256,"distance.metric":"cosine"}',
+    'fields.text_embedding.index-options' = '{"nlist":512,"distance.metric":"inner_product"}'
+);
+```
+
+Each vector search selects one column and uses that column's index, dimension, and distance
+metric. Listing multiple columns does not combine their vectors or define a fused ranking.
+Index coverage is tracked separately for each column, so an index on `image_embedding` does
+not cover a query on `text_embedding`. VECTOR columns outside the index list remain unindexed.
+
 ### Options
 
 | Option | Default | Description |
