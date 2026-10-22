@@ -189,7 +189,7 @@ def test_native_branch_stream_checkpoint_histories(tmp_path, native_rest_catalog
     _write(main, [{'id': 1, 'value': 10, 'p': 'a'}])
     branch = _branch(catalog, main)
     for target, value in ((main, 100), (branch, 20)):
-        builder = target.new_stream_write_builder()._with_commit_user('same-writer')
+        builder = target.new_stream_write_builder().with_commit_user('same-writer')
         messages = _prepare(builder, [{'id': 1, 'value': value, 'p': 'a'}], checkpoint=7)
         _commit(builder, messages, checkpoint=7)
         snapshot = target.snapshot_manager().get_latest_snapshot()

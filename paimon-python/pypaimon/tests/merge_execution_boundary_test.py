@@ -79,7 +79,7 @@ if engine == 'python':
 else:
     core = Mock()
     builder = core.new_batch_write_builder.return_value
-    builder._with_commit_user.return_value = builder
+    builder.with_commit_user.return_value = builder
     writer = builder.new_update.return_value
     writer.merge_into.return_value = []
     def assignment(batch):

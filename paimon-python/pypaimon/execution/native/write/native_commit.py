@@ -56,7 +56,7 @@ def create_native_commit(table, commit_user, overwrite_partition=None, *, batch=
     if native_table is None:
         return None
     if batch or overwrite_partition is not None:
-        builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
+        builder = native_table.new_batch_write_builder().with_commit_user(commit_user)
         if overwrite_partition is not None:
             builder = builder.with_overwrite(overwrite_partition)
         return builder.new_commit()
