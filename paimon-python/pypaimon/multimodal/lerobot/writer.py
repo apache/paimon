@@ -208,6 +208,15 @@ def _compute_stats(episode, features):
                 array = array.reshape(array.shape[0], -1)
             data[name] = array
     numeric_stats = compute_episode_stats(data, numeric_features)
+    # LeRobot 0.6 promotes running statistics to float32. Preserve boolean
+    # extrema from the original values to match the persisted episode schema.
+    for name, feature in numeric_features.items():
+        if feature.get("dtype") in ("bool", "boolean"):
+            values = data[name]
+            numeric_stats[name]["min"] = np.min(
+                values, axis=0, keepdims=values.ndim == 1)
+            numeric_stats[name]["max"] = np.max(
+                values, axis=0, keepdims=values.ndim == 1)
     for name, shape in reshaped_features.items():
         numeric_stats[name] = {
             stat: value if stat == "count" else value.reshape(shape)

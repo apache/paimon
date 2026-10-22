@@ -817,6 +817,46 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                          rows[0]["observation.matrix"])
         self.assertEqual([True, False], rows[0]["observation.flags"])
 
+    def test_multiframe_boolean_statistics_preserve_extrema(self):
+        for shape in ((2,), (2, 2)):
+            with self.subTest(shape=shape):
+                name = "bool_stats_%d" % len(shape)
+                writer = PaimonLeRobotWriter(
+                    self.connection, name, fps=10, features={
+                        "observation.flags": {
+                            "dtype": "bool", "shape": shape, "names": None,
+                        },
+                    })
+                first = np.array([True, False] * (int(np.prod(shape)) // 2),
+                                 dtype=np.bool_).reshape(shape)
+                for flags in (first, ~first):
+                    writer.add_frame({
+                        "observation.flags": flags, "task": "inspect",
+                    })
+                writer.save_episode()
+                writer.finalize()
+
+                rows = self.connection.get_table(name).scan().select([
+                    "index", "observation.flags"
+                ]).to_arrow().sort_by("index").to_pylist()
+                self.assertEqual(
+                    [first.tolist(), (~first).tolist()],
+                    [row["observation.flags"] for row in rows])
+                episode = _catalog_rows(
+                    self.connection, name + "__episodes")[0]
+                stats = {
+                    row["key"]: json.loads(row["value"])
+                    for row in _catalog_rows(self.connection, name + "__stats")
+                }["observation.flags"]
+                for stat, expected in (("min", np.zeros(shape, dtype=bool)),
+                                       ("max", np.ones(shape, dtype=bool))):
+                    value = episode["stats/observation.flags/" + stat]
+                    self.assertEqual(expected.tolist(), value)
+                    self.assertEqual(np.dtype(bool), np.asarray(value).dtype)
+                    self.assertEqual(expected.tolist(), stats[stat])
+                    self.assertEqual(
+                        np.dtype(bool), np.asarray(stats[stat]).dtype)
+
     def test_discards_rerecorded_episode_and_finalizes_tail_batch(self):
         writer = PaimonLeRobotWriter(
             self.connection,

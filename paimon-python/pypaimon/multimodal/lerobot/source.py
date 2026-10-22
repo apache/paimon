@@ -214,6 +214,11 @@ def _import_lerobot_dataset():
     return LeRobotDataset
 
 
+def _info_dict(info):
+    # LeRobot 0.6 exposes DatasetInfo instead of a dict.
+    return dict(info.to_dict() if hasattr(info, "to_dict") else info)
+
+
 def _load_hub_info(source):
     try:
         from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -222,7 +227,9 @@ def _load_hub_info(source):
             "load_from_lerobot requires LeRobot; install "
             "'pypaimon[lerobot]'.") from error
     try:
-        return dict(LeRobotDatasetMetadata(repo_id=source.repo_id).info)
+        metadata = LeRobotDatasetMetadata(repo_id=source.repo_id)
+        # DatasetInfo omits unknown fields; preserve the downloaded source JSON.
+        return _local_source(Path(metadata.root), source.path)[1]
     except Exception as error:
         raise ValueError(
             "Cannot open LeRobot Dataset v3 metadata %s: %s"
