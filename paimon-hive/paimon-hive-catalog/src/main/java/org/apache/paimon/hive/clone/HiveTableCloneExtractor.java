@@ -139,6 +139,11 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     @Override
     public Map<String, String> extractOptions(Table table, boolean copyFiles) {
         Map<String, String> hiveTableOptions = table.getParameters();
+        if (copyFiles && "true".equalsIgnoreCase(hiveTableOptions.get("transactional"))) {
+            // ACID files wrap rows with transaction metadata, and aborted writes leave files behind
+            throw new UnsupportedOperationException(
+                    "Copying data files is not supported for transactional tables.");
+        }
         Map<String, String> paimonOptions = new HashMap<>();
         String comment = hiveTableOptions.get("comment");
         if (comment != null) {
@@ -193,6 +198,11 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             @javax.annotation.Nullable PartitionPredicate predicate,
             boolean recursive)
             throws Exception {
+        int[] partitionValueIndexes =
+                partitionValueIndexes(
+                        identifier,
+                        INSTANCE.extractPartitionKeys(sourceTable),
+                        partitionRowType.getFieldNames());
         List<Partition> partitions =
                 client.listPartitions(
                         identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
@@ -216,7 +226,10 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
                     .forEach(type -> valueSetters.add(BinaryWriter.createValueSetter(type)));
             List<HivePartitionFiles> results = new ArrayList<>();
             for (Partition partition : partitions) {
-                List<String> partitionValues = partition.getValues();
+                List<String> partitionValues = new ArrayList<>();
+                for (int index : partitionValueIndexes) {
+                    partitionValues.add(partition.getValues().get(index));
+                }
                 String location = partition.getSd().getLocation();
                 BinaryRow partitionRow =
                         FileMetaUtils.writePartitionValue(
@@ -234,6 +247,29 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             }
             return results;
         }
+    }
+
+    /**
+     * Hive partition values follow the order of the source partition keys, and the partition row
+     * follows the order of the target partition keys. Returns, for each target key, the index of
+     * its value in the Hive partition values.
+     */
+    @VisibleForTesting
+    static int[] partitionValueIndexes(
+            Identifier identifier, List<String> sourceKeys, List<String> targetKeys) {
+        int[] indexes = new int[targetKeys.size()];
+        boolean match = sourceKeys.size() == targetKeys.size();
+        for (int i = 0; match && i < targetKeys.size(); i++) {
+            indexes[i] = sourceKeys.indexOf(targetKeys.get(i));
+            match = indexes[i] >= 0;
+        }
+        if (!match) {
+            throw new IllegalStateException(
+                    String.format(
+                            "The partition keys %s of table %s do not match the partition keys %s of the target table.",
+                            sourceKeys, identifier, targetKeys));
+        }
+        return indexes;
     }
 
     /**

@@ -88,6 +88,29 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testCopyFilesIntoTargetWithOtherPartitionKeyOrder() throws Exception {
+        String dbName = "hivedb" + StringUtils.randomNumericString(10);
+        TableEnvironment tEnv = hiveTableEnvironment(dbName);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.t (id STRING) PARTITIONED BY (p1 STRING, p2 STRING) STORED AS orc",
+                dbName);
+        sql(tEnv, "INSERT INTO %s.t PARTITION (p1 = 'A', p2 = 'B') VALUES ('a')", dbName);
+
+        usePaimonCatalog(tEnv);
+        sql(
+                tEnv,
+                "CREATE TABLE test.t (id STRING, p1 STRING, p2 STRING) PARTITIONED BY (p2, p1) "
+                        + "WITH ('bucket' = '-1', 'file.format' = 'orc')");
+        // the partition the source values land in when they are read in the wrong order
+        sql(tEnv, "INSERT INTO test.t VALUES ('keep', 'B', 'A')");
+        cloneWithCopyFiles(dbName, "t");
+
+        assertThat(sql(tEnv, "SELECT * FROM test.t"))
+                .containsExactlyInAnyOrder(Row.of("a", "A", "B"), Row.of("keep", "B", "A"));
+    }
+
+    @Test
     public void testCopyFilesSkipsUnregisteredPartitions() throws Exception {
         String dbName = "hivedb" + StringUtils.randomNumericString(10);
         TableEnvironment tEnv = hiveTableEnvironment(dbName);

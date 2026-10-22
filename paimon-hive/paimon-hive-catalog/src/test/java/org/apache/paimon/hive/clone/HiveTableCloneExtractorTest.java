@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -130,6 +131,32 @@ class HiveTableCloneExtractorTest {
                                 HiveTableCloneExtractor.checkNoSharedFiles(
                                         identifier, Arrays.asList(first, second)))
                 .hasMessageContaining(inner.toString());
+    }
+
+    @Test
+    void partitionKeysMustMatchTheTarget() {
+        Identifier identifier = Identifier.create("db", "t");
+        List<String> source = Arrays.asList("a", "b", "c");
+
+        assertThatThrownBy(
+                        () ->
+                                HiveTableCloneExtractor.partitionValueIndexes(
+                                        identifier, source, Arrays.asList("a", "b", "c", "d")))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(
+                        () ->
+                                HiveTableCloneExtractor.partitionValueIndexes(
+                                        identifier, source, Arrays.asList("a", "b", "d")))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void copyingFilesOfTransactionalTablesIsRejected() {
+        Table table = new Table();
+        table.setParameters(Collections.singletonMap("transactional", "true"));
+
+        assertThatThrownBy(() -> HiveTableCloneExtractor.INSTANCE.extractOptions(table, true))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     private static List<String> recursivelyListedFiles(String location) throws IOException {
