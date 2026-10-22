@@ -157,7 +157,7 @@ class PythonTableUpdate:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
         scan = read_builder.new_scan()
-        splits = scan.plan_all_files().splits()
+        splits = scan.plan_all().splits()
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []
@@ -434,7 +434,7 @@ class PythonTableUpdate:
         else:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        plan = read_builder.new_scan().plan_all_files()
+        plan = read_builder.new_scan().plan_all()
         splits = plan.splits()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         files_info = RowIdFileIndex.from_splits(
@@ -546,7 +546,7 @@ class ShardTableUpdator:
         context.total_shard_count = total_shard_count
         context.shard_num = shard_num
         scanner = context.table.new_read_builder().new_scan()
-        plan = scanner.plan_all_files()
+        plan = scanner.plan_all()
         context.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)

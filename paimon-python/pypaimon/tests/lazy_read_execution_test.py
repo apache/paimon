@@ -42,7 +42,7 @@ def table(tmp_path):
     return catalog.get_table('default.lazy_execution')
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 @pytest.mark.parametrize('unrestricted_auth', [False, True])
 def test_native_scan_does_not_construct_python_executors(table, method, unrestricted_auth):
     with ExitStack() as stack:
@@ -80,7 +80,7 @@ def test_python_scanner_is_constructed_only_after_native_preparation_fails(table
         assert [(r.from_, r.to) for r in scan.file_scanner._row_ranges] == [(1, 4)]
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 @pytest.mark.parametrize('window', ['100,100', '100,200'])
 def test_native_timestamp_scan_delegates_snapshot_selection_and_authorization(table, method, window):
     table = table.copy({'incremental-between-timestamp': window, 'query-auth.enabled': 'true'})

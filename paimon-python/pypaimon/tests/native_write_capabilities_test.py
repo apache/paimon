@@ -48,7 +48,7 @@ def _rows(table, native_read, all_files=False, chunk_shuffle=False):
     scan = builder.new_scan()
     if chunk_shuffle:
         scan.with_chunk_shuffle(seed=7, chunk_size=1)
-    splits = (scan.plan_all_files() if all_files else scan.plan()).splits()
+    splits = (scan.plan_all() if all_files else scan.plan()).splits()
     read = builder.new_read()
     if native_read:
         with patch(

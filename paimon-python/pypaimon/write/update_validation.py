@@ -25,7 +25,7 @@ from pypaimon.write.row_utils import require_columns
 
 
 def _authorize_update(table):
-    """Require the same whole-table grant as plan_all_files for fast paths."""
+    """Require the same whole-table grant as plan_all for fast paths."""
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
     from pypaimon.read.auth_support import authorize
 

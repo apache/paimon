@@ -178,7 +178,7 @@ class PythonTableScan:
     def plan(self, auth_result=None):
         return wrap_plan_with_auth(auth_result, self._scanner(auth_result).scan())
 
-    def plan_all_files(self):
+    def plan_all(self):
         scanner = self._scanner(None)
         # Writer restore/overwrite must see L0 even when batch reads hide it.
         skip_level0 = scanner.skip_level0

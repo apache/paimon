@@ -68,7 +68,7 @@ def test_native_read_scan_and_stream_preparation_do_not_import_python_execution(
             with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True), \
                     patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)):
                 assert builder.new_scan().plan().snapshot_id == 7
-                assert builder.new_scan().plan_all_files().snapshot_id == 7
+                assert builder.new_scan().plan_all().snapshot_id == 7
                 assert builder.new_scan().scan_with_stats()[0].snapshot_id == 7
             reader = builder.new_read()
             assert reader.to_arrow([]).num_rows == 0

@@ -24,7 +24,7 @@ def dynamic_bucket_data_buckets(table, partition, snapshot):
     from pypaimon.index.dynamic_bucket import bucket_read_builder
 
     read_builder = bucket_read_builder(table, partition, snapshot)
-    # plan_all_files includes level zero and requires unrestricted query
+    # plan_all includes level zero and requires unrestricted query
     # authorization. A policy which cannot supply complete metadata must fail
     # preparation before input assignment, never omit buckets from validation.
     plan = native_plan(read_builder.table, predicate=read_builder._predicate, all_files=True)

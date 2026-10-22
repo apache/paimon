@@ -122,7 +122,7 @@ def native_plan(
         scan = scan.with_chunk_shuffle(str(seed), chunk_size)
     if shard is not None:
         scan = scan.with_shard(*shard)
-    rust_plan = scan.plan_all_files() if all_files else scan.plan()
+    rust_plan = scan.plan_all() if all_files else scan.plan()
     return _from_native_plan(table, rust_plan)
 
 
@@ -170,7 +170,7 @@ class NativeTableScan:
         # Core requests and captures query authorization with its own plan.
         return self._plan()
 
-    def plan_all_files(self):
+    def plan_all(self):
         return self._plan(all_files=True)
 
     def plan_files(self, skip_level0, only_read_real_buckets):

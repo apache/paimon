@@ -143,7 +143,7 @@ class PythonTableDeleteByRowId:
     def _scan_anchor_ranges(self) -> Tuple[int, List[_AnchorRange]]:
         context = self._context
         scan = context.table.new_read_builder().new_scan()
-        plan = scan.plan_all_files()
+        plan = scan.plan_all()
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         anchors = []
 

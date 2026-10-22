@@ -113,14 +113,14 @@ class TableScan:
         from pypaimon.read.read_dispatch import plan_scan
         return plan_scan(self)
 
-    def plan_all_files(self) -> Plan:
-        """Plan matching files including L0 and all data-evolution column files.
+    def plan_all(self) -> Plan:
+        """Plan splits including L0 and all matching data-evolution column files.
 
         Existing filters and limits still apply. Query authorization must be
         unrestricted, as required by writer restore, overwrite and indexing.
         """
-        from pypaimon.read.read_dispatch import plan_all_files
-        return plan_all_files(self)
+        from pypaimon.read.read_dispatch import plan_all
+        return plan_all(self)
 
     def __auth_query(self, all_columns=False):
         request = self._scan_request()
@@ -220,7 +220,7 @@ class TableScan:
         """
         from pypaimon.execution.native.read.plan import NativeTableScan
         execution = NativeTableScan(self)
-        return execution.plan_all_files() if all_files else execution.plan()
+        return execution.plan_all() if all_files else execution.plan()
 
 
 __all__ = [

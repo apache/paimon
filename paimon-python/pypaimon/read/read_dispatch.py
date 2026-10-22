@@ -213,8 +213,8 @@ def plan_files(scanner):
     return entries
 
 
-def plan_all_files(self) -> Plan:
-    """Plan matching files including L0 and all data-evolution column files.
+def plan_all(self) -> Plan:
+    """Plan splits including L0 and all matching data-evolution column files.
 
     Existing filters and limits still apply. Query authorization must be
     unrestricted, as required by writer restore, overwrite and indexing.
@@ -231,7 +231,7 @@ def plan_all_files(self) -> Plan:
     if self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
     from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).plan_all_files()
+    return PythonTableScan(self).plan_all()
 
 
 def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:

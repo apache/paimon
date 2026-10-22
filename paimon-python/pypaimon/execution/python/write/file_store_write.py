@@ -529,7 +529,7 @@ class FileStoreWrite:
         scanner = PythonTableScan(read_builder.with_filter(partition_filter).new_scan())._file_scanner()
         # Sequence restoration reads file metadata, not query results. As in
         # Java's writer scan, include L0 and do not require SELECT or apply row
-        # filters/masks to internal state. Public plan_all_files stays guarded.
+        # filters/masks to internal state. Public plan_all stays guarded.
         scanner.skip_level0 = False
 
         max_seq_numbers = {}

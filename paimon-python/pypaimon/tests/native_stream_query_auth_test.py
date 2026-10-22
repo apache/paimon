@@ -224,7 +224,7 @@ def test_combined_timestamp_events_apply_auth_and_masked_filter_before_limit(sou
             assert reader.to_arrow(plan.splits()).to_pylist() == [{'id': 5}]
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 @pytest.mark.parametrize('window', ['equal', 'future'])
 def test_empty_timestamp_windows_cannot_bypass_authorization(source, method, window):
     _, table, server, _ = source

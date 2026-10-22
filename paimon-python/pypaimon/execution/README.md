@@ -210,7 +210,7 @@ Message conversion happens during preparation; publication uses the selected
 executor's prepared messages. Batch/stream binding details stay in the Native
 adapter, and overwrite details stay in each backend.
 
-Both batch scanners expose `plan(auth_result=None)`, `plan_all_files()` and
+Both batch scanners expose `plan(auth_result=None)`, `plan_all()` and
 `scan_with_stats(auth_result=None)`. Both readers expose `read_rows(splits)` and
 `read_batches(splits, schema, parallelism=None, blob_parallelism=1,
 ordered=False)`. Output materialization and Python parallel-read helpers are

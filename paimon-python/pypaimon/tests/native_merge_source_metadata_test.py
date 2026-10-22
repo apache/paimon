@@ -63,7 +63,7 @@ def _new_table(catalog, name, evolution=True):
 
 def _rows(table, metadata=()):
     builder = table.new_read_builder().with_projection(list(dict.fromkeys(table.field_names + list(metadata))))
-    return builder.new_read().to_arrow(builder.new_scan().plan_all_files().splits()).to_pylist()
+    return builder.new_read().to_arrow(builder.new_scan().plan_all().splits()).to_pylist()
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])

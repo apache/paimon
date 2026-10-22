@@ -41,7 +41,7 @@ def test_bound_read_executors_have_the_same_call_contract(method):
     assert signature(getattr(PythonTableRead, method)) == signature(getattr(NativeTableRead, method))
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 def test_bound_scan_executors_have_the_same_call_contract(method):
     assert signature(getattr(PythonTableScan, method)) == signature(getattr(NativeTableScan, method))
 
@@ -149,13 +149,13 @@ def test_python_bound_all_files_restores_scanner_configuration_on_success_or_fai
     execution = PythonTableScan(SimpleNamespace(_python_file_scanner=scanner, _query_auth_fn=None))
     if failure:
         with pytest.raises(OSError, match='planning failed'):
-            execution.plan_all_files()
+            execution.plan_all()
     else:
-        assert execution.plan_all_files() is expected
+        assert execution.plan_all() is expected
     assert scanner.skip_level0 is True
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 def test_native_bound_scan_uses_live_configuration_without_creating_a_python_scanner(table, method):
     scan = table.new_read_builder().new_scan()
     execution = NativeTableScan(scan)
@@ -166,11 +166,11 @@ def test_native_bound_scan_uses_live_configuration_without_creating_a_python_sca
         result = getattr(execution, method)()
     assert (result[0] if method == 'scan_with_stats' else result).snapshot_id == 9
     assert native.call_args[1]['limit'] == 1
-    assert bool(native.call_args[1].get('all_files')) is (method == 'plan_all_files')
+    assert bool(native.call_args[1].get('all_files')) is (method == 'plan_all')
     assert scan._file_scanner is None
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 def test_native_bound_scan_does_not_turn_preparation_failure_into_an_empty_plan(table, method):
     scan = table.new_read_builder().new_scan()
     execution = NativeTableScan(scan)
