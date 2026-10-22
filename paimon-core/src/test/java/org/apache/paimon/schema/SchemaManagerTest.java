@@ -57,6 +57,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -179,55 +180,35 @@ public class SchemaManagerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"partial-update", "aggregation", "first-row"})
-    public void testCreateTableWithPreserveFieldOnRetractRejectsUnsupportedMergeEngine(
-            String mergeEngine) throws Exception {
+    @CsvSource({
+        "true, partial-update",
+        "true, aggregation",
+        "true, first-row",
+        "false, partial-update",
+        "false, aggregation",
+        "false, first-row"
+    })
+    public void testPreserveFieldOnRetractRejectsUnsupportedMergeEngine(
+            boolean setOnCreate, String mergeEngine) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
-        options.put(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+        if (setOnCreate) {
+            options.put(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
+        }
         Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
-
-        assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(schema)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "'changelog-producer.preserve-field-on-retract' is only supported with 'merge-engine' = 'deduplicate'.");
-        assertThat(retryArtificialException(() -> manager.latest())).isEmpty();
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"partial-update", "aggregation", "first-row"})
-    public void testAlterTableWithPreserveFieldOnRetractRejectsUnsupportedMergeEngine(
-            String mergeEngine) throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
-        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
-        Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
-        TableSchema original = retryArtificialException(() -> manager.createTable(schema));
-
-        assertThatThrownBy(
-                        () ->
-                                retryArtificialException(
-                                        () ->
-                                                manager.commitChanges(
-                                                        SchemaChange.setOption(
-                                                                CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT
-                                                                        .key(),
-                                                                "f2"))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "'changelog-producer.preserve-field-on-retract' is only supported with 'merge-engine' = 'deduplicate'.");
-        TableSchema latest = retryArtificialException(() -> manager.latest()).get();
-        assertThat(latest).isEqualTo(original);
-        assertThat(latest.id()).isEqualTo(original.id());
+        assertPreserveFieldOnRetractRejected(
+                schema,
+                setOnCreate,
+                "f2",
+                "'changelog-producer.preserve-field-on-retract' is only supported with 'merge-engine' = 'deduplicate'.");
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testPreserveFieldOnRetractWithDeduplicateMergeEngine(boolean setOnCreate)
+    public void testPreserveFieldOnRetractWithDefaultMergeEngine(boolean setOnCreate)
             throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MERGE_ENGINE.key(), "deduplicate");
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
         if (setOnCreate) {
             options.put(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), "f2");
@@ -278,6 +259,66 @@ public class SchemaManagerTest {
         retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("f3")));
         assertThat(retryArtificialException(() -> manager.latest()).get().fieldNames())
                 .containsExactly("f0", "f1", "f2");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "true, metadata.b",
+        "true, 'metadata,metadata.b'",
+        "false, metadata.b",
+        "false, 'metadata,metadata.b'"
+    })
+    public void testPreserveFieldOnRetractRejectsNestedPath(boolean setOnCreate, String fields)
+            throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metadata",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "b", DataTypes.INT())))
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.MERGE_ENGINE.key(), "deduplicate")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup")
+                        .option(
+                                CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(),
+                                setOnCreate ? fields : "metadata")
+                        .build();
+        assertPreserveFieldOnRetractRejected(
+                schema,
+                setOnCreate,
+                fields,
+                "Column 'metadata.b' specified in 'changelog-producer.preserve-field-on-retract' can not be found in table schema.");
+    }
+
+    private void assertPreserveFieldOnRetractRejected(
+            Schema schema, boolean setOnCreate, String fields, String message) throws Exception {
+        TableSchema original =
+                setOnCreate ? null : retryArtificialException(() -> manager.createTable(schema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                setOnCreate
+                                                        ? manager.createTable(schema)
+                                                        : manager.commitChanges(
+                                                                SchemaChange.setOption(
+                                                                        CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT
+                                                                                .key(),
+                                                                        fields))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        if (setOnCreate) {
+            assertThat(latest).isEmpty();
+        } else {
+            assertThat(latest).contains(original);
+            assertThat(latest.get().id()).isEqualTo(original.id());
+        }
     }
 
     @ParameterizedTest
