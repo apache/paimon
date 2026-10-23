@@ -28,7 +28,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.execution.native.write.input_routing import (
-    NativeDynamicBucketAssigner, NativeDynamicBucketAssignerRouter, as_record_batch,
+    NativeDynamicBucketAssigner, NativeDynamicBucketAssignerRouter, NativeInputRouter, input_batches,
 )
 from pypaimon.execution.python.write.input_routing import (
     PythonDynamicBucketAssigner, PythonDynamicBucketAssignerRouter,
@@ -39,9 +39,71 @@ from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner, crea
 @pytest.mark.parametrize('row_count', [0, 3])
 def test_arrow_transport_preserves_rows_when_all_columns_are_projected_out(row_count):
     data = pa.table({'id': list(range(row_count))}).select([])
-    batch = as_record_batch(data)
-    assert batch.num_rows == row_count
-    assert batch.num_columns == 0
+    batches = input_batches(data)
+    assert sum(batch.num_rows for batch in batches) == row_count
+    assert all(batch.num_columns == 0 for batch in batches)
+
+
+def test_empty_arrow_transport_preserves_routing_schema_and_metadata():
+    schema = pa.schema([pa.field('id', pa.int64(), nullable=False)], metadata={b'input': b'empty'})
+    data = pa.Table.from_batches([], schema=schema)
+    batches = input_batches(data)
+    assert len(batches) == 1
+    assert batches[0].num_rows == 0
+    assert batches[0].schema.equals(schema, check_metadata=True)
+
+
+@pytest.mark.parametrize('mode', ['dense', 'sparse'])
+def test_empty_arrow_transport_preserves_union_payload_columns(mode):
+    type_ids = pa.array([], type=pa.int8())
+    children = [pa.array([], type=pa.int64()), pa.array([], type=pa.string())]
+    payload = (pa.UnionArray.from_dense(type_ids, pa.array([], type=pa.int32()), children)
+               if mode == 'dense' else pa.UnionArray.from_sparse(type_ids, children))
+    # An ignored payload still travels with the batch; constructing it with
+    # pa.array([], type=union_type) is unsupported by Arrow.
+    data = pa.table({'id': pa.array([], type=pa.int64()), 'payload': payload})
+    batches = input_batches(data)
+    assert len(batches) == 1
+    assert batches[0].num_rows == 0
+    assert batches[0].schema.equals(data.schema, check_metadata=True)
+
+
+@pytest.mark.parametrize('operation', ['fixed', 'dynamic', 'assign'])
+def test_empty_input_is_still_validated_by_the_sdk(tmp_path, operation):
+    table = _table(tmp_path)
+    core = Mock()
+    if operation == 'fixed':
+        execution = NativeInputRouter(table)
+        execution._router = core
+        method = 'route'
+    elif operation == 'dynamic':
+        execution = NativeDynamicBucketAssignerRouter(table, 1, 1)
+        execution._router = core
+        method = 'route'
+    else:
+        execution = NativeDynamicBucketAssigner(table, 1, 1, 0)
+        execution._assigner = core
+        method = 'assign'
+    failure = ValueError('Missing routing column p')
+    getattr(core, method).side_effect = failure
+    schema = pa.schema([('id', pa.int64())], metadata={b'input': b'empty'})
+    data = pa.Table.from_batches([], schema=schema)
+    with pytest.raises(ValueError) as raised:
+        getattr(execution, method)(data)
+    assert raised.value is failure
+    transported = getattr(core, method).call_args.args[0]
+    assert transported.num_rows == 0
+    assert transported.schema.equals(schema, check_metadata=True)
+
+
+def _uncombined_table(batch):
+    chunked = pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)])
+    data = Mock(spec=pa.Table)
+    data.schema = chunked.schema
+    data.num_rows = chunked.num_rows
+    data.to_batches.return_value = chunked.to_batches()
+    data.combine_chunks.return_value = chunked
+    return data
 
 
 def _table(tmp_path, native=True):
@@ -95,7 +157,7 @@ def test_native_dynamic_router_pickle_rebuilds_without_python_hashing(tmp_path, 
     batch = pa.record_batch([[1, 2], ['west', 'west']], names=['id', 'p'])
     expected = pa.record_batch([pa.array([0, 1], type=pa.int32()), pa.array([42, -3], type=pa.int32())],
                                names=['assigner', 'key_hash'])
-    sdk.DynamicBucketAssignerRouter.return_value.route.return_value = expected
+    sdk.DynamicBucketAssignerRouter.return_value.route.side_effect = [expected.slice(0, 1), expected.slice(1)]
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
@@ -109,7 +171,82 @@ def test_native_dynamic_router_pickle_rebuilds_without_python_hashing(tmp_path, 
         assert restored.route(pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)])).equals(expected)
     assert sdk.DynamicBucketAssignerRouter.call_count == 2
     sdk.DynamicBucketAssignerRouter.assert_called_with(native_table.schema.return_value, 2, 2)
-    assert sdk.DynamicBucketAssignerRouter.return_value.route.call_args[0][0].equals(batch)
+    assert [call.args[0].to_pydict() for call in sdk.DynamicBucketAssignerRouter.return_value.route.call_args_list] == [
+        batch.slice(0, 1).to_pydict(), batch.slice(1).to_pydict()]
+
+
+def test_native_dynamic_routing_preserves_all_batches_and_sdk_output_schema(tmp_path, sdk):
+    router = NativeDynamicBucketAssignerRouter(_table(tmp_path), 2, 2)
+    router._router = sdk.DynamicBucketAssignerRouter.return_value
+    schema = pa.schema([
+        pa.field('assigner', pa.int32(), nullable=False),
+        pa.field('key_hash', pa.int32(), nullable=False),
+    ], metadata={b'output': b'routing'})
+    expected = pa.record_batch([[0, 1, 0], [42, -3, 42]], schema=schema)
+    router._router.route.side_effect = [expected.slice(0, 1), expected.slice(1)]
+    data = _uncombined_table(pa.record_batch([[1, 2, 1]], names=['id']))
+    actual = router.route(data)
+    assert actual.equals(expected, check_metadata=True)
+    assert [call.args[0].num_rows for call in router._router.route.call_args_list] == [1, 2]
+    data.combine_chunks.assert_not_called()
+
+
+@pytest.mark.parametrize('precomputed', [False, True])
+def test_native_assignment_keeps_state_and_slices_hashes_across_input_batches(tmp_path, precomputed):
+    assigner = NativeDynamicBucketAssigner(_table(tmp_path), 1, 1, 0)
+    core = assigner._assigner = Mock()
+    core.assign.side_effect = [pa.array([0], type=pa.int32()), pa.array([1, 0], type=pa.int32())]
+    batch = pa.record_batch([['west', 'west', 'west'], [1, 2, 1]], names=['p', 'id'])
+    data = _uncombined_table(batch)
+    hashes = pa.chunked_array([pa.array([42, -3], type=pa.int32()), pa.array([42], type=pa.int32())])
+    actual = assigner.assign(data, hashes if precomputed else None)
+    assert actual.to_pylist() == [0, 1, 0]
+    assert [call.args[0].num_rows for call in core.assign.call_args_list] == [1, 2]
+    actual_hashes = [call.kwargs['key_hashes'] for call in core.assign.call_args_list]
+    if precomputed:
+        assert [values.to_pylist() for values in actual_hashes] == [[42], [-3, 42]]
+    else:
+        assert actual_hashes == [None, None]
+    data.combine_chunks.assert_not_called()
+
+
+@pytest.mark.parametrize('hashes,error', [
+    (pa.chunked_array([pa.array([1], type=pa.int32()), pa.array([2, None], type=pa.int32())]), ValueError),
+    (pa.array([1, 2], type=pa.int32()), ValueError),
+    (pa.array([1, 2, 3, 4], type=pa.int32()), ValueError),
+    (pa.array([1, 2, 3], type=pa.int64()), TypeError),
+    ([1, 2, 3], TypeError),
+])
+def test_native_assignment_validates_all_hashes_before_accepting_any_input(tmp_path, hashes, error):
+    assigner = NativeDynamicBucketAssigner(_table(tmp_path), 1, 1, 0)
+    core = assigner._assigner = Mock()
+    data = _uncombined_table(pa.record_batch([[1, 2, 3]], names=['id']))
+    with pytest.raises(error):
+        assigner.assign(data, hashes)
+    core.assign.assert_not_called()
+
+
+@pytest.mark.parametrize('operation', ['route', 'assign'])
+def test_native_dynamic_later_batch_errors_are_terminal(tmp_path, sdk, operation):
+    if operation == 'route':
+        execution = NativeDynamicBucketAssignerRouter(_table(tmp_path), 1, 1)
+        core = execution._router = sdk.DynamicBucketAssignerRouter.return_value
+        first = pa.record_batch([pa.array([0], type=pa.int32()), pa.array([42], type=pa.int32())],
+                                names=['assigner', 'key_hash'])
+    else:
+        execution = NativeDynamicBucketAssigner(_table(tmp_path), 1, 1, 0)
+        core = execution._assigner = Mock()
+        first = pa.array([0], type=pa.int32())
+    failure = ValueError('later input batch failed')
+    getattr(core, operation).side_effect = [first, failure]
+    data = _uncombined_table(pa.record_batch([[1, 2, 3]], names=['id']))
+    with patch('pypaimon.execution.python.write.input_routing.PythonDynamicBucketAssignerRouter.__init__',
+               side_effect=AssertionError('Python replay')), \
+            patch('pypaimon.execution.python.write.input_routing.PythonDynamicBucketAssigner.__init__',
+                  side_effect=AssertionError('Python replay')):
+        with pytest.raises(ValueError) as raised:
+            getattr(execution, operation)(data)
+    assert raised.value is failure
 
 
 @pytest.mark.parametrize('overwrite', [False, True])

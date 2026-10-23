@@ -76,6 +76,7 @@ def test_native_dynamic_arrow_route_and_assignment_keep_one_restore_snapshot(nat
     _commit(table, {'id': [1], 'value': ['old'], 'p': ['west']})
     snapshot_id = table.snapshot_manager().get_latest_snapshot().id
     batch = pa.record_batch([['west', 'west', 'east'], [2, 1, 2]], names=['p', 'id'])
+    chunked_input = pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)])
     reference = DynamicBucketInputRouter(table.table_schema)
     _, partition_hashes, hashes = reference.extract_hashes_batch(batch)
     reference_assigner = DynamicBucketAssigner(
@@ -87,19 +88,19 @@ def test_native_dynamic_arrow_route_and_assignment_keep_one_restore_snapshot(nat
                          side_effect=AssertionError('Bucket restoration must not request SELECT')) as query:
         router = create_dynamic_bucket_assigner_router(table, 1, 1)
         assert isinstance(router, NativeDynamicBucketAssignerRouter)
-        routed = pickle.loads(pickle.dumps(router)).route(pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)]))
+        routed = pickle.loads(pickle.dumps(router)).route(chunked_input)
         assert routed.schema.names == ['assigner', 'key_hash']
         assert routed.column(0).to_pylist() == [0] * batch.num_rows
         assert routed.column(1).to_pylist() == [value - (1 << 32) if value >= 1 << 31 else value for value in hashes]
         assigner = create_dynamic_bucket_assigner(table, 1, 1, 0, base_snapshot_id=snapshot_id)
         assert isinstance(assigner, NativeDynamicBucketAssigner)
         assert assigner.restore_snapshot_id == snapshot_id
-        assert assigner.assign(batch, routed.column(1)).to_pylist() == expected
-        assert assigner.assign(batch).to_pylist() == expected
+        assert assigner.assign(chunked_input, routed.column(1)).to_pylist() == expected
+        assert assigner.assign(chunked_input).to_pylist() == expected
         # Overwrite ignores existing mappings and exposes an empty restore point.
         overwritten = create_dynamic_bucket_assigner(table, 1, 1, 0, True, snapshot_id)
         assert overwritten.restore_snapshot_id == 0
-        assert overwritten.assign(batch, routed.column(1)).to_pylist() == [0, 1, 0]
+        assert overwritten.assign(chunked_input, routed.column(1)).to_pylist() == [0, 1, 0]
         query.assert_not_called()
     assert table.snapshot_manager().get_latest_snapshot().id == snapshot_id
 

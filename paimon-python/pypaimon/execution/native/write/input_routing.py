@@ -23,15 +23,15 @@ from pypaimon.execution.native.runtime import native_runtime_available
 from pypaimon.execution.native.write.native_commit import create_native_write_table
 
 
-def as_record_batch(data):
+def input_batches(data):
     if isinstance(data, pa.RecordBatch):
-        return data
+        return [data]
     if isinstance(data, pa.Table):
-        batches = data.combine_chunks().to_batches()
-        # Arrow retains a zero-column table's row count on its RecordBatch;
-        # rebuilding it from arrays alone would silently turn it into 0 rows.
-        return batches[0] if batches else pa.RecordBatch.from_arrays(
-            [column.combine_chunks() for column in data.columns], schema=data.schema)
+        # Binary columns can retain multiple chunks even after combine_chunks.
+        # Preserve every batch and its row count, including zero-column input.
+        batches = data.to_batches()
+        return batches if batches else [pa.RecordBatch.from_arrays(
+            [column.combine_chunks() for column in data.columns], schema=data.schema)]
     raise TypeError('Input routing requires a pyarrow Table or RecordBatch')
 
 
@@ -68,7 +68,8 @@ class NativeInputRouter:
     def route(self, data) -> pa.Int32Array:
         if self._router is None:
             self._prepare()
-        return self._router.route(as_record_batch(data))
+        buckets = [self._router.route(batch) for batch in input_batches(data)]
+        return buckets[0] if len(buckets) == 1 else pa.concat_arrays(buckets)
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -107,7 +108,12 @@ class NativeDynamicBucketAssignerRouter:
     def route(self, data) -> pa.RecordBatch:
         if self._router is None:
             self._prepare()
-        return self._router.route(as_record_batch(data))
+        routed = [self._router.route(batch) for batch in input_batches(data)]
+        if len(routed) == 1:
+            return routed[0]
+        return pa.RecordBatch.from_arrays([
+            pa.concat_arrays([batch.column(index) for batch in routed]) for index in range(2)
+        ], schema=routed[0].schema)
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -163,8 +169,22 @@ class NativeDynamicBucketAssigner:
         return self._base_snapshot_id
 
     def assign(self, data, key_hashes=None) -> pa.Int32Array:
-        if self._assigner is None:
-            self._prepare()
+        batches = input_batches(data)
         if isinstance(key_hashes, pa.ChunkedArray):
             key_hashes = key_hashes.combine_chunks()
-        return self._assigner.assign(as_record_batch(data), key_hashes=key_hashes)
+        if key_hashes is not None:
+            if not isinstance(key_hashes, pa.Int32Array):
+                raise TypeError('Dynamic bucket key hashes must be an Int32Array')
+            # Validate the whole input before the stateful assigner sees any
+            # batch, including a null or missing hash in a later chunk.
+            if len(key_hashes) != data.num_rows or key_hashes.null_count:
+                raise ValueError('Dynamic bucket key hashes must be non-null and match the input row count')
+        if self._assigner is None:
+            self._prepare()
+        buckets = []
+        offset = 0
+        for batch in batches:
+            hashes = None if key_hashes is None else key_hashes.slice(offset, batch.num_rows)
+            buckets.append(self._assigner.assign(batch, key_hashes=hashes))
+            offset += batch.num_rows
+        return buckets[0] if len(buckets) == 1 else pa.concat_arrays(buckets)
