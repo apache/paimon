@@ -154,8 +154,8 @@ class _FrameLocator:
 
     def _index_scanner(self, predicate):
         if not self._scanner_initialized:
-            from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
-            self._scanner = DataEvolutionGlobalIndexScanner.create(
+            from pypaimon.globalindex.index_dispatch import create_python_scalar_index_scanner
+            self._scanner = create_python_scalar_index_scanner(
                 self._table,
                 predicate=predicate,
                 snapshot=self._snapshot,

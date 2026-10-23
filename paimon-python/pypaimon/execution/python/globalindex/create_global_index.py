@@ -118,7 +118,7 @@ class PythonGlobalIndexBuilder:
                 splits, unindexed_ranges, index_field, table_read, index_path,
                 DataEvolutionIndexSourceMeta(snapshot.id).serialize() if snapshot else None)
         if execution == "ray":
-            from pypaimon.ray.vector_index_build import build_vector_index
+            from pypaimon.execution.python.globalindex.ray_index_build import build_vector_index
             return build_vector_index(
                 self, splits, unindexed_ranges, index_field, table_read,
                 index_path, concurrency, ray_remote_args)

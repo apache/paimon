@@ -121,6 +121,8 @@ class PackagingTest(unittest.TestCase):
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
         self.assertIn("pypaimon/_version.py", names)
         execution_files = (
+            "pypaimon/common/transform_schema.py",
+            "pypaimon/filesystem/format_dispatch.py",
             "pypaimon/table/source/search_execution.py",
             "pypaimon/ray/search_execution.py",
             "pypaimon/execution/native/read/search_execution.py",
@@ -128,6 +130,7 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/read/search/distributed_vector_search.py",
             "pypaimon/execution/python/read/search/distributed_full_text_search.py",
             "pypaimon/execution/python/map_blob_key_serializer.py",
+            "pypaimon/execution/python/globalindex/ray_index_build.py",
             "pypaimon/execution/python/write/external_path_provider.py",
             "pypaimon/execution/python/read/predicate_json_parser.py",
             "pypaimon/execution/python/read/blob_view_lookup.py",
@@ -143,7 +146,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/utils/temporal_string.py",
             "pypaimon/utils/row_to_string.py",
             "pypaimon/execution/python/casting/__init__.py",
-            "pypaimon/execution/python/casting/data_type_casts.py",
             "pypaimon/execution/python/casting/schema_evolution.py",
             "pypaimon/execution/python/casting/decimal_cast.py",
             "pypaimon/execution/python/casting/temporal_cast.py",

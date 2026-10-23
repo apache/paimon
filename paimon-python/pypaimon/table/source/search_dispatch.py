@@ -77,7 +77,11 @@ def _native_requested(builder):
     return callable(enabled) and enabled()
 
 
-def create_vector_scan(builder, python_factory, batch=False):
+def create_vector_scan(builder, execution, batch=False):
+    def python_factory():
+        from pypaimon.execution.python.read.search.factories import new_vector_scan
+        return new_vector_scan(execution)
+
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_scan
@@ -85,7 +89,11 @@ def create_vector_scan(builder, python_factory, batch=False):
     return python_factory() if native is None else _SearchScan(native, python_factory)
 
 
-def create_vector_read(builder, python_factory, batch=False):
+def create_vector_read(builder, batch=False):
+    def python_factory():
+        from pypaimon.execution.python.read.search.factories import new_batch_vector_read, new_vector_read
+        return new_batch_vector_read(builder) if batch else new_vector_read(builder)
+
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_read
@@ -96,7 +104,11 @@ def create_vector_read(builder, python_factory, batch=False):
     return reader_type(native, python_factory)
 
 
-def create_full_text_scan(builder, python_factory):
+def create_full_text_scan(builder, execution):
+    def python_factory():
+        from pypaimon.execution.python.read.search.factories import new_full_text_scan
+        return new_full_text_scan(execution)
+
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_full_text_scan
@@ -104,7 +116,11 @@ def create_full_text_scan(builder, python_factory):
     return python_factory() if native is None else _SearchScan(native, python_factory)
 
 
-def create_full_text_read(builder, python_factory):
+def create_full_text_read(builder, execution):
+    def python_factory():
+        from pypaimon.execution.python.read.search.factories import new_full_text_read
+        return new_full_text_read(execution)
+
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_full_text_read

@@ -136,12 +136,12 @@ class TableQueryAuthResult:
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:
             return None
-        from pypaimon.execution.python.read.predicate_json_parser import parse_predicate_to_batch_filter
+        from pypaimon.read.read_dispatch import create_python_row_filter
 
         if len(self.filter) == 1:
-            return parse_predicate_to_batch_filter(self.filter[0])
+            return create_python_row_filter(self.filter[0])
         # Java PredicateBuilder.and evaluates entries in their original order.
-        return parse_predicate_to_batch_filter(json.dumps({
+        return create_python_row_filter(json.dumps({
             'kind': 'COMPOUND', 'function': 'AND',
             'children': [json.loads(rule) for rule in self.filter],
         }))

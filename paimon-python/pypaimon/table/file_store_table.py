@@ -489,30 +489,8 @@ class FileStoreTable(Table):
     def create_row_key_extractor(
         self, ignore_existing: bool = False
     ) -> 'RowKeyExtractor':
-        from pypaimon.execution.python.write.row_key_extractor import (
-            DynamicBucketRowKeyExtractor, FixedBucketRowKeyExtractor,
-            PostponeBucketRowKeyExtractor, UnawareBucketRowKeyExtractor)
-
-        bucket_mode = self.bucket_mode()
-        if bucket_mode == BucketMode.HASH_FIXED:
-            return FixedBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.BUCKET_UNAWARE:
-            return UnawareBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.POSTPONE_MODE:
-            return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC:
-            return DynamicBucketRowKeyExtractor(
-                self.table_schema,
-                table=self,
-                ignore_existing=ignore_existing,
-            )
-        elif bucket_mode == BucketMode.CROSS_PARTITION:
-            raise ValueError(
-                "CROSS_PARTITION primary-key writes require a persistent "
-                "global primary-key index, which PyPaimon does not yet support"
-            )
-        else:
-            raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
+        from pypaimon.write.backend_dispatch import create_row_key_extractor
+        return create_row_key_extractor(self, ignore_existing)
 
     def copy(self, options: dict) -> 'FileStoreTable':
         return self._copy(options, resolve_time_travel=True)
