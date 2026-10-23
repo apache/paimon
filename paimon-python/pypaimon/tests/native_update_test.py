@@ -30,6 +30,7 @@ from pypaimon.execution.native.write.native_update import create_native_delete, 
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.read.table_read import TableRead
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.write.backend_dispatch import native_row_id_update_selected
 
 
 pytestmark = pytest.mark.native_plan
@@ -39,7 +40,6 @@ pytestmark = pytest.mark.native_plan
 def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, stream):
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -62,7 +62,8 @@ def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, 
     with patch.object(PythonTableUpdateByRowId, '_load_existing_files_info',
                       side_effect=AssertionError('Python loaded the file index')):
         updater = update.new_update_by_row_id(commit_id) if stream else update.new_update_by_row_id()
-        assert isinstance(updater, NativeTableUpdateByRowId)
+        assert isinstance(updater, TableUpdateByRowId)
+        assert native_row_id_update_selected(updater)
         assert updater.commit_user == builder.commit_user
         assert updater.commit_identifier == commit_id
         assert updater.commit_messages == []
@@ -91,7 +92,6 @@ def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, 
 
 @pytest.mark.parametrize('stream', [False, True])
 def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
-    from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
     from pypaimon.table.row.generic_row import GenericRow
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -133,7 +133,8 @@ def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
     current = read.new_read().to_arrow(read.new_scan().plan().splits())
     selected = current.filter(pa.compute.equal(current['p'], 'a'))
     updater = update.new_update_by_row_id(3) if stream else update.new_update_by_row_id()
-    assert isinstance(updater, NativeTableUpdateByRowId)
+    assert isinstance(updater, TableUpdateByRowId)
+    assert native_row_id_update_selected(updater)
     messages = updater.update_columns(selected.select(['p', '_ROW_ID']), ['p'])
     commit = builder.new_commit()
     commit.commit(messages, 3) if stream else commit.commit(messages)

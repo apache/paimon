@@ -27,8 +27,8 @@ applies the conversion leniently.
 """
 
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataTypeParser,
-                                        MapType, MultisetType, RowType,
-                                        VectorType)
+                                        MapType, MultisetType, PyarrowFieldParser,
+                                        RowType, VectorType)
 
 # ---- Type roots --------------------------------------------------------------
 
@@ -152,6 +152,38 @@ def _build_rules():
 
 _IMPLICIT_RULES, _EXPLICIT_RULES = _build_rules()
 
+# Materialization capabilities are schema contracts, independent of which
+# executor is installed or selected. Keep the existing Arrow leaf conversions
+# and the Java conversions supplied by the readers here, without executing a
+# cast while validating a schema change. Logical admissibility is checked by
+# supports_cast separately; Arrow also has storage casts absent from that spec.
+_NUMERIC_CAST_TARGETS = CHARACTER_STRING | NUMERIC | {BOOLEAN}
+_TEXT_CAST_TARGETS = CHARACTER_STRING | BINARY_STRING | NUMERIC | {
+    BOOLEAN, DATE, BLOB,
+} | TIMESTAMP_FAMILY
+_BINARY_CAST_TARGETS = CHARACTER_STRING | BINARY_STRING | NUMERIC | {BOOLEAN, BLOB}
+_TIMESTAMP_CAST_TARGETS = CHARACTER_STRING | TIMESTAMP_FAMILY | {BIGINT, DATE, TIME}
+_EXECUTABLE_CAST_RULES = {
+    CHAR: _TEXT_CAST_TARGETS,
+    VARCHAR: _TEXT_CAST_TARGETS,
+    BINARY: _BINARY_CAST_TARGETS,
+    VARBINARY: _BINARY_CAST_TARGETS,
+    BLOB: _BINARY_CAST_TARGETS,
+    BOOLEAN: CHARACTER_STRING | INTEGER_NUMERIC | {BOOLEAN, FLOAT, DOUBLE},
+    DECIMAL: CHARACTER_STRING | NUMERIC,
+    TINYINT: _NUMERIC_CAST_TARGETS,
+    SMALLINT: _NUMERIC_CAST_TARGETS,
+    INTEGER: _NUMERIC_CAST_TARGETS | {DATE, TIME, TIMESTAMP},
+    BIGINT: _NUMERIC_CAST_TARGETS | TIMESTAMP_FAMILY,
+    FLOAT: _NUMERIC_CAST_TARGETS,
+    DOUBLE: _NUMERIC_CAST_TARGETS,
+    DATE: CHARACTER_STRING | TIMESTAMP_FAMILY | {DATE, INTEGER},
+    TIME: CHARACTER_STRING | {TIME, INTEGER},
+    TIMESTAMP: _TIMESTAMP_CAST_TARGETS,
+    TIMESTAMP_LTZ: _TIMESTAMP_CAST_TARGETS,
+    VARIANT: {VARIANT},
+}
+
 
 def supports_cast(source_type, target_type, allow_explicit: bool = True) -> bool:
     """Whether ``source_type`` can be cast to ``target_type`` for a column type
@@ -190,7 +222,7 @@ def _equals_ignore_nullable(source_type, target_type) -> bool:
 
 
 def can_execute_cast(source_type, target_type) -> bool:
-    """Whether the Python read path can actually *materialize* a stored
+    """Whether the read path can actually *materialize* a stored
     ``source_type`` value as ``target_type`` when reading a file written before
     the column type change.
 
@@ -222,7 +254,14 @@ def can_execute_cast(source_type, target_type) -> bool:
     # Any other conversion touching a constructed type has no runtime cast.
     if source_root in CONSTRUCTED or target_root in CONSTRUCTED:
         return False
-    # Leaf-to-leaf: probe the same executor used by old-file readers, including
-    # Java conversions with no direct PyArrow kernel, such as INT -> TIMESTAMP.
-    from pypaimon.execution.python.casting.data_type_casts import schema_evolution_cast_supported
-    return schema_evolution_cast_supported(source_type, target_type)
+    # Resolve Arrow type metadata to retain parameter validation and alternate
+    # LTZ spellings. No arrays, cast kernels or execution backends are needed.
+    source_pa = PyarrowFieldParser.from_paimon_type(source_type)
+    target_pa = PyarrowFieldParser.from_paimon_type(target_type)
+    if source_pa == target_pa:
+        return True
+    if source_root in TIMESTAMP_FAMILY:
+        source_root = TIMESTAMP_LTZ if source_pa.tz is not None else TIMESTAMP
+    if target_root in TIMESTAMP_FAMILY:
+        target_root = TIMESTAMP_LTZ if target_pa.tz is not None else TIMESTAMP
+    return target_root in _EXECUTABLE_CAST_RULES.get(source_root, set())

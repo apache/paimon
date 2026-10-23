@@ -74,6 +74,28 @@ def row_id_groups(plan):
     return sorted(groups, key=lambda group: group[0])
 
 
+def validate_live_row_ids(table, info, first_row_id, row_ids):
+    """Reject deleted updates using only the routed snapshot's DV files.
+
+    The writer must still merge physical rows, including tombstones, to preserve
+    row-id offsets. Filtering the writer's original data would shift those offsets.
+    """
+    from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
+
+    split, files = info.first_row_id_index[first_row_id]
+    if split.data_deletion_files is None:
+        return
+    row_ids = row_ids.to_pylist()
+    target_names = {file.file_name for file in files}
+    for file, deletion in zip(split.files, split.data_deletion_files):
+        if deletion is None or file.file_name not in target_names:
+            continue
+        vector = DeletionVector.read(table.file_io, deletion)
+        for row_id in row_ids:
+            if file.row_id_range().contains(row_id) and vector.is_deleted(row_id - file.first_row_id):
+                raise ValueError("Cannot update deleted _ROW_ID {}.".format(row_id))
+
+
 class PythonRowIdPlan:
     """Route captured metadata with no file access or mutation state."""
 

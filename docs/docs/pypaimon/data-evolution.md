@@ -236,6 +236,12 @@ If you already have `_ROW_ID` values, use `delete_by_row_id` to write deletion
 vectors directly. This follow-up deletes the first row from the fresh table
 above; use row IDs obtained from your target table in an existing dataset.
 
+The same method accepts an integer PyArrow `Array` or `ChunkedArray`, so a
+projected `_ROW_ID` column can be submitted without converting it to a Python
+list. NULL IDs and unsigned values outside the signed 64-bit range are rejected;
+duplicate IDs delete the row once. Native execution retains Arrow buffers and
+chunk boundaries through the Rust binding.
+
 ```python
 write_builder = table.new_batch_write_builder()
 table_update = write_builder.new_update()

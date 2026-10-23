@@ -103,9 +103,8 @@ def _row_id_array(row_ids):
     """Accept integer Arrow inputs without silently truncating floating IDs."""
     if not isinstance(row_ids, (pa.Array, pa.ChunkedArray)) or not pa.types.is_integer(row_ids.type):
         raise TypeError('_ROW_ID input must be an integer Arrow array')
-    if row_ids.null_count:
-        raise ValueError('_ROW_ID is null; planner snapshot is stale or row IDs come from a different table.')
-    row_ids = row_ids.cast(pa.int64(), safe=True)
+    from pypaimon.write.row_input import normalize_row_ids
+    row_ids = normalize_row_ids(row_ids)
     return row_ids.combine_chunks() if isinstance(row_ids, pa.ChunkedArray) else row_ids
 
 

@@ -716,10 +716,9 @@ def distributed_update_apply(
         )
         update = captured_table.new_batch_write_builder().new_update()
         worker = update.new_update_by_row_id(_precomputed_files_info=info)
-        from pypaimon.write.backend_dispatch import native_row_id_update_selected
-        if not native_row_id_update_selected(worker):
-            _validate_live_row_ids(
-                captured_table, info, int(group[frid_col][0].as_py()), for_update[row_id_name].to_pylist())
+        from pypaimon.write.backend_dispatch import validate_row_id_update_rows
+        validate_row_id_update_rows(
+            worker, info, int(group[frid_col][0].as_py()), for_update[row_id_name])
         msgs = worker.update_columns(for_update, list(captured_cols))
         return pa.Table.from_pydict({
             "msgs_blob": [pickle.dumps(msgs)],
@@ -900,7 +899,7 @@ def distributed_delete_apply(
                 "merging."
             )
 
-        row_ids = group.column(row_id_name).to_pylist()
+        row_ids = group.column(row_id_name)
         worker = TableDeleteByRowId(
             captured_table,
             _precomputed_anchor_ranges=ray.get(precomputed_info_ref),
@@ -910,7 +909,7 @@ def distributed_delete_apply(
             "msgs_blob": pa.array([pickle.dumps(msgs)], type=pa.binary()),
             "n_deleted": pa.array([len(row_ids)], type=pa.int64()),
             "row_ids_blob": pa.array(
-                [pickle.dumps(row_ids if collect_row_ids else [])],
+                [pickle.dumps(row_ids.to_pylist() if collect_row_ids else [])],
                 type=pa.binary(),
             ),
         })
@@ -1023,24 +1022,3 @@ def distributed_write_collect_msgs(
         write_kwargs["concurrency"] = concurrency
     insert_ds.write_datasink(sink, **write_kwargs)
     return sink.collected
-
-
-def _validate_live_row_ids(table, info, first_row_id, row_ids):
-    """Reject deleted updates using only the routed snapshot's DV files.
-
-    The writer must still merge physical rows, including tombstones, to preserve
-    row-id offsets. Filtering the writer's original data would shift those offsets.
-    """
-    from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
-
-    split, files = info.first_row_id_index[first_row_id]
-    if split.data_deletion_files is None:
-        return
-    target_names = {file.file_name for file in files}
-    for file, deletion in zip(split.files, split.data_deletion_files):
-        if deletion is None or file.file_name not in target_names:
-            continue
-        vector = DeletionVector.read(table.file_io, deletion)
-        for row_id in row_ids:
-            if file.row_id_range().contains(row_id) and vector.is_deleted(row_id - file.first_row_id):
-                raise ValueError("Cannot update deleted _ROW_ID {}.".format(row_id))

@@ -459,6 +459,15 @@ def native_row_id_update_selected(worker):
     return isinstance(execution, NativeTableUpdateByRowId)
 
 
+def validate_row_id_update_rows(worker, captured_plan, first_row_id, row_ids):
+    """Validate liveness in the selected executor before positional rewriting."""
+    if native_row_id_update_selected(worker):
+        # Core validates the captured anchor's DV before staging any output.
+        return
+    from pypaimon.execution.python.write.row_id_plan import validate_live_row_ids
+    validate_live_row_ids(worker.table, captured_plan, first_row_id, row_ids)
+
+
 def python_commit(owner):
     """Create Python commit resources only after that backend is selected."""
     if owner._python_commit is None:
@@ -554,3 +563,70 @@ def close_table_commit(owner):
                     callback.close()
                 except Exception:
                     pass
+
+
+def create_row_key_extractor(table, ignore_existing=False):
+    """Construct the public per-row extractor through the Python write boundary."""
+    from pypaimon.table.bucket_mode import BucketMode
+    from pypaimon.execution.python.write.row_key_extractor import (
+        DynamicBucketRowKeyExtractor, FixedBucketRowKeyExtractor,
+        PostponeBucketRowKeyExtractor, UnawareBucketRowKeyExtractor,
+    )
+
+    bucket_mode = table.bucket_mode()
+    if bucket_mode == BucketMode.HASH_FIXED:
+        return FixedBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.BUCKET_UNAWARE:
+        return UnawareBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.POSTPONE_MODE:
+        return PostponeBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.HASH_DYNAMIC:
+        return DynamicBucketRowKeyExtractor(
+            table.table_schema, table=table, ignore_existing=ignore_existing)
+    elif bucket_mode == BucketMode.CROSS_PARTITION:
+        raise ValueError(
+            "CROSS_PARTITION primary-key writes require a persistent "
+            "global primary-key index, which PyPaimon does not yet support"
+        )
+    raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
+
+
+def filter_merge_condition_batch(batch, condition, pre_rewritten=False):
+    """Execute the public Python condition helper without selecting a table writer."""
+    from pypaimon.execution.python.write.merge_condition import filter_batch
+    return filter_batch(batch, condition, pre_rewritten)
+
+
+def apply_merge_condition(batch, rewritten, empty_schema):
+    from pypaimon.execution.python.write.merge_condition import apply_condition
+    return apply_condition(batch, rewritten, empty_schema)
+
+
+def create_external_path_provider(strategy, paths, relative_bucket_path, weights):
+    from pypaimon.execution.python.write.external_path_provider import ExternalPathProvider
+    return ExternalPathProvider.create(strategy, paths, relative_bucket_path, weights)
+
+
+def execute_row_id_conflict_check(table, messages, latest_snapshot_id, check_from_snapshot):
+    if table.options.native_commit_enabled():
+        from pypaimon.execution.native.write.native_commit import prepare_native_row_id_conflict_check
+        # Unsupported configurations return None explicitly. Permission or
+        # transport failures must never restart the check in another backend.
+        native = prepare_native_row_id_conflict_check(table, messages)
+        if native is not None:
+            commit, native_messages = native
+            failure = None
+            try:
+                commit.check_row_id_conflicts(native_messages, latest_snapshot_id, check_from_snapshot)
+            except BaseException as error:
+                failure = error
+                raise
+            finally:
+                try:
+                    commit.close()
+                except BaseException:
+                    if failure is None:
+                        raise
+            return
+    from pypaimon.execution.python.write.commit.row_id_conflict import check_row_id_conflicts as check
+    check(table, messages, latest_snapshot_id, check_from_snapshot)

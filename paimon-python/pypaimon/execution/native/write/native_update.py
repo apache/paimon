@@ -33,7 +33,7 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.execution.native.write.native_commit import (
     create_native_write_table, from_native_commit_messages,
 )
-from pypaimon.write.row_input import RowIdUpdateInputMixin
+from pypaimon.write.row_input import RowIdUpdateInputMixin, normalize_row_ids
 from pypaimon.write.row_utils import _contains_blob_value, value_for_arrow
 
 
@@ -506,11 +506,7 @@ class NativeBatchTableUpdate:
         return from_native_commit_messages(self.table, messages)
 
     def delete_by_row_id(self, row_ids):
-        ids = []
-        for row_id in row_ids:
-            if row_id is None:
-                raise ValueError('_ROW_ID value must not be null.')
-            ids.append(int(row_id))
+        ids = normalize_row_ids(row_ids)
         try:
             messages = self.writer.delete_by_row_id(ids)
         except ValueError as error:

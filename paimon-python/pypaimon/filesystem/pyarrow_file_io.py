@@ -1003,8 +1003,8 @@ class PyArrowFileIO(FileIO):
             import vortex
             from vortex import store
 
-            from pypaimon.execution.python.read.reader.vortex_utils import (to_vortex_specified)
-            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
+            from pypaimon.filesystem.format_dispatch import vortex_location
+            file_path_for_vortex, store_kwargs = vortex_location(self, path)
 
             if store_kwargs:
                 vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
@@ -1018,13 +1018,13 @@ class PyArrowFileIO(FileIO):
 
     def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
         try:
-            from pypaimon.execution.python.write.writer.format_row_writer import FormatRowWriter
+            from pypaimon.filesystem.format_dispatch import new_row_writer
 
             if fields is None:
                 fields = PyarrowFieldParser.to_paimon_schema(data.schema)
 
             with self.new_output_stream(path) as output_stream:
-                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+                writer = new_row_writer(output_stream, fields, zstd_level=zstd_level)
                 writer.write_table(data)
                 writer.close()
         except Exception as e:
@@ -1032,7 +1032,7 @@ class PyArrowFileIO(FileIO):
             raise RuntimeError(f"Failed to write row file {path}: {e}") from e
 
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
-        from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
+        from pypaimon.filesystem.format_dispatch import new_blob_writer
 
         try:
             if data.num_columns != 1:
@@ -1047,7 +1047,7 @@ class PyArrowFileIO(FileIO):
             num_rows = data.num_rows
             field_name = fields[0].name
             with self.new_output_stream(path) as output_stream:
-                writer = BlobFormatWriter(output_stream)
+                writer = new_blob_writer(output_stream)
                 for i in range(num_rows):
                     writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
                 writer.close()

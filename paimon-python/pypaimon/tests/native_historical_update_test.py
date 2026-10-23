@@ -30,7 +30,8 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.execution.native.write.native_update import NativeShardTableUpdator
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from pypaimon.write.backend_dispatch import native_row_id_update_selected
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -91,7 +92,7 @@ def _update(table, operation, stream, native):
     update = builder.new_update().with_update_type(['value'])
     kwargs = dict(commit_identifier=37) if stream else {}
     changed = pa.table({'_ROW_ID': [0], 'value': [11]})
-    guard = patch.object(TableUpdateByRowId, 'update_columns',
+    guard = patch.object(PythonTableUpdateByRowId, 'update_columns',
                          side_effect=AssertionError('Python historical update fallback')) if native else ExitStack()
     with guard:
         if operation == 'row_id':
@@ -100,6 +101,7 @@ def _update(table, operation, stream, native):
             return update.update_by_arrow_batches_with_row_id(iter([changed]), **kwargs)
         if operation == 'incremental':
             updater = update.new_update_by_row_id(**kwargs)
+            assert native_row_id_update_selected(updater) == native
             return updater.update_columns(changed, ['value'])
         if operation == 'predicate':
             predicate = table.new_read_builder().new_predicate_builder().equal('id', 1)

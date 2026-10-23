@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_input import RowIdInput
 from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
@@ -124,7 +125,7 @@ class TableUpdate:
         from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations(self)._delete_by_predicate(predicate, commit_identifier)
 
-    def _delete_by_row_id(self, row_ids: Sequence[int], commit_identifier: int) -> List[CommitMessage]:
+    def _delete_by_row_id(self, row_ids: RowIdInput, commit_identifier: int) -> List[CommitMessage]:
         from pypaimon.write.update_dispatch import TableUpdateOperations
         return TableUpdateOperations(self)._delete_by_row_id(row_ids, commit_identifier)
 
@@ -194,12 +195,12 @@ class BatchTableUpdate(TableUpdate):
         """Delete rows matching ``predicate`` using deletion vectors."""
         return self._delete_by_predicate(predicate, BATCH_COMMIT_IDENTIFIER)
 
-    def delete_by_row_id(self, row_ids: Sequence[int]) -> List[CommitMessage]:
-        """Delete rows by ``_ROW_ID`` using deletion vectors."""
+    def delete_by_row_id(self, row_ids: RowIdInput) -> List[CommitMessage]:
+        """Delete sequence or integer Arrow ``_ROW_ID`` values using deletion vectors."""
         return self._delete_by_row_id(row_ids, BATCH_COMMIT_IDENTIFIER)
 
     def _delete_by_row_id(
-            self, row_ids: Sequence[int], commit_identifier: int
+            self, row_ids: RowIdInput, commit_identifier: int
     ) -> List[CommitMessage]:
         return super()._delete_by_row_id(row_ids, commit_identifier)
 
@@ -293,7 +294,7 @@ class StreamTableUpdate(TableUpdate):
 
     def delete_by_row_id(
             self,
-            row_ids: Sequence[int],
+            row_ids: RowIdInput,
             commit_identifier: int,
     ) -> List[CommitMessage]:
         """Delete rows by ``_ROW_ID`` using deletion vectors,

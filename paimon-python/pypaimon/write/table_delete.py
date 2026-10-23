@@ -15,9 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional
 
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_input import RowIdInput, normalize_row_ids
 
 if TYPE_CHECKING:
     from pypaimon.execution.python.write.table_delete import _AnchorRangesInfo
@@ -40,8 +41,9 @@ class TableDeleteByRowId:
         owner._execution = create_python_row_id_delete(table, _precomputed_anchor_ranges)
         return owner
 
-    def delete(self, row_ids: Sequence[int]) -> List[CommitMessage]:
-        return self._execution.delete(row_ids)
+    def delete(self, row_ids: RowIdInput) -> List[CommitMessage]:
+        """Delete sequence or integer Arrow IDs; duplicate IDs are idempotent."""
+        return self._execution.delete(normalize_row_ids(row_ids))
 
     def _snapshot_anchor_ranges(self):
         # Ray's metadata coordinator selects _from_python explicitly. Native

@@ -186,6 +186,9 @@ def test_ray_callbacks_route_read_update_and_delete_with_captured_core_plans(tmp
         if native:
             guards.enter_context(patch.object(PythonRowIdPlan, '_positions',
                                               side_effect=AssertionError('Python row-ID routing')))
+            guards.enter_context(patch(
+                'pypaimon.execution.python.write.row_id_plan.validate_live_row_ids',
+                side_effect=AssertionError('Python deletion-vector validation')))
         source = _dataset(pa.table({'_ROW_ID': pa.array([3, 0, 3], type=pa.int64())}))
         read = distributed_read_by_row_id(source, table, ['id', 'value'], num_partitions=2)
         rows = pa.concat_tables(list(read.iter_batches())).sort_by('id')
@@ -214,3 +217,55 @@ def test_ray_callbacks_route_read_update_and_delete_with_captured_core_plans(tmp
         read = distributed_read_by_row_id(source, table, ['id', 'value'], num_partitions=2)
         rows = pa.concat_tables(list(read.iter_batches())).sort_by('id')
         assert rows.to_pydict() == {'id': [1, 4], 'value': [8, 9], '_ROW_ID': [0, 3]}
+
+
+@pytest.mark.parametrize('native', _ENGINES)
+@pytest.mark.parametrize('collect_row_ids', [False, True])
+@pytest.mark.parametrize('selected_ids', [[], [0, 3]])
+def test_ray_delete_transports_arrow_ids_and_collects_only_requested_actions(
+        tmp_path, native, collect_row_ids, selected_ids, monkeypatch):
+    from pypaimon.ray.data_evolution_merge_join import distributed_delete_apply
+
+    table = _table(tmp_path)
+    _append(table, [1, 2])
+    _append(table, [3, 4])
+    table = table.copy({'write.native.enabled': str(native).lower()})
+    snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+    scheduler = SimpleNamespace(
+        put=lambda value: pickle.loads(pickle.dumps(value)), get=lambda value: value)
+    monkeypatch.setitem(sys.modules, 'ray', scheduler)
+    source = _dataset(pa.table({'_ROW_ID': pa.array(selected_ids, type=pa.int64())}))
+    delete = TableDeleteByRowId.delete
+    received = []
+
+    def delete_arrow(worker, row_ids):
+        assert isinstance(row_ids, (pa.Array, pa.ChunkedArray))
+        assert row_ids.type == pa.int64()
+        received.append(row_ids)
+        return delete(worker, row_ids)
+
+    with patch.object(TableDeleteByRowId, 'delete', delete_arrow):
+        messages, count, actions = distributed_delete_apply(
+            source, table, num_partitions=2, collect_row_ids=collect_row_ids)
+    assert [ids.to_pylist() for ids in received] == ([selected_ids] if selected_ids else [])
+    assert count == len(selected_ids)
+    assert actions == (selected_ids if collect_row_ids else [])
+    assert all(message.check_from_snapshot == snapshot_id for message in messages)
+    table.new_batch_write_builder().new_commit().commit(messages)
+    read = table.new_read_builder()
+    rows = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
+    assert rows['id'].to_pylist() == ([2, 3] if selected_ids else [1, 2, 3, 4])
+
+
+def test_ray_delete_rejects_duplicate_ids_before_writing(tmp_path, monkeypatch):
+    from pypaimon.ray.data_evolution_merge_join import distributed_delete_apply
+
+    table = _table(tmp_path)
+    _append(table, [1, 2])
+    scheduler = SimpleNamespace(
+        put=lambda value: pickle.loads(pickle.dumps(value)), get=lambda value: value)
+    monkeypatch.setitem(sys.modules, 'ray', scheduler)
+    source = _dataset(pa.table({'_ROW_ID': pa.array([0, 0], type=pa.int64())}))
+    with patch.object(TableDeleteByRowId, 'delete', side_effect=AssertionError('delete before validation')):
+        with pytest.raises(ValueError, match='multiple source rows'):
+            distributed_delete_apply(source, table, num_partitions=2)

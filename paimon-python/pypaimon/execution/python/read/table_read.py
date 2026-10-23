@@ -440,7 +440,8 @@ class PythonTableRead:
             defer_blob_resolution,
         )
         sr._blob_parallelism = blob_parallelism
-        sr._parquet_row_group_cache = read._parquet_row_group_cache
+        from pypaimon.read.read_dispatch import python_row_group_cache
+        sr._parquet_row_group_cache = python_row_group_cache(read._parquet_row_group_cache)
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,

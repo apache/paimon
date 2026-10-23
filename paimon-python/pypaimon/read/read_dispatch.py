@@ -18,6 +18,7 @@
 """Preparation selection for reading and planning; execution is never replayed."""
 
 import logging
+import threading
 from typing import Iterator, List, Optional, Tuple
 
 import pyarrow
@@ -26,6 +27,37 @@ from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.read.scan_stats import ScanStats
+
+
+class _ParquetRowGroupCacheRequest:
+    """Share cache configuration until a Python reader needs decoded rows."""
+
+    def __init__(self, max_size):
+        self.max_size = max_size
+        self._cache = None
+        self._lock = threading.Lock()
+
+    def __getstate__(self):
+        # Decoded batches and locks belong to the process that reads them.
+        return {'max_size': self.max_size}
+
+    def __setstate__(self, state):
+        self.__init__(state['max_size'])
+
+
+def python_row_group_cache(request):
+    if not isinstance(request, _ParquetRowGroupCacheRequest):
+        return request
+    with request._lock:
+        if request._cache is None:
+            from pypaimon.execution.python.read.reader.format_pyarrow_reader import _DecodedRowGroupCache
+            request._cache = _DecodedRowGroupCache(request.max_size)
+        return request._cache
+
+
+def create_python_row_filter(rule_json):
+    from pypaimon.execution.python.read.predicate_json_parser import parse_predicate_to_batch_filter
+    return parse_predicate_to_batch_filter(rule_json)
 
 
 def validate_read_backend(read):

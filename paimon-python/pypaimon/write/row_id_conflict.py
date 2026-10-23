@@ -108,25 +108,5 @@ def check_row_id_conflicts(table, messages, latest_snapshot_id, check_from_snaps
     if (not baselines or invalid_baseline or min(baselines) != check_from_snapshot or missing_baseline):
         raise ValueError('Row-ID conflict check baseline must match the commit messages')
     _authorize_update(table)
-    if table.options.native_commit_enabled():
-        from pypaimon.execution.native.write.native_commit import prepare_native_row_id_conflict_check
-        # Unsupported configurations return None explicitly. Permission or
-        # transport failures must never restart the check in another backend.
-        native = prepare_native_row_id_conflict_check(table, messages)
-        if native is not None:
-            commit, native_messages = native
-            failure = None
-            try:
-                commit.check_row_id_conflicts(native_messages, latest_snapshot_id, check_from_snapshot)
-            except BaseException as error:
-                failure = error
-                raise
-            finally:
-                try:
-                    commit.close()
-                except BaseException:
-                    if failure is None:
-                        raise
-            return
-    from pypaimon.execution.python.write.commit.row_id_conflict import check_row_id_conflicts as check
-    check(table, messages, latest_snapshot_id, check_from_snapshot)
+    from pypaimon.write.backend_dispatch import execute_row_id_conflict_check
+    execute_row_id_conflict_check(table, messages, latest_snapshot_id, check_from_snapshot)
