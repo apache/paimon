@@ -438,19 +438,16 @@ def make_fixed_bucket_udf(table: FileStoreTable):
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.input_routing import FixedBucketInputRouter
+    from pypaimon.write.backend_dispatch import create_input_router
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
-    extractor = FixedBucketInputRouter(table.table_schema)
+    router = create_input_router(table)
 
     @daft.func.batch(return_dtype=DataType.int32())
     def _fixed_bucket(*columns) -> Series:
         arrow_table = _series_to_arrow_table(columns, schema)
-        buckets = []
-        for batch in arrow_table.to_batches():
-            _, batch_buckets = extractor.extract_partition_bucket_batch(batch)
-            buckets.extend(batch_buckets)
-        return Series.from_arrow(pa.array(buckets, type=pa.int32()))
+        buckets = [router.route(batch) for batch in arrow_table.to_batches()]
+        return Series.from_arrow(pa.concat_arrays(buckets) if buckets else pa.array([], type=pa.int32()))
 
     return _fixed_bucket
 
@@ -466,12 +463,11 @@ def make_dynamic_routing_udf(
     import daft
     from daft import DataType, Series
 
-    from pypaimon.index.dynamic_bucket import compute_assigner, to_signed_int32
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.input_routing import DynamicBucketInputRouter
+    from pypaimon.write.backend_dispatch import create_dynamic_bucket_router
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
-    extractor = DynamicBucketInputRouter(table.table_schema)
+    router = create_dynamic_bucket_router(table, num_channels, num_assigners)
     return_fields = {
         assigner_column: DataType.int32(),
         key_hash_column: DataType.int32(),
@@ -486,25 +482,14 @@ def make_dynamic_routing_udf(
         assigners = []
         key_hashes = []
         for batch in arrow_table.to_batches():
-            _, partition_hashes, batch_key_hashes = (
-                extractor.extract_hashes_batch(batch)
-            )
-            assigners.extend([
-                compute_assigner(
-                    partition_hash, key_hash, num_channels, num_assigners
-                )
-                for partition_hash, key_hash in zip(
-                    partition_hashes, batch_key_hashes
-                )
-            ])
-            key_hashes.extend(
-                to_signed_int32(value) for value in batch_key_hashes
-            )
+            routed = router.route(batch)
+            assigners.append(routed.column(0))
+            key_hashes.append(routed.column(1))
         return Series.from_arrow(
             pa.StructArray.from_arrays(
                 [
-                    pa.array(assigners, type=pa.int32()),
-                    pa.array(key_hashes, type=pa.int32()),
+                    pa.concat_arrays(assigners) if assigners else pa.array([], type=pa.int32()),
+                    pa.concat_arrays(key_hashes) if key_hashes else pa.array([], type=pa.int32()),
                 ],
                 names=[assigner_column, key_hash_column],
             )
@@ -528,7 +513,7 @@ def make_dynamic_bucket_assignment_udf(
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.input_routing import DynamicBucketInputRouter
+    from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner
 
     catalog_options = _extract_catalog_options(table)
     table_identifier = _extract_identifier(table)
@@ -556,9 +541,10 @@ def make_dynamic_bucket_assignment_udf(
         unnest=True,
     )
     def _assign_dynamic_bucket(*columns) -> Series:
-        assigner_values = columns[data_column_count].to_pylist()
-        key_hash_values = columns[data_column_count + 1].to_pylist()
-        if not assigner_values:
+        import pyarrow.compute as pc
+
+        assigner_values = columns[data_column_count].to_arrow()
+        if len(assigner_values) == 0:
             return Series.from_arrow(
                 pa.array([], type=pa.struct([
                     pa.field(field.name, field.type) for field in output_fields
@@ -567,8 +553,8 @@ def make_dynamic_bucket_assignment_udf(
                     pa.field(base_snapshot_column, pa.int64()),
                 ]))
             )
-        assign_id = assigner_values[0]
-        if any(value != assign_id for value in assigner_values):
+        assign_id = assigner_values[0].as_py()
+        if assigner_values.null_count or pc.count_distinct(assigner_values).as_py() != 1:
             raise RuntimeError(
                 "A dynamic-bucket group contained multiple assigners"
             )
@@ -582,36 +568,17 @@ def make_dynamic_bucket_assignment_udf(
             table_path,
             schema_token,
         )
-        from pypaimon.index.dynamic_bucket import HashBucketAssigner, resolve_bucket_snapshot
-
-        router = DynamicBucketInputRouter(worker_table.table_schema)
-        snapshot = resolve_bucket_snapshot(worker_table, base_snapshot_id)
-        options = worker_table.options
-        assigner = HashBucketAssigner(
-            worker_table,
-            num_channels=num_channels,
-            num_assigners=num_assigners,
-            assign_id=assign_id,
-            ignore_existing=ignore_existing,
-            target_bucket_row_number=options.dynamic_bucket_target_row_num(),
-            max_buckets_num=options.dynamic_bucket_max_buckets(),
-            snapshot=snapshot,
-        )
-        buckets = []
-        offset = 0
-        for batch in arrow_table.to_batches():
-            batch_hashes = key_hash_values[offset:offset + batch.num_rows]
-            partitions, partition_hashes = router.extract_partition_hashes_batch(batch)
-            buckets.extend(bucket for bucket, _ in assigner.assign_batch(
-                partitions, partition_hashes, batch_hashes))
-            offset += batch.num_rows
+        assigner = create_dynamic_bucket_assigner(
+            worker_table, num_channels, num_assigners, assign_id,
+            ignore_existing=ignore_existing, base_snapshot_id=base_snapshot_id)
+        buckets = assigner.assign(arrow_table, key_hashes=columns[data_column_count + 1].to_arrow())
         arrays = [
             arrow_table.column(field.name).combine_chunks()
             for field in output_fields
         ]
-        arrays.append(pa.array(buckets, type=pa.int32()))
+        arrays.append(buckets)
         arrays.append(pa.array(
-            [snapshot.id if snapshot is not None else 0] * arrow_table.num_rows,
+            [assigner.restore_snapshot_id] * arrow_table.num_rows,
             type=pa.int64(),
         ))
         return Series.from_arrow(

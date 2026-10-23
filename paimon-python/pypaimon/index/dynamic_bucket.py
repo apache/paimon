@@ -83,7 +83,7 @@ def compute_assigner(
         raise ValueError("num_channels and num_assigners must be positive")
     start = abs(_java_remainder(to_signed_int32(partition_hash), num_channels))
     assigner = abs(_java_remainder(to_signed_int32(key_hash), num_assigners))
-    return (start + assigner) % num_channels
+    return _java_remainder(to_signed_int32(start + assigner), num_channels)
 
 
 def is_my_bucket(bucket: int, num_assigners: int, assign_id: int) -> bool:
@@ -141,6 +141,7 @@ class _PartitionIndex:
         self.total_bucket_set = set(bucket_information)
         self.total_bucket_list = list(bucket_information)
         self.target_bucket_row_number = target_bucket_row_number
+        self._bucket_upper_bound_reached = False
 
     def assign(
         self,
@@ -174,7 +175,9 @@ class _PartitionIndex:
         global_max_bucket_id = (
             MAX_DYNAMIC_BUCKETS if max_buckets_num == -1 else max_buckets_num
         ) - 1
-        if not self.total_bucket_set or max_bucket_id < global_max_bucket_id:
+        # Java's occupancy and bucket limit are partition-local. A larger
+        # bucket restored from another partition cannot hide a free local ID.
+        if not self._bucket_upper_bound_reached:
             for bucket in range(global_max_bucket_id + 1):
                 if bucket_filter(bucket) and bucket not in self.total_bucket_set:
                     self.non_full_bucket_information[bucket] = 1
@@ -187,6 +190,9 @@ class _PartitionIndex:
                     "No dynamic bucket id remains below Java Short.MAX_VALUE. "
                     "Increase dynamic-bucket.target-row-num."
                 )
+            # The assigner's ownership and limit are fixed for this partition,
+            # so Java remembers exhaustion and reuses an owned bucket directly.
+            self._bucket_upper_bound_reached = True
 
         if not self.total_bucket_list:
             raise RuntimeError(

@@ -116,41 +116,48 @@ def _seed_snapshot(table):
 
 
 @pytest.mark.parametrize('ignore_existing', [False, True])
-def test_daft_dynamic_assignment_restores_pinned_native_metadata_without_python_executor(tmp_path, ignore_existing):
+def test_daft_dynamic_assignment_dispatches_pinned_snapshot_and_arrow_hashes(tmp_path, ignore_existing):
     daft = pytest.importorskip('daft')
     from pypaimon.daft.daft_datasink import make_dynamic_bucket_assignment_udf
 
     table = _table(tmp_path, '-1')
-    snapshot, plan = _seed_snapshot(table)
+    snapshot, _ = _seed_snapshot(table)
     rows = {'id': [2, 1], 'value': ['other', 'new'], 'p': ['p', 'p']}
     router = DynamicBucketInputRouter(table.table_schema)
     _, _, hashes = router.extract_hashes_batch(pa.table(rows).to_batches()[0])
     rows.update(assigner=[0, 0], hash=hashes)
+    execution = Mock()
+    execution.restore_snapshot_id = 0 if ignore_existing else snapshot.id
+    execution.assign.return_value = pa.array([0, 1] if ignore_existing else [1, 0], type=pa.int32())
     with ExitStack() as stack:
         for target in [
             'execution.python.write.row_key_extractor.DynamicBucketRowKeyExtractor.__init__',
             'execution.python.write.row_key_extractor.SimpleHashBucketAssigner.__init__',
             'execution.python.read.scanner.file_scanner.FileScanner.__init__',
             'execution.python.write.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
+            'write.input_routing.DynamicBucketInputRouter.__init__',
+            'index.dynamic_bucket.HashBucketAssigner.__init__',
         ]:
             stack.enter_context(patch('pypaimon.' + target, side_effect=AssertionError(target)))
         stack.enter_context(patch('pypaimon.daft.daft_datasink._load_worker_table', return_value=table))
+        factory = stack.enter_context(patch(
+            'pypaimon.write.backend_dispatch.create_dynamic_bucket_assigner', return_value=execution))
         native_plan = stack.enter_context(patch(
-            'pypaimon.execution.native.read.plan.native_plan', return_value=plan))
+            'pypaimon.execution.native.read.plan.native_plan', side_effect=AssertionError('Read authorization')))
         udf = make_dynamic_bucket_assignment_udf(
             table, 1, 1, 'bucket', 'hash', 'base_snapshot',
             ignore_existing=ignore_existing, base_snapshot_id=snapshot.id)
-        result = daft.from_pydict(rows).select(udf(*[daft.col(name) for name in rows])).to_pydict()
+        # Match the Int32 transport emitted by the first routing stage.
+        frame = pa.table(rows).set_column(4, 'hash', pa.array(hashes, type=pa.int32()))
+        result = daft.from_arrow(frame).select(udf(*[daft.col(name) for name in rows])).to_pydict()
     assert result['bucket'] == ([0, 1] if ignore_existing else [1, 0])
-    assert result['base_snapshot'] == [snapshot.id, snapshot.id]
-    if ignore_existing:
-        native_plan.assert_not_called()
-    else:
-        native_plan.assert_called_once()
-        assert native_plan.call_args[0][0].options.scan_snapshot_id() == snapshot.id
-        assert native_plan.call_args[1]['all_files'] is True
-        predicate = native_plan.call_args[1]['predicate']
-        assert predicate.field == 'p' and predicate.literals == ['p']
+    assert result['base_snapshot'] == [0 if ignore_existing else snapshot.id] * 2
+    native_plan.assert_not_called()
+    factory.assert_called_once_with(
+        table, 1, 1, 0, ignore_existing=ignore_existing, base_snapshot_id=snapshot.id)
+    transported = execution.assign.call_args[0][0]
+    assert transported.to_pydict() == {key: rows[key] for key in ('id', 'value', 'p')}
+    assert execution.assign.call_args[1]['key_hashes'].equals(pa.array(hashes, type=pa.int32()))
 
 
 def test_native_dynamic_metadata_preserves_missing_hash_index_validation(tmp_path):
