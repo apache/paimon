@@ -46,6 +46,8 @@ Missing or empty stats create no stats table. The frame table's
 pip install 'pypaimon[lerobot]'
 ```
 
+Python 3.10–3.11 uses LeRobot 0.4.x; Python 3.12+ uses LeRobot 0.6.x.
+
 ```python
 conn.load_from_lerobot(
     "robot_data",

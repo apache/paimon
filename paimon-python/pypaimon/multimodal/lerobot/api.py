@@ -43,6 +43,7 @@ from pypaimon.multimodal.lerobot.schema import (
 from pypaimon.multimodal.lerobot.source import (
     _close_quietly,
     _import_lerobot_dataset,
+    _info_dict,
     _load_hub_info,
     _open_resolved_dataset,
     _resolved_source,
@@ -122,15 +123,16 @@ def load_from_lerobot(
             download_videos=bool(video_fields),
         )
         try:
-            info = dict(dataset.meta.info)
+            info = _info_dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
             _validated_counts(info, resolved_source.path)
             _validate_v3_required_features(info)
             video_fields = _video_feature_names(info)
 
             lerobot_schema = _schema_from_info(info)
+            # Preserve source extensions omitted by LeRobot DatasetInfo.to_dict().
             metadata = _load_dataset_metadata(
-                dataset, info, resolved_source)
+                dataset, local_info, resolved_source)
             _import_dataset(
                 connection,
                 table_name,

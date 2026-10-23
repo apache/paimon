@@ -3500,7 +3500,7 @@ class _FailingCloseDataset:
 
 @unittest.skipUnless(
     sys.version_info >= (3, 10) and LeRobotDataset is not None,
-    "LeRobot 0.4.x requires Python 3.10+ and the lerobot extra",
+    "LeRobot requires Python 3.10+ and the lerobot extra",
 )
 class LeRobotImportTest(unittest.TestCase):
 
@@ -3582,6 +3582,70 @@ class LeRobotImportTest(unittest.TestCase):
                 })
             dataset.save_episode()
         dataset.finalize()
+
+    def test_hub_metadata_accepts_installed_lerobot_info(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+        from pypaimon.multimodal.lerobot.source import _load_hub_info
+
+        metadata = LeRobotDatasetMetadata(
+            repo_id="pypaimon/local-image-test", root=self.image_source)
+        with patch("lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata",
+                   return_value=metadata):
+            info = _load_hub_info(_LeRobotSource(
+                path="pypaimon/local-image-test", root=None,
+                repo_id="pypaimon/local-image-test"))
+        self.assertIsInstance(info, dict)
+        self.assertEqual(info["total_frames"], 5)
+        self.assertEqual(info["total_episodes"], 2)
+        self.assertEqual(info["features"]["observation.state"]["dtype"], "float32")
+
+    def test_custom_reader_accepts_installed_lerobot_metadata(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+        metadata = LeRobotDatasetMetadata(
+            repo_id="pypaimon/local-image-test", root=self.image_source)
+        reader = _ManualDatasetReader(metadata)
+        try:
+            self.assertEqual(reader.meta.info["total_frames"], 5)
+            self.assertEqual(reader.meta.info["total_episodes"], 2)
+            self.assertEqual(
+                reader.meta.features["observation.state"]["shape"], (3,))
+        finally:
+            reader.close()
+
+    def test_local_import_preserves_extended_info(self):
+        source = self.temp_dir / "extended-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["vendor_extension"] = {"labels": ["pick"], "enabled": True}
+        info_path.write_text(json.dumps(info))
+
+        self.connection.load_from_lerobot("extended_info", source)
+
+        self.assertEqual(
+            info, _catalog_metadata(self.connection, "extended_info__info"))
+
+    def test_hub_import_preserves_extended_info(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+        source = self.temp_dir / "hub-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["vendor_extension"] = {"labels": ["pick"], "enabled": True}
+        info_path.write_text(json.dumps(info))
+        repo_id = "pypaimon/hub-image-test"
+        metadata = LeRobotDatasetMetadata(repo_id=repo_id, root=source)
+        dataset = LeRobotDataset(repo_id=repo_id, root=source)
+        with patch("lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata",
+                   return_value=metadata), patch(
+                       "pypaimon.multimodal.lerobot.source._open_dataset",
+                       return_value=dataset):
+            self.connection.load_from_lerobot("hub_info", repo_id)
+
+        self.assertEqual(
+            info, _catalog_metadata(self.connection, "hub_info__info"))
 
     def test_table_dataset_pickle_preserves_episode_metadata_and_reads(self):
         import torch

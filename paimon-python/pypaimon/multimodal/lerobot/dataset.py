@@ -49,6 +49,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _schema_from_info,
     _validate_lerobot_schema,
 )
+from pypaimon.multimodal.lerobot.source import _info_dict
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
@@ -885,10 +886,10 @@ class _PaimonLeRobotMetadata:
 
 def _reader_metadata(metadata):
     info = _metadata_member(metadata, "info")
-    if not isinstance(info, Mapping):
+    if not isinstance(info, Mapping) and not callable(getattr(info, "to_dict", None)):
         raise TypeError(
             "PaimonDatasetReader metadata must contain an info map.")
-    info = dict(info)
+    info = _info_dict(info)
     features = info.get("features")
     if isinstance(features, Mapping):
         info["features"] = {
