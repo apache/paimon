@@ -246,10 +246,10 @@ class FileStorePathFactory:
         if not self.external_paths:
             return None
 
-        from pypaimon.write.backend_dispatch import create_external_path_provider
+        from pypaimon.execution.python.write.external_path_provider import ExternalPathProvider
 
         relative_bucket_path = self.relative_bucket_path(partition, bucket, canonical_partition)
-        return create_external_path_provider(
+        return ExternalPathProvider.create(
             self.external_path_strategy,
             self.external_paths,
             relative_bucket_path,

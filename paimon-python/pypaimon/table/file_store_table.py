@@ -489,7 +489,7 @@ class FileStoreTable(Table):
     def create_row_key_extractor(
         self, ignore_existing: bool = False
     ) -> 'RowKeyExtractor':
-        from pypaimon.write.backend_dispatch import create_row_key_extractor
+        from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
         return create_row_key_extractor(self, ignore_existing)
 
     def copy(self, options: dict) -> 'FileStoreTable':

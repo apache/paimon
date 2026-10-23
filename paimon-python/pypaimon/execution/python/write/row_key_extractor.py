@@ -520,3 +520,23 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
 class PostponeFixedBucketRowKeyExtractor(PostponeFixedBucketInputRouter, RowKeyExtractor):
     """Route Python file writes with the shared distributed input router."""
+
+
+def create_row_key_extractor(table, ignore_existing=False):
+    """Construct a per-row extractor for Python file writing."""
+    bucket_mode = table.bucket_mode()
+    if bucket_mode == BucketMode.HASH_FIXED:
+        return FixedBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.BUCKET_UNAWARE:
+        return UnawareBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.POSTPONE_MODE:
+        return PostponeBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.HASH_DYNAMIC:
+        return DynamicBucketRowKeyExtractor(
+            table.table_schema, table=table, ignore_existing=ignore_existing)
+    elif bucket_mode == BucketMode.CROSS_PARTITION:
+        raise ValueError(
+            "CROSS_PARTITION primary-key writes require a persistent "
+            "global primary-key index, which PyPaimon does not yet support"
+        )
+    raise ValueError(f"Unsupported bucket mode: {bucket_mode}")

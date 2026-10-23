@@ -51,14 +51,14 @@ def remap_source_on_keys(
 def filter_batch(
     batch: pa.Table, condition: str, _pre_rewritten: bool = False,
 ) -> pa.Table:
-    from pypaimon.write.backend_dispatch import filter_merge_condition_batch as execute
+    from pypaimon.execution.python.write.merge_condition import filter_batch as execute
     return execute(batch, condition, _pre_rewritten)
 
 
 def apply_condition(
     batch: pa.Table, rewritten: str, empty_schema: pa.Schema,
 ) -> pa.Table:
-    from pypaimon.write.backend_dispatch import apply_merge_condition as execute
+    from pypaimon.execution.python.write.merge_condition import apply_condition as execute
     return execute(batch, rewritten, empty_schema)
 
 
