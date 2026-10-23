@@ -437,35 +437,125 @@ def _validate_blob_fields(
             )
         )
 
+    if video_fields and primary_keys:
+        raise ValueError(
+            f"'{CoreOptions.VIDEO_FRAME_FIELD.key()}' only supports append-only tables."
+        )
+
     if blob_field_names:
-        required_options = {
-            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-        }
-
-        missing_options = []
-        for key, expected_value in required_options.items():
-            if key not in options or options[key] != expected_value:
-                missing_options.append(f"{key}='{expected_value}'")
-
-        if missing_options:
-            raise ValueError(
-                f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
-                f"missing required options: "
-                f"{', '.join(missing_options)}. "
-                f"Please add these options to the schema."
-            )
-
-        if primary_keys:
-            raise ValueError(
-                "BLOB, ARRAY<BLOB> or MAP<X, BLOB> type is not supported with primary key."
-            )
-
         if blob_field_names.intersection(partition_keys):
             raise ValueError(
                 "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
                 "part of partition keys."
             )
+
+        if not primary_keys:
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+            }
+
+            missing_options = []
+            for key, expected_value in required_options.items():
+                if key not in options or options[key] != expected_value:
+                    missing_options.append(f"{key}='{expected_value}'")
+
+            if missing_options:
+                raise ValueError(
+                    f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
+                    f"missing required options: "
+                    f"{', '.join(missing_options)}. "
+                    f"Please add these options to the schema."
+                )
+        else:
+            _validate_primary_key_blob_fields(
+                fields,
+                options,
+                core_options,
+                primary_keys,
+                partition_keys,
+                blob_field_names,
+                all_inline_fields,
+            )
+
+
+def _validate_primary_key_blob_fields(
+    fields: List[DataField],
+    options: dict,
+    core_options: CoreOptions,
+    primary_keys: List[str],
+    partition_keys: List[str],
+    blob_field_names: set,
+    all_inline_fields: set,
+):
+    """Mirror Java SchemaValidation#validatePrimaryKeyBlobKeyConfiguration and
+    validatePrimaryKeyBlobConfiguration."""
+    from pypaimon.common.options.core_options import ChangelogProducer, MergeEngine
+
+    managed_blob_fields = [
+        field.name
+        for field in fields
+        if field.name in blob_field_names and field.name not in all_inline_fields
+    ]
+    configured_bucket_key = options.get(CoreOptions.BUCKET_KEY.key())
+    if configured_bucket_key and configured_bucket_key.strip():
+        bucket_keys = [
+            key.strip() for key in configured_bucket_key.split(',') if key.strip()
+        ]
+    else:
+        bucket_keys = [pk for pk in primary_keys if pk not in partition_keys]
+
+    if managed_blob_fields:
+        pk_blob_fields = [f for f in managed_blob_fields if f in primary_keys]
+        if pk_blob_fields:
+            raise ValueError(
+                f"Managed BLOB fields cannot be primary keys: {pk_blob_fields}."
+            )
+        bucket_blob_fields = [f for f in managed_blob_fields if f in bucket_keys]
+        if bucket_blob_fields:
+            raise ValueError(
+                f"Managed BLOB fields cannot be bucket keys: {bucket_blob_fields}."
+            )
+        sequence_fields = core_options.sequence_field()
+        sequence_blob_fields = [f for f in managed_blob_fields if f in sequence_fields]
+        if sequence_blob_fields:
+            raise ValueError(
+                f"Managed BLOB fields cannot be sequence fields: {sequence_blob_fields}."
+            )
+
+        if core_options.merge_engine() not in (
+            MergeEngine.DEDUPLICATE,
+            MergeEngine.PARTIAL_UPDATE,
+            MergeEngine.FIRST_ROW,
+        ):
+            raise ValueError(
+                "Primary-key managed BLOB tables only support the deduplicate, "
+                "partial-update or first-row merge engine."
+            )
+        if core_options.changelog_producer() != ChangelogProducer.NONE:
+            raise ValueError(
+                "Primary-key managed BLOB tables only support changelog-producer 'none'."
+            )
+        if core_options.data_file_external_paths() is not None:
+            raise ValueError(
+                f"Primary-key managed BLOB tables do not support "
+                f"'{CoreOptions.DATA_FILE_EXTERNAL_PATHS.key()}'."
+            )
+        if str(options.get('pk-clustering-override', 'false')).lower() == 'true':
+            raise ValueError(
+                "Primary-key managed BLOB tables do not support 'pk-clustering-override'."
+            )
+
+    if blob_field_names.intersection(primary_keys):
+        raise ValueError(
+            "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
+            "part of primary keys."
+        )
+    if blob_field_names.intersection(bucket_keys):
+        raise ValueError(
+            "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
+            "part of bucket keys."
+        )
 
 
 def _validate_options(options: dict):
