@@ -96,7 +96,7 @@ def _request(tmp_path):
 
 
 @pytest.fixture
-def native_protocol():
+def native_protocol(monkeypatch):
     module = 'pypaimon.execution.native.write.native_index_build'
     core = Mock()
     shards = [SimpleNamespace(ordinal=ordinal) for ordinal in range(3)]
@@ -106,8 +106,11 @@ def native_protocol():
     sdk = ModuleType('pypaimon_rust.datafusion')
     sdk.GlobalIndexBuildBuilder = SimpleNamespace(supports_index_type=lambda kind: True)
     scheduler = _Ray()
-    with patch.dict(sys.modules, {'pypaimon_rust.datafusion': sdk, 'ray': scheduler}), \
-            patch(module + '.native_runtime_available', return_value=True), \
+    # Retain lazy imports between cases instead of restoring all of sys.modules,
+    # which leaves stale package attributes for Python 3.10's mock resolver.
+    monkeypatch.setitem(sys.modules, 'pypaimon_rust.datafusion', sdk)
+    monkeypatch.setitem(sys.modules, 'ray', scheduler)
+    with patch(module + '.native_runtime_available', return_value=True), \
             patch(module + '._rest_catalog_supported', return_value=True), \
             patch(module + '._native_table', return_value=native_table), \
             patch(module + '.from_native_commit_messages', side_effect=lambda table, messages: messages), \

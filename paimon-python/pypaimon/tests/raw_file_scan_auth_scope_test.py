@@ -92,14 +92,22 @@ def test_raw_scope_clears_cached_query_rules(table, restriction, native_fallback
     assert native.call_count == int(native_fallback)
 
 
-def test_restricted_raw_scope_does_not_clear_cached_rules(table):
+@pytest.mark.parametrize('operation', ['raw-files', 'all-files'])
+def test_restricted_raw_scope_does_not_clear_cached_rules(table, operation):
     scan = table.new_read_builder().new_scan()
     scan._query_auth_fn = lambda select: TableQueryAuthResult([_partition_filter()], None)
     scan.plan()
     source = scan._python_file_scanner
     prior_partition_filter = source.auth_partition_predicate
     assert prior_partition_filter is not None
-    with patch.object(source, 'plan_files', side_effect=AssertionError('Unauthorized file access')):
+    plan = scan.file_scanner.plan_files if operation == 'raw-files' else scan.plan_all
+    with patch.object(source, 'plan_files', side_effect=AssertionError('Unauthorized file access')), \
+            patch.object(NativeTableScan, 'plan_files',
+                         side_effect=AssertionError('Unauthorized Native file access')) as native, \
+            patch.object(scan, '_try_native_plan',
+                         side_effect=AssertionError('Unauthorized Native planning')) as native_plan:
         with pytest.raises(TableNoPermissionException):
-            scan.file_scanner.plan_files()
+            plan()
+    native.assert_not_called()
+    native_plan.assert_not_called()
     assert source.auth_partition_predicate is prior_partition_filter

@@ -18,7 +18,7 @@
 """Nested Native update dispatch and parity with the Python implementation."""
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -27,8 +27,8 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 pytestmark = pytest.mark.native_plan
@@ -66,15 +66,16 @@ def _table(tmp_path, data_type, native):
     return table, schema
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                            (TableUpdate, '_build_predicate_update_table'),
-                            (TableUpsertByKey, '_upsert_partition'),
-                            (TableUpsertByKey, '_upsert_row_partition')]:
-            stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                (PythonTableUpdate, '_build_predicate_update_table'),
+                                (PythonTableUpsert, '_upsert_partition'),
+                                (PythonTableUpsert, '_upsert_row_partition')]:
+                stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python fallback')))
+        yield
 
 
 def _commit(builder, messages, stream):

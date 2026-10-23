@@ -223,6 +223,9 @@ def plan_files(scanner):
         native_supported = _native_query_auth_supported(scan.table)
     else:
         native_supported = False
+    native_auth = native_supported and scan.table.options.query_auth_enabled
+    if not native_auth and scan._TableScan__auth_query(all_columns=True) is not None:
+        raise TableNoPermissionException(scan.table.identifier)
     if native_supported:
         from pypaimon.execution.native.read.plan import NativeTableScan
         result = NativeTableScan(scan).plan_files(scanner.skip_level0, scanner.only_read_real_buckets)
@@ -231,7 +234,7 @@ def plan_files(scanner):
             scanner._scanned_snapshot = None
             scanner._scanned_snapshot_id = snapshot_id
             return entries
-    if scan._TableScan__auth_query(all_columns=True) is not None:
+    if native_auth and scan._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(scan.table.identifier)
     from pypaimon.execution.python.read.table_scan import PythonTableScan
     # Let the selected executor refresh cached rules for this unrestricted scope.
@@ -253,11 +256,14 @@ def plan_all(self) -> Plan:
         native_supported = _native_query_auth_supported(self.table) and self._native_plan_supported()
     else:
         native_supported = False
+    native_auth = native_supported and self.table.options.query_auth_enabled
+    if not native_auth and self._TableScan__auth_query(all_columns=True) is not None:
+        raise TableNoPermissionException(self.table.identifier)
     if native_supported:
         plan = self._try_native_plan(all_files=True)
         if plan is not None:
             return plan
-    if self._TableScan__auth_query(all_columns=True) is not None:
+    if native_auth and self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
     from pypaimon.execution.python.read.table_scan import PythonTableScan
     return PythonTableScan(self).plan_all()
