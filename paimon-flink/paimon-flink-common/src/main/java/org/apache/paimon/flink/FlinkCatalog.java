@@ -27,6 +27,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.function.BuiltInFunctions;
 import org.apache.paimon.flink.function.CatalogAwareFunction;
+import org.apache.paimon.flink.lakestream.LakeStreamTableFactory;
+import org.apache.paimon.flink.lakestream.LakeStreamUtils;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -47,6 +49,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -58,6 +61,8 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -112,7 +117,9 @@ import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.FunctionDefinitionFactory;
 import org.apache.flink.table.functions.UserDefinedFunction;
 import org.apache.flink.table.functions.UserDefinedFunctionHelper;
@@ -194,13 +201,29 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private final boolean disableCreateTableInDefaultDatabase;
 
+    /** The Flink configuration of the {@code CREATE CATALOG} statement. */
+    private final ReadableConfig flinkConfiguration;
+
+    /** The cached Lakestream Store catalog, {@code null} until first use. */
+    @Nullable private volatile org.apache.flink.table.catalog.Catalog lakeStreamStoreCatalog;
+
     public FlinkCatalog(Catalog catalog, String name, String defaultDatabase, Options options) {
+        this(catalog, name, defaultDatabase, options, new Configuration());
+    }
+
+    public FlinkCatalog(
+            Catalog catalog,
+            String name,
+            String defaultDatabase,
+            Options options,
+            ReadableConfig flinkConfiguration) {
         super(name, defaultDatabase);
         LOG.info("Creating Flink catalog: metastore={}", options.get(CatalogOptions.METASTORE));
         this.catalog = catalog;
         this.name = name;
         this.options = new Options(options.toMap());
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
+        this.flinkConfiguration = flinkConfiguration;
         if (!disableCreateTableInDefaultDatabase) {
             try {
                 getDatabase(defaultDatabase);
@@ -219,6 +242,9 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public Optional<Factory> getFactory() {
+        if (lakeStreamStoreConfigured()) {
+            return Optional.of(new FlinkTableFactory(this, new LakeStreamTableFactory(this)));
+        }
         return Optional.of(new FlinkTableFactory(this));
     }
 
@@ -358,6 +384,9 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private CatalogBaseTable getTable(ObjectPath tablePath, @Nullable Long timestamp)
             throws TableNotExistException {
+        if (LakeStreamUtils.isRealTimeTable(tablePath)) {
+            return getLakeStreamRealTimeTable(tablePath, timestamp);
+        }
         Table table;
         try {
             table = catalog.getTable(toIdentifier(tablePath));
@@ -973,10 +1002,153 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public final void close() throws CatalogException {
+        Throwable failure = null;
         try {
             catalog.close();
         } catch (Exception e) {
-            throw new CatalogException("Failed to close catalog " + catalog.toString(), e);
+            failure = new CatalogException("Failed to close catalog " + catalog.toString(), e);
+        }
+        try {
+            closeLakeStreamStoreCatalog();
+        } catch (Throwable t) {
+            failure = ExceptionUtils.firstOrSuppressed(t, failure);
+        }
+        if (failure != null) {
+            ExceptionUtils.rethrow(failure);
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    //  Lake-stream mode (PIP-39)
+    // ------------------------------------------------------------------------
+
+    /** Whether this catalog names a Lakestream Store. */
+    public boolean lakeStreamStoreConfigured() {
+        return lakeStreamStore() != null;
+    }
+
+    /** The configured store identifier, or {@code <unset>} when there is none. */
+    public String lakeStreamStoreIdentifier() {
+        String store = lakeStreamStore();
+        return store == null ? "<unset>" : store;
+    }
+
+    /** The trimmed {@code lakestream.store} value, or {@code null} when it is absent or blank. */
+    @Nullable
+    private String lakeStreamStore() {
+        String store = options.get(CatalogOptions.LAKE_STREAM_STORE);
+        return StringUtils.isNullOrWhitespaceOnly(store) ? null : store.trim();
+    }
+
+    /**
+     * Lazily discovers, creates, opens and caches the Lakestream Store catalog. Lazy so that an
+     * unreachable or absent store does not stop this catalog from resolving table metadata.
+     */
+    public synchronized org.apache.flink.table.catalog.Catalog getOrCreateLakeStreamStoreCatalog() {
+        org.apache.flink.table.catalog.Catalog cached = lakeStreamStoreCatalog;
+        if (cached != null) {
+            return cached;
+        }
+
+        String identifier = lakeStreamStore();
+        if (identifier == null) {
+            throw new CatalogException(
+                    String.format(
+                            "Lake-stream mode requires the catalog option '%s' to name the "
+                                    + "Lakestream Store implementation (e.g. '%s' = 'fluss'), but "
+                                    + "catalog '%s' does not set it to a store identifier.",
+                            CatalogOptions.LAKE_STREAM_STORE.key(),
+                            CatalogOptions.LAKE_STREAM_STORE.key(),
+                            name));
+        }
+
+        CatalogFactory catalogFactory;
+        try {
+            catalogFactory =
+                    FactoryUtil.discoverFactory(
+                            Thread.currentThread().getContextClassLoader(),
+                            CatalogFactory.class,
+                            identifier);
+        } catch (ValidationException e) {
+            throw new CatalogException(
+                    String.format(
+                            "Could not discover a Flink CatalogFactory for the Lakestream Store "
+                                    + "'%s' configured via '%s'. Please make sure the store "
+                                    + "connector jar is on the classpath.",
+                            identifier, CatalogOptions.LAKE_STREAM_STORE.key()),
+                    e);
+        }
+
+        // 'fluss.bootstrap.servers' -> 'bootstrap.servers'
+        Map<String, String> storeOptions =
+                LakeStreamUtils.extractPrefixedOptions(options.toMap(), identifier + ".");
+        CatalogFactory.Context storeContext =
+                new FactoryUtil.DefaultCatalogContext(
+                        name,
+                        storeOptions,
+                        flinkConfiguration,
+                        Thread.currentThread().getContextClassLoader());
+
+        org.apache.flink.table.catalog.Catalog created = catalogFactory.createCatalog(storeContext);
+        try {
+            created.open();
+        } catch (Throwable t) {
+            try {
+                created.close();
+            } catch (Throwable suppressed) {
+                t.addSuppressed(suppressed);
+            }
+            ExceptionUtils.rethrow(t);
+        }
+        lakeStreamStoreCatalog = created;
+        return created;
+    }
+
+    private synchronized void closeLakeStreamStoreCatalog() {
+        org.apache.flink.table.catalog.Catalog cached = lakeStreamStoreCatalog;
+        lakeStreamStoreCatalog = null;
+        if (cached != null) {
+            cached.close();
+        }
+    }
+
+    /** Resolves a {@code $rt} read to the store's view of the base table. */
+    private CatalogBaseTable getLakeStreamRealTimeTable(
+            ObjectPath tablePath, @Nullable Long timestamp) throws TableNotExistException {
+        ObjectPath basePath = LakeStreamUtils.stripRealTimeSuffix(tablePath);
+        if (timestamp != null) {
+            throw new CatalogException(
+                    String.format(
+                            "Lake-stream real-time table '%s' does not support time travel reads. "
+                                    + "The '$%s' suffix already provides the freshest data by "
+                                    + "combining Paimon and Lakestream Store data; use time travel "
+                                    + "on the original table '%s' instead.",
+                            tablePath.getFullName(),
+                            LakeStreamUtils.REAL_TIME_TABLE_SUFFIX,
+                            basePath.getFullName()));
+        }
+        CatalogBaseTable baseTable = getTable(basePath, null);
+        if (!Options.fromMap(baseTable.getOptions()).get(CoreOptions.LAKE_STREAM_ENABLED)) {
+            throw new TableNotExistException(getName(), tablePath);
+        }
+        return requireLakeStreamStoreTable(basePath);
+    }
+
+    /** The store's view of a lake-stream table, which the store's own enablement flow creates. */
+    public CatalogBaseTable requireLakeStreamStoreTable(ObjectPath tablePath) {
+        org.apache.flink.table.catalog.Catalog store = getOrCreateLakeStreamStoreCatalog();
+        try {
+            return store.getTable(tablePath);
+        } catch (TableNotExistException e) {
+            throw new ValidationException(
+                    String.format(
+                            "Table '%s' does not exist in the Lakestream Store '%s'. Lake-stream "
+                                    + "mode requires the corresponding store-side table to exist "
+                                    + "for Paimon table '%s'.",
+                            tablePath.getFullName(),
+                            lakeStreamStoreIdentifier(),
+                            tablePath.getFullName()),
+                    e);
         }
     }
 

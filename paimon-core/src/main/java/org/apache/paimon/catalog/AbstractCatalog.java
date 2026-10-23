@@ -74,6 +74,7 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
@@ -476,14 +477,16 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
 
+        Table table;
         try {
-            getTable(fromTable);
+            table = getTable(fromTable);
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
             throw new TableNotExistException(fromTable);
         }
+        checkNotLakeStreamTable(table, fromTable, "renameTable");
 
         try {
             getTable(toTable);
@@ -536,6 +539,7 @@ public abstract class AbstractCatalog implements Catalog {
             }
             throw e;
         }
+        checkNotLakeStreamTable(existing, identifier, "replaceTable");
 
         TableType targetTableType = Options.fromMap(newSchema.options()).get(TYPE);
         if (!(existing instanceof FileStoreTable) || !targetTableType.equals(TableType.TABLE)) {

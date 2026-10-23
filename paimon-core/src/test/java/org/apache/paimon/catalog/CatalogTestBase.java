@@ -1164,6 +1164,143 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testRenameLakeStreamTableIsRejected() throws Exception {
+        catalog.createDatabase("lake_stream_db", true);
+        Identifier fromTable = Identifier.create("lake_stream_db", "orders");
+        catalog.createTable(
+                fromTable,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .option("lakestream.enabled", "true")
+                        .build(),
+                false);
+
+        Identifier toTable = Identifier.create("lake_stream_db", "orders_renamed");
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> catalog.renameTable(fromTable, toTable, false))
+                .withMessageContaining("lake-stream");
+
+        // rejected before changing any metadata: the original name still resolves and the
+        // target name was never created
+        assertThat(catalog.getTable(fromTable)).isNotNull();
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(() -> catalog.getTable(toTable));
+    }
+
+    @Test
+    public void testRenameTableWithLakeStreamDisabledIsAllowed() throws Exception {
+        catalog.createDatabase("lake_stream_off_db", true);
+        Identifier fromTable = Identifier.create("lake_stream_off_db", "orders");
+        catalog.createTable(
+                fromTable,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .option("lakestream.enabled", "false")
+                        .build(),
+                false);
+
+        Identifier toTable = Identifier.create("lake_stream_off_db", "orders_renamed");
+        catalog.renameTable(fromTable, toTable, false);
+        assertThat(catalog.getTable(toTable)).isNotNull();
+    }
+
+    @Test
+    public void testAlterLakeStreamTableColumnIsAllowed() throws Exception {
+        catalog.createDatabase("lake_stream_alter_db", true);
+        Identifier identifier = Identifier.create("lake_stream_alter_db", "orders");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .option("lakestream.enabled", "true")
+                        .build(),
+                false);
+
+        // column changes are permitted and applied to Paimon only
+        catalog.alterTable(identifier, SchemaChange.addColumn("col2", DataTypes.STRING()), false);
+        assertThat(catalog.getTable(identifier).rowType().getFieldNames())
+                .containsExactly("pk", "col1", "col2");
+    }
+
+    @Test
+    public void testReplaceLakeStreamTableIsRejected() throws Exception {
+        if (!supportsReplaceTable()) {
+            return;
+        }
+        catalog.createDatabase("lake_stream_replace_db", true);
+        Identifier identifier = Identifier.create("lake_stream_replace_db", "orders");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .option("lakestream.enabled", "true")
+                        .build(),
+                false);
+
+        Schema newSchema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .build();
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> catalog.replaceTable(identifier, newSchema, false))
+                .withMessageContaining("lake-stream");
+
+        // rejected before changing any metadata: the mode is still on
+        assertThat(catalog.getTable(identifier).options())
+                .containsEntry("lakestream.enabled", "true");
+    }
+
+    @Test
+    public void testDropLakeStreamTableIsAllowed() throws Exception {
+        catalog.createDatabase("lake_stream_drop_db", true);
+        Identifier identifier = Identifier.create("lake_stream_drop_db", "orders");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .option("lakestream.enabled", "true")
+                        .build(),
+                false);
+
+        // a mis-configured lake-stream table must stay correctable: dropping it never consults
+        // the Lakestream Store, so it works even when no store table exists
+        catalog.dropTable(identifier, false);
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(() -> catalog.getTable(identifier));
+    }
+
+    @Test
+    public void testDisableLakeStreamModeThenRenameIsAllowed() throws Exception {
+        catalog.createDatabase("lake_stream_disable_db", true);
+        Identifier fromTable = Identifier.create("lake_stream_disable_db", "orders");
+        catalog.createTable(
+                fromTable,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.STRING())
+                        .option("lakestream.enabled", "true")
+                        .build(),
+                false);
+
+        Identifier toTable = Identifier.create("lake_stream_disable_db", "orders_renamed");
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> catalog.renameTable(fromTable, toTable, false));
+
+        catalog.alterTable(fromTable, SchemaChange.setOption("lakestream.enabled", "false"), false);
+        assertThat(catalog.getTable(fromTable).options())
+                .containsEntry("lakestream.enabled", "false");
+
+        catalog.renameTable(fromTable, toTable, false);
+        assertThat(catalog.getTable(toTable)).isNotNull();
+    }
+
+    @Test
     public void testAlterDataTable() throws Exception {
         baseAlterTable(Maps.newHashMap());
     }

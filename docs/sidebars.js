@@ -76,7 +76,8 @@ const sidebars = {
             "items": ["concepts/spec/tableindex", "concepts/spec/fileindex"]
           }
         ]
-      }
+      },
+      "concepts/lake-stream"
     ]
   },
   {
@@ -250,7 +251,8 @@ const sidebars = {
         "items": [
           "flink/sql-write",
           "flink/sql-query",
-          "flink/sql-lookup"
+          "flink/sql-lookup",
+          "flink/lake-stream"
         ]
       },
       {
