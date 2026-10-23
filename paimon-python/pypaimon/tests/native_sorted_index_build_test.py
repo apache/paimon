@@ -26,7 +26,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
+from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse, GetTableSnapshotResponse
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
@@ -35,6 +36,7 @@ from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.execution.native.write.native_commit import from_native_commit_messages
 from pypaimon.write.table_commit import BatchTableCommit
@@ -116,6 +118,43 @@ def _build(table, kind, column='name', **kwargs):
 def _delete(table, ids):
     builder = table.new_batch_write_builder()
     _commit(table, builder.new_update().delete_by_row_id(ids))
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
+@pytest.mark.parametrize('policy', ['unrestricted', 'filtered', 'masked', 'denied'])
+def test_query_auth_keeps_python_index_build_authorization(rest_catalog, policy):
+    catalog, server = rest_catalog
+    table = _create(catalog, options={'scan.native-plan.enabled': 'false'})
+    _append(table, ROWS)
+    catalog.alter_table(table.identifier, [SchemaChange.set_option('query-auth.enabled', 'true')])
+    table = catalog.get_table(table.identifier)
+    if policy == 'denied':
+        reply = server._mock_response(ErrorResponse('TABLE', 'indexes', 'index build denied', 403), 403)
+    else:
+        response = AuthTableQueryResponse(
+            filter=['{"kind":"LEAF","transform":{"name":"FIELD_REF",'
+                    '"fieldRef":{"name":"id","index":0,"type":"INT"}},'
+                    '"function":"GREATER_THAN","literals":[1]}'] if policy == 'filtered' else None,
+            column_masking={'name': '{"name":"NULL"}'} if policy == 'masked' else None)
+        reply = server._mock_response(response, 200)
+    native_module = 'pypaimon.execution.native.write.native_index_build'
+    with patch.object(server, '_table_query_auth_handle', return_value=reply) as authorize, \
+            patch(native_module + '._native_table', side_effect=AssertionError('Native index build selected')):
+        for native in [False, True]:
+            request = GlobalIndexBuilder(table.copy({'write.native.enabled': str(native).lower()}), 'name')
+            if policy == 'unrestricted':
+                files = _message_files(request.build())
+                assert sum(file.row_count for file in files) == len(ROWS)
+                assert all(table.file_io.exists(_path(table, file)) for file in files)
+            else:
+                with pytest.raises(TableNoPermissionException):
+                    request.build()
+        assert authorize.call_count >= 2
+    assert _files(table) == []
+    assert table.snapshot_manager().get_latest_snapshot().id == 1
 
 
 @pytest.mark.parametrize('kind', ['btree', 'bitmap'])

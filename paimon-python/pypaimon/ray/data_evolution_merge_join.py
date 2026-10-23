@@ -81,6 +81,7 @@ class _SelfMergeUpdatePlan:
     row_id_name: str
     snapshot_id: int
     callable_input_columns: Optional[List[str]]
+    row_id_plan: Any
 
 
 @dataclass(frozen=True)
@@ -162,7 +163,7 @@ def build_self_merge_update_plan(
         CoreOptions, GlobalIndexSearchMode,
     )
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.execution.python.write.table_update import PythonTableUpdate
+    from pypaimon.write.row_id_plan import capture_row_id_plan
 
     row_id_name = SpecialFields.ROW_ID.name
     needed_cols = set(resolve_target_projection(
@@ -197,6 +198,8 @@ def build_self_merge_update_plan(
         table.copy_without_time_travel(dynamic_options)
         if dynamic_options else table
     )
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    scan_table = scan_table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(scan_table))
     read_builder = scan_table.new_read_builder().with_projection(projection)
     if scan_predicate is not None:
         read_builder.with_filter(scan_predicate)
@@ -207,9 +210,8 @@ def build_self_merge_update_plan(
     )
     # A packed scan split may contain multiple logical row-id groups. Keep
     # each group intact, but do not materialize unrelated groups together.
-    file_groups = list(PythonTableUpdate._predicate_update_file_groups(
-        scan_plan.splits()
-    ))
+    row_id_plan = capture_row_id_plan(scan_table, scan_plan)
+    file_groups = [split for _, _, split in row_id_plan.groups]
     update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
     return _SelfMergeUpdatePlan(
         table=table,
@@ -226,6 +228,7 @@ def build_self_merge_update_plan(
             list(read_columns) + [row_id_name]
             if read_columns else None
         ),
+        row_id_plan=row_id_plan,
     )
 
 
@@ -241,11 +244,11 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
     return pa.table(columns, names=names)
 
 
-def _apply_self_merge_update_group(context, file_group, collect_row_ids):
+def _apply_self_merge_update_group(context, group_plan, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
-    from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
 
+    file_group = group_plan.plan.splits()[0]
     table_read = TableRead(
         context.scan_table,
         context.predicate,
@@ -284,11 +287,8 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         if collect_row_ids else []
     )
 
-    files_info = RowIdFileIndex.from_splits(
-        context.snapshot_id, [file_group],
-    )
     updater = context.table.new_batch_write_builder().new_update().new_update_by_row_id(
-        _precomputed_files_info=files_info)
+        _precomputed_files_info=group_plan)
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
@@ -307,8 +307,11 @@ def distributed_self_merge_update_apply(
 ) -> Tuple[list, int, list]:
     """Stage self-merge updates in scan tasks without a routing shuffle."""
     import ray
+    from pypaimon.read.plan import Plan
+    from pypaimon.write.row_id_plan import CapturedRowIdPlan
 
-    if not plan.file_groups:
+    captured = plan.row_id_plan
+    if not captured.groups:
         return [], 0, []
 
     remote_args = dict(ray_remote_args or {})
@@ -328,8 +331,8 @@ def distributed_self_merge_update_apply(
         snapshot_id=plan.snapshot_id,
         callable_input_columns=plan.callable_input_columns,
     ))
-    group_iter = iter(plan.file_groups)
-    max_in_flight = max(1, min(num_partitions, len(plan.file_groups)))
+    group_iter = iter(captured.groups)
+    max_in_flight = max(1, min(num_partitions, len(captured.groups)))
     pending = set()
     messages = []
     num_updated = 0
@@ -338,11 +341,15 @@ def distributed_self_merge_update_apply(
 
     def submit_next():
         try:
-            file_group = next(group_iter)
+            group = next(group_iter)
         except StopIteration:
             return False
+        # Transport only this canonical group. Ray deserializes shared Python
+        # objects per task, so broadcasting the full plan repeats all metadata.
+        group_plan = CapturedRowIdPlan(
+            captured.table, Plan([group[2]], captured.plan.snapshot_id), [group])
         pending.add(apply_remote.remote(
-            context, file_group, collect_row_ids
+            context, group_plan, collect_row_ids
         ))
         return True
 
@@ -612,11 +619,11 @@ def distributed_update_apply(
     # the delete path).
     from pypaimon.common.options.core_options import CoreOptions
     scan_table = (
-        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        table.copy_without_time_travel({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
-    planner = RowIdFileIndex.from_table(scan_table)
+    from pypaimon.write.row_id_plan import capture_row_id_plan
+    planner = capture_row_id_plan(scan_table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
@@ -632,23 +639,9 @@ def distributed_update_apply(
         # Keep the matched join and file-routing shuffle in separate Ray jobs.
         update_ds = update_ds.materialize()
 
-    # Pin commit-time conflict check to the snapshot the join was built on,
-    # so concurrent commits between read and planner are detected.
-    check_from_snapshot = (
-        base_snapshot_id if base_snapshot_id is not None
-        else planner.snapshot_id
-    )
-
-    # Put file metadata into Ray's object store and pass a single ref to
-    # workers. Avoids per-task manifest re-scans (Jingsong review #6) and
-    # avoids serializing the metadata into every task's closure. Override
-    # snapshot_id with the join's base snapshot so commit-time conflict
-    # detection covers the read→planner window.
-    from dataclasses import replace
-    files_info = replace(
-        planner,
-        snapshot_id=check_from_snapshot,
-    )
+    # Capture files and the resolved snapshot together. Workers must not plan
+    # again after later append/compaction commits.
+    files_info = planner
     precomputed_info_ref = ray.put(files_info)
 
     frid_col = "_FIRST_ROW_ID"
@@ -708,7 +701,7 @@ def distributed_update_apply(
     )
     with_frid = with_frid.union(ray.data.from_arrow(sentinel))
 
-    captured_table = table
+    captured_table = planner.table
     captured_cols = cols
 
     def _apply_group(group: pa.Table) -> pa.Table:
@@ -731,15 +724,16 @@ def distributed_update_apply(
 
         for_update = group.drop_columns([frid_col])
         info = ray.get(precomputed_info_ref)
-        _validate_live_row_ids(
-            captured_table, info, int(group[frid_col][0].as_py()), for_update[row_id_name].to_pylist())
         row_ids = (
             for_update.column(row_id_name).to_pylist()
             if collect_row_ids else []
         )
         update = captured_table.new_batch_write_builder().new_update()
-        worker = update.new_update_by_row_id(
-            _precomputed_files_info=ray.get(precomputed_info_ref))
+        worker = update.new_update_by_row_id(_precomputed_files_info=info)
+        from pypaimon.write.backend_dispatch import native_row_id_update_selected
+        if not native_row_id_update_selected(worker):
+            _validate_live_row_ids(
+                captured_table, info, int(group[frid_col][0].as_py()), for_update[row_id_name].to_pylist())
         msgs = worker.update_columns(for_update, list(captured_cols))
         return pa.Table.from_pydict({
             "msgs_blob": [pickle.dumps(msgs)],
@@ -817,8 +811,8 @@ def distributed_read_by_row_id(
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
     # The caller pinned the resolved snapshot, including any retained tag metadata.
-    from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
-    planner = RowIdFileIndex.from_table(table)
+    from pypaimon.write.row_id_plan import capture_row_id_plan
+    planner = capture_row_id_plan(table)
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return None
@@ -869,7 +863,7 @@ def distributed_read_by_row_id(
             frid_col, pa.array(sorted_arr[idx], type=pa.int64())
         )
 
-    captured_table = table  # read at the same pinned snapshot the planner routed on
+    captured_table = planner.table  # read the captured view used for routing
     captured_read_cols = read_cols
     captured_empty = empty_out
 
@@ -920,12 +914,12 @@ def distributed_delete_apply(
 
     row_id_name = SpecialFields.ROW_ID.name
     scan_table = (
-        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        table.copy_without_time_travel({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
 
-    planner = TableDeleteByRowId._from_python(scan_table)
-    anchor_info = planner._snapshot_anchor_ranges()
+    from pypaimon.write.row_id_plan import capture_row_id_plan
+    anchor_info = capture_row_id_plan(scan_table)
     if not anchor_info.anchors:
         return [], 0, []
 
@@ -990,7 +984,7 @@ def distributed_delete_apply(
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_group = delete_ds.map_batches(_assign_group, **map_kwargs)
-    captured_table = scan_table
+    captured_table = anchor_info.table
 
     def _apply_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:

@@ -335,6 +335,14 @@ def create_row_id_update_execution(table, commit_user, commit_identifier, precom
     """Select one incremental updater before capturing target files."""
     from pypaimon.write.update_validation import _authorize_update
     _authorize_update(table)
+    from pypaimon.write.row_id_plan import CapturedRowIdPlan
+    if isinstance(precomputed, CapturedRowIdPlan):
+        _validate_captured_row_id_plan(table, precomputed)
+        if table.options.native_write_enabled():
+            from pypaimon.execution.native.write.native_update import create_native_update_by_row_id
+            native = create_native_update_by_row_id(table, commit_user, commit_identifier, precomputed)
+            if native is not None:
+                return native
     if precomputed is None:
         native = prepare_native_write_operation('update_by_row_id', table, commit_user, commit_identifier)
         if native is not None:
@@ -343,9 +351,17 @@ def create_row_id_update_execution(table, commit_user, commit_identifier, precom
 
 
 def create_row_id_delete_execution(table, precomputed=None):
-    """Keep precomputed broadcast metadata within its selected Python executor."""
+    """Select one deleter, reusing captured metadata when supplied."""
     from pypaimon.write.update_validation import _authorize_update
     _authorize_update(table)
+    from pypaimon.write.row_id_plan import CapturedRowIdPlan
+    if isinstance(precomputed, CapturedRowIdPlan):
+        _validate_captured_row_id_plan(table, precomputed)
+        if table.options.native_write_enabled():
+            from pypaimon.execution.native.write.native_update import create_native_row_id_delete
+            native = create_native_row_id_delete(table, precomputed)
+            if native is not None:
+                return native
     if precomputed is None and table.options.native_write_enabled():
         def prepare():
             from pypaimon.execution.native.write.native_update import create_native_row_id_delete
@@ -354,6 +370,19 @@ def create_row_id_delete_execution(table, precomputed=None):
         if native is not None:
             return native
     return create_python_row_id_delete(table, precomputed)
+
+
+def _validate_captured_row_id_plan(table, captured):
+    if (table.table_path != captured.table.table_path or table.current_branch() != captured.table.current_branch()
+            or table.table_schema.id != captured.table.table_schema.id
+            or table.fields != captured.table.fields):
+        raise ValueError('Captured row-ID plan belongs to a different table, branch or schema')
+
+
+def native_row_id_update_selected(worker):
+    from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
+    execution = vars(worker).get('_execution', worker)
+    return isinstance(execution, NativeTableUpdateByRowId)
 
 
 def python_commit(owner):

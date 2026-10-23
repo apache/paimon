@@ -17,8 +17,6 @@
 
 """Ray shard construction with one driver-side global-index commit."""
 
-from pypaimon.execution.python.globalindex.build_plan import split_by_global_index_shard
-from pypaimon.execution.python.globalindex.index_file_utils import new_global_index_file_name
 from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
 from pypaimon.ray.search_execution import execution_options
 
@@ -40,6 +38,8 @@ def validate_build_options(builder, concurrency, ray_remote_args):
 def build_vector_index(builder, splits, unindexed_ranges, index_field, table_read,
                        index_path, concurrency, remote_args):
     import ray
+    from pypaimon.execution.python.globalindex.build_plan import split_by_global_index_shard
+    from pypaimon.execution.python.globalindex.index_file_utils import new_global_index_file_name
 
     shards = split_by_global_index_shard(
         splits, builder._core_options.global_index_row_count_per_shard(), unindexed_ranges)
@@ -79,3 +79,43 @@ def _build_shard(context, shard, file_name):
     index_split, index_range = shard
     return builder._build_generic_shard(
         index_split, index_range, index_field, table_read, index_path, file_name=file_name)
+
+
+def build_native_vector_index(table, plan, concurrency, remote_args):
+    """Schedule immutable Core tasks; all publication remains with the caller."""
+    import ray
+
+    shards = plan.shards()
+    if not shards:
+        return []
+    context = ray.put(table)
+    remote = ray.remote(_build_native_shard).options(**remote_args)
+    pending, results = {}, {}
+    next_shard = 0
+    try:
+        while pending or next_shard < len(shards):
+            while len(pending) < concurrency and next_shard < len(shards):
+                ref = remote.remote(context, shards[next_shard])
+                pending[ref] = next_shard
+                next_shard += 1
+            ready, _ = ray.wait(list(pending), num_returns=1)
+            ref = ready[0]
+            ordinal = pending[ref]
+            results[ordinal] = ray.get(ref)
+            del pending[ref]
+        return [message for ordinal in range(len(shards)) for message in results[ordinal]]
+    except BaseException:
+        # A worker may have completed even when result delivery failed. Wait
+        # for dispatched tasks, but retain every output: its commit ownership
+        # is unknown and another attempt may already hold the messages.
+        for ref in pending:
+            try:
+                ray.get(ref)
+            except BaseException:
+                pass
+        raise
+
+
+def _build_native_shard(table, shard):
+    from pypaimon.execution.native.write.native_index_build import build_native_index_shard
+    return build_native_index_shard(table, shard)

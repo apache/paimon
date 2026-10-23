@@ -84,21 +84,25 @@ def create_native_update(table, commit_user, columns):
     return NativeBatchTableUpdate(table, writer)
 
 
-def create_native_update_by_row_id(table, commit_user, commit_identifier):
+def create_native_update_by_row_id(table, commit_user, commit_identifier, plan=None):
     """Create a core updater sharing one snapshot across incremental calls."""
     # Columns are selected per call; one core updater pins the snapshot and
     # tracks overlaps across Parquet and dedicated Blob updates.
     if not _native_update_columns_supported(table, None):
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(
+        table._copy_with_snapshot(plan.table._read_snapshot) if plan is not None else table)
     if native_table is None:
         return None
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
-        writer = (native_table.new_batch_write_builder().with_commit_user(commit_user)
-                  .new_update().new_update_by_row_id())
+        update = native_table.new_batch_write_builder().with_commit_user(commit_user).new_update()
     else:
-        writer = (native_table.new_stream_write_builder().with_commit_user(commit_user)
-                  .new_update().new_update_by_row_id(commit_identifier))
+        update = native_table.new_stream_write_builder().with_commit_user(commit_user).new_update()
+    if plan is not None:
+        from pypaimon.execution.native.write.row_id_plan import native_plan
+        update.with_plan(native_plan(plan.table, plan.plan))
+    writer = (update.new_update_by_row_id() if commit_identifier == BATCH_COMMIT_IDENTIFIER
+              else update.new_update_by_row_id(commit_identifier))
     return NativeTableUpdateByRowId(
         table, commit_user, commit_identifier, writer)
 
@@ -438,22 +442,26 @@ def create_native_predicate_delete(table, commit_user, predicate):
     return NativePredicateTableUpdate(table, writer, native_predicate)
 
 
-def create_native_delete(table, commit_user):
+def create_native_delete(table, commit_user, plan=None):
     """Select Rust's deletion-vector writer for supported batch deletes."""
     if not table.options.deletion_vectors_enabled(False):
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(
+        table._copy_with_snapshot(plan.table._read_snapshot) if plan is not None else table)
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
               .with_commit_user(commit_user)
               .new_update())
+    if plan is not None:
+        from pypaimon.execution.native.write.row_id_plan import native_plan
+        writer.with_plan(native_plan(plan.table, plan.plan))
     return NativeBatchTableUpdate(table, writer)
 
 
-def create_native_row_id_delete(table):
+def create_native_row_id_delete(table, plan=None):
     """Adapt the direct deletion API to the existing core table updater."""
-    operation = create_native_delete(table, table.new_batch_write_builder().commit_user)
+    operation = create_native_delete(table, table.new_batch_write_builder().commit_user, plan)
     return None if operation is None else NativeTableDeleteByRowId(operation)
 
 

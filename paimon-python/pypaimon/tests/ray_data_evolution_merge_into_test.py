@@ -3311,7 +3311,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ):
                 messages, count, row_ids = (
                     join_module._apply_self_merge_update_group(
-                        context, plan.file_groups[0], True,
+                        context, plan.row_id_plan.for_split(plan.file_groups[0]), True,
                     )
                 )
 

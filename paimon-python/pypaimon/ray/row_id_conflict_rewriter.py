@@ -31,7 +31,7 @@ from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
-from pypaimon.execution.python.write.commit.conflict_detection import RowIdExistenceConflict
+from pypaimon.write.row_id_conflict import RowIdExistenceConflict, check_row_id_conflicts
 from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
@@ -367,22 +367,7 @@ def _validate_no_logical_conflict(
         base_snapshot_id: int,
 ) -> None:
     """Reject non-compaction changes before advancing the rewrite baseline."""
-    commit = table.new_batch_write_builder().new_commit()
-    try:
-        file_store_commit = commit.file_store_commit
-        file_store_commit.conflict_detection._row_id_check_from_snapshot = (
-            base_snapshot_id
-        )
-        entries = file_store_commit._collect_manifest_entries(update_messages)
-        conflict = file_store_commit.conflict_detection.check_row_id_from_snapshot(
-            latest_snapshot,
-            entries,
-            check_compaction=False,
-        )
-        if conflict is not None:
-            raise conflict
-    finally:
-        commit.close()
+    check_row_id_conflicts(table, update_messages, latest_snapshot.id, base_snapshot_id)
 
 
 def _find_row_id_conflict(error) -> Optional[RowIdExistenceConflict]:
