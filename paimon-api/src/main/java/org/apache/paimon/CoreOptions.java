@@ -4080,7 +4080,11 @@ public class CoreOptions implements Serializable {
 
     public List<String> changelogRowDeduplicateIgnoreFields() {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
-                .map(s -> Arrays.asList(s.split(",")))
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
 
