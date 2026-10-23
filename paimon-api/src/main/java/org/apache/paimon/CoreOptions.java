@@ -1019,10 +1019,9 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether Java writers may automatically roll back a committed compaction "
-                                    + "to recover from a write conflict. Enabling this can remove snapshots "
-                                    + "and tags already used by readers. This option does not affect "
-                                    + "explicit rollback operations and is not supported by Python writers.");
+                            "Allow Java writers to roll back compaction on write conflicts. "
+                                    + "May delete snapshots and tags. Does not affect explicit rollback "
+                                    + "or Python writers.");
 
     public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
             key("commit.max-retries")

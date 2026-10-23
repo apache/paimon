@@ -564,8 +564,7 @@ class FileStoreCommit:
                 )
                 if rewrite_result is not None:
                     return RewriteResult(rewrite_result)
-                # Preserve committed snapshots, including tags created concurrently with
-                # this writer. The caller must retry from a fresh read if rewriting fails.
+                # Automatic rollback can delete snapshots and tags already used by readers.
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
