@@ -23,7 +23,10 @@ from copy import copy
 import pyarrow as pa
 from packaging.version import Version
 
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.predicate_json_parser import _collect_all_field_refs_from_transform
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.push_down_utils import rewrite_predicate_indices
 from pypaimon.read.read_support import close_read_source
 from pypaimon.schema.data_types import (
@@ -104,17 +107,27 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
                 "export_lance only supports BLOB, ARRAY<BLOB> and MAP<K, BLOB> output columns; "
                 "project nested BLOB column %r separately." % field.name)
 
-    blob_columns = [field.name for field in fields if is_blob_file_type(field.type)]
     map_blobs = [field.name for field in fields if is_map_blob_type(field.type)]
     array_blobs = [field.name for field in fields if is_array_blob_type(field.type)]
-    descriptor_fields = query._table.options.blob_descriptor_fields()
-    descriptor_field_ids = {field.id for field in query._table.fields if field.name in descriptor_fields}
-    descriptor_columns = [field.name for field in fields if field.id in descriptor_field_ids]
     # Include predicate-only columns internally, then remove them before
     # materializing payloads and writing the requested projection.
     builder, file_io, _ = query._blob_descriptor_query_read_builder()
+    predicate_fields = query._predicate_fields()
+    payload_predicate = any(
+        field.name in predicate_fields and is_blob_file_type(field.type)
+        for field in query._table.fields)
+    payload_mode = not query._table.options.blob_as_descriptor()
+    read_payloads = payload_mode and payload_predicate
+    if read_payloads:
+        builder.table = builder.table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "false"})
     splits = builder.new_scan().plan().splits()
-    reader = builder.new_read()._to_managed_arrow_batch_reader(splits)
+    if payload_mode and any(isinstance(split, QueryAuthSplit) for split in splits):
+        read_payloads = True
+        builder.table = builder.table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "false"})
+    blob_columns, descriptor_columns, unresolved_views = _blob_reference_columns(
+        query._table, fields, splits, read_payloads)
+    reader = builder.new_read()._to_managed_arrow_batch_reader(
+        splits, blob_parallelism=blob_parallelism if read_payloads else None)
     batches = None
     failure = None
     try:
@@ -131,7 +144,7 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
             export_fields.append(output_field)
         schema = pa.schema(export_fields, metadata=reader.schema.metadata)
         batches = _export_batches(reader, names, schema, file_io, blob_columns,
-                                  map_blobs, array_blobs, descriptor_columns, blob_parallelism)
+                                  map_blobs, array_blobs, descriptor_columns, unresolved_views, blob_parallelism)
         # The default 2.0 format loses nullable struct validity. Version 2.1
         # with the required Lance version preserves nested NULLs as well.
         return lance.write_dataset(
@@ -147,10 +160,62 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
             close_read_source(reader, failure)
 
 
+def _blob_reference_columns(table, fields, splits, materialized):
+    by_name = {field.name: field for field in table.new_read_builder()._table_read_fields()}
+    by_id = {field.id: field for field in table.fields}
+    descriptor_fields = table.options.blob_descriptor_fields()
+    video_fields = table.options.video_frame_fields()
+    unresolved_views = (table.options.blob_view_fields()
+                        if (not table.options.blob_view_resolve_enabled()
+                            or table.catalog_environment.catalog_loader is None) else set())
+    # Plans normally share one captured policy. Compare provenance if a
+    # planner returns multiple policies rather than guessing from masked bytes.
+    policies = {id(getattr(split, "auth_result", None)): getattr(split, "auth_result", None) for split in splits}
+    result = None
+    for policy in list(policies.values()) or [None]:
+        masks = policy.parsed_column_masking() if policy is not None else {}
+        blobs, descriptors, views = [], [], []
+        for field in fields:
+            if not is_blob_file_type(field.type):
+                continue
+            source = by_id[field.id]
+            transform = masks.get(source.name)
+            if transform is not None:
+                if transform["name"] != "FIELD_REF":
+                    inputs = _collect_all_field_refs_from_transform(transform)
+                    if video_fields.intersection(inputs):
+                        raise ValueError("export_lance does not support masks with video-frame inputs.")
+                    if unresolved_views.intersection(inputs):
+                        raise ValueError("export_lance does not support masks with unresolved blob-view inputs.")
+                    if not materialized and any(
+                            is_blob_file_type(by_name[name].type)
+                            for name in inputs):
+                        raise ValueError("export_lance only supports direct FIELD_REF masks with BLOB inputs.")
+                    continue
+                source = by_name[transform["fieldRef"]["name"]]
+                if not is_blob_file_type(source.type):
+                    continue
+            if source.name in video_fields:
+                raise ValueError("export_lance does not support video-frame column %r; project it out." % source.name)
+            blobs.append(field.name)
+            if source.name in descriptor_fields:
+                descriptors.append(field.name)
+            if source.name in unresolved_views:
+                views.append(field.name)
+        current = ([], [], views) if materialized else (blobs, descriptors, views)
+        if result is not None and result != current:
+            raise ValueError("export_lance requires consistent BLOB masking provenance across splits.")
+        result = current
+    return result
+
+
 def _export_batches(reader, names, schema, file_io, blob_columns, map_blobs,
-                    array_blobs, descriptor_columns, parallelism):
+                    array_blobs, descriptor_columns, unresolved_views, parallelism):
     for batch in reader:
         batch = batch.select(names)
+        for column in unresolved_views:
+            if batch.column(column).null_count != batch.num_rows:
+                raise ValueError("export_lance does not support unresolved blob-view column %r." % column)
         bodies = {}
         if blob_columns:
             data = batch.select(blob_columns).to_pydict()

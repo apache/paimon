@@ -196,7 +196,10 @@ class PythonTableRead:
                         if read.include_row_kind:
                             if "_row_kind" not in batch.schema.names:
                                 batch = read._add_row_kind_column_to_batch(batch, "+I")
-                        yield batch
+                        # Auth masks may change types. Align Python results
+                        # before Arrow exposes them through its fixed schema.
+                        yield read._try_to_pad_batch_by_schema(
+                            batch, schema, allow_type_cast=True)
                         if remaining is not None:
                             remaining -= batch.num_rows
                             if remaining <= 0:

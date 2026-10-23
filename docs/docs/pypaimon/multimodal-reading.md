@@ -141,6 +141,8 @@ the target.
 The first version rejects selected video-frame fields or descriptors and VARIANT columns;
 project these fields out before exporting. Paimon indexes and snapshot history
 are not transferred. Build any required indexes on the Lance dataset after export.
+With `blob-as-descriptor=true`, BLOB authorization masks that compute from BLOB
+inputs are unsupported; direct field-reference masks remain supported.
 
 ### As-of joins
 
