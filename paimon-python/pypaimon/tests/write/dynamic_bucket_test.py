@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.index.dynamic_bucket import (
-    HashBucketAssigner,
+    DynamicBucketAssigner,
     _PartitionIndex,
     _iter_hashes,
     compute_assigner,
@@ -248,7 +248,7 @@ class DynamicBucketTest(unittest.TestCase):
             validate_bucket_id(32768)
 
     def test_restore_rejects_bucket_id_above_java_short_range(self):
-        assigner = HashBucketAssigner(
+        assigner = DynamicBucketAssigner(
             table=Mock(),
             num_channels=1,
             num_assigners=1,
@@ -282,7 +282,7 @@ class DynamicBucketTest(unittest.TestCase):
     def test_assigner_rejects_record_owned_by_another_writer(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'wrong_assigner')
-            assigner = HashBucketAssigner(
+            assigner = DynamicBucketAssigner(
                 table=table,
                 num_channels=2,
                 num_assigners=2,

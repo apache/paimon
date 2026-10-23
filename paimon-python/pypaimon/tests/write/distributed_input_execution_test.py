@@ -24,7 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.index.dynamic_bucket import HashBucketAssigner
+from pypaimon.index.dynamic_bucket import DynamicBucketAssigner
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
@@ -49,7 +49,7 @@ def forbid_python_execution():
         for target in [
             'execution.python.write.row_key_extractor.FixedBucketRowKeyExtractor.__init__',
             'execution.python.write.row_key_extractor.DynamicBucketRowKeyExtractor.__init__',
-            'execution.python.write.row_key_extractor.SimpleHashBucketAssigner.__init__',
+            'execution.python.write.row_key_extractor.SimpleDynamicBucketAssigner.__init__',
             'execution.python.read.scanner.file_scanner.FileScanner.__init__',
             'execution.python.write.table_write.PythonTableWrite.__init__',
             'execution.python.write.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
@@ -85,7 +85,7 @@ def test_daft_fixed_and_dynamic_routing_do_not_construct_python_extractors(tmp_p
     batch = pa.table(rows).to_batches()[0]
     assert fixed['bucket'] == FixedBucketInputRouter(table.table_schema).extract_partition_bucket_batch(batch)[1]
     # Only input hashing belongs to this stage; it must not construct even a
-    # transient SimpleHashBucketAssigner or persistent HASH-index maintainer.
+    # transient SimpleDynamicBucketAssigner or persistent HASH-index maintainer.
     dynamic = _table(tmp_path / 'dynamic', '-1')
     router = DynamicBucketInputRouter(dynamic.table_schema)
     _, partition_hashes, key_hashes = router.extract_hashes_batch(batch)
@@ -132,11 +132,11 @@ def test_daft_dynamic_assignment_dispatches_pinned_snapshot_and_arrow_hashes(tmp
     with ExitStack() as stack:
         for target in [
             'execution.python.write.row_key_extractor.DynamicBucketRowKeyExtractor.__init__',
-            'execution.python.write.row_key_extractor.SimpleHashBucketAssigner.__init__',
+            'execution.python.write.row_key_extractor.SimpleDynamicBucketAssigner.__init__',
             'execution.python.read.scanner.file_scanner.FileScanner.__init__',
             'execution.python.write.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
             'write.input_routing.DynamicBucketInputRouter.__init__',
-            'index.dynamic_bucket.HashBucketAssigner.__init__',
+            'index.dynamic_bucket.DynamicBucketAssigner.__init__',
         ]:
             stack.enter_context(patch('pypaimon.' + target, side_effect=AssertionError(target)))
         stack.enter_context(patch('pypaimon.daft.daft_datasink._load_worker_table', return_value=table))
@@ -168,7 +168,7 @@ def test_native_dynamic_metadata_preserves_missing_hash_index_validation(tmp_pat
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=plan), \
             patch('pypaimon.execution.python.read.scanner.file_scanner.FileScanner.__init__',
                   side_effect=AssertionError('Pure scanner')):
-        assigner = HashBucketAssigner(table, 1, 1, 0, 1, -1, snapshot=snapshot)
+        assigner = DynamicBucketAssigner(table, 1, 1, 0, 1, -1, snapshot=snapshot)
         with pytest.raises(RuntimeError, match='no complete HASH index.*7'):
             assigner.assign(('p',), 0, 123)
 

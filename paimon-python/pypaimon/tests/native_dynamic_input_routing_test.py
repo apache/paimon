@@ -24,10 +24,10 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.execution.native.write.input_routing import NativeDynamicBucketAssigner, NativeDynamicBucketRouter
-from pypaimon.index.dynamic_bucket import HashBucketAssigner
+from pypaimon.execution.native.write.input_routing import NativeDynamicBucketAssigner, NativeDynamicBucketAssignerRouter
+from pypaimon.index.dynamic_bucket import DynamicBucketAssigner
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
-from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner, create_dynamic_bucket_router
+from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner, create_dynamic_bucket_assigner_router
 from pypaimon.write.input_routing import DynamicBucketInputRouter
 
 pytestmark = pytest.mark.native_plan
@@ -64,7 +64,7 @@ def _forbid_python_input_execution():
     for target in [
         'pypaimon.write.input_routing.FixedBucketInputRouter.__init__',
         'pypaimon.write.input_routing.DynamicBucketInputRouter.__init__',
-        'pypaimon.index.dynamic_bucket.HashBucketAssigner.__init__',
+        'pypaimon.index.dynamic_bucket.DynamicBucketAssigner.__init__',
         'pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
     ]:
         stack.enter_context(patch(target, side_effect=AssertionError('Python input execution: ' + target)))
@@ -78,15 +78,15 @@ def test_native_dynamic_arrow_route_and_assignment_keep_one_restore_snapshot(nat
     batch = pa.record_batch([['west', 'west', 'east'], [2, 1, 2]], names=['p', 'id'])
     reference = DynamicBucketInputRouter(table.table_schema)
     _, partition_hashes, hashes = reference.extract_hashes_batch(batch)
-    reference_assigner = HashBucketAssigner(
+    reference_assigner = DynamicBucketAssigner(
         table, 1, 1, 0, 1, -1, snapshot=table.snapshot_manager().get_snapshot_by_id(snapshot_id))
     expected = [bucket for bucket, _ in reference_assigner.assign_batch(
         reference._extract_partitions_batch(batch), partition_hashes, hashes)]
     with _forbid_python_input_execution(), \
             patch.object(RESTCatalogServer, '_table_query_auth_handle',
                          side_effect=AssertionError('Bucket restoration must not request SELECT')) as query:
-        router = create_dynamic_bucket_router(table, 1, 1)
-        assert isinstance(router, NativeDynamicBucketRouter)
+        router = create_dynamic_bucket_assigner_router(table, 1, 1)
+        assert isinstance(router, NativeDynamicBucketAssignerRouter)
         routed = pickle.loads(pickle.dumps(router)).route(pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)]))
         assert routed.schema.names == ['assigner', 'key_hash']
         assert routed.column(0).to_pylist() == [0] * batch.num_rows
@@ -112,7 +112,7 @@ def test_native_dynamic_precomputed_hashes_need_only_partition_input(native_rest
         source['p'] = ['west'] * 3
     source = pa.table(source)
     with _forbid_python_input_execution():
-        routed = create_dynamic_bucket_router(table, 1, 1).route(source)
+        routed = create_dynamic_bucket_assigner_router(table, 1, 1).route(source)
         assigner = create_dynamic_bucket_assigner(table, 1, 1, 0, base_snapshot_id=0)
         partitions = source.select(['p'] if partitioned else [])
         assert partitions.num_rows == 3

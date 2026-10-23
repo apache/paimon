@@ -28,12 +28,12 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.execution.native.write.input_routing import (
-    NativeDynamicBucketAssigner, NativeDynamicBucketRouter, as_record_batch,
+    NativeDynamicBucketAssigner, NativeDynamicBucketAssignerRouter, as_record_batch,
 )
 from pypaimon.execution.python.write.input_routing import (
-    PythonDynamicBucketAssigner, PythonDynamicBucketRouter,
+    PythonDynamicBucketAssigner, PythonDynamicBucketAssignerRouter,
 )
-from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner, create_dynamic_bucket_router
+from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner, create_dynamic_bucket_assigner_router
 
 
 @pytest.mark.parametrize('row_count', [0, 3])
@@ -58,7 +58,7 @@ def _table(tmp_path, native=True):
 
 @pytest.fixture
 def sdk(monkeypatch):
-    module = SimpleNamespace(DynamicBucketRouter=Mock())
+    module = SimpleNamespace(DynamicBucketAssignerRouter=Mock())
     monkeypatch.setitem(sys.modules, 'pypaimon_rust.datafusion', module)
     return module
 
@@ -66,8 +66,8 @@ def sdk(monkeypatch):
 def test_python_dynamic_router_and_assigner_share_arrow_contract(tmp_path):
     table = _table(tmp_path, False)
     batch = pa.table({'p': ['west', 'west', 'east'], 'id': [1, 2, 1]})
-    router = create_dynamic_bucket_router(table, 1, 1)
-    assert isinstance(router, PythonDynamicBucketRouter)
+    router = create_dynamic_bucket_assigner_router(table, 1, 1)
+    assert isinstance(router, PythonDynamicBucketAssignerRouter)
     routed = router.route(batch)
     assert routed.schema == pa.schema([('assigner', pa.int32()), ('key_hash', pa.int32())])
     assert routed.column(0).to_pylist() == [0, 0, 0]
@@ -95,21 +95,21 @@ def test_native_dynamic_router_pickle_rebuilds_without_python_hashing(tmp_path, 
     batch = pa.record_batch([[1, 2], ['west', 'west']], names=['id', 'p'])
     expected = pa.record_batch([pa.array([0, 1], type=pa.int32()), pa.array([42, -3], type=pa.int32())],
                                names=['assigner', 'key_hash'])
-    sdk.DynamicBucketRouter.return_value.route.return_value = expected
+    sdk.DynamicBucketAssignerRouter.return_value.route.return_value = expected
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
             patch('pypaimon.write.input_routing.DynamicBucketInputRouter.__init__',
                   side_effect=AssertionError('Python hashing')):
-        router = create_dynamic_bucket_router(table, 2, 2)
-        assert isinstance(router, NativeDynamicBucketRouter)
+        router = create_dynamic_bucket_assigner_router(table, 2, 2)
+        assert isinstance(router, NativeDynamicBucketAssignerRouter)
         router._router = lambda: None
         restored = pickle.loads(pickle.dumps(router))
         assert restored._router is None
         assert restored.route(pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)])).equals(expected)
-    assert sdk.DynamicBucketRouter.call_count == 2
-    sdk.DynamicBucketRouter.assert_called_with(native_table.schema.return_value, 2, 2)
-    assert sdk.DynamicBucketRouter.return_value.route.call_args[0][0].equals(batch)
+    assert sdk.DynamicBucketAssignerRouter.call_count == 2
+    sdk.DynamicBucketAssignerRouter.assert_called_with(native_table.schema.return_value, 2, 2)
+    assert sdk.DynamicBucketAssignerRouter.return_value.route.call_args[0][0].equals(batch)
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
@@ -119,7 +119,7 @@ def test_native_assignment_uses_writer_builder_and_precomputed_arrow_hashes(tmp_
     builder = native_table.new_batch_write_builder.return_value
     builder.with_restore_snapshot.return_value = builder
     builder.with_overwrite.return_value = builder
-    core = builder.new_bucket_assigner.return_value
+    core = builder.new_dynamic_bucket_assigner.return_value
     core.restore_snapshot_id = 0 if overwrite else 7
     core.assign.return_value = pa.array([1, 0], type=pa.int32())
     batch = pa.record_batch([[2, 1], ['west', 'west']], names=['id', 'p'])
@@ -127,7 +127,7 @@ def test_native_assignment_uses_writer_builder_and_precomputed_arrow_hashes(tmp_
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
-            patch('pypaimon.index.dynamic_bucket.HashBucketAssigner.__init__',
+            patch('pypaimon.index.dynamic_bucket.DynamicBucketAssigner.__init__',
                   side_effect=AssertionError('Python index restoration')):
         assigner = create_dynamic_bucket_assigner(table, 2, 2, 1, overwrite, 7)
         assert isinstance(assigner, NativeDynamicBucketAssigner)
@@ -135,7 +135,7 @@ def test_native_assignment_uses_writer_builder_and_precomputed_arrow_hashes(tmp_
         assert assigner.assign(batch, hashes) is core.assign.return_value
     builder.with_restore_snapshot.assert_called_once_with(7)
     assert builder.with_overwrite.call_count == int(overwrite)
-    builder.new_bucket_assigner.assert_called_once_with(2, 2, 1)
+    builder.new_dynamic_bucket_assigner.assert_called_once_with(2, 2, 1)
     assert core.assign.call_args[0][0] is batch
     assert core.assign.call_args[1]['key_hashes'].equals(hashes.combine_chunks())
 
@@ -147,24 +147,25 @@ def test_native_dynamic_errors_never_replay_python(tmp_path, sdk, operation, pha
     failure = TableNoPermissionException(table.identifier)
     native_table = Mock()
     builder = native_table.new_batch_write_builder.return_value
-    core = sdk.DynamicBucketRouter.return_value if operation == 'route' else builder.new_bucket_assigner.return_value
+    core = (sdk.DynamicBucketAssignerRouter.return_value if operation == 'route' else
+            builder.new_dynamic_bucket_assigner.return_value)
     core.restore_snapshot_id = 0
     if phase == 'prepare':
         if operation == 'route':
-            sdk.DynamicBucketRouter.side_effect = failure
+            sdk.DynamicBucketAssignerRouter.side_effect = failure
         else:
-            builder.new_bucket_assigner.side_effect = failure
+            builder.new_dynamic_bucket_assigner.side_effect = failure
     else:
         getattr(core, operation).side_effect = failure
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
-            patch('pypaimon.execution.python.write.input_routing.PythonDynamicBucketRouter.__init__',
+            patch('pypaimon.execution.python.write.input_routing.PythonDynamicBucketAssignerRouter.__init__',
                   side_effect=AssertionError('Python replay')), \
             patch('pypaimon.execution.python.write.input_routing.PythonDynamicBucketAssigner.__init__',
                   side_effect=AssertionError('Python replay')):
         with pytest.raises(TableNoPermissionException) as raised:
-            execution = (create_dynamic_bucket_router(table, 1, 1) if operation == 'route' else
+            execution = (create_dynamic_bucket_assigner_router(table, 1, 1) if operation == 'route' else
                          create_dynamic_bucket_assigner(table, 1, 1, 0))
             getattr(execution, operation)(pa.record_batch([[1], ['west']], names=['id', 'p']))
     assert raised.value is failure
@@ -174,6 +175,7 @@ def test_native_dynamic_errors_never_replay_python(tmp_path, sdk, operation, pha
 def test_missing_native_environment_selects_python_before_input(tmp_path, operation):
     table = _table(tmp_path)
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=False):
-        execution = (create_dynamic_bucket_router(table, 1, 1) if operation == 'route' else
+        execution = (create_dynamic_bucket_assigner_router(table, 1, 1) if operation == 'route' else
                      create_dynamic_bucket_assigner(table, 1, 1, 0, base_snapshot_id=0))
-    assert isinstance(execution, PythonDynamicBucketRouter if operation == 'route' else PythonDynamicBucketAssigner)
+    expected_type = PythonDynamicBucketAssignerRouter if operation == 'route' else PythonDynamicBucketAssigner
+    assert isinstance(execution, expected_type)

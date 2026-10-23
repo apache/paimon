@@ -20,12 +20,13 @@
 import pyarrow as pa
 
 from pypaimon.index.dynamic_bucket import (
-    HashBucketAssigner, compute_assigner, resolve_bucket_snapshot, to_signed_int32,
+    DynamicBucketAssigner, compute_assigner, resolve_bucket_snapshot, to_signed_int32,
 )
 from pypaimon.write.input_routing import DynamicBucketInputRouter
 
 
-class PythonDynamicBucketRouter:
+class PythonDynamicBucketAssignerRouter:
+    """Route input rows to dynamic bucket assigners and carry their key hashes."""
 
     def __init__(self, table, num_channels, num_assigners):
         if num_channels <= 0 or num_assigners <= 0:
@@ -50,7 +51,7 @@ class PythonDynamicBucketAssigner:
         self._router = DynamicBucketInputRouter(table.table_schema)
         snapshot = None if ignore_existing else resolve_bucket_snapshot(table, base_snapshot_id)
         self.restore_snapshot_id = snapshot.id if snapshot is not None else 0
-        self._assigner = HashBucketAssigner(
+        self._assigner = DynamicBucketAssigner(
             table, num_channels=num_channels, num_assigners=num_assigners, assign_id=assign_id,
             target_bucket_row_number=table.options.dynamic_bucket_target_row_num(),
             max_buckets_num=table.options.dynamic_bucket_max_buckets(),

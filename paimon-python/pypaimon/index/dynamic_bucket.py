@@ -204,7 +204,7 @@ class _PartitionIndex:
         return bucket, True
 
 
-class HashBucketAssigner:
+class DynamicBucketAssigner:
     """Restore dynamic-bucket mappings from HASH indexes before assigning."""
 
     def __init__(

@@ -62,7 +62,7 @@ class BlockPythonExecution(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockPythonExecution())
 from pypaimon import CatalogFactory
-from pypaimon.index.dynamic_bucket import HashBucketAssigner, resolve_bucket_snapshot
+from pypaimon.index.dynamic_bucket import DynamicBucketAssigner, resolve_bucket_snapshot
 from pypaimon.write.input_routing import DynamicBucketInputRouter
 
 catalog = CatalogFactory.create({'warehouse': sys.argv[1]})
@@ -77,7 +77,7 @@ partitions, partition_hashes, key_hashes = router.extract_hashes_batch(rows)
 # actual nonempty HASH file produced above and restores the original key.
 plan = SimpleNamespace(splits=lambda: [SimpleNamespace(bucket=0)])
 with patch('pypaimon.execution.native.read.plan.native_plan', return_value=plan) as native_plan:
-    assigner = HashBucketAssigner(table, 1, 1, 0, 1, -1, snapshot=snapshot)
+    assigner = DynamicBucketAssigner(table, 1, 1, 0, 1, -1, snapshot=snapshot)
     assert assigner.assign_batch(partitions, partition_hashes, key_hashes) == [(1, True), (0, False)]
     assert assigner.assign(partitions[1], partition_hashes[1], key_hashes[1]) == 0
 native_plan.assert_called_once()

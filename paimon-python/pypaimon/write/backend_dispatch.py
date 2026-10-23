@@ -220,18 +220,18 @@ def create_input_router(table, bucket_plan=None):
     return FixedBucketInputRouter(table.table_schema)
 
 
-def create_dynamic_bucket_router(table, num_channels, num_assigners):
-    """Select pure input hashing before a distributed task receives rows."""
+def create_dynamic_bucket_assigner_router(table, num_channels, num_assigners):
+    """Select routing to dynamic bucket assigners before a task receives rows."""
     if table.options.native_write_enabled():
-        from pypaimon.execution.native.write.input_routing import create_native_dynamic_bucket_router
+        from pypaimon.execution.native.write.input_routing import create_native_dynamic_bucket_assigner_router
         try:
-            native = create_native_dynamic_bucket_router(table, num_channels, num_assigners)
+            native = create_native_dynamic_bucket_assigner_router(table, num_channels, num_assigners)
         except NotImplementedError:
             native = None
         if native is not None:
             return native
-    from pypaimon.execution.python.write.input_routing import PythonDynamicBucketRouter
-    return PythonDynamicBucketRouter(table, num_channels, num_assigners)
+    from pypaimon.execution.python.write.input_routing import PythonDynamicBucketAssignerRouter
+    return PythonDynamicBucketAssignerRouter(table, num_channels, num_assigners)
 
 
 def create_dynamic_bucket_assigner(table, num_channels, num_assigners, assign_id,

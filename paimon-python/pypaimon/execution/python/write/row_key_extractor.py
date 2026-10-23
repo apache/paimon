@@ -281,7 +281,7 @@ class _SimplePartitionIndex:
         )
 
 
-class SimpleHashBucketAssigner:
+class SimpleDynamicBucketAssigner:
     def __init__(self, num_assigners, assign_id, target_bucket_row_number, max_buckets_num):
         validate_max_buckets(max_buckets_num)
         self.num_assigners = num_assigners
@@ -330,7 +330,7 @@ class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
         max_buckets_num = opts.dynamic_bucket_max_buckets()
 
         if table is None:
-            self._assigner = SimpleHashBucketAssigner(
+            self._assigner = SimpleDynamicBucketAssigner(
                 num_assigners=num_assigners,
                 assign_id=assign_id,
                 target_bucket_row_number=target_bucket_row_number,
@@ -339,12 +339,12 @@ class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
             self._index_maintainer = None
         else:
             from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketIndexMaintainer
-            from pypaimon.index.dynamic_bucket import HashBucketAssigner
+            from pypaimon.index.dynamic_bucket import DynamicBucketAssigner
 
             from pypaimon.index.dynamic_bucket import resolve_bucket_snapshot
             snapshot = resolve_bucket_snapshot(table, base_snapshot_id)
             self.base_snapshot_id = snapshot.id if snapshot is not None else 0
-            self._assigner = HashBucketAssigner(
+            self._assigner = DynamicBucketAssigner(
                 table=table,
                 num_channels=num_channels,
                 num_assigners=num_assigners,

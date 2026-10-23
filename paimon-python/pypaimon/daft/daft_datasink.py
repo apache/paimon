@@ -464,10 +464,10 @@ def make_dynamic_routing_udf(
     from daft import DataType, Series
 
     from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.write.backend_dispatch import create_dynamic_bucket_router
+    from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner_router
 
     schema = PyarrowFieldParser.from_paimon_schema(table.fields)
-    router = create_dynamic_bucket_router(table, num_channels, num_assigners)
+    router = create_dynamic_bucket_assigner_router(table, num_channels, num_assigners)
     return_fields = {
         assigner_column: DataType.int32(),
         key_hash_column: DataType.int32(),

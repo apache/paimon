@@ -76,18 +76,19 @@ class NativeInputRouter:
         return state
 
 
-def create_native_dynamic_bucket_router(table, num_channels, num_assigners):
+def create_native_dynamic_bucket_assigner_router(table, num_channels, num_assigners):
     if not native_runtime_available():
         return None
     native_table = create_native_write_table(table)
     if native_table is None:
         return None
-    router = NativeDynamicBucketRouter(table, num_channels, num_assigners)
+    router = NativeDynamicBucketAssignerRouter(table, num_channels, num_assigners)
     router._prepare(native_table)
     return router
 
 
-class NativeDynamicBucketRouter:
+class NativeDynamicBucketAssignerRouter:
+    """Route input rows to dynamic bucket assigners using Rust's row hashes."""
 
     def __init__(self, table, num_channels, num_assigners):
         self.table = table
@@ -96,12 +97,12 @@ class NativeDynamicBucketRouter:
         self._router = None
 
     def _prepare(self, native_table=None):
-        from pypaimon_rust.datafusion import DynamicBucketRouter
+        from pypaimon_rust.datafusion import DynamicBucketAssignerRouter
         if native_table is None:
             native_table = create_native_write_table(self.table)
         if native_table is None:
-            raise RuntimeError('Native dynamic bucket routing is unavailable')
-        self._router = DynamicBucketRouter(native_table.schema(), self._num_channels, self._num_assigners)
+            raise RuntimeError('Native dynamic bucket assigner routing is unavailable')
+        self._router = DynamicBucketAssignerRouter(native_table.schema(), self._num_channels, self._num_assigners)
 
     def route(self, data) -> pa.RecordBatch:
         if self._router is None:
@@ -149,7 +150,7 @@ class NativeDynamicBucketAssigner:
             builder = builder.with_restore_snapshot(self._base_snapshot_id)
         if self._ignore_existing:
             builder = builder.with_overwrite()
-        self._assigner = builder.new_bucket_assigner(
+        self._assigner = builder.new_dynamic_bucket_assigner(
             self._num_channels, self._num_assigners, self._assign_id)
         # A restored worker must keep the driver's snapshot even if a new
         # snapshot was committed after this executor was serialized.
