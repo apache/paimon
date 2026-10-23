@@ -161,7 +161,7 @@ def test_native_dynamic_router_pickle_rebuilds_without_python_hashing(tmp_path, 
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
-            patch('pypaimon.write.input_routing.DynamicBucketInputRouter.__init__',
+            patch('pypaimon.execution.python.write.input_routing.DynamicBucketInputRouter.__init__',
                   side_effect=AssertionError('Python hashing')):
         router = create_dynamic_bucket_assigner_router(table, 2, 2)
         assert isinstance(router, NativeDynamicBucketAssignerRouter)
@@ -264,7 +264,7 @@ def test_native_assignment_uses_dedicated_constructor_and_precomputed_arrow_hash
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
             patch.object(table, 'new_batch_write_builder', side_effect=AssertionError('Python write builder')), \
-            patch('pypaimon.index.dynamic_bucket.DynamicBucketAssigner.__init__',
+            patch('pypaimon.execution.python.write.dynamic_bucket.DynamicBucketAssigner.__init__',
                   side_effect=AssertionError('Python index restoration')):
         assigner = create_dynamic_bucket_assigner(table, 2, 2, 1, overwrite, base_snapshot_id)
         assert isinstance(assigner, NativeDynamicBucketAssigner)

@@ -26,13 +26,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.index.dynamic_bucket import (
-    DynamicBucketAssigner,
-    _PartitionIndex,
-    _iter_hashes,
-    compute_assigner,
-    to_signed_int32,
-    validate_bucket_id,
+from pypaimon.index.dynamic_bucket import to_signed_int32, validate_bucket_id
+from pypaimon.execution.python.write.dynamic_bucket import (
+    DynamicBucketAssigner, _PartitionIndex, _iter_hashes, compute_assigner,
 )
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -261,7 +257,7 @@ class DynamicBucketTest(unittest.TestCase):
         entry.bucket = 32768
 
         with patch(
-            'pypaimon.index.dynamic_bucket.IndexFileHandler'
+            'pypaimon.execution.python.write.dynamic_bucket.IndexFileHandler'
         ) as handler:
             handler.return_value.scan.return_value = [entry]
             with patch.object(

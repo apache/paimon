@@ -214,9 +214,9 @@ def create_input_router(table, bucket_plan=None):
         if native is not None:
             return native
     if bucket_plan is not None:
-        from pypaimon.write.input_routing import PostponeFixedBucketInputRouter
+        from pypaimon.execution.python.write.input_routing import PostponeFixedBucketInputRouter
         return PostponeFixedBucketInputRouter(table, bucket_plan)
-    from pypaimon.write.input_routing import FixedBucketInputRouter
+    from pypaimon.execution.python.write.input_routing import FixedBucketInputRouter
     return FixedBucketInputRouter(table.table_schema)
 
 
@@ -393,6 +393,16 @@ def create_shard_update_execution(owner, table, projection, columns, commit_user
     if native is not None:
         return native
     return create_python_shard_updator(owner, table, projection, columns, commit_user, shard, shard_count)
+
+
+def create_row_id_plan_execution(table, plan):
+    """Select pure routing once; execution errors never replay another backend."""
+    from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
+    native = create_native_row_id_plan(table, plan)
+    if native is not None:
+        return NativeRowIdPlan(table, plan, native=native)
+    from pypaimon.execution.python.write.row_id_plan import PythonRowIdPlan
+    return PythonRowIdPlan(plan)
 
 
 def create_row_id_update_execution(table, commit_user, commit_identifier, precomputed=None):

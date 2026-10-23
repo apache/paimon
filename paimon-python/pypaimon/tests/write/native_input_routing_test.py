@@ -31,7 +31,7 @@ from pypaimon.execution.native.write.postpone_bucket import NativePostponeBucket
 from pypaimon.write.backend_dispatch import create_input_router, create_postpone_bucket_planner
 from pypaimon.write.bucket_plan import PostponeBucketPlan
 from pypaimon.write.bucket_planning import PostponeBucketPlanning
-from pypaimon.write.input_routing import FixedBucketInputRouter
+from pypaimon.execution.python.write.input_routing import FixedBucketInputRouter
 
 
 def _table(tmp_path, bucket='4', partition='p', native=True):

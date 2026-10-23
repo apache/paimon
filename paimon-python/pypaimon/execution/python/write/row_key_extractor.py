@@ -24,14 +24,11 @@ import numpy as np
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.index.dynamic_bucket import (
-    MAX_DYNAMIC_BUCKETS,
-    is_my_bucket,
-    validate_max_buckets,
-)
+from pypaimon.index.dynamic_bucket import MAX_DYNAMIC_BUCKETS, validate_max_buckets
+from pypaimon.execution.python.write.dynamic_bucket import is_my_bucket
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.write.input_routing import (
+from pypaimon.execution.python.write.input_routing import (
     DynamicBucketInputRouter, FixedBucketInputRouter, PartitionKeyExtractor, PostponeFixedBucketInputRouter,
     _bucket_from_hash as _shared_bucket_from_hash, _hash_bytes_by_words as _shared_hash_bytes_by_words,
 )
@@ -338,8 +335,9 @@ class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
             )
             self._index_maintainer = None
         else:
-            from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketIndexMaintainer
-            from pypaimon.index.dynamic_bucket import DynamicBucketAssigner
+            from pypaimon.execution.python.write.dynamic_bucket import (
+                DynamicBucketAssigner, DynamicBucketIndexMaintainer,
+            )
 
             from pypaimon.index.dynamic_bucket import resolve_bucket_snapshot
             snapshot = resolve_bucket_snapshot(table, base_snapshot_id)
