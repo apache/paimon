@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
 import org.apache.paimon.flink.sink.coordinator.SavepointTagger;
+import org.apache.paimon.flink.sink.listener.PartitionMarkDoneListener;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
@@ -99,7 +100,11 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                 writeProvider,
                 commitUser,
                 streamingCheckpointEnabled,
-                committerFactory,
+                context -> {
+                    PartitionMarkDoneListener.checkCoordinatorRestoreSupported(
+                            context.streamingCheckpointEnabled(), context.isRestored(), table);
+                    return committerFactory.create(context);
+                },
                 autoTagForSavepoint);
     }
 
@@ -133,7 +138,8 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     committerFactory,
                     streamingCheckpointEnabled,
                     initialCommitUser,
-                    autoTagForSavepoint ? createSavepointTaggerFactory(table) : null);
+                    autoTagForSavepoint ? createSavepointTaggerFactory(table) : null,
+                    new Options(table.options()).get(FlinkConnectorOptions.END_INPUT_WATERMARK));
         }
 
         /**
@@ -165,7 +171,7 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
             OperatorID operatorId = parameters.getStreamConfig().getOperatorID();
             OperatorEventGateway gateway =
                     parameters.getOperatorEventDispatcher().getOperatorEventGateway(operatorId);
-            return (T)
+            CoordinatorCommittingRowDataStoreWriteOperator operator =
                     new CoordinatorCommittingRowDataStoreWriteOperator(
                             parameters,
                             table,
@@ -173,6 +179,8 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                             initialCommitUser,
                             gateway,
                             autoTagForSavepoint);
+            parameters.getOperatorEventDispatcher().registerEventHandler(operatorId, operator);
+            return (T) operator;
         }
 
         @Override

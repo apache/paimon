@@ -38,10 +38,34 @@ public class CoordinatorState {
     @Nonnull private final String commitUser;
     @Nonnull private final Map<String, byte[]> committerStates;
 
+    // Array length is the saved writer parallelism; zero denotes legacy/unknown parallelism.
+    @Nonnull private final long[] terminalCoveredBy;
+
     public CoordinatorState(
             @Nonnull String commitUser, @Nonnull Map<String, byte[]> committerStates) {
+        this(commitUser, committerStates, new long[0]);
+    }
+
+    public CoordinatorState(
+            @Nonnull String commitUser,
+            @Nonnull Map<String, byte[]> committerStates,
+            @Nonnull long[] terminalCoveredBy) {
+        for (long checkpoint : terminalCoveredBy) {
+            if (checkpoint < -1 || checkpoint == Long.MAX_VALUE) {
+                throw new IllegalArgumentException("Invalid terminal coverage " + checkpoint);
+            }
+        }
+        this.terminalCoveredBy = terminalCoveredBy.clone();
         this.commitUser = commitUser;
         this.committerStates = committerStates;
+    }
+
+    public int getWriterParallelism() {
+        return terminalCoveredBy.length;
+    }
+
+    public long[] getTerminalCoveredBy() {
+        return terminalCoveredBy.clone();
     }
 
     @Nonnull
