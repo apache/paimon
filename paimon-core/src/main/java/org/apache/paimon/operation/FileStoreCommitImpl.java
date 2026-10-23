@@ -1240,12 +1240,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             rowIdConflictChecker,
                             commitKind);
             if (exception.isPresent()) {
-                if (allowRollback && rollback != null) {
-                    snapshotCommit.ensureValid();
-                    if (rollback.tryToRollback(latestSnapshot)) {
-                        return RetryCommitResult.forRollback(exception.get());
-                    }
-                }
+                // A committed snapshot may already be pinned by a tag or an active reader.
+                // Destructive rollback is not a safe way to recover a writer's conflict.
                 throw exception.get();
             }
         }

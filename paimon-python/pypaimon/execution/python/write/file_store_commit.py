@@ -564,11 +564,8 @@ class FileStoreCommit:
                 )
                 if rewrite_result is not None:
                     return RewriteResult(rewrite_result)
-                if allow_rollback and self.rollback is not None:
-                    if self.rollback.try_to_rollback(latest_snapshot):
-                        # Rolled back: base/snapshot no longer valid; next attempt
-                        # re-scans from scratch (matches Java RollbackRetryResult).
-                        return RollbackRetryResult(conflict_exception)
+                # Preserve committed snapshots, including tags created concurrently with
+                # this writer. The caller must retry from a fresh read if rewriting fails.
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)

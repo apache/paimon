@@ -39,7 +39,6 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.execution.python.write.file_store_commit import (
     CommitFailRetryResult,
     FileStoreCommit,
-    RollbackRetryResult,
     RewriteResult,
     _reject_compact_increment,
     _row_id_check_from_messages,
@@ -392,62 +391,7 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
         )
 
-    def test_conflict_rollback_retry_skips_history_and_rescans_base(
-            self, mock_manifest_list_manager, mock_manifest_file_manager):
-        file_store_commit = self._create_file_store_commit()
-        conflict = RuntimeError("conflicting compaction")
-        read_all = Mock(return_value=[])
-        file_store_commit.commit_scanner.read_all_entries_from_changed_partitions = read_all
-        file_store_commit.conflict_detection.check_conflicts = Mock(
-            return_value=conflict
-        )
-        file_store_commit.rollback = Mock()
-        file_store_commit.rollback.try_to_rollback.return_value = True
-
-        result = file_store_commit._try_commit_once(
-            retry_result=None,
-            commit_kind="APPEND",
-            commit_entries=[Mock()],
-            changelog_entries=[],
-            commit_identifier=11,
-            latest_snapshot=Mock(id=3),
-            detect_conflicts=True,
-            allow_rollback=True,
-        )
-
-        self.assertIsInstance(result, RollbackRetryResult)
-        self.assertIs(result.exception, conflict)
-
-        file_store_commit.snapshot_manager.get_snapshot_by_id.side_effect = (
-            AssertionError("rollback retry must not scan snapshot history")
-        )
-        file_store_commit.commit_scanner.read_incremental_changes = Mock(
-            side_effect=AssertionError(
-                "rollback retry must not reuse the previous conflict base"
-            )
-        )
-        read_all.reset_mock()
-        file_store_commit.conflict_detection.check_conflicts.return_value = (
-            RuntimeError("conflict after rollback retry")
-        )
-
-        with self.assertRaisesRegex(
-                RuntimeError, "conflict after rollback retry"):
-            file_store_commit._try_commit_once(
-                retry_result=result,
-                commit_kind="APPEND",
-                commit_entries=[Mock()],
-                changelog_entries=[],
-                commit_identifier=11,
-                latest_snapshot=Mock(id=2),
-                detect_conflicts=True,
-            )
-
-        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_not_called()
-        file_store_commit.commit_scanner.read_incremental_changes.assert_not_called()
-        read_all.assert_called_once()
-
-    def test_conflict_rollback_failure_preserves_original_conflict(
+    def test_conflict_preserves_committed_snapshot_without_rollback(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         file_store_commit = self._create_file_store_commit()
         conflict = RuntimeError("conflicting compaction")
@@ -459,7 +403,7 @@ class TestFileStoreCommit(unittest.TestCase):
             return_value=conflict
         )
         file_store_commit.rollback = Mock()
-        file_store_commit.rollback.try_to_rollback.return_value = False
+        file_store_commit.rollback.try_to_rollback.return_value = True
 
         with self.assertRaises(RuntimeError) as failure:
             file_store_commit._try_commit_once(
@@ -474,7 +418,7 @@ class TestFileStoreCommit(unittest.TestCase):
             )
 
         self.assertIs(failure.exception, conflict)
-        file_store_commit.rollback.try_to_rollback.assert_called_once_with(latest_snapshot)
+        file_store_commit.rollback.try_to_rollback.assert_not_called()
         self.mock_snapshot_commit.commit.assert_not_called()
         mock_manifest_file_manager.return_value.write.assert_not_called()
         mock_manifest_list_manager.return_value.write.assert_not_called()

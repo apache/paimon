@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
@@ -1270,6 +1271,75 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                         })
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
+        assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
+    }
+
+    @Test
+    public void testConflictingWriterPreservesTaggedCompaction() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 10, 11);
+        long readSnapshotId = table.latestSnapshot().get().id();
+
+        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder staleBuilder = table.newBatchWriteBuilder();
+        List<CommitMessage> staleMessages;
+        try (BatchTableWrite write = staleBuilder.newWrite().withWriteType(writeType)) {
+            write.write(GenericRow.of(BinaryString.fromString("stale-10")));
+            write.write(GenericRow.of(BinaryString.fromString("stale-11")));
+            List<CommitMessage> prepared = write.prepareCommit();
+            setFirstRowId(prepared, firstRowId);
+            staleMessages =
+                    prepared.stream()
+                            .map(
+                                    message ->
+                                            ((CommitMessageImpl) message)
+                                                    .withCheckFromSnapshot(readSnapshotId))
+                            .collect(Collectors.toList());
+        }
+
+        updateF2(table, firstRowId, 100, 101);
+        FileStoreTable compactTable = withCompactOptions(table, "1 MB");
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, false, false, compactTable.latestSnapshot().get());
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isEqualTo(1);
+        CommitMessage compact = tasks.get(0).doCompact(compactTable, "tagged-compaction");
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(compact));
+        }
+        long concurrentSnapshotId = table.latestSnapshot().get().id();
+        table.createTag("published", concurrentSnapshotId);
+        AtomicInteger rollbackCalls = new AtomicInteger();
+        CatalogEnvironment environment =
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
+                    @Override
+                    public TableRollback catalogTableRollback(String branch) {
+                        return (instant, fromSnapshot) -> {
+                            rollbackCalls.incrementAndGet();
+                            table.rollbackTo(((Instant.SnapshotInstant) instant).getSnapshotId());
+                        };
+                    }
+                };
+        FileStoreTable writerTable =
+                new AppendOnlyFileStoreTable(
+                        table.fileIO(), table.location(), table.schema(), environment);
+
+        assertThatThrownBy(
+                        () -> {
+                            try (BatchTableCommit commit =
+                                    writerTable.newBatchWriteBuilder().newCommit()) {
+                                commit.commit(staleMessages);
+                            }
+                        })
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+        assertThat(table.tagManager().getOrThrow("published").id()).isEqualTo(concurrentSnapshotId);
+        assertThat(rollbackCalls.get()).isZero();
+        assertThat(readF0AndF2(table.copy(Collections.singletonMap("scan.tag-name", "published"))))
+                .isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
         assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
         assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
     }
