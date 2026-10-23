@@ -64,7 +64,7 @@ public class CanalFieldParser {
     protected static String convertEnum(String value, String mysqlType) {
         int elementIndex = Integer.parseInt(value);
         // enum('a','b','c')
-        return getEnumValueByIndex(mysqlType, elementIndex);
+        return null;
     }
 
     protected static String getEnumValueByIndex(String mysqlType, int elementIndex) {
