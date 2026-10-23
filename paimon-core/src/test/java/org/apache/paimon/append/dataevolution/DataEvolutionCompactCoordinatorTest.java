@@ -552,6 +552,60 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerSkipsCompactedVectorStoreFiles() {
+        // Rolled compaction output: non-overlapping files, only the last below the target size.
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 300L, 100));
+        entries.add(makeVectorStoreEntry("v1.vector.json", 0L, 100L, 1024));
+        entries.add(makeVectorStoreEntry("v2.vector.json", 100L, 100L, 1024));
+        entries.add(makeVectorStoreEntry("v3.vector.json", 200L, 100L, 10));
+        assertThat(vectorStorePlanner(1024, 1024, 2).compactPlan(entries)).isEmpty();
+
+        // Two small files are worth merging, and the task still takes every file of the range.
+        List<ManifestEntry> twoSmall = new ArrayList<>(entries);
+        twoSmall.set(2, makeVectorStoreEntry("v2.vector.json", 100L, 100L, 10));
+        List<DataEvolutionCompactTask> tasks =
+                vectorStorePlanner(1024, 1024, 2).compactPlan(twoSmall);
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(
+                        twoSmall.get(1).file(), twoSmall.get(2).file(), twoSmall.get(3).file());
+
+        // Overlapping files are always merged, regardless of their sizes.
+        List<ManifestEntry> overlapping = new ArrayList<>(entries);
+        overlapping.add(makeVectorStoreEntry("update.vector.json", 0L, 100L, 1024));
+        tasks = vectorStorePlanner(1024, 1024, 2).compactPlan(overlapping);
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore()).hasSize(4);
+    }
+
+    @Test
+    public void testCompactPlannerSkipsCompletedVectorStoreFiles() {
+        // Estimated rolling sizes may leave several outputs below the target size.
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 200L, 100));
+        entries.add(makeVectorStoreEntry("out1.vector.json", 0L, 100L, 10));
+        entries.add(makeVectorStoreEntry("out2.vector.json", 100L, 100L, 10));
+        Set<String> completed =
+                new HashSet<>(Arrays.asList("out1.vector.json", "out2.vector.json"));
+        assertThat(vectorStorePlanner(1024, 1024, 2).compactPlan(entries)).hasSize(1);
+        assertThat(
+                        vectorStorePlanner(1024, 1024, 2)
+                                .withCompletedVectorFiles(completed)
+                                .compactPlan(entries))
+                .isEmpty();
+
+        // A new file in the range requires rewriting the completed outputs with it.
+        entries.add(makeVectorStoreEntry("update.vector.json", 0L, 100L, 10));
+        List<DataEvolutionCompactTask> tasks =
+                vectorStorePlanner(1024, 1024, 2)
+                        .withCompletedVectorFiles(completed)
+                        .compactPlan(entries);
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore()).hasSize(3);
+    }
+
+    @Test
     public void testCompactPlannerSkipsVectorFieldMissingForPartOfRange() {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
@@ -1127,6 +1181,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 compactMinFileNum,
                 schemaId -> rowType,
                 null,
+                targetFileSize,
                 new HashSet<>(Arrays.asList(1, 2)));
     }
 

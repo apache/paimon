@@ -650,6 +650,8 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
             }
             write(getTableDefault(), rows);
         }
+        // Non-overlapping files are only rewritten when small; overlap them with an update.
+        updateVectors(0, Collections.singletonList("embedding"), vectorRows(rowsPerWrite, 7));
         List<String> expected = readAllVectors(getTableDefault());
         catalog.alterTable(
                 identifier(),
@@ -666,6 +668,13 @@ public class VectorStoreTableTest extends DataEvolutionTestBase {
                 .extracting(DataFileMeta::nonNullRowIdRange)
                 .containsExactly(new Range(0, 999), new Range(1000, 1999), new Range(2000, 2499));
         assertThat(readAllVectors(getTableDefault())).isEqualTo(expected);
+
+        FileStoreTable table = getTableDefault();
+        assertThat(
+                        new DataEvolutionCompactCoordinator(
+                                        table, false, true, table.latestSnapshot().get())
+                                .plan())
+                .isEmpty();
     }
 
     private List<String> readAllVectors(FileStoreTable table) throws Exception {
