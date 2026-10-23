@@ -55,11 +55,6 @@ def python_row_group_cache(request):
         return request._cache
 
 
-def create_python_row_filter(rule_json):
-    from pypaimon.execution.python.read.predicate_json_parser import parse_predicate_to_batch_filter
-    return parse_predicate_to_batch_filter(rule_json)
-
-
 def validate_read_backend(read):
     """Validate the explicitly selected Python backend without loading Native."""
     if not read.table.options.native_read_enabled():

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Public factories retain captured inputs and enter their selected dispatch boundary."""
+"""Public factories retain captured inputs and keep standalone helpers independent."""
 
 import subprocess
 import sys
@@ -172,7 +172,9 @@ assert not any(name.startswith('pypaimon.execution.python') for name in sys.modu
     ('-2', ['id', 'p'], 'PostponeBucketRowKeyExtractor'),
     ('-1', ['id', 'p'], 'DynamicBucketRowKeyExtractor'),
 ])
-def test_public_row_key_factory_preserves_per_row_contract(tmp_path, bucket, primary_keys, expected):
+def test_python_row_key_factory_preserves_per_row_contract(tmp_path, bucket, primary_keys, expected):
+    from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
+
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     arrow_schema = pa.schema([('id', pa.int32()), ('p', pa.string())])
@@ -184,7 +186,7 @@ def test_public_row_key_factory_preserves_per_row_contract(tmp_path, bucket, pri
     rows = pa.record_batch([pa.array([1, 2], pa.int32()), pa.array(['a', 'a'])], schema=arrow_schema)
     with patch('pypaimon.execution.native.runtime.native_runtime_available',
                side_effect=AssertionError('Per-row helper rediscovered the Native writer')):
-        extractor = table.create_row_key_extractor(ignore_existing=True)
+        extractor = create_row_key_extractor(table, ignore_existing=True)
         partitions, buckets = extractor.extract_partition_bucket_batch(rows)
     assert type(extractor).__name__ == expected
     assert partitions == [('a',), ('a',)]
@@ -194,16 +196,29 @@ def test_public_row_key_factory_preserves_per_row_contract(tmp_path, bucket, pri
         assert buckets == [-2 if bucket == '-2' else 0] * 2
 
 
-def test_ray_condition_compatibility_helpers_keep_python_execution():
+def test_shared_merge_condition_helpers_do_not_load_execution():
     if sys.version_info < (3, 10):
         pytest.skip('Python MERGE conditions require Python 3.10')
     pytest.importorskip('datafusion')
-    from pypaimon.ray.merge_condition import apply_condition, filter_batch, rewrite_condition
+    source = r'''
+import importlib.abc
+import sys
+import pyarrow as pa
 
-    rows = pa.table({'s.id': pa.chunked_array([[1, 2], [3]]), 't.id': [2, 1, 2]})
-    with patch('pypaimon.execution.native.runtime.native_runtime_available',
-               side_effect=AssertionError('Python condition helper discovered Native execution')):
-        assert filter_batch(rows, 's.id > t.id').column('s.id').to_pylist() == [2, 3]
-        schema = pa.schema([('s.id', pa.int64())])
-        empty = apply_condition(rows, rewrite_condition('s.id < 0'), schema)
-    assert empty.num_rows == 0 and empty.schema == schema
+class RejectExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(('pypaimon.execution', 'pypaimon_rust')):
+            raise AssertionError('Shared condition helper selected execution: ' + fullname)
+
+sys.meta_path.insert(0, RejectExecution())
+from pypaimon.ray.merge_condition import apply_condition, filter_batch, rewrite_condition
+rows = pa.table({'s.id': pa.chunked_array([[1, 2], [3]]), 't.id': [2, 1, 2]})
+assert filter_batch(rows, 's.id > t.id').column('s.id').to_pylist() == [2, 3]
+schema = pa.schema([('s.id', pa.int64())])
+empty = apply_condition(rows, rewrite_condition('s.id < 0'), schema)
+assert empty.num_rows == 0 and empty.schema == schema
+assert not any(name.startswith(('pypaimon.execution', 'pypaimon_rust')) for name in sys.modules)
+'''
+    result = subprocess.run([sys.executable, '-c', source], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr

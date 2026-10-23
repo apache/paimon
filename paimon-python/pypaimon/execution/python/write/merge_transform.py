@@ -56,7 +56,7 @@ def _build_matched_transform(
     _filter_batch = None
     if any(r is not None for _, r, _ in prepared_clauses):
         _load_datafusion()
-        from pypaimon.execution.python.write.merge_condition import filter_batch as _filter_batch
+        from pypaimon.write.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch
@@ -123,7 +123,7 @@ def _build_matched_delete_transform(
     _filter_batch = None
     if any(r is not None for r, _ in prepared_clauses):
         _load_datafusion()
-        from pypaimon.execution.python.write.merge_condition import filter_batch as _filter_batch
+        from pypaimon.write.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch
@@ -174,7 +174,7 @@ def _build_insert_transform(
     _filter_batch = None
     if any(r is not None for _, r in prepared_clauses):
         _load_datafusion()
-        from pypaimon.execution.python.write.merge_condition import filter_batch as _filter_batch
+        from pypaimon.write.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch

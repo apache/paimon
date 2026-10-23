@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Set, TYPE_CHECKING
+from typing import List, Optional, Set
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.file_io import FileIO
@@ -29,9 +29,6 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
-
-if TYPE_CHECKING:
-    from pypaimon.execution.python.write.row_key_extractor import RowKeyExtractor
 
 
 class FileStoreTable(Table):
@@ -485,12 +482,6 @@ class FileStoreTable(Table):
             partitions=partitions,
             dry_run=dry_run,
         )
-
-    def create_row_key_extractor(
-        self, ignore_existing: bool = False
-    ) -> 'RowKeyExtractor':
-        from pypaimon.write.backend_dispatch import create_row_key_extractor
-        return create_row_key_extractor(self, ignore_existing)
 
     def copy(self, options: dict) -> 'FileStoreTable':
         return self._copy(options, resolve_time_travel=True)
