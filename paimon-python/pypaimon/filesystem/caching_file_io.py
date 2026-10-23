@@ -519,9 +519,6 @@ class CachingFileIO(FileIO):
     def write_avro(self, *args, **kwargs):
         return self._delegate.write_avro(*args, **kwargs)
 
-    def write_lance(self, *args, **kwargs):
-        return self._delegate.write_lance(*args, **kwargs)
-
     def write_blob(self, *args, **kwargs):
         return self._delegate.write_blob(*args, **kwargs)
 

@@ -88,7 +88,7 @@ public class SparkMultimodalITCase {
                         + " USING paimon\n"
                         + "PARTITIONED BY (`date` STRING COMMENT 'date')\n"
                         + "TBLPROPERTIES (\n"
-                        + "    'vector.file.format'='lance',\n"
+                        + "    'vector.file.format'='parquet',\n"
                         + "    'vector-field'='embs',\n"
                         + "    'field.embs.vector-dim'='4',\n"
                         + "    'row-tracking.enabled'='true',\n"

@@ -50,8 +50,8 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 5L, 2L),
-                        file("data-2.vector.lance", "embedding", 5L, 5L, 2L));
+                        file("data-1.vector.parquet", "embedding", 0L, 5L, 2L),
+                        file("data-2.vector.parquet", "embedding", 5L, 5L, 2L));
 
         assertThat(DataEvolutionVectorReadPlanner.plan(files, VECTOR_TYPE, this::rowType, null))
                 .isNull();
@@ -62,7 +62,7 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 5L, 2L));
+                        file("data-1.vector.parquet", "embedding", 0L, 5L, 2L));
 
         List<DataEvolutionVectorReadPlanner.ReadRange> ranges =
                 DataEvolutionVectorReadPlanner.plan(files, VECTOR_TYPE, this::rowType, null);
@@ -73,7 +73,7 @@ public class DataEvolutionVectorReadPlannerTest {
                 .containsExactly(new Range(0, 4), new Range(5, 9));
         assertThat(ranges.get(0).files)
                 .extracting(DataFileMeta::fileName)
-                .containsExactly("data-1.vector.lance");
+                .containsExactly("data-1.vector.parquet");
         assertThat(ranges.get(1).files).isEmpty();
     }
 
@@ -83,8 +83,8 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 10L, 2L),
-                        file("data-2.vector.lance", "embedding", 0L, 5L, 3L));
+                        file("data-1.vector.parquet", "embedding", 0L, 10L, 2L),
+                        file("data-2.vector.parquet", "embedding", 0L, 5L, 3L));
 
         List<DataEvolutionVectorReadPlanner.ReadRange> ranges =
                 DataEvolutionVectorReadPlanner.plan(files, VECTOR_TYPE, this::rowType, null);
@@ -95,10 +95,10 @@ public class DataEvolutionVectorReadPlannerTest {
                 .containsExactly(new Range(0, 4), new Range(5, 9));
         assertThat(ranges.get(0).files)
                 .extracting(DataFileMeta::fileName)
-                .containsExactly("data-2.vector.lance");
+                .containsExactly("data-2.vector.parquet");
         assertThat(ranges.get(1).files)
                 .extracting(DataFileMeta::fileName)
-                .containsExactly("data-1.vector.lance");
+                .containsExactly("data-1.vector.parquet");
     }
 
     @Test
@@ -107,8 +107,8 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 7L, 2L),
-                        file("data-2.vector.lance", "embedding", 3L, 7L, 3L));
+                        file("data-1.vector.parquet", "embedding", 0L, 7L, 2L),
+                        file("data-2.vector.parquet", "embedding", 3L, 7L, 3L));
 
         List<DataEvolutionVectorReadPlanner.ReadRange> ranges =
                 DataEvolutionVectorReadPlanner.plan(files, VECTOR_TYPE, this::rowType, null);
@@ -125,10 +125,10 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 10L, 1L),
-                        file("data-2.vector.lance", "embedding", 5L, 5L, 2L),
-                        file("data-3.vector.lance", "embedding", 2L, 6L, 3L),
-                        file("data-4.vector.lance", "embedding", 0L, 5L, 4L));
+                        file("data-1.vector.parquet", "embedding", 0L, 10L, 1L),
+                        file("data-2.vector.parquet", "embedding", 5L, 5L, 2L),
+                        file("data-3.vector.parquet", "embedding", 2L, 6L, 3L),
+                        file("data-4.vector.parquet", "embedding", 0L, 5L, 4L));
 
         List<DataEvolutionVectorReadPlanner.ReadRange> ranges =
                 DataEvolutionVectorReadPlanner.plan(files, VECTOR_TYPE, this::rowType, null);
@@ -139,7 +139,7 @@ public class DataEvolutionVectorReadPlannerTest {
                 .containsExactly(new Range(0, 4), new Range(5, 7), new Range(8, 9));
         assertThat(ranges.get(1).files)
                 .extracting(DataFileMeta::fileName)
-                .containsExactly("data-3.vector.lance");
+                .containsExactly("data-3.vector.parquet");
     }
 
     @Test
@@ -148,9 +148,9 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 10L, 1L),
-                        file("data-2.vector.lance", "embedding", 0L, 7L, 2L),
-                        file("data-3.vector.lance", "embedding", 7L, 3L, 2L));
+                        file("data-1.vector.parquet", "embedding", 0L, 10L, 1L),
+                        file("data-2.vector.parquet", "embedding", 0L, 7L, 2L),
+                        file("data-3.vector.parquet", "embedding", 7L, 3L, 2L));
 
         assertThat(DataEvolutionVectorReadPlanner.plan(files, VECTOR_TYPE, this::rowType, null))
                 .isNull();
@@ -164,8 +164,8 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "e1", 0L, 10L, 3L),
-                        file("data-2.vector.lance", "e2", 0L, 5L, 2L));
+                        file("data-1.vector.parquet", "e1", 0L, 10L, 3L),
+                        file("data-2.vector.parquet", "e2", 0L, 5L, 2L));
 
         List<DataEvolutionVectorReadPlanner.ReadRange> ranges =
                 DataEvolutionVectorReadPlanner.plan(files, readType, this::rowType, null);
@@ -182,8 +182,8 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 4L, 1L),
-                        file("data-3.vector.lance", "embedding", 7L, 3L, 1L));
+                        file("data-1.vector.parquet", "embedding", 0L, 4L, 1L),
+                        file("data-3.vector.parquet", "embedding", 7L, 3L, 1L));
         List<Range> rowRanges = Arrays.asList(new Range(1, 1), new Range(8, 8));
 
         assertThat(
@@ -197,7 +197,7 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 5L, 2L));
+                        file("data-1.vector.parquet", "embedding", 0L, 5L, 2L));
 
         // No selected row falls outside [0, 4], so the sequential bunch reads every one of them.
         assertThat(
@@ -227,7 +227,7 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 5L, 5L, 2L));
+                        file("data-1.vector.parquet", "embedding", 5L, 5L, 2L));
 
         assertThat(plan(files, new Range(5, 5), new Range(7, 7))).isNull();
         assertThat(plan(files, new Range(1, 1), new Range(7, 7))).isNotNull();
@@ -240,8 +240,8 @@ public class DataEvolutionVectorReadPlannerTest {
         List<DataFileMeta> files =
                 Arrays.asList(
                         file("data-0.parquet", "id", 0L, 10L, 1L),
-                        file("data-1.vector.lance", "embedding", 0L, 3L, 2L),
-                        file("data-2.vector.lance", "embedding", 6L, 3L, 3L));
+                        file("data-1.vector.parquet", "embedding", 0L, 3L, 2L),
+                        file("data-2.vector.parquet", "embedding", 6L, 3L, 3L));
 
         assertThat(plan(files, new Range(1, 1), new Range(7, 7))).isNull();
         assertThat(plan(files, new Range(1, 1), new Range(3, 3))).isNotNull();

@@ -862,7 +862,7 @@ class PickleTest(unittest.TestCase):
 class HdfsNativeWriteFormatTest(unittest.TestCase):
     """HdfsNativeFileIO is the default hdfs:// backend, so it must keep the
     same write surface as the pyarrow backend it replaces — including
-    lance/vortex, which otherwise fall through to FileIO's NotImplementedError.
+    vortex, which otherwise falls through to FileIO's NotImplementedError.
     """
 
     def setUp(self):
@@ -874,31 +874,12 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
     def tearDown(self):
         _uninstall_fake_hdfs_native()
 
-    def test_lance_and_vortex_are_overridden(self):
+    def test_vortex_is_overridden(self):
         # The regression this guards: with these unimplemented, an HDFS table
-        # using file.format=lance/vortex would hit FileIO's NotImplementedError.
+        # using file.format=vortex would hit FileIO's NotImplementedError.
         from pypaimon.common.file_io import FileIO
         self.assertIsNot(
-            type(self.fio).write_lance, FileIO.write_lance)
-        self.assertIsNot(
             type(self.fio).write_vortex, FileIO.write_vortex)
-
-    def test_write_lance_delegates_to_lance_specified(self):
-        import pyarrow
-        table = pyarrow.table({"a": [1, 2]})
-        writer = MagicMock(name="LanceFileWriter")
-        fake_lance = types.ModuleType("lance")
-        fake_lance.file = types.SimpleNamespace(
-            LanceFileWriter=MagicMock(return_value=writer))
-        with patch.dict(sys.modules, {"lance": fake_lance}), \
-                patch("pypaimon.execution.python.read.reader.lance_utils.to_lance_specified",
-                      return_value=("hdfs://ns/x.lance", {"opt": "v"})) as spec:
-            self.fio.write_lance("hdfs://ns/x.lance", table)
-        spec.assert_called_once()
-        _, kwargs = fake_lance.file.LanceFileWriter.call_args
-        self.assertEqual(kwargs.get("storage_options"), {"opt": "v"})
-        self.assertEqual(kwargs.get("version"), "2.1")
-        writer.close.assert_called_once()
 
     def test_write_vortex_delegates_to_vortex_specified(self):
         import pyarrow

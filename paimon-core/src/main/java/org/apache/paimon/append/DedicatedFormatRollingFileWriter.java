@@ -73,7 +73,7 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
  *       parquet)
  *   <li><b>Blob columns</b>: Stored in dedicated blob files within blob file format
  *   <li><b>Vector columns</b>: Stored in dedicated vector files using a specialized format (e.g.,
- *       lance)
+ *       parquet)
  * </ul>
  *
  * <p>File rolling is triggered based on the target file size for each type. When rolling occurs,
@@ -84,7 +84,7 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
  * Example file structure:
  *   Normal file: f1.parquet (id, name columns)
  *   Blob files:  blob/b1.blob, blob/b2.blob (data BLOB column)
- *   Vector file: vector/v1.lance (embedding VECTOR column)
+ *   Vector file: vector/v1.parquet (embedding VECTOR column)
  * Rolling behavior:
  *   Normal file1: f1.parquet -&gt; blob files (b1.blob, b2.blob)
  *   Normal file2: f2.parquet -&gt; blob files (b3.blob)

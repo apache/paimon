@@ -52,7 +52,7 @@ public class CopyFilesUtilTest {
         assertThat(newName(pathFactory, "data-a-0.parquet"))
                 .endsWith(".parquet")
                 .doesNotContain(".vector.");
-        assertThat(newName(pathFactory, "data-a-0.vector.lance")).endsWith(".vector.lance");
+        assertThat(newName(pathFactory, "data-a-0.vector.parquet")).endsWith(".vector.parquet");
         assertThat(newName(pathFactory, "data-a-0.blob")).endsWith(".blob");
         assertThat(newName(pathFactory, "data-a-0.video")).endsWith(".video");
     }

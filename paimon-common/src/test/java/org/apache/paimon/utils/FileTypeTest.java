@@ -317,7 +317,7 @@ public class FileTypeTest {
                         FileType.classify(
                                 new Path(
                                         TABLE_ROOT
-                                                + "/dt=2024-01-01/bucket-0/data-a1b2c3d4-0.vector.lance")))
+                                                + "/dt=2024-01-01/bucket-0/data-a1b2c3d4-0.vector.parquet")))
                 .isEqualTo(FileType.DATA);
         // unknown file defaults to DATA
         assertThat(

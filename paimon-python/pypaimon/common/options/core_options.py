@@ -144,7 +144,6 @@ class CoreOptions:
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_VIDEO: str = "video"
-    FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
     FILE_FORMAT_MOSAIC: str = "mosaic"

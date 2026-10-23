@@ -660,32 +660,6 @@ class HdfsNativeFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
-    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
-        # Mirror the remote-scheme writer: lance/vortex talk to the backend
-        # through their own object_store, so we hand them the URI plus any
-        # storage options the FileIO exposes rather than routing through the
-        # native client. Without these two methods, an HDFS table configured
-        # with file.format=lance/vortex would hit FileIO's NotImplementedError
-        # now that this class is the default hdfs:// backend.
-        try:
-            import lance
-
-            from pypaimon.execution.python.read.reader.lance_utils import to_lance_specified
-            file_path_for_lance, storage_options = to_lance_specified(self, path)
-            kwargs.setdefault("version", "2.1")
-
-            writer = lance.file.LanceFileWriter(
-                file_path_for_lance, data.schema,
-                storage_options=storage_options, **kwargs)
-            try:
-                for batch in data.to_batches():
-                    writer.write_batch(batch)
-            finally:
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
-
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import mosaic

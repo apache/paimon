@@ -263,8 +263,6 @@ class DataWriter(ABC):
             self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             self.file_io.write_blob(file_path, data)
-        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
-            self.file_io.write_lance(file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             self.file_io.write_vortex(file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:

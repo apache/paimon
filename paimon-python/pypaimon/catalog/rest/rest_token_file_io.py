@@ -288,9 +288,6 @@ class RESTTokenFileIO(FileIO):
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         return self.file_io().write_avro(path, data, avro_schema, compression, zstd_level, **kwargs)
 
-    def write_lance(self, path: str, data, **kwargs):
-        return self.file_io().write_lance(path, data, **kwargs)
-
     def write_blob(self, path: str, data, **kwargs):
         return self.file_io().write_blob(path, data, **kwargs)
 

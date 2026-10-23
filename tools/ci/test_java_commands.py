@@ -99,7 +99,7 @@ class MavenCommandsTest(unittest.TestCase):
         root = SCRIPT.resolve().parents[2]
         workflow = (root / '.github/workflows/ci-python.yml').read_text()
         modules = set(re.search(r'-pl ([^\s]+) -am', workflow).group(1).split(','))
-        self.assertTrue({'paimon-core', 'paimon-lance', 'paimon-lumina',
+        self.assertTrue({'paimon-core', 'paimon-lumina',
                          'paimon-vortex/paimon-vortex-format', 'paimon-full-text',
                          'paimon-vector'}.issubset(modules))
         for module in modules:

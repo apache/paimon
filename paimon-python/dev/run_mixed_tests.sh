@@ -124,15 +124,6 @@ run_batched_java_write_tests() {
         result=1
     fi
 
-    # The supported Lance dependency requires Python >=3.10.
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-        local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
-        lance_tests="${lance_tests}+testJavaWriteReadAppendTableLance"
-        lance_tests="${lance_tests}+testDataEvolutionWriteLance"
-        if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
-            result=1
-        fi
-    fi
 
     if [[ "$PYTHON_MINOR" -ge 11 ]]; then
         local vortex_tests="org.apache.paimon.JavaPyVortexE2ETest#testJavaWriteVectorDedicatedFile"
@@ -179,7 +170,7 @@ run_batched_java_write_tests() {
 
 # Function to run Java test
 run_java_write_test() {
-    echo -e "${YELLOW}=== Step 1: Running Java Write Tests (Parquet/Orc/Avro + Lance) ===${NC}"
+    echo -e "${YELLOW}=== Step 1: Running Java Write Tests (Parquet/Orc/Avro) ===${NC}"
 
     if skip_batched_java_write; then
         return 0
@@ -200,20 +191,8 @@ run_java_write_test() {
 
     echo ""
 
-    # Run the Java test method for lance format (readers skipped on <3.10).
-    local lance_result=0
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-        echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
-        echo "Note: Maven may download dependencies on first run, this may take a while..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance+testJavaWriteReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true; then
-            echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
-        else
-            echo -e "${RED}✗ Java write lance test failed${NC}"
-            lance_result=1
-        fi
-    fi
 
-    if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
+    if [[ $parquet_result -eq 0 ]]; then
         return 0
     else
         echo -e "${RED}✗ Java test failed${NC}"
@@ -227,7 +206,7 @@ run_python_read_test() {
 
     cd "$PAIMON_PYTHON_DIR"
 
-    # Run the parameterized Python test method (runs for both Parquet/Orc/Avro and Lance)
+    # Run the parameterized Python test method (runs for Parquet/Orc/Avro)
     echo "Running Python test for JavaPyReadWriteTest.test_read_pk_table..."
     if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table or test_read_append_table or test_read_java_dynamic_bucket_hash_index" -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
@@ -259,7 +238,7 @@ run_python_write_test() {
 
 # Function to run Java Read test for Python-Write-Java-Read scenario
 run_java_read_test() {
-    echo -e "${YELLOW}=== Step 4: Running Java Read Test (testReadPkTable, testReadPkTableLance) ===${NC}"
+    echo -e "${YELLOW}=== Step 4: Running Java Read Test (testReadPkTable) ===${NC}"
 
     cd "$PROJECT_ROOT"
 
@@ -276,22 +255,8 @@ run_java_read_test() {
 
     echo ""
 
-    # Java read Lance reads a Python-written table; Python skips lance on <3.10.
-    local lance_result=0
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-        echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
-        echo "Note: Maven may download dependencies on first run, this may take a while..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance+testReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-            echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
-        else
-            echo -e "${RED}✗ Java read lance test failed${NC}"
-            lance_result=1
-        fi
-    else
-        echo -e "${YELLOW}⏭ Skipping Java read Lance (lance needs Python >= 3.10, current: $PYTHON_VERSION)${NC}"
-    fi
 
-    if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
+    if [[ $parquet_result -eq 0 ]]; then
         return 0
     else
         return 1
@@ -784,7 +749,6 @@ run_data_evolution_test() {
     echo -e "${YELLOW}=== Running Data Evolution Test (Java Write, Python Read) ===${NC}"
 
     local core_result=0
-    local lance_result=0
 
     if ! skip_batched_java_write; then
         cd "$PROJECT_ROOT"
@@ -798,16 +762,6 @@ run_data_evolution_test() {
             core_result=1
         fi
 
-        # Java write data evolution table (lance) -- only read back on >=3.10.
-        if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-            echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
-            if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
-                echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
-            else
-                echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
-                lance_result=1
-            fi
-        fi
     fi
 
     # Python read data evolution tables
@@ -820,7 +774,7 @@ run_data_evolution_test() {
         return 1
     fi
 
-    if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
+    if [[ $core_result -ne 0 ]]; then
         return 1
     fi
     return 0
@@ -876,21 +830,8 @@ run_data_evolution_py_write_test() {
         core_result=1
     fi
 
-    # Java read Lance reads a Python-written table; Python skips lance on <3.10.
-    local lance_result=0
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-        echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-            echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
-        else
-            echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
-            lance_result=1
-        fi
-    else
-        echo -e "${YELLOW}⏭ Skipping Java data evolution read Lance (lance needs Python >= 3.10, current: $PYTHON_VERSION)${NC}"
-    fi
 
-    if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
+    if [[ $core_result -ne 0 ]]; then
         return 1
     fi
     return 0
@@ -1213,7 +1154,7 @@ main() {
         echo ""
     fi
 
-    # Run Java read test (handles both Parquet/Orc/Avro and Lance)
+    # Run Java read test (handles Parquet/Orc/Avro)
     if ! run_java_read_test; then
         java_read_result=1
     fi
@@ -1402,8 +1343,7 @@ main() {
 
     echo ""
 
-    # Run data evolution test (Java write, Python read). Lance variant skips
-    # itself on <3.10 (get_file_format_params + gated Java lance read).
+    # Run data evolution test (Java write, Python read).
     if ! run_data_evolution_test; then
         data_evolution_result=1
     fi
@@ -1453,9 +1393,9 @@ main() {
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Java Write Test (Parquet/Orc/Avro + Lance): PASSED${NC}"
+        echo -e "${GREEN}✓ Java Write Test (Parquet/Orc/Avro): PASSED${NC}"
     else
-        echo -e "${RED}✗ Java Write Test (Parquet/Orc/Avro + Lance): FAILED${NC}"
+        echo -e "${RED}✗ Java Write Test (Parquet/Orc/Avro): FAILED${NC}"
     fi
 
     if [[ $python_read_result -eq 0 ]]; then
@@ -1471,9 +1411,9 @@ main() {
     fi
 
     if [[ $java_read_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Java Read Test (Parquet/Orc/Avro + Lance): PASSED${NC}"
+        echo -e "${GREEN}✓ Java Read Test (Parquet/Orc/Avro): PASSED${NC}"
     else
-        echo -e "${RED}✗ Java Read Test (Parquet/Orc/Avro + Lance): FAILED${NC}"
+        echo -e "${RED}✗ Java Read Test (Parquet/Orc/Avro): FAILED${NC}"
     fi
 
     if [[ $pk_dv_result -eq 0 ]]; then

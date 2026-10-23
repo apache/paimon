@@ -73,7 +73,6 @@ class SelectionTest(unittest.TestCase):
 
     def test_java_python_fixtures_run_python(self):
         for module, name in [('paimon-core', 'JavaPyE2ETest'),
-                             ('paimon-lance', 'JavaPyLanceE2ETest'),
                              ('paimon-lumina', 'JavaPyLuminaE2ETest')]:
             result = plan.select([module + '/src/test/java/org/apache/paimon/' + name + '.java'])
             self.assertTrue(result['python'])

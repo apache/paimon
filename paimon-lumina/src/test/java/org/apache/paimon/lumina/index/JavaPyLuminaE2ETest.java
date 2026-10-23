@@ -57,8 +57,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -66,7 +64,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
-import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
@@ -103,12 +100,10 @@ public class JavaPyLuminaE2ETest {
         warehouse = new Path("file://" + tempDir.resolve("warehouse"));
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"orc", "lance"})
+    @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testLuminaVectorIndexWrite(String fileFormat) throws Exception {
-        String tableName =
-                "lance".equals(fileFormat) ? "test_lumina_vector_lance" : "test_lumina_vector";
+    public void testLuminaVectorIndexWrite() throws Exception {
+        String tableName = "test_lumina_vector";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
 
         int dimension = 4;
@@ -123,9 +118,6 @@ public class JavaPyLuminaE2ETest {
         options.set(ROW_TRACKING_ENABLED, true);
         options.set(DATA_EVOLUTION_ENABLED, true);
         options.set(GLOBAL_INDEX_ENABLED, true);
-        if (!"orc".equals(fileFormat)) {
-            options.setString(FILE_FORMAT.key(), fileFormat);
-        }
         options.setString(LuminaVectorIndexOptions.DIMENSION.key(), String.valueOf(dimension));
         options.setString(LuminaVectorIndexOptions.DISTANCE_METRIC.key(), "l2");
         options.setString(LuminaVectorIndexOptions.ENCODING_TYPE.key(), "rawf32");

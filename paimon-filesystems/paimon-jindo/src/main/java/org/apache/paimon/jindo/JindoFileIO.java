@@ -166,7 +166,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     }
 
     /**
-     * This method is used to initialize some thirdparty connector, such as Lance reader/writer.
+     * This method is used to initialize native file format readers and writers.
      *
      * @param path file path
      * @param opType read/write/meta

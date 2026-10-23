@@ -389,7 +389,7 @@ public class DataEvolutionUtilsTest {
     @Test
     public void testRetrieveAnchorFileSkipsSpecialFiles() {
         DataFileMeta blobFile = dataFile("blob-file.blob", 1);
-        DataFileMeta vectorFile = dataFile("data.vector.lance", 2);
+        DataFileMeta vectorFile = dataFile("data.vector.parquet", 2);
         DataFileMeta oldestNormalFile = dataFile("oldest-normal.parquet", 3);
         DataFileMeta newestNormalFile = dataFile("newest-normal.parquet", 4);
 
@@ -408,7 +408,7 @@ public class DataEvolutionUtilsTest {
                                 DataEvolutionUtils.retrieveAnchorFile(
                                         Arrays.asList(
                                                 dataFile("blob-file.blob", 1),
-                                                dataFile("data.vector.lance", 2)),
+                                                dataFile("data.vector.parquet", 2)),
                                         Function.identity()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("anchor file");
