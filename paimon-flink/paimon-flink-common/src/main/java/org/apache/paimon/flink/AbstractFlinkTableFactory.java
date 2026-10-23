@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.lakestream.LakeStreamTableFactory;
 import org.apache.paimon.flink.sink.FlinkFormatTableSink;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataEvolutionDataTableSource;
@@ -81,12 +82,74 @@ public abstract class AbstractFlinkTableFactory
 
     @Nullable private final FlinkCatalog flinkCatalog;
 
+    /** Builds the source and sink of a lake-stream table; {@code null} when no store is named. */
+    @Nullable private final LakeStreamTableFactory lakeStreamTableFactory;
+
     public AbstractFlinkTableFactory(@Nullable FlinkCatalog flinkCatalog) {
+        this(flinkCatalog, null);
+    }
+
+    public AbstractFlinkTableFactory(
+            @Nullable FlinkCatalog flinkCatalog,
+            @Nullable LakeStreamTableFactory lakeStreamTableFactory) {
         this.flinkCatalog = flinkCatalog;
+        this.lakeStreamTableFactory = lakeStreamTableFactory;
     }
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
+        if (isLakeStreamRead(context)) {
+            return createLakeStreamSource(context);
+        }
+        return createPaimonTableSource(context);
+    }
+
+    @Override
+    public DynamicTableSink createDynamicTableSink(Context context) {
+        if (isLakeStreamWrite(context)) {
+            return createLakeStreamSink(context);
+        }
+        return createPaimonTableSink(context, buildPaimonTable(context));
+    }
+
+    /** Whether the read is a {@code $rt} read of a lake-stream table. */
+    protected boolean isLakeStreamRead(Context context) {
+        return flinkCatalog != null
+                && LakeStreamTableFactory.isLakeStreamRead(flinkCatalog.catalog(), context);
+    }
+
+    /**
+     * Whether the write is to a lake-stream table, or through the read-only {@code $rt} name. The
+     * flag comes from the catalog, not from the table in the context, because Flink merges query
+     * hints into the latter. With no catalog there is no persisted flag, only the DDL options.
+     */
+    protected boolean isLakeStreamWrite(Context context) {
+        if (flinkCatalog == null) {
+            return Options.fromMap(context.getCatalogTable().getOptions())
+                    .get(CoreOptions.LAKE_STREAM_ENABLED);
+        }
+        return LakeStreamTableFactory.isLakeStreamWrite(flinkCatalog.catalog(), context);
+    }
+
+    /** The source that serves a lake-stream read. */
+    protected DynamicTableSource createLakeStreamSource(Context context) {
+        if (lakeStreamTableFactory == null) {
+            throw LakeStreamTableFactory.missingStoreError(context.getObjectIdentifier(), "read");
+        }
+        return lakeStreamTableFactory.createDynamicTableSource(context);
+    }
+
+    /** The sink that serves a lake-stream write. */
+    protected DynamicTableSink createLakeStreamSink(Context context) {
+        if (lakeStreamTableFactory == null) {
+            throw LakeStreamTableFactory.missingStoreError(
+                    context.getObjectIdentifier(), "write to");
+        }
+        return lakeStreamTableFactory.createDynamicTableSink(context);
+    }
+
+    /** The source Paimon builds for a table that lake-stream mode does not claim. */
+    protected DynamicTableSource createPaimonTableSource(Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
         Table table = getPaimonTable(origin, context);
         boolean unbounded =
@@ -107,9 +170,8 @@ public abstract class AbstractFlinkTableFactory
         }
     }
 
-    @Override
-    public DynamicTableSink createDynamicTableSink(Context context) {
-        Table table = buildPaimonTable(context);
+    /** The sink Paimon builds for a table that lake-stream mode does not claim. */
+    protected DynamicTableSink createPaimonTableSink(Context context, Table table) {
         if (table instanceof FormatTable) {
             return new FlinkFormatTableSink(
                     context.getObjectIdentifier(), (FormatTable) table, context);
@@ -299,7 +361,7 @@ public abstract class AbstractFlinkTableFactory
         return optionsFromTableConfig;
     }
 
-    static Map<String, String> getAllOptions(DynamicTableFactory.Context context) {
+    public static Map<String, String> getAllOptions(DynamicTableFactory.Context context) {
         ReadableConfig config = context.getConfiguration();
         if (config instanceof Configuration) {
             return ((Configuration) config).toMap();

@@ -268,6 +268,64 @@ under the License.
             <version>3.44.0.0</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- lake-stream mode: runs the routing against a real Fluss cluster -->
+
+        <dependency>
+            <groupId>org.apache.fluss</groupId>
+            <artifactId>fluss-flink-${test.flink.main.version}</artifactId>
+            <version>${test.fluss.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.fluss</groupId>
+            <artifactId>fluss-server</artifactId>
+            <version>${test.fluss.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.fluss</groupId>
+            <artifactId>fluss-server</artifactId>
+            <version>${test.fluss.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.fluss</groupId>
+            <artifactId>fluss-test-utils</artifactId>
+            <version>${test.fluss.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+          Fluss starts its test cluster with curator-test, which flink-test-utils already brings in
+          at 5.4.0. hadoop-common would otherwise win the version mediation with curator 2.7.1 and
+          ZooKeeper 3.4.6, and the cluster then fails to start.
+        -->
+
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-framework</artifactId>
+            <version>${test.curator.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-client</artifactId>
+            <version>${test.curator.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.zookeeper</groupId>
+            <artifactId>zookeeper</artifactId>
+            <version>${test.zookeeper.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 
