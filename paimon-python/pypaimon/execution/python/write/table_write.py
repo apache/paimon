@@ -231,10 +231,6 @@ class PythonTableWrite:
         writer = self.writer
         if blob_consumer is not None and not callable(blob_consumer):
             raise TypeError('blob_consumer must be callable')
-        if writer.file_store_write.data_writers:
-            raise RuntimeError(
-                "with_blob_consumer must be called before any write operation."
-            )
         writer.file_store_write.blob_consumer = blob_consumer
         return self
 

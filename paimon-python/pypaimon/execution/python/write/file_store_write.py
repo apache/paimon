@@ -131,27 +131,32 @@ class FileStoreWrite:
         require_columns(values_by_name, column_names, 'write_row')
         writer = self.data_writers.get(key)
         data = None
-        if writer is None and self._has_blob_columns():
-            # Dedicated writers consume live payloads themselves. Inline fields
-            # instead encode to Arrow before the writer captures its layout.
-            descriptor_fields = self.options.blob_descriptor_fields()
-            view_fields = self.options.blob_view_fields()
+        if self._has_blob_columns():
+            descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
+            view_fields = CoreOptions.blob_view_fields(self.options)
             inline_columns = [name for name in column_names if name in descriptor_fields or name in view_fields]
             if inline_columns:
                 values_by_name = dict(values_by_name)
                 for name in inline_columns:
                     values_by_name[name] = inline_blob_value(
                         values_by_name[name], name in descriptor_fields, name in view_fields)
-                # Reuse the encoded bytes in the dedicated row path. Keep the
-                # original event kind and leave unselected Blob objects alone.
                 from pypaimon.table.row.generic_row import GenericRow
                 row = GenericRow([values_by_name[name] for name in column_names],
                                  [self.table.field_dict[name] for name in column_names], row.get_row_kind())
-            ordinary_columns = [name for name in column_names
-                                if name in inline_columns or not is_blob_file_field(self.table.field_dict[name])]
-            if ordinary_columns:
-                row_values_to_arrow_table(
-                    values_by_name, self.table.table_schema.fields, ordinary_columns)
+            if not self.table.is_primary_key_table:
+                if writer is None:
+                    ordinary_columns = [
+                        name for name in column_names
+                        if name in inline_columns or not is_blob_file_field(self.table.field_dict[name])
+                    ]
+                    if ordinary_columns:
+                        row_values_to_arrow_table(
+                            values_by_name, self.table.table_schema.fields, ordinary_columns)
+            else:
+                data = row_values_to_arrow_table(
+                    values_by_name, self.table.table_schema.fields, column_names)
+                from pypaimon.write.row_kind import with_row_kind
+                data = with_row_kind(self.table, data, row)
         elif writer is None or not hasattr(writer, 'write_row'):
             data = row_values_to_arrow_table(
                 values_by_name, self.table.table_schema.fields, column_names)
@@ -167,24 +172,6 @@ class FileStoreWrite:
             self._written_buckets.add(key)
             return
 
-        descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
-        view_fields = CoreOptions.blob_view_fields(self.options)
-        if descriptor_fields or view_fields:
-            values_by_name = {
-                name: inline_blob_value(
-                    val,
-                    name in descriptor_fields,
-                    name in view_fields,
-                )
-                for name, val in values_by_name.items()
-            }
-        data = row_values_to_arrow_table(
-            values_by_name,
-            self.table.table_schema.fields,
-            column_names,
-        )
-        from pypaimon.write.row_kind import with_row_kind
-        data = with_row_kind(self.table, data, row)
         writer.write(data.to_batches()[0])
         self._written_buckets.add(key)
 
