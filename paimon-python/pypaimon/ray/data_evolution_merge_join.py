@@ -98,7 +98,6 @@ class _SelfMergeUpdateContext:
     row_id_name: str
     snapshot_id: int
     callable_input_columns: Optional[List[str]]
-    row_id_plan: Any
 
 
 def _resolve_source_projection(
@@ -245,10 +244,11 @@ def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
     return pa.table(columns, names=names)
 
 
-def _apply_self_merge_update_group(context, file_group, collect_row_ids):
+def _apply_self_merge_update_group(context, group_plan, collect_row_ids):
     """Read, transform, and stage one complete first-row-id file group."""
     from pypaimon.read.table_read import TableRead
 
+    file_group = group_plan.plan.splits()[0]
     table_read = TableRead(
         context.scan_table,
         context.predicate,
@@ -287,9 +287,8 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         if collect_row_ids else []
     )
 
-    files_info = context.row_id_plan.for_split(file_group)
     updater = context.table.new_batch_write_builder().new_update().new_update_by_row_id(
-        _precomputed_files_info=files_info)
+        _precomputed_files_info=group_plan)
     try:
         messages = updater.update_columns(updates, context.update_cols)
     except Exception:
@@ -308,8 +307,11 @@ def distributed_self_merge_update_apply(
 ) -> Tuple[list, int, list]:
     """Stage self-merge updates in scan tasks without a routing shuffle."""
     import ray
+    from pypaimon.read.plan import Plan
+    from pypaimon.write.row_id_plan import CapturedRowIdPlan
 
-    if not plan.file_groups:
+    captured = plan.row_id_plan
+    if not captured.groups:
         return [], 0, []
 
     remote_args = dict(ray_remote_args or {})
@@ -328,10 +330,9 @@ def distributed_self_merge_update_apply(
         row_id_name=plan.row_id_name,
         snapshot_id=plan.snapshot_id,
         callable_input_columns=plan.callable_input_columns,
-        row_id_plan=plan.row_id_plan,
     ))
-    group_iter = iter(plan.file_groups)
-    max_in_flight = max(1, min(num_partitions, len(plan.file_groups)))
+    group_iter = iter(captured.groups)
+    max_in_flight = max(1, min(num_partitions, len(captured.groups)))
     pending = set()
     messages = []
     num_updated = 0
@@ -340,11 +341,15 @@ def distributed_self_merge_update_apply(
 
     def submit_next():
         try:
-            file_group = next(group_iter)
+            group = next(group_iter)
         except StopIteration:
             return False
+        # Transport only this canonical group. Ray deserializes shared Python
+        # objects per task, so broadcasting the full plan repeats all metadata.
+        group_plan = CapturedRowIdPlan(
+            captured.table, Plan([group[2]], captured.plan.snapshot_id), [group])
         pending.add(apply_remote.remote(
-            context, file_group, collect_row_ids
+            context, group_plan, collect_row_ids
         ))
         return True
 

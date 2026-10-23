@@ -3289,7 +3289,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             row_id_name=plan.row_id_name,
             snapshot_id=plan.snapshot_id,
             callable_input_columns=plan.callable_input_columns,
-            row_id_plan=plan.row_id_plan,
         )
         batch_sizes = []
         real_build_transform = join_module._build_matched_transform
@@ -3312,7 +3311,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ):
                 messages, count, row_ids = (
                     join_module._apply_self_merge_update_group(
-                        context, plan.file_groups[0], True,
+                        context, plan.row_id_plan.for_split(plan.file_groups[0]), True,
                     )
                 )
 

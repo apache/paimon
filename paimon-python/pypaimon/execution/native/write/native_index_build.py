@@ -34,6 +34,7 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
     if (builder._index_type not in ('btree', 'bitmap', 'full-text') + tuple(VINDEX_IDENTIFIERS)
             or not table.options.native_write_enabled()
             or (table.options.deletion_vectors_enabled() and builder._index_type == 'full-text')
+            or table.options.query_auth_enabled
             or table.is_primary_key_table
             or table.options.file_format() != 'parquet'
             or not native_runtime_available()

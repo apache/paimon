@@ -163,6 +163,24 @@ def test_native_ray_empty_plan_does_not_submit_or_select_python(tmp_path, native
     assert not scheduler.submitted
 
 
+@pytest.mark.parametrize('execution', ['local', 'ray'])
+def test_query_auth_selects_python_before_native_index_execution(tmp_path, native_protocol, execution):
+    core, _, scheduler = native_protocol
+    request = _request(tmp_path)
+    request._table = request._table.copy({'query-auth.enabled': 'true'})
+    with patch('pypaimon.execution.python.globalindex.create_global_index.PythonGlobalIndexBuilder') as python:
+        python.return_value.build.return_value = ['authorized-python-message']
+        kwargs = {'execution': execution}
+        if execution == 'ray':
+            kwargs['concurrency'] = 2
+        assert request.build(**kwargs) == ['authorized-python-message']
+        assert python.return_value.build.call_args[1]['execution'] == execution
+    core.plan.assert_not_called()
+    core.build.assert_not_called()
+    core.build_shard.assert_not_called()
+    assert not scheduler.submitted
+
+
 def test_native_ray_worker_failure_stops_admission_and_retains_outputs(tmp_path, native_protocol):
     core, _, scheduler = native_protocol
     failure = PermissionError('worker authorization changed')

@@ -73,6 +73,48 @@ def test_captured_update_and_delete_keep_snapshot_without_manifest_rescan(table)
             pa.table({'_ROW_ID': [2], 'v': [9]}), ['v'])
 
 
+def test_self_merge_tasks_transport_only_their_complete_captured_group(table):
+    from pypaimon.ray.data_evolution_merge_join import (
+        build_self_merge_update_plan, distributed_self_merge_update_apply)
+    from pypaimon.write.row_id_plan import CapturedRowIdPlan
+    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+    _append(table, [1, 2])
+    _append(table, [3, 4])
+    messages = TableUpdateByRowId(table, 'partial', 1).update_columns(
+        pa.table({'_ROW_ID': [0], 'v': [9]}), ['v'])
+    table.new_batch_write_builder().new_commit().commit(messages)
+    plan = build_self_merge_update_plan(
+        table=table, clauses=[], target_field_names=table.field_names,
+        target_pa_schema=pa.schema([('id', pa.int32()), ('v', pa.int32())]),
+        update_cols=['v'], resolve_target_projection=lambda *args, **kwargs: ['v'])
+    assert len(plan.file_groups) == 2
+    expected = {start: {file.file_name for file in split.files}
+                for start, _, split in plan.row_id_plan.groups}
+    assert max(len(names) for names in expected.values()) == 2
+    _append(table, [5])
+    submitted = []
+
+    def submit(context, captured, collect_row_ids):
+        assert not hasattr(context, 'row_id_plan'), 'shared context includes whole-table metadata'
+        assert isinstance(captured, CapturedRowIdPlan)
+        captured = pickle.loads(pickle.dumps(captured))
+        assert len(captured.groups) == len(captured.plan.splits()) == 1
+        assert captured.table._read_snapshot.id == captured.snapshot_id == plan.snapshot_id
+        start, _, split = captured.groups[0]
+        assert {file.file_name for file in split.files} == expected[start]
+        assert captured.plan.splits() == [split]
+        submitted.append(start)
+        return start
+
+    scheduler = SimpleNamespace(
+        put=lambda value: value, remote=lambda function: SimpleNamespace(remote=submit),
+        wait=lambda pending, **kwargs: (pending[:1], pending[1:]), get=lambda ref: ([], 0, []))
+    with patch.dict(sys.modules, {'ray': scheduler}):
+        assert distributed_self_merge_update_apply(plan, num_partitions=2) == ([], 0, [])
+    assert submitted == plan.row_id_plan.first_row_ids
+
+
 def test_native_captured_plan_does_not_construct_python_index(table):
     _append(table, [1, 2])
     plan = table.new_read_builder().new_scan().plan_all()
