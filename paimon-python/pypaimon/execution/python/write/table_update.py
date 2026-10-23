@@ -487,7 +487,7 @@ class PythonTableUpdate:
 
     def _delete_rows_with_python(self, row_ids):
         context = self._context
-        return TableDeleteByRowId._from_python(context.table).delete(list(row_ids))
+        return TableDeleteByRowId._from_python(context.table).delete(row_ids)
 
 
 class _ShardBatchIterator:

@@ -459,6 +459,15 @@ def native_row_id_update_selected(worker):
     return isinstance(execution, NativeTableUpdateByRowId)
 
 
+def validate_row_id_update_rows(worker, captured_plan, first_row_id, row_ids):
+    """Validate liveness in the selected executor before positional rewriting."""
+    if native_row_id_update_selected(worker):
+        # Core validates the captured anchor's DV before staging any output.
+        return
+    from pypaimon.execution.python.write.row_id_plan import validate_live_row_ids
+    validate_live_row_ids(worker.table, captured_plan, first_row_id, row_ids)
+
+
 def python_commit(owner):
     """Create Python commit resources only after that backend is selected."""
     if owner._python_commit is None:
