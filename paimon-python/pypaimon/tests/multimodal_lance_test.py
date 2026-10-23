@@ -409,17 +409,6 @@ def test_export_lance_missing_dependency_has_installation_hint(conn, tmp_path):
     assert not path.exists()
 
 
-def test_export_lance_old_dependency_has_upgrade_hint_before_writing(conn, tmp_path):
-    table = _table(conn, "old_dependency", {"id": pa.int32()}, [{"id": 1}])
-    path = tmp_path / "old_dependency.lance"
-
-    with patch.object(lance, "__version__", "12.0.0"):
-        with pytest.raises(ImportError, match="13\\.0\\.0"):
-            table.scan().export_lance(str(path))
-
-    assert not path.exists()
-
-
 def test_export_lance_retained_tag_query_uses_schema_of_resolved_snapshot(conn, tmp_path):
     from pypaimon.schema.data_types import AtomicType
     from pypaimon.schema.schema_change import SchemaChange

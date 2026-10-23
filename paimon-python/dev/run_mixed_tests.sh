@@ -124,8 +124,8 @@ run_batched_java_write_tests() {
         result=1
     fi
 
-    # lance has no Python wheel on <3.8; its readers are all skipped there.
-    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+    # The supported Lance dependency requires Python >=3.10.
+    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
         local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
         lance_tests="${lance_tests}+testJavaWriteReadAppendTableLance"
         lance_tests="${lance_tests}+testDataEvolutionWriteLance"
@@ -200,9 +200,9 @@ run_java_write_test() {
 
     echo ""
 
-    # Run the Java test method for lance format (readers skipped on <3.8).
+    # Run the Java test method for lance format (readers skipped on <3.10).
     local lance_result=0
-    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
         echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
         echo "Note: Maven may download dependencies on first run, this may take a while..."
         if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance+testJavaWriteReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true; then
@@ -276,9 +276,9 @@ run_java_read_test() {
 
     echo ""
 
-    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
+    # Java read Lance reads a Python-written table; Python skips lance on <3.10.
     local lance_result=0
-    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
         echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
         echo "Note: Maven may download dependencies on first run, this may take a while..."
         if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance+testReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
@@ -288,7 +288,7 @@ run_java_read_test() {
             lance_result=1
         fi
     else
-        echo -e "${YELLOW}⏭ Skipping Java read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        echo -e "${YELLOW}⏭ Skipping Java read Lance (lance needs Python >= 3.10, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
@@ -798,8 +798,8 @@ run_data_evolution_test() {
             core_result=1
         fi
 
-        # Java write data evolution table (lance) -- only read back on >=3.8.
-        if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Java write data evolution table (lance) -- only read back on >=3.10.
+        if [[ "$PYTHON_MINOR" -ge 10 ]]; then
             echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
             if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
                 echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
@@ -876,9 +876,9 @@ run_data_evolution_py_write_test() {
         core_result=1
     fi
 
-    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
+    # Java read Lance reads a Python-written table; Python skips lance on <3.10.
     local lance_result=0
-    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
         echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
         if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
             echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
@@ -887,7 +887,7 @@ run_data_evolution_py_write_test() {
             lance_result=1
         fi
     else
-        echo -e "${YELLOW}⏭ Skipping Java data evolution read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        echo -e "${YELLOW}⏭ Skipping Java data evolution read Lance (lance needs Python >= 3.10, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
@@ -1403,7 +1403,7 @@ main() {
     echo ""
 
     # Run data evolution test (Java write, Python read). Lance variant skips
-    # itself on <3.8 (get_file_format_params + gated Java lance read).
+    # itself on <3.10 (get_file_format_params + gated Java lance read).
     if ! run_data_evolution_test; then
         data_evolution_result=1
     fi

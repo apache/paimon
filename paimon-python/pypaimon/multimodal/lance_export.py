@@ -21,7 +21,6 @@ import os
 from copy import copy
 
 import pyarrow as pa
-from packaging.version import Version
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_json_parser import _collect_all_field_refs_from_transform
@@ -60,12 +59,6 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
         import lance
     except ImportError as error:
         raise ImportError("export_lance requires Lance; install 'pypaimon[lance]'.") from error
-    if Version(lance.__version__) < Version("13.0.0"):
-        raise ImportError(
-            "export_lance requires pylance >= 13.0.0 (Python >= 3.10) "
-            "to preserve NULL Blob values across batches; "
-            "upgrade with pip install --upgrade 'pypaimon[lance]'.")
-
     # Resolve once, including an empty table. All schema, planning and BLOB
     # reads must use the same view even if another writer commits meanwhile.
     query = copy(query)
@@ -145,8 +138,7 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
         schema = pa.schema(export_fields, metadata=reader.schema.metadata)
         batches = _export_batches(reader, names, schema, file_io, blob_columns,
                                   map_blobs, array_blobs, descriptor_columns, unresolved_views, blob_parallelism)
-        # The default 2.0 format loses nullable struct validity. Version 2.1
-        # with the required Lance version preserves nested NULLs as well.
+        # Use the validated format for native Blobs and nullable structures.
         return lance.write_dataset(
             batches, uri, schema=schema, mode=mode,
             storage_options=storage_options, data_storage_version="2.1")

@@ -41,8 +41,8 @@ else:
 
 
 def get_file_format_params():
-    # lance has no wheel on Python < 3.8.
-    if sys.version_info[:2] < (3, 8):
+    # The supported Lance dependency requires Python >= 3.10.
+    if sys.version_info[:2] < (3, 10):
         return [('parquet',), ('orc',), ('avro',)]
     else:
         return [('parquet',), ('orc',), ('avro',), ('lance',)]
@@ -1369,7 +1369,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
     def test_read_lumina_vector_index(self):
         """Test reading a Lumina vector index built by Java (orc and lance formats)."""
         test_cases = [('default.test_lumina_vector', 'orc')]
-        if sys.version_info[:2] != (3, 6):
+        if sys.version_info[:2] >= (3, 10):
             test_cases.append(('default.test_lumina_vector_lance', 'lance'))
         for table_name, label in test_cases:
             with self.subTest(file_format=label):

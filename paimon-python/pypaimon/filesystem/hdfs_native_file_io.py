@@ -670,13 +670,13 @@ class HdfsNativeFileIO(FileIO):
         try:
             import lance
 
-            from pypaimon.execution.python.read.reader.lance_utils import (
-                lance_file_writer_options, to_lance_specified)
+            from pypaimon.execution.python.read.reader.lance_utils import to_lance_specified
             file_path_for_lance, storage_options = to_lance_specified(self, path)
+            kwargs.setdefault("version", "2.1")
 
             writer = lance.file.LanceFileWriter(
                 file_path_for_lance, data.schema,
-                storage_options=storage_options, **lance_file_writer_options(kwargs))
+                storage_options=storage_options, **kwargs)
             try:
                 for batch in data.to_batches():
                     writer.write_batch(batch)
