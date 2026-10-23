@@ -24,6 +24,7 @@ import pyarrow as pa
 from packaging.version import Version
 
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
+from pypaimon.read.push_down_utils import rewrite_predicate_indices
 from pypaimon.read.read_support import close_read_source
 from pypaimon.schema.data_types import (
     ArrayType,
@@ -37,7 +38,7 @@ from pypaimon.schema.data_types import (
     is_blob_type,
     is_map_blob_type,
 )
-from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.file_store_table import FileStoreTable
 
 
@@ -66,10 +67,13 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
     query = copy(query)
     table = query._table
     snapshot = TimeTravelUtil.resolve_snapshot(table)
-    if snapshot is not None and snapshot.schema_id != table.table_schema.id:
-        # A tag can move after scan() captured its schema. Reload the schema
-        # from the resolved snapshot itself, including tags whose snapshot
-        # manifest has already expired, while preserving runtime overrides.
+    historical = any(table.options.options.contains_key(key) for key in SCAN_KEYS)
+    if (snapshot is not None and not hasattr(table, "_read_snapshot")
+            and snapshot.schema_id != table.table_schema.id
+            and (historical or snapshot.schema_id > table.table_schema.id)):
+        # Follow moving tags and newer data commits, but preserve the logical
+        # schema of latest or pinned scans after a schema-only ALTER. A tag's
+        # schema can still be resolved when its snapshot manifest has expired.
         schema = table.schema_manager.get_schema(snapshot.schema_id)
         dynamic_options = getattr(table, "_applied_dynamic_options", {})
         options = table._exclude_current_schema_field_options(schema, table.options.options, set(dynamic_options))
@@ -77,14 +81,20 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
             table.file_io, table.identifier, table.table_path,
             schema.copy(new_options=options), table.catalog_environment)
         table._applied_dynamic_options = dict(dynamic_options)
+        # Predicates were bound when the query was created. Rebind after a
+        # schema refresh so partition pruning uses the resolved field order.
+        query._predicate = rewrite_predicate_indices(
+            query._predicate, table.new_read_builder()._table_read_fields())
     query._table = table._copy_with_snapshot(snapshot)
     fields = query._configured_read_builder()._output_fields()
     names = [field.name for field in fields]
     if not names or len(names) != len(set(names)):
         raise ValueError("export_lance requires at least one column and unique output column names.")
     video_fields = query._table.options.video_frame_fields()
+    # A nested projection's alias may match an unrelated source column.
+    video_field_ids = {field.id for field in query._table.fields if field.name in video_fields}
     for field in fields:
-        if field.name in video_fields:
+        if field.id in video_field_ids:
             raise ValueError("export_lance does not support video-frame column %r; project it out." % field.name)
         if _contains_type(field.type, "VARIANT"):
             raise ValueError("export_lance does not support VARIANT column %r; project it out." % field.name)

@@ -87,6 +87,8 @@ assert reopened.count_rows() == exported.count_rows()
 Use `docs.scan(snapshot_id=42)` instead of `tag_name` to export an existing
 snapshot by ID. The two arguments are mutually exclusive. Without either,
 the export resolves the latest snapshot once and reads that version throughout.
+Snapshot and tag reads use their historical schema. Latest reads preserve the
+table's logical schema, including schema-only changes without a new data commit.
 Resolving a snapshot does not retain its source files: use a retained tag for
 long exports. The export does not create a retention tag automatically.
 

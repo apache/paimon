@@ -569,3 +569,93 @@ def test_export_lance_failed_later_blob_batch_never_publishes_partial_dataset(co
     else:
         with pytest.raises(ValueError):
             lance.dataset(str(path))
+
+
+@pytest.mark.python_plan
+@pytest.mark.parametrize("view", ["latest", "moved_tag"])
+def test_export_lance_rebinds_predicates_after_schema_reordering(conn, tmp_path, view):
+    from copy import deepcopy
+
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import Move, SchemaChange
+
+    table = conn.create_table(
+        "reordered", schema=pa.schema([
+            pa.field("part", pa.int32()), pa.field("id", pa.int32()),
+            pa.field("value", pa.int32()),
+        ]), data=[{"part": 99, "id": 1, "value": 20}],
+        partitioned=["part", "id"], options={"file.format": "parquet"})
+    if view == "moved_tag":
+        table.raw_table.create_tag("training")
+    query = table.scan(**({"tag_name": "training"} if view == "moved_tag" else {}))
+    query.where("id = 1 AND (value >= 20 OR part = 3)").select(["value", "id"])
+    original_predicate = deepcopy(query._predicate)
+    conn.catalog.alter_table("default.reordered", [
+        SchemaChange.add_column("pad", AtomicType("INT"), move=Move.first("pad")),
+    ])
+    current = conn.get_table("reordered")
+    current.add([
+        {"pad": 999, "part": 99, "id": 1, "value": 30},
+        {"pad": 999, "part": 99, "id": 1, "value": 5},
+        {"pad": 999, "part": 99, "id": 2, "value": 40},
+    ])
+    if view == "moved_tag":
+        current.raw_table.replace_tag("training")
+    path = tmp_path / (view + ".lance")
+
+    query.export_lance(str(path))
+
+    assert query._predicate == original_predicate
+    assert [field.name for field in query._table.fields] == ["part", "id", "value"]
+    assert lance.dataset(str(path)).schema.names == ["value", "id"]
+    assert sorted(_rows(path), key=lambda row: row["value"]) == [
+        {"value": 20, "id": 1}, {"value": 30, "id": 1},
+    ]
+
+
+def test_export_lance_rebinds_row_id_predicate_after_schema_reordering(conn, tmp_path):
+    from copy import deepcopy
+
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.schema.schema_change import Move, SchemaChange
+
+    table = _table(conn, "reordered_row_ids", {"id": pa.int32()}, [{"id": 1}])
+    row_id = table.scan().with_row_id().to_list()[0]["_ROW_ID"]
+    query = table.take_row_ids([row_id]).select("id").with_row_id()
+    original_predicate = deepcopy(query._predicate)
+    conn.catalog.alter_table("default.reordered_row_ids", [
+        SchemaChange.add_column("pad", AtomicType("INT"), move=Move.first("pad")),
+    ])
+    conn.get_table("reordered_row_ids").add([{"pad": 999, "id": 2}])
+    path = tmp_path / "reordered_row_ids.lance"
+
+    query.export_lance(str(path))
+
+    assert query._predicate == original_predicate
+    assert _rows(path) == [{"id": 1, "_ROW_ID": row_id}]
+
+
+def test_export_lance_allows_scalar_alias_matching_unselected_video_column(conn, tmp_path):
+    table = _table(conn, "video_alias", {
+        "id": pa.int32(), "video": pa.struct([pa.field("frame", pa.int32())]),
+        "video_frame": pa.large_binary(),
+    }, [
+        {"id": 1, "video": {"frame": 7}, "video_frame": None},
+        {"id": 2, "video": {"frame": None}, "video_frame": None},
+        {"id": 3, "video": None, "video_frame": None},
+    ], options={"video-frame-field": "video_frame"})
+    query = table.scan().select(["id", "video.frame"])
+    expected = [
+        {"id": 1, "video_frame": 7},
+        {"id": 2, "video_frame": None},
+        {"id": 3, "video_frame": None},
+    ]
+    assert sorted(query.to_list(), key=lambda row: row["id"]) == expected
+    path = tmp_path / "video_alias.lance"
+
+    query.export_lance(str(path))
+
+    reopened = lance.dataset(str(path))
+    assert reopened.schema.names == ["id", "video_frame"]
+    assert reopened.schema.field("video_frame").type == pa.int32()
+    assert sorted(_rows(path), key=lambda row: row["id"]) == expected
