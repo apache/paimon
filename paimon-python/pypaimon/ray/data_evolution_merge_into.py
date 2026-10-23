@@ -237,10 +237,7 @@ def _prepare(
         for c in list(when_matched) + list(when_not_matched)
     )
     if has_condition:
-        from pypaimon.write.merge_condition import (
-            _load_datafusion, extract_target_columns,
-        )
-        _load_datafusion()
+        from pypaimon.write.merge_condition import extract_target_columns
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)

@@ -315,6 +315,91 @@ def test_missing_optional_runtime_selects_python_before_consuming_input():
     native.assert_not_called()
 
 
+@pytest.mark.parametrize('operation', ['update', 'delete', 'insert', 'self-update', 'self-delete'])
+def test_native_ray_preparation_does_not_require_python_datafusion(
+        tmp_path, monkeypatch, native_protocol, operation):
+    from pypaimon import CatalogFactory, Schema
+    from pypaimon.ray import data_evolution_merge_into as merge
+    from pypaimon.write.merge_types import WhenMatched, WhenNotMatched
+
+    catalog_options = {'warehouse': str(tmp_path)}
+    catalog = CatalogFactory.create(catalog_options)
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
+        'deletion-vectors.enabled': 'true', 'write.native.enabled': 'true',
+    }), False)
+    source = Mock()
+    source.schema.return_value = schema
+    monkeypatch.setitem(sys.modules, 'datafusion', None)
+    self_merge = operation.startswith('self-')
+    operation = operation[5:] if self_merge else operation
+    condition = 's.value > 0'
+    matched = ([WhenMatched.delete(condition)] if operation == 'delete' else
+               [WhenMatched.update({'value': 5}, condition)] if operation == 'update' else [])
+    not_matched = ([WhenNotMatched({'value': 5}, condition)] if operation == 'insert' else [])
+    with patch.object(merge, '_normalize_source', return_value=source):
+        table, _, matched, not_matched, ctx = merge._prepare(
+            'default.t', 'default.t' if self_merge else object(), catalog_options,
+            matched, not_matched, ['_ROW_ID'] if self_merge else ['id'],
+        )
+    assert table.options.native_write_enabled()
+    assert ctx.is_self_merge is self_merge
+    assert ctx.self_merge_scan_predicate is None
+    if operation == 'update':
+        output_schema = _update_schema()
+        transform = create_merge_batch_transform(
+            'update', matched, dict(zip(ctx.source_on_cols, ctx.target_on_cols)),
+            list(zip(ctx.source_on_cols, ctx.target_on_cols)), ['value'],
+            '_ROW_ID', output_schema, native_enabled=True,
+        )
+    elif operation == 'delete':
+        output_schema = pa.schema([pa.field('_ROW_ID', pa.int64(), nullable=False)])
+        transform = create_merge_batch_transform(
+            'delete', matched, {}, '_ROW_ID', output_schema, native_enabled=True,
+        )
+    else:
+        output_schema = schema
+        transform = create_merge_batch_transform(
+            'insert', not_matched, schema.names, schema, native_enabled=True,
+        )
+    native_protocol.execute.return_value = output_schema.empty_table()
+    batch = (pa.table({'s.id': pa.array([1], pa.int32()), 's.value': pa.array([10], pa.int32())})
+             if operation == 'insert' else _joined_batch())
+    assert transform(batch).schema == output_schema
+    assert native_protocol.calls[0][2][0]['condition'] == {'sql': '"s.value" > 0'}
+
+
+@pytest.mark.parametrize('operation', ['update', 'delete', 'insert'])
+@pytest.mark.parametrize('native_requested', [False, True])
+def test_python_conditional_merge_requires_datafusion_before_batch_execution(
+        monkeypatch, operation, native_requested):
+    monkeypatch.setitem(sys.modules, 'datafusion', None)
+    clauses = [_NormalizedClause(
+        {} if operation == 'delete' else {'value': LiteralValue(5)},
+        's.value > 0', delete=operation == 'delete',
+    )]
+    with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
+        with pytest.raises(ImportError, match='require DataFusion'):
+            if operation == 'update':
+                create_merge_batch_transform(
+                    'update', clauses, {}, [], ['value'], '_ROW_ID', _update_schema(),
+                    native_enabled=native_requested,
+                )
+            elif operation == 'delete':
+                create_merge_batch_transform(
+                    'delete', clauses, {}, '_ROW_ID',
+                    pa.schema([pa.field('_ROW_ID', pa.int64(), nullable=False)]),
+                    native_enabled=native_requested,
+                )
+            else:
+                create_merge_batch_transform(
+                    'insert', clauses, ['value'], pa.schema([('value', pa.int32())]),
+                    native_enabled=native_requested,
+                )
+
+
 def test_incompatible_installed_runtime_is_not_replayed_in_python(native_protocol):
     del native_protocol.module.MergeBatchExecution
     with patch('pypaimon.execution.python.write.merge_transform._build_matched_transform') as python:
