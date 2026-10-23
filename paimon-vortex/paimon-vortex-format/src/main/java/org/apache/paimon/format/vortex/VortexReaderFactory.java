@@ -20,22 +20,16 @@ package org.apache.paimon.format.vortex;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import dev.vortex.api.Expression;
 
 import javax.annotation.Nullable;
 
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-
-import static org.apache.paimon.format.vortex.VortexUtils.toVortexSpecifiedForReader;
 
 /** A factory to create Vortex Reader. */
 public class VortexReaderFactory implements FormatReaderFactory {
@@ -43,47 +37,37 @@ public class VortexReaderFactory implements FormatReaderFactory {
     private final RowType dataSchemaRowType;
     private final RowType projectedRowType;
     @Nullable private final List<Predicate> predicates;
+    private final int workerThreads;
 
     public VortexReaderFactory(
             RowType dataSchemaRowType,
             RowType projectedRowType,
-            @Nullable List<Predicate> predicates) {
+            @Nullable List<Predicate> predicates,
+            int workerThreads) {
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedRowType = projectedRowType;
         this.predicates = predicates;
+        this.workerThreads = workerThreads;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) {
-        long[] rowIndices = toRowIndices(context.selection());
-        Pair<Path, Map<String, String>> vortexSpecified =
-                toVortexSpecifiedForReader(context.fileIO(), context.filePath());
-        // The scan clones the filter it is given, the same way it clones the projection, so this
-        // tree is ours to release once the reader's constructor has built the scan. One tree is
-        // built per data file, and nothing downstream reaches it again.
-        try (Expression predicate = VortexPredicateConverter.toVortexExpression(predicates)) {
+        VortexSessions.ensureWorkerThreads(workerThreads);
+
+        RoaringBitmap32 selection = context.selection();
+        VortexInput input =
+                VortexInput.of(context.fileIO(), context.filePath(), context.fileSize());
+
+        // The scan clones the filter it is given, so this tree is ours to release once the
+        // reader's constructor has built the scan.
+        try (Expression filter = VortexPredicateConverter.toVortexExpression(predicates)) {
             return new VortexRecordsReader(
-                    vortexSpecified.getLeft(),
+                    input,
+                    context.filePath(),
                     dataSchemaRowType,
                     projectedRowType,
-                    rowIndices,
-                    predicate,
-                    vortexSpecified.getRight());
+                    selection,
+                    filter);
         }
-    }
-
-    @Nullable
-    private static long[] toRowIndices(@Nullable RoaringBitmap32 selection) {
-        if (selection == null) {
-            return null;
-        }
-        long cardinality = selection.getCardinality();
-        long[] indices = new long[(int) cardinality];
-        Iterator<Integer> iter = selection.iterator();
-        int i = 0;
-        while (iter.hasNext()) {
-            indices[i++] = iter.next();
-        }
-        return indices;
     }
 }

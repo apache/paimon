@@ -18,6 +18,7 @@
 
 package dev.vortex.api;
 
+import dev.vortex.io.NativeReadable;
 import dev.vortex.jni.NativeDataSource;
 import dev.vortex.jni.NativeScan;
 
@@ -45,6 +46,26 @@ public final class DataSource implements AutoCloseable {
         return new DataSource(session, ptr);
     }
 
+    /**
+     * Opens one file through a caller-provided byte source instead of a native storage client.
+     * The readable must stay open until this data source and all its scans are closed.
+     *
+     * @param readConcurrency maximum in-flight reads, or 0 for the native default
+     */
+    public static DataSource open(Session session, NativeReadable readable, int readConcurrency) {
+        long ptr =
+                NativeDataSource.openFiles(
+                        session.nativePointer(),
+                        new Object[] {readable},
+                        new String[] {readable.name()},
+                        new long[] {readable.length()},
+                        readConcurrency);
+        if (ptr == 0) {
+            throw new RuntimeException("Failed to open Vortex data source: " + readable.name());
+        }
+        return new DataSource(session, ptr);
+    }
+
     public long rowCount() {
         long[] out = new long[2];
         NativeDataSource.rowCount(pointer, out);
@@ -68,6 +89,10 @@ public final class DataSource implements AutoCloseable {
                 options.selectionIndices().isPresent()
                         ? options.selectionIndices().get()
                         : null;
+        byte[] selectionRoaringBitmap =
+                options.selectionRoaringBitmap().isPresent()
+                        ? options.selectionRoaringBitmap().get()
+                        : null;
         byte selectionMode = options.selectionMode().code();
         long limit = optionalLongOrZero(options.limit());
         boolean ordered = options.ordered();
@@ -80,6 +105,7 @@ public final class DataSource implements AutoCloseable {
                         rangeBegin,
                         rangeEnd,
                         selectionIndices,
+                        selectionRoaringBitmap,
                         selectionMode,
                         limit,
                         ordered);

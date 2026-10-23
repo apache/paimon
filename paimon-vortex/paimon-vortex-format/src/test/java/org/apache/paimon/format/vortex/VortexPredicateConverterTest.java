@@ -515,6 +515,117 @@ public class VortexPredicateConverterTest {
         assertEquals(0L, rows.get(0).getTimestamp(0, 0).getMillisecond());
     }
 
+    @Test
+    public void testInSemantic(@TempDir java.nio.file.Path tempDir) throws Exception {
+        // More than 20 literals keep the IN leaf instead of an OR of equals.
+        List<Object> literals = new ArrayList<>();
+        for (int i = 100; i < 125; i++) {
+            literals.add(i);
+        }
+        literals.add(2);
+        literals.add(4);
+        Predicate in = BUILDER.in(0, literals);
+        assertNotNull(VortexPredicateConverter.toVortexExpression(Collections.singletonList(in)));
+
+        List<InternalRow> rows =
+                roundTrip(tempDir, ROW_TYPE, fourRows(), Collections.singletonList(in));
+        assertEquals(2, rows.size());
+        assertEquals(2, rows.get(0).getInt(0));
+        assertEquals(4, rows.get(1).getInt(0));
+    }
+
+    @Test
+    public void testNotInSemantic(@TempDir java.nio.file.Path tempDir) throws Exception {
+        List<Object> literals = new ArrayList<>();
+        for (int i = 100; i < 125; i++) {
+            literals.add(i);
+        }
+        literals.add(2);
+        Predicate notIn = BUILDER.notIn(0, literals);
+
+        List<InternalRow> rows =
+                roundTrip(tempDir, ROW_TYPE, fourRows(), Collections.singletonList(notIn));
+        assertEquals(3, rows.size());
+        assertEquals(1, rows.get(0).getInt(0));
+        assertEquals(3, rows.get(1).getInt(0));
+        assertEquals(4, rows.get(2).getInt(0));
+    }
+
+    @Test
+    public void testNotInWithNullLiteralMatchesNothing(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // Paimon, like SQL, makes NOT IN false for every row when the list holds a null.
+        List<Object> literals = new ArrayList<>();
+        for (int i = 100; i < 125; i++) {
+            literals.add(i);
+        }
+        literals.add(null);
+        Predicate notIn = BUILDER.notIn(0, literals);
+
+        List<InternalRow> rows =
+                roundTrip(tempDir, ROW_TYPE, fourRows(), Collections.singletonList(notIn));
+        assertEquals(0, rows.size());
+    }
+
+    @Test
+    public void testBetweenSemantic(@TempDir java.nio.file.Path tempDir) throws Exception {
+        Predicate between = BUILDER.between(1, 20L, 30L);
+        assertNotNull(
+                VortexPredicateConverter.toVortexExpression(Collections.singletonList(between)));
+
+        List<InternalRow> rows =
+                roundTrip(tempDir, ROW_TYPE, fourRows(), Collections.singletonList(between));
+        assertEquals(2, rows.size());
+        assertEquals(20L, rows.get(0).getLong(1));
+        assertEquals(30L, rows.get(1).getLong(1));
+    }
+
+    @Test
+    public void testStringMatchSemantic(@TempDir java.nio.file.Path tempDir) throws Exception {
+        GenericRow[] data =
+                new GenericRow[] {
+                    GenericRow.of(1, 10L, BinaryString.fromString("a_b%c")),
+                    GenericRow.of(2, 20L, BinaryString.fromString("axbyc")),
+                    GenericRow.of(3, 30L, BinaryString.fromString("zz_b%")),
+                    GenericRow.of(4, 40L, null)
+                };
+
+        // The pattern characters in the literal must match only themselves.
+        assertIds(roundTrip(tempDir, ROW_TYPE, data, single(BUILDER.startsWith(2, str("a_b")))), 1);
+        assertIds(roundTrip(tempDir, ROW_TYPE, data, single(BUILDER.endsWith(2, str("b%")))), 3);
+        assertIds(
+                roundTrip(tempDir, ROW_TYPE, data, single(BUILDER.contains(2, str("_b%")))), 1, 3);
+
+        // A negated match drops null strings, as Paimon does.
+        Predicate notStartsWith = BUILDER.startsWith(2, str("a")).negate().get();
+        assertNotNull(VortexPredicateConverter.toVortexExpression(single(notStartsWith)));
+        assertIds(roundTrip(tempDir, ROW_TYPE, data, single(notStartsWith)), 3);
+    }
+
+    private static GenericRow[] fourRows() {
+        return new GenericRow[] {
+            GenericRow.of(1, 10L, BinaryString.fromString("a")),
+            GenericRow.of(2, 20L, BinaryString.fromString("b")),
+            GenericRow.of(3, 30L, BinaryString.fromString("c")),
+            GenericRow.of(4, 40L, BinaryString.fromString("d"))
+        };
+    }
+
+    private static List<Predicate> single(Predicate predicate) {
+        return Collections.singletonList(predicate);
+    }
+
+    private static BinaryString str(String value) {
+        return BinaryString.fromString(value);
+    }
+
+    private static void assertIds(List<InternalRow> rows, int... ids) {
+        assertEquals(ids.length, rows.size());
+        for (int i = 0; i < ids.length; i++) {
+            assertEquals(ids[i], rows.get(i).getInt(0));
+        }
+    }
+
     private List<InternalRow> roundTrip(
             java.nio.file.Path tempDir,
             RowType rowType,

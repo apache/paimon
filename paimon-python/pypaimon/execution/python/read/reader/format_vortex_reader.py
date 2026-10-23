@@ -32,6 +32,11 @@ class FormatVortexReader(RecordBatchReader):
     and filters it based on the provided predicate and projection.
     """
 
+    # Vortex exports each chunk through the Arrow C interface. Small chunks make that per-chunk
+    # cost dominate, so Vortex produces chunks of up to this many rows, and the reader slices
+    # them to the requested batch size without a copy.
+    NATIVE_BATCH_SIZE = 65536
+
     # row_indices: from IndexedSplit (ANN vector search), discrete local row offsets within the file.
     # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
@@ -41,21 +46,15 @@ class FormatVortexReader(RecordBatchReader):
                  predicate_fields: Optional[Set[str]] = None):
         import vortex
 
-        from pypaimon.execution.python.read.reader.vortex_utils import to_vortex_specified
-        file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, file_path)
-
-        if store_kwargs:
-            from vortex import store
-            vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-            vortex_file = vortex_store.open()
-        else:
-            vortex_file = vortex.open(file_path_for_vortex)
+        from pypaimon.execution.python.read.reader.vortex_utils import open_vortex_file
+        vortex_file = open_vortex_file(file_io, file_path)
 
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
 
         # Identify which fields exist in the file and which are missing
-        file_schema_names = set(vortex_file.dtype.to_arrow_schema().names)
+        file_schema = vortex_file.dtype.to_arrow_schema()
+        file_schema_names = set(file_schema.names)
         self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
         self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
 
@@ -66,8 +65,7 @@ class FormatVortexReader(RecordBatchReader):
         if push_down_predicate is not None:
             try:
                 from vortex.arrow.expression import arrow_to_vortex
-                arrow_schema = vortex_file.dtype.to_arrow_schema()
-                vortex_expr = arrow_to_vortex(push_down_predicate, arrow_schema)
+                vortex_expr = arrow_to_vortex(push_down_predicate, file_schema)
             except Exception:
                 pass
 
@@ -79,12 +77,50 @@ class FormatVortexReader(RecordBatchReader):
             # index array. Acceptable trade-off vs reading the full file.
             indices = vortex.array(range(shard_range[0], shard_range[1]))
 
-        self.record_batch_reader = vortex_file.scan(
-            columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()
+        # Ask Vortex for offset-based strings and binaries. It exports views by default, and
+        # casting them in pyarrow decodes every value a second time.
+        export_schema = pa.schema([
+            file_schema.field(name).with_type(self._without_view_types(file_schema.field(name).type))
+            for name in self.existing_fields
+        ]) if self.existing_fields else None
+
+        self.record_batch_reader = vortex_file.to_arrow(
+            columns_for_vortex, expr=vortex_expr, indices=indices,
+            batch_size=max(batch_size, self.NATIVE_BATCH_SIZE), schema=export_schema)
+        self._batch_size = batch_size
+        self._pending: Optional[RecordBatch] = None
+        self._pending_offset = 0
 
         self._output_schema = (
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
+
+    @staticmethod
+    def _without_view_types(data_type: pa.DataType) -> pa.DataType:
+        """Replace string_view/binary_view, also nested ones, with string/binary."""
+        if data_type == pa.string_view():
+            return pa.utf8()
+        if data_type == pa.binary_view():
+            return pa.binary()
+        if pa.types.is_struct(data_type):
+            return pa.struct([
+                data_type.field(i).with_type(
+                    FormatVortexReader._without_view_types(data_type.field(i).type))
+                for i in range(data_type.num_fields)
+            ])
+        if pa.types.is_list(data_type):
+            value_field = data_type.value_field
+            return pa.list_(value_field.with_type(
+                FormatVortexReader._without_view_types(value_field.type)))
+        if pa.types.is_large_list(data_type):
+            value_field = data_type.value_field
+            return pa.large_list(value_field.with_type(
+                FormatVortexReader._without_view_types(value_field.type)))
+        if pa.types.is_fixed_size_list(data_type):
+            value_field = data_type.value_field
+            return pa.list_(value_field.with_type(
+                FormatVortexReader._without_view_types(value_field.type)), data_type.list_size)
+        return data_type
 
     @staticmethod
     def _cast_view_types(batch: RecordBatch) -> RecordBatch:
@@ -109,10 +145,17 @@ class FormatVortexReader(RecordBatchReader):
             return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
         return batch
 
+    def _next_slice(self) -> RecordBatch:
+        while self._pending is None or self._pending_offset >= self._pending.num_rows:
+            self._pending = self._cast_view_types(next(self.record_batch_reader))
+            self._pending_offset = 0
+        batch = self._pending.slice(self._pending_offset, self._batch_size)
+        self._pending_offset += self._batch_size
+        return batch
+
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
-            batch = next(self.record_batch_reader)
-            batch = self._cast_view_types(batch)
+            batch = self._next_slice()
 
             if not self.missing_fields:
                 return batch
@@ -150,3 +193,4 @@ class FormatVortexReader(RecordBatchReader):
 
     def close(self):
         self.record_batch_reader = None
+        self._pending = None

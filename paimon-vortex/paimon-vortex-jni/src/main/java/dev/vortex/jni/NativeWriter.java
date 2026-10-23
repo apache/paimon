@@ -18,6 +18,8 @@
 
 package dev.vortex.jni;
 
+import dev.vortex.api.VortexWriteSummary;
+
 import java.util.Map;
 
 /** Native methods for Vortex writer operations. */
@@ -29,11 +31,40 @@ public final class NativeWriter {
 
     private NativeWriter() {}
 
+    /**
+     * Opens a writer at {@code uri}. The native side borrows the Arrow schema at {@code
+     * arrowSchemaAddr}, so the caller still owns it and must release it.
+     */
     public static native long create(
-            long sessionPtr, String uri, long arrowSchemaAddr, Map<String, String> options);
+            long sessionPtr,
+            String uri,
+            long arrowSchemaAddr,
+            Map<String, String> options,
+            Map<String, byte[]> metadata);
 
+    /**
+     * Opens a writer that streams the file into a caller-provided {@code
+     * dev.vortex.io.NativeWritable}. The native side writes and flushes but never closes it.
+     */
+    public static native long createStream(
+            long sessionPtr, Object writable, long arrowSchemaAddr, Map<String, byte[]> metadata);
+
+    /**
+     * Moves the Arrow array at {@code arrowArrayAddr} into the writer and borrows the schema at
+     * {@code arrowSchemaAddr}. The caller must release the schema after the call.
+     */
     public static native boolean writeBatch(
             long writerPtr, long arrowArrayAddr, long arrowSchemaAddr);
 
+    /** Compressed bytes that reached the sink so far. */
+    public static native long bytesWritten(long writerPtr);
+
+    /** Uncompressed bytes accepted by the writer that did not reach the sink yet. */
+    public static native long bufferedBytes(long writerPtr);
+
+    /** Flushes and closes the writer. Must be called at most once, and not with {@link #finish}. */
     public static native void close(long writerPtr);
+
+    /** Flushes and closes the writer, and returns its summary. Must be called at most once. */
+    public static native VortexWriteSummary finish(long writerPtr);
 }

@@ -243,7 +243,8 @@ public class ArrowFormatWriter implements AutoCloseable {
                 return false;
             }
         }
-        for (int i = 0; i < currentRow.getFieldCount(); i++) {
+        int fieldCount = currentRow.getFieldCount();
+        for (int i = 0; i < fieldCount; i++) {
             try {
                 fieldWriters[i].write(rowId, currentRow, i);
             } catch (OversizedAllocationException | IndexOutOfBoundsException e) {

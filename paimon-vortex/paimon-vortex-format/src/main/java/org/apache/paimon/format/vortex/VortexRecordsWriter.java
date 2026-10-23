@@ -20,89 +20,81 @@ package org.apache.paimon.format.vortex;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowUtils;
-import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.BundleRecords;
 
-import dev.vortex.api.Session;
+import dev.vortex.api.VortexWriteSummary;
 import dev.vortex.api.VortexWriter;
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
 import org.apache.arrow.c.Data;
-import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.BaseVariableWidthVector;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowStreamReader;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
+import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Supplier;
 
-/** Vortex records writer using the Arrow C Data Interface. */
+/**
+ * Vortex records writer using the Arrow C Data Interface.
+ *
+ * <p>The native writer moves each exported Arrow array and keeps references to its buffers until
+ * the batch is encoded, which can be after {@code writeBatch} returns. The exported array holds its
+ * own reference to each buffer, so after the export this writer clears its vectors instead of
+ * overwriting buffers that the native writer can still read. All buffers come from one allocator,
+ * which is closed only after the native writer is finished.
+ */
 public class VortexRecordsWriter implements BundleFormatWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(VortexRecordsWriter.class);
 
-    private static final double COMPRESSION_RATIO = 0.25;
+    /** The compression ratio to assume until the native writer has written enough bytes. */
+    private static final double INITIAL_COMPRESSION_RATIO = 0.25;
 
-    private final Supplier<ArrowFormatCWriter> cWriterSupplier;
-    private final Session session;
+    /** Bytes on the sink from which the observed compression ratio is used. */
+    private static final long MIN_OBSERVED_BYTES = 1024 * 1024;
+
+    private final ArrowFormatCWriter arrowWriter;
     private final VortexWriter nativeWriter;
+    @Nullable private final Closeable output;
     private final String path;
 
-    // Vortex's writeBatch is semi-async: Rust takes zero-copy ownership of buffers
-    // via Arc<FFI_ArrowArray> and releases them after the background write completes.
-    // Each flush creates a new ArrowFormatCWriter (with its own RootAllocator) so
-    // buffers are never reused across batches. The Rust release callback frees most
-    // memory; only a small residual (~148 bytes per batch from Arrow 15's incomplete
-    // release) remains in each retained resource until nativeWriter.close().
-    private final List<AutoCloseable> retainedResources;
-    private ArrowFormatCWriter currentWriter;
+    private long acceptedBytes;
+    private long writeNanos;
+    @Nullable private VortexWriteSummary summary;
+    private boolean closed;
 
-    // Direct bundles are copied into this writer-owned allocator. Vortex synchronously imports
-    // independent Arrow buffer references before writeBatch returns, while nativeWriter.close()
-    // completes outstanding asynchronous writes before this allocator is closed.
-    @Nullable private RootAllocator bundleAllocator;
+    VortexRecordsWriter(ArrowFormatCWriter arrowWriter, VortexOutput output) throws IOException {
+        this.arrowWriter = arrowWriter;
+        this.output = output.writable();
+        this.path = output.name();
 
-    private long jniCost = 0;
-    private long ffiBytes = 0;
-
-    public VortexRecordsWriter(
-            Supplier<ArrowFormatCWriter> cWriterSupplier,
-            Path path,
-            Map<String, String> storageOptions)
-            throws IOException {
-        this.cWriterSupplier = cWriterSupplier;
-        this.path = path.toUri().toString();
-        this.retainedResources = new ArrayList<>();
-        this.currentWriter = cWriterSupplier.get();
-
-        this.session = Session.create();
         try {
-            Schema arrowSchema = currentWriter.getVectorSchemaRoot().getSchema();
             this.nativeWriter =
-                    VortexWriter.create(session, this.path, arrowSchema, storageOptions);
-        } catch (Exception e) {
-            session.close();
-            throw e;
+                    output.open(
+                            arrowWriter.getVectorSchemaRoot().getSchema(),
+                            arrowWriter.getAllocator());
+        } catch (Throwable t) {
+            closeQuietly(this.output, t);
+            closeQuietly(arrowWriter, t);
+            throw t;
         }
     }
 
     @Override
     public void addElement(InternalRow internalRow) throws IOException {
-        if (!currentWriter.write(internalRow)) {
+        if (!arrowWriter.write(internalRow)) {
             flush();
-            if (!currentWriter.write(internalRow)) {
+            if (!arrowWriter.write(internalRow)) {
                 throw new RuntimeException("Exception happens while write to vortex file");
             }
         }
@@ -112,9 +104,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
             ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
-            if (currentWriter.formatWriter().isArrowBundleSchemaCompatible(arrowBundle)) {
+            if (arrowWriter.formatWriter().isArrowBundleSchemaCompatible(arrowBundle)) {
                 flush();
-                writeBundleVsr(arrowBundle.getVectorSchemaRoot());
+                writeBundleRoot(arrowBundle.getVectorSchemaRoot());
                 return;
             }
         }
@@ -126,137 +118,187 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
-        return suggestedCheck && (long) (ffiBytes * COMPRESSION_RATIO) >= targetSize;
+        return suggestedCheck && estimatedFileSize() >= targetSize;
+    }
+
+    /** The exact file size after close, or the size the file would have if it closed now. */
+    long estimatedFileSize() {
+        if (summary != null) {
+            return summary.fileSize();
+        }
+
+        // The native writer writes the file header in the background, so without any rows the
+        // byte count depends on timing. An empty file must never count as full.
+        if (acceptedBytes == 0 && arrowWriter.empty()) {
+            return 0;
+        }
+
+        long written = nativeWriter.bytesWritten();
+        long javaBuffered = arrowWriter.empty() ? 0 : arrowWriter.formatWriter().memoryUsed();
+
+        // The native counters lag behind the input: batches that are queued or being encoded are
+        // neither buffered nor written. So take the compression ratio of the input that has left
+        // the native buffers, once enough of it reached the sink, and apply it to all input.
+        long flushedInput = acceptedBytes - nativeWriter.bufferedBytes();
+        double ratio =
+                written >= MIN_OBSERVED_BYTES && flushedInput > 0
+                        ? Math.min(1.0, (double) written / flushedInput)
+                        : INITIAL_COMPRESSION_RATIO;
+        return Math.max(written, (long) ((acceptedBytes + javaBuffered) * ratio));
     }
 
     @Override
     public void close() throws IOException {
-        long t1 = System.currentTimeMillis();
-        Throwable throwable = null;
+        if (closed) {
+            return;
+        }
+        closed = true;
 
+        Throwable failure = null;
         try {
             flush();
         } catch (Throwable t) {
-            throwable = t;
+            failure = t;
         }
 
-        // nativeWriter.close() blocks until all async background writes complete.
+        // finish() blocks until the native writer has encoded and released every batch.
         try {
-            nativeWriter.close();
+            summary = nativeWriter.finish();
         } catch (Throwable t) {
-            throwable = addSuppressed(throwable, t);
+            failure = addSuppressed(failure, t);
         }
 
-        // Release all retained resources now that async writes are done.
-        for (AutoCloseable res : retainedResources) {
-            try {
-                closeQuietly(res);
-            } catch (Throwable t) {
-                throwable = addSuppressed(throwable, t);
-            }
-        }
-        retainedResources.clear();
-        try {
-            closeQuietly(currentWriter);
-        } catch (Throwable t) {
-            throwable = addSuppressed(throwable, t);
-        }
+        failure = closeQuietly(output, failure);
+        failure = closeArrowWriter(failure);
 
-        if (bundleAllocator != null) {
-            try {
-                bundleAllocator.close();
-            } catch (Throwable t) {
-                throwable = addSuppressed(throwable, t);
-            }
-        }
+        LOG.debug(
+                "Wrote {} uncompressed Arrow bytes in {} ms of native calls to {}.",
+                acceptedBytes,
+                writeNanos / 1_000_000,
+                path);
 
-        try {
-            session.close();
-        } catch (Throwable t) {
-            throwable = addSuppressed(throwable, t);
+        if (failure != null) {
+            rethrow(failure);
         }
+    }
 
-        long closeCost = System.currentTimeMillis() - t1;
-        LOG.info("Jni cost: {}ms, close cost: {}ms for file: {}", jniCost, closeCost, path);
-
-        if (throwable != null) {
-            rethrow(throwable);
-        }
+    /** The native write summary, available after {@link #close()}. */
+    @Nullable
+    @Override
+    public Object writerMetadata() {
+        return summary;
     }
 
     private void flush() throws IOException {
-        currentWriter.flush();
-        if (!currentWriter.empty()) {
-            ffiBytes += bufferBytes(currentWriter.getVectorSchemaRoot());
-            ArrowCStruct cStruct = currentWriter.toCStruct();
-            long t1 = System.currentTimeMillis();
-            nativeWriter.writeBatch(cStruct.arrayAddress(), cStruct.schemaAddress());
-            jniCost += (System.currentTimeMillis() - t1);
-            // Each ArrowFormatCWriter has its own RootAllocator and buffers.
-            // Retain it so buffer memory stays alive for async Rust reads.
-            retainedResources.add(currentWriter);
-            currentWriter = cWriterSupplier.get();
+        arrowWriter.flush();
+        if (arrowWriter.empty()) {
+            return;
         }
+
+        VectorSchemaRoot root = arrowWriter.getVectorSchemaRoot();
+        writeRoot(root, arrowWriter.getAllocator());
+
+        // The exported array keeps the buffers alive for the native writer. Clear the vectors so
+        // that the next batch allocates new buffers instead of resetting the exported ones, and
+        // size the new buffers like this batch, so they do not grow value by value.
+        int rowCount = root.getRowCount();
+        double[] densities = new double[root.getFieldVectors().size()];
+        for (int i = 0; i < densities.length; i++) {
+            FieldVector vector = root.getVector(i);
+            if (vector instanceof BaseVariableWidthVector && rowCount > 0) {
+                long bytes = ((BaseVariableWidthVector) vector).getStartOffset(rowCount);
+                densities[i] = Math.max(1.0, (double) bytes / rowCount);
+            }
+        }
+        root.clear();
+        for (int i = 0; i < densities.length; i++) {
+            FieldVector vector = root.getVector(i);
+            if (densities[i] > 0) {
+                ((BaseVariableWidthVector) vector).setInitialCapacity(rowCount, densities[i]);
+            } else {
+                vector.setInitialCapacity(rowCount);
+            }
+            vector.allocateNew();
+        }
+        arrowWriter.reset();
     }
 
-    /** Write an external VSR (from writeBundle) via IPC copy into the writer-owned allocator. */
-    private void writeBundleVsr(VectorSchemaRoot vsr) throws IOException {
-        ffiBytes += bufferBytes(vsr);
-        byte[] ipc = ArrowUtils.serializeToIpc(vsr);
-        RootAllocator allocator = bundleAllocator();
+    /** Copies an external root, which its owner can reuse after this call, then writes the copy. */
+    private void writeBundleRoot(VectorSchemaRoot root) throws IOException {
+        byte[] ipc = ArrowUtils.serializeToIpc(root);
+        BufferAllocator allocator = arrowWriter.getAllocator();
         try (ArrowStreamReader reader =
-                        new ArrowStreamReader(new ByteArrayInputStream(ipc), allocator);
-                ArrowArray array = ArrowArray.allocateNew(allocator);
-                ArrowSchema schema = ArrowSchema.allocateNew(allocator)) {
+                new ArrowStreamReader(new ByteArrayInputStream(ipc), allocator)) {
             if (!reader.loadNextBatch()) {
                 throw new IOException("Arrow IPC copy did not contain a record batch.");
             }
-            Data.exportVectorSchemaRoot(
-                    allocator, reader.getVectorSchemaRoot(), null, array, schema);
+            writeRoot(reader.getVectorSchemaRoot(), allocator);
+        }
+    }
 
-            long t1 = System.currentTimeMillis();
+    private void writeRoot(VectorSchemaRoot root, BufferAllocator allocator) throws IOException {
+        acceptedBytes += bufferBytes(root);
+        try (ArrowArray array = ArrowArray.allocateNew(allocator);
+                ArrowSchema schema = ArrowSchema.allocateNew(allocator)) {
+            Data.exportVectorSchemaRoot(allocator, root, null, array, schema);
+            long start = System.nanoTime();
             try {
                 nativeWriter.writeBatch(array.memoryAddress(), schema.memoryAddress());
             } finally {
+                writeNanos += System.nanoTime() - start;
+                // The native writer moves the array and borrows the schema. Release what is
+                // still ours.
                 ArrowUtils.releaseCDataIfNeeded(array, schema);
             }
-            jniCost += (System.currentTimeMillis() - t1);
         }
     }
 
-    private RootAllocator bundleAllocator() {
-        if (bundleAllocator == null) {
-            bundleAllocator = new RootAllocator(Long.MAX_VALUE);
+    @Nullable
+    private Throwable closeArrowWriter(@Nullable Throwable failure) {
+        try {
+            arrowWriter.close();
+        } catch (IllegalStateException e) {
+            // Arrow reports buffers that a native release callback has not returned yet as a
+            // leak. The native writer is finished, so they are freed when it drops them.
+            if (e.getMessage() == null || !e.getMessage().contains("Memory was leaked")) {
+                return addSuppressed(failure, e);
+            }
+            LOG.debug("Arrow buffers of {} were still referenced on close.", path, e);
+        } catch (Throwable t) {
+            return addSuppressed(failure, t);
         }
-        return bundleAllocator;
+        return failure;
     }
 
-    private static long bufferBytes(VectorSchemaRoot vsr) {
+    private static long bufferBytes(VectorSchemaRoot root) {
         long bytes = 0;
-        for (int i = 0; i < vsr.getFieldVectors().size(); i++) {
-            bytes += vsr.getFieldVectors().get(i).getBufferSize();
+        for (int i = 0; i < root.getFieldVectors().size(); i++) {
+            bytes += root.getFieldVectors().get(i).getBufferSize();
         }
         return bytes;
     }
 
-    private static void closeQuietly(AutoCloseable closeable) {
+    @Nullable
+    private static Throwable closeQuietly(
+            @Nullable AutoCloseable closeable, @Nullable Throwable failure) {
+        if (closeable == null) {
+            return failure;
+        }
+
         try {
             closeable.close();
-        } catch (IllegalStateException e) {
-            if (e.getMessage() == null || !e.getMessage().contains("Memory was leaked")) {
-                throw e;
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } catch (Throwable t) {
+            return addSuppressed(failure, t);
         }
+        return failure;
     }
 
-    private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
-        if (throwable == null) {
+    private static Throwable addSuppressed(@Nullable Throwable failure, Throwable suppressed) {
+        if (failure == null) {
             return suppressed;
         }
-        throwable.addSuppressed(suppressed);
-        return throwable;
+        failure.addSuppressed(suppressed);
+        return failure;
     }
 
     private static void rethrow(Throwable throwable) throws IOException {

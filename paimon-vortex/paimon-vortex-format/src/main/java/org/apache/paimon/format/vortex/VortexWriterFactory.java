@@ -26,21 +26,24 @@ import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.utils.Pair;
 
 import java.io.IOException;
-import java.util.Map;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.format.vortex.VortexUtils.toVortexSpecifiedForWriter;
-
-/** A factory to create Vortex {@link FormatWriter}. */
+/**
+ * A factory to create Vortex {@link FormatWriter}.
+ *
+ * <p>A direct write lets local and OSS files use a native storage client. A write to a stream goes
+ * through the stream, which its caller closes.
+ */
 public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectWrite {
 
     private final Supplier<ArrowFormatCWriter> cWriterSupplier;
+    private final int workerThreads;
 
-    public VortexWriterFactory(Supplier<ArrowFormatCWriter> cWriterSupplier) {
+    public VortexWriterFactory(Supplier<ArrowFormatCWriter> cWriterSupplier, int workerThreads) {
         this.cWriterSupplier = cWriterSupplier;
+        this.workerThreads = workerThreads;
     }
 
     @VisibleForTesting
@@ -49,16 +52,16 @@ public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectW
     }
 
     @Override
-    public FormatWriter create(PositionOutputStream positionOutputStream, String compression) {
-        throw new UnsupportedOperationException(
-                "VortexWriterFactory does not support PositionOutputStream, "
-                        + "please use create(FileIO fileIO, Path path, String compression) instead.");
+    public FormatWriter create(PositionOutputStream positionOutputStream, String compression)
+            throws IOException {
+        VortexSessions.ensureWorkerThreads(workerThreads);
+        return new VortexRecordsWriter(
+                cWriterSupplier.get(), VortexOutput.of(positionOutputStream));
     }
 
     @Override
     public FormatWriter create(FileIO fileIO, Path path, String compression) throws IOException {
-        Pair<Path, Map<String, String>> vortexSpecified = toVortexSpecifiedForWriter(fileIO, path);
-        return new VortexRecordsWriter(
-                cWriterSupplier, vortexSpecified.getLeft(), vortexSpecified.getRight());
+        VortexSessions.ensureWorkerThreads(workerThreads);
+        return new VortexRecordsWriter(cWriterSupplier.get(), VortexOutput.of(fileIO, path));
     }
 }
