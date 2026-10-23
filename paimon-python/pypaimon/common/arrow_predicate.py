@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Execute REST row filters and column-mask transforms on Python Arrow batches."""
+"""Compile REST predicates and column transforms for standalone Arrow batches."""
 
 import json
 import re

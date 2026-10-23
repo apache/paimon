@@ -41,6 +41,9 @@ Keep this boundary when adding or moving code:
 
 ```text
 pypaimon/
+  common/
+    arrow_predicate.py          Standalone Arrow predicate and transform helpers
+    external_path_provider.py   Shared external file placement strategies
   read/                         Public read/scan APIs, Arrow output and explain
     read_dispatch.py            Read/scan selection across the two backends
     read_support.py             Shared output, schema and reader ownership
@@ -51,7 +54,7 @@ pypaimon/
     write_dispatch.py           Writer coordination and safe pre-write switching
     update_dispatch.py          Update/upsert/delete/MERGE coordination
     input_adapter.py            Pandas transport and distributed input conversion
-    merge_condition.py          Shared MERGE condition parsing and validation
+    merge_condition.py          Shared MERGE condition parsing and Arrow batch filtering
     merge_transform.py          Shared Arrow assignments and callable inputs
     ray_datasink.py              Ray worker writes and coordinator commits
   globalindex/                  Public index contracts and backend coordination
@@ -71,12 +74,10 @@ pypaimon/
         search/                 Vector/text/hybrid search and Python factories
         blob_view_lookup.py     Upstream Blob descriptor planning, loading and resolution
         interval_partition.py   Primary-key sorted-run grouping
-        predicate_json_parser.py Authorization row-filter and masking execution
         map_shared_shredding.py Physical MAP decoding and selected-column pruning
         variant_shredding.py    Physical VARIANT reconstruction and shredding
       deletionvectors/          DV bitmap codecs, file I/O and deleted-row filtering
       write/                    File writers, committers and update execution
-        external_path_provider.py Per-writer external file placement strategies
       globalindex/              Index file codecs, readers, writers and build algorithms
       index/                    Primary-key index source selection and sorted-index grouping
       merge_engine_dispatch.py  Python merge-function selection
@@ -149,9 +150,9 @@ executor; Native commits pass the spec to Rust.
 
 Physical MAP/VARIANT codecs and Blob View resolution belong to Python
 execution. Public value objects, schema/spec parsing and selected-key metadata
-stay in `data`. MERGE condition evaluation and first-matching-clause selection
-also belong to Python execution; callable transport, SQL rewriting and shared
-Arrow assignment adapters stay in `write`.
+stay in `data`. Table MERGE action selection belongs to the selected backend.
+Standalone Arrow condition filtering, SQL rewriting, callable transport and
+shared Arrow assignment adapters stay in `write`.
 
 Dynamic bucket HASH index publication and writer-owned pending state belong
 to the Python writer. The shared input bucket assigner remains in `index`:
@@ -159,18 +160,19 @@ distributed producers use it to route inputs before either backend writes.
 `input_routing` and `bucket_planning` similarly serve both backends' input
 protocols without retaining a file writer or publishing data.
 
-External-path round-robin, weighted selection and entropy directories belong
-to Python write execution. Shared path factories retain configuration and
-existing-file resolution, loading a provider only when Python allocates a new
-file. MAP BLOB key serializers implement the physical file format and are
+External-path round-robin, weighted selection and entropy directories are shared
+path utilities in `common`. Shared path factories retain configuration and
+existing-file resolution, loading a provider when a caller allocates a new file.
+MAP BLOB key serializers implement the physical file format and are
 shared within the Python backend. Generic URI/FileIO contracts, resource
 caches and integer codecs stay in `common`; Native Blob inputs also use the
 URI reader contract.
 
-Authorization row-filter and column-mask evaluation belongs to Python read
-execution. JSON field-reference extraction and rule/schema validation remain
-shared. The public authorization result creates a Python filter lazily when
-explicitly requested; Native reads pass the original rules to Rust.
+Standalone Arrow predicate and transform helpers live in `common/arrow_predicate`.
+JSON field-reference extraction and rule/schema validation remain independent
+of that Arrow evaluator. The public authorization result creates an Arrow
+filter lazily when explicitly requested without selecting either backend.
+Python readers use the shared evaluator; Native reads pass the original rules to Rust.
 
 Framework adapters keep their actual implementation in their original modules,
 including their public class identities, serialization and worker closures.

@@ -131,14 +131,13 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/read/search/distributed_full_text_search.py",
             "pypaimon/execution/python/map_blob_key_serializer.py",
             "pypaimon/execution/python/globalindex/ray_index_build.py",
-            "pypaimon/execution/python/write/external_path_provider.py",
-            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/common/external_path_provider.py",
+            "pypaimon/common/arrow_predicate.py",
             "pypaimon/execution/python/read/blob_view_lookup.py",
             "pypaimon/execution/python/read/interval_partition.py",
             "pypaimon/execution/python/read/map_shared_shredding.py",
             "pypaimon/execution/python/read/variant_shredding.py",
             "pypaimon/execution/python/write/dynamic_bucket.py",
-            "pypaimon/execution/python/write/merge_condition.py",
             "pypaimon/execution/python/write/merge_transform.py",
             "pypaimon/schema/data_type_casts.py",
             "pypaimon/utils/numeric_utils.py",
@@ -221,7 +220,9 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
-            "pypaimon/common/external_path_provider.py",
+            "pypaimon/execution/python/write/external_path_provider.py",
+            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/execution/python/write/merge_condition.py",
             "pypaimon/common/map_blob_key_serializer.py",
             "pypaimon/utils/blob_view_lookup.py",
             "pypaimon/read/interval_partition.py",

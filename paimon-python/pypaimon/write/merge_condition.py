@@ -250,3 +250,42 @@ def _safe_literals(field, literals) -> bool:
     if type_name in {'STRING', 'CHAR', 'VARCHAR'}:
         return all(isinstance(literal, str) for literal in literals)
     return False
+
+
+def filter_batch(
+    batch: pa.Table, condition: str, _pre_rewritten: bool = False,
+) -> pa.Table:
+    if batch.num_rows == 0:
+        return batch
+    datafusion = _load_datafusion()
+    rewritten = condition if _pre_rewritten else rewrite_condition(condition)
+    config = datafusion.SessionConfig().set(
+        "datafusion.optimizer.enable_round_robin_repartition", "false"
+    )
+    ctx = datafusion.SessionContext(config)
+    input_batches = batch.to_batches()
+    # Use one batch per partition and rebuild from partitioned batches so
+    # DataFusion neither concatenates 32-bit offsets nor reorders the input.
+    ctx.register_record_batches(
+        "_batch", [[record_batch] for record_batch in input_batches]
+    )
+    result = ctx.sql(
+        f'SELECT * FROM _batch WHERE {rewritten}'
+    )
+    output_batches = [
+        record_batch
+        for partition in result.collect_partitioned()
+        for record_batch in partition
+    ]
+    if not output_batches:
+        return batch.schema.empty_table()
+    return pa.Table.from_batches(output_batches)
+
+
+def apply_condition(
+    batch: pa.Table, rewritten: str, empty_schema: pa.Schema,
+) -> pa.Table:
+    batch = filter_batch(batch, rewritten, _pre_rewritten=True)
+    if batch.num_rows == 0:
+        return empty_schema.empty_table()
+    return batch

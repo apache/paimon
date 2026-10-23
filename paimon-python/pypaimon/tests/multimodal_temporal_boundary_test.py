@@ -81,7 +81,7 @@ assert not loaded, loaded
 ])
 def test_temporal_mask_schema_matches_actual_python_mask(data_type, transform):
     from pypaimon.common.transform_schema import effective_masked_schema
-    from pypaimon.execution.python.read.predicate_json_parser import _apply_predicate_transform
+    from pypaimon.common.arrow_predicate import _apply_predicate_transform
 
     schema = pa.schema([pa.field('value', data_type, nullable=False, metadata={b'field': b'value'})],
                        metadata={b'schema': b'value'})

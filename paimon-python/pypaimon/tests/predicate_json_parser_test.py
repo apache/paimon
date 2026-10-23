@@ -24,7 +24,7 @@ from pathlib import Path
 import pyarrow as pa
 
 from pypaimon.common.predicate_json_parser import extract_referenced_fields
-from pypaimon.execution.python.read.predicate_json_parser import (
+from pypaimon.common.arrow_predicate import (
     _apply_predicate_transform,
     _convert_literal,
     _paimon_type_to_arrow,
