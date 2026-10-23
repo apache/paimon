@@ -60,6 +60,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1275,8 +1277,9 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
     }
 
-    @Test
-    public void testConflictingWriterPreservesTaggedCompaction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "false", "true"})
+    public void testConflictingWriterAutoRollback(String autoRollback) throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
         long firstRowId = writeFullRows(table, 10, 11);
@@ -1326,16 +1329,28 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         FileStoreTable writerTable =
                 new AppendOnlyFileStoreTable(
                         table.fileIO(), table.location(), table.schema(), environment);
+        if (!autoRollback.equals("default")) {
+            writerTable =
+                    writerTable.copy(
+                            Collections.singletonMap("commit.auto-rollback.enabled", autoRollback));
+        }
+        FileStoreTable configuredWriter = writerTable;
 
         assertThatThrownBy(
                         () -> {
                             try (BatchTableCommit commit =
-                                    writerTable.newBatchWriteBuilder().newCommit()) {
+                                    configuredWriter.newBatchWriteBuilder().newCommit()) {
                                 commit.commit(staleMessages);
                             }
                         })
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+        if (autoRollback.equals("true")) {
+            assertThat(rollbackCalls.get()).isEqualTo(1);
+            assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId - 1);
+            assertThat(table.tagManager().tagExists("published")).isFalse();
+            return;
+        }
         assertThat(table.tagManager().getOrThrow("published").id()).isEqualTo(concurrentSnapshotId);
         assertThat(rollbackCalls.get()).isZero();
         assertThat(readF0AndF2(table.copy(Collections.singletonMap("scan.tag-name", "published"))))
