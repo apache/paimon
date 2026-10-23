@@ -175,7 +175,7 @@ def test_unavailable_vector_format_falls_back_before_accepting_data(native_rest_
     schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32(), 2))])
     native_rest_catalog.create_table('default.vectors', Schema.from_pyarrow_schema(schema, options={
         'write.native.enabled': 'true', 'row-tracking.enabled': 'true',
-        'data-evolution.enabled': 'true', 'vector.file.format': 'lance',
+        'data-evolution.enabled': 'true', 'vector.file.format': 'vortex',
     }), False)
     table = native_rest_catalog.get_table('default.vectors')
     builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()

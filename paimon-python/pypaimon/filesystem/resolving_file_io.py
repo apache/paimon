@@ -128,9 +128,6 @@ class ResolvingFileIO(FileIO):
         return self._get_fileio(path).write_avro(path, data, avro_schema,
                                                  compression, zstd_level, **kwargs)
 
-    def write_lance(self, path: str, data, **kwargs):
-        return self._get_fileio(path).write_lance(path, data, **kwargs)
-
     def write_blob(self, path: str, data, **kwargs):
         return self._get_fileio(path).write_blob(path, data, **kwargs)
 

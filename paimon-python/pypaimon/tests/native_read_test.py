@@ -690,7 +690,7 @@ def test_native_avro_read_uses_native_path():
     native.assert_called_once()
 
 
-@pytest.mark.parametrize('file_name', ['camera.unsupported', 'data.vector.lance', 'data.vector.vortex'])
+@pytest.mark.parametrize('file_name', ['camera.unsupported', 'data.vector.unsupported', 'data.vector.vortex'])
 def test_native_read_falls_back_for_unsupported_dedicated_file(file_name):
     read = _table_read()
     schema = pa.schema([('id', pa.int32())])
