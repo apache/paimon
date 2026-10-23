@@ -402,8 +402,8 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit.conflict_detection.check_conflicts = Mock(
             return_value=conflict
         )
-        file_store_commit.rollback = Mock()
-        file_store_commit.rollback.try_to_rollback.return_value = True
+        rollback = file_store_commit.table.catalog_environment.catalog_table_rollback
+        rollback.reset_mock()
 
         with self.assertRaises(RuntimeError) as failure:
             file_store_commit._try_commit_once(
@@ -414,11 +414,10 @@ class TestFileStoreCommit(unittest.TestCase):
                 commit_identifier=11,
                 latest_snapshot=latest_snapshot,
                 detect_conflicts=True,
-                allow_rollback=True,
             )
 
         self.assertIs(failure.exception, conflict)
-        file_store_commit.rollback.try_to_rollback.assert_not_called()
+        rollback.assert_not_called()
         self.mock_snapshot_commit.commit.assert_not_called()
         mock_manifest_file_manager.return_value.write.assert_not_called()
         mock_manifest_list_manager.return_value.write.assert_not_called()
