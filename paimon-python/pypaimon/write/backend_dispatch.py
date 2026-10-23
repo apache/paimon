@@ -204,6 +204,22 @@ def create_postpone_bucket_planner(table, known_num_buckets=None):
     return PythonPostponeBucketPlanner(table, known_num_buckets=known_num_buckets)
 
 
+def create_input_router(table, bucket_plan=None):
+    """Select bucket routing before a distributed task receives input rows."""
+    if table.options.native_write_enabled():
+        def prepare():
+            from pypaimon.execution.native.write.input_routing import create_native_input_router
+            return create_native_input_router(table, bucket_plan)
+        native = try_prepare_native(prepare)
+        if native is not None:
+            return native
+    if bucket_plan is not None:
+        from pypaimon.write.input_routing import PostponeFixedBucketInputRouter
+        return PostponeFixedBucketInputRouter(table, bucket_plan)
+    from pypaimon.write.input_routing import FixedBucketInputRouter
+    return FixedBucketInputRouter(table.table_schema)
+
+
 def load_postpone_bucket_metadata(table):
     """Select metadata planning before public bucket arithmetic consumes input."""
     if table.options.native_write_enabled():

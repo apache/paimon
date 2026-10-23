@@ -134,8 +134,8 @@ def _group_by_partition_bucket(
 ):
     partition_keys = list(table.table_schema.partition_keys or [])
     if extractor is None:
-        from pypaimon.write.input_routing import FixedBucketInputRouter
-        extractor = FixedBucketInputRouter(table.table_schema)
+        from pypaimon.write.backend_dispatch import create_input_router
+        extractor = create_input_router(table)
     col_names = set(f.name for f in table.table_schema.fields)
     bucket_col = _pick_bucket_col_name(col_names)
     bucket_udf = _make_bucket_udf(extractor, bucket_col)
@@ -154,8 +154,7 @@ def _identity_batch(batch: pa.Table) -> pa.Table:
 def _make_bucket_udf(extractor, bucket_col):
     """Build a map_batches UDF that appends a transient bucket column.
 
-    The bucket value comes from ``extract_partition_bucket_batch`` so it
-    matches the writer's bucket assignment for the same row exactly.
+    The prepared router uses the writer's bucket assignment for each row.
     """
     def _udf(batch: pa.Table) -> pa.Table:
         if batch.num_rows == 0:
@@ -163,7 +162,10 @@ def _make_bucket_udf(extractor, bucket_col):
                 bucket_col, pa.array([], type=pa.int32())
             )
         record_batch = batch.combine_chunks().to_batches()[0]
-        _, buckets = extractor.extract_partition_bucket_batch(record_batch)
+        if hasattr(extractor, 'route'):
+            buckets = extractor.route(record_batch)
+        else:
+            _, buckets = extractor.extract_partition_bucket_batch(record_batch)
         return batch.append_column(
             bucket_col, pa.array(buckets, type=pa.int32())
         )
