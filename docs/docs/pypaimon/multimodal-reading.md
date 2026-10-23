@@ -138,7 +138,7 @@ still depends on payload sizes and has no fixed byte cap. Unresolvable BLOB
 references fail the export instead of copying internal Paimon descriptors into
 the target.
 
-The first version rejects selected video-frame fields and VARIANT columns;
+The first version rejects selected video-frame fields or descriptors and VARIANT columns;
 project these fields out before exporting. Paimon indexes and snapshot history
 are not transferred. Build any required indexes on the Lance dataset after export.
 

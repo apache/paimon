@@ -40,6 +40,7 @@ from pypaimon.schema.data_types import (
 )
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.table.row.blob import BlobDescriptorSerde, VideoFrameDescriptor
 
 
 def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_parallelism):
@@ -106,6 +107,9 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
     blob_columns = [field.name for field in fields if is_blob_file_type(field.type)]
     map_blobs = [field.name for field in fields if is_map_blob_type(field.type)]
     array_blobs = [field.name for field in fields if is_array_blob_type(field.type)]
+    descriptor_fields = query._table.options.blob_descriptor_fields()
+    descriptor_field_ids = {field.id for field in query._table.fields if field.name in descriptor_fields}
+    descriptor_columns = [field.name for field in fields if field.id in descriptor_field_ids]
     # Include predicate-only columns internally, then remove them before
     # materializing payloads and writing the requested projection.
     builder, file_io, _ = query._blob_descriptor_query_read_builder()
@@ -127,7 +131,7 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
             export_fields.append(output_field)
         schema = pa.schema(export_fields, metadata=reader.schema.metadata)
         batches = _export_batches(reader, names, schema, file_io, blob_columns,
-                                  map_blobs, array_blobs, blob_parallelism)
+                                  map_blobs, array_blobs, descriptor_columns, blob_parallelism)
         # The default 2.0 format loses nullable struct validity. Version 2.1
         # with the required Lance version preserves nested NULLs as well.
         return lance.write_dataset(
@@ -143,12 +147,20 @@ def export_lance(query, uri, *, mode, blob_mode, storage_options, blob_paralleli
             close_read_source(reader, failure)
 
 
-def _export_batches(reader, names, schema, file_io, blob_columns, map_blobs, array_blobs, parallelism):
+def _export_batches(reader, names, schema, file_io, blob_columns, map_blobs,
+                    array_blobs, descriptor_columns, parallelism):
     for batch in reader:
         batch = batch.select(names)
-        bodies = fetch_blob_bodies(
-            file_io, batch.select(blob_columns).to_pydict(), blob_columns,
-            parallelism, map_blobs, array_blobs) if blob_columns else {}
+        bodies = {}
+        if blob_columns:
+            data = batch.select(blob_columns).to_pydict()
+            for column in descriptor_columns:
+                # Known descriptor fields also accept older wire versions
+                # without a magic header. Normalize only those fields so raw
+                # payloads that resemble legacy references remain unchanged.
+                data[column] = [_export_descriptor(value, column) for value in data[column]]
+            bodies = fetch_blob_bodies(
+                file_io, data, blob_columns, parallelism, map_blobs, array_blobs)
         arrays = []
         for index, field in enumerate(schema):
             if field.name in bodies:
@@ -159,6 +171,15 @@ def _export_batches(reader, names, schema, file_io, blob_columns, map_blobs, arr
                     array = pa.array(array.to_pylist(), type=field.type)
             arrays.append(array)
         yield pa.RecordBatch.from_arrays(arrays, schema=schema)
+
+
+def _export_descriptor(value, column):
+    if value is None:
+        return None
+    raw = bytes(value)
+    if VideoFrameDescriptor.is_video_frame_descriptor(raw):
+        raise ValueError("export_lance does not support video-frame column %r; project it out." % column)
+    return BlobDescriptorSerde.deserialize(raw).serialize()
 
 
 def _lance_arrow_type(data_type):
