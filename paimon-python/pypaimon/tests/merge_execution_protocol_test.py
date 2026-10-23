@@ -26,6 +26,7 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.tests.merge_sdk_test_support import MergeAssignment, WhenMatched, WhenNotMatched, merge_sdk_module
 from pypaimon.write.backend_dispatch import create_merge_batch_transform
 from pypaimon.write.merge_types import (
     LiteralValue, SourceColumnRef, TargetColumnRef, _NormalizedClause,
@@ -38,15 +39,32 @@ def native_protocol(monkeypatch):
     execute = Mock()
 
     class MergeBatchExecution:
-        def __init__(self, input_schema, output_schema, clauses, mode):
-            calls.append((input_schema, output_schema, clauses, mode))
+        @classmethod
+        def for_updates(cls, input_schema, update_schema, when_matched):
+            assert all(isinstance(clause, WhenMatched) for clause in when_matched)
+            return cls((input_schema, update_schema, when_matched, 'update'))
+
+        @classmethod
+        def for_deletes(cls, input_schema, when_matched):
+            assert all(isinstance(clause, WhenMatched) for clause in when_matched)
+            schema = pa.schema([pa.field('_ROW_ID', pa.int64(), nullable=False)])
+            return cls((input_schema, schema, when_matched, 'delete'))
+
+        @classmethod
+        def for_inserts(cls, input_schema, target_schema, when_not_matched):
+            assert all(isinstance(clause, WhenNotMatched) for clause in when_not_matched)
+            return cls((input_schema, target_schema, when_not_matched, 'insert'))
+
+        def __init__(self, compiled):
+            self.compiled = compiled
+            calls.append(compiled)
 
         def execute(self, batch):
-            return execute(batch, calls[-1])
+            return execute(batch, self.compiled)
 
     runtime = ModuleType('pypaimon_rust')
     runtime.__path__ = []
-    datafusion = ModuleType('pypaimon_rust.datafusion')
+    datafusion = merge_sdk_module()
     datafusion.MergeBatchExecution = MergeBatchExecution
     monkeypatch.setitem(sys.modules, 'pypaimon_rust', runtime)
     monkeypatch.setitem(sys.modules, 'pypaimon_rust.datafusion', datafusion)
@@ -101,9 +119,10 @@ def test_native_update_restores_callable_aliases_and_preserves_result_chunks(nat
         assert input_schema == batch.schema
         assert output_schema == _update_schema()
         assert mode == 'update'
-        assert clauses[0]['condition'] == {'sql': '"t.id" > 0'}
-        name, kind, callback = clauses[0]['assignments'][0]
-        assert (name, kind) == ('value', 'callable')
+        assert clauses[0].condition == '"t.id" > 0'
+        assignment = clauses[0].assignments['value']
+        assert assignment.kind == 'function'
+        callback = assignment.value
         assert callback(rows).equals(result['value'])
         return result
 
@@ -130,7 +149,7 @@ def test_native_self_update_keeps_explicit_callable_read_order(native_protocol):
     batch = _joined_batch()
 
     def execute(rows, compiled):
-        callback = compiled[2][0]['assignments'][0][2]
+        callback = compiled[2][0].assignments['value'].value
         return pa.Table.from_arrays([rows['t._ROW_ID'], callback(rows)], schema=_update_schema())
 
     native_protocol.execute.side_effect = execute
@@ -162,11 +181,11 @@ def test_native_custom_row_id_preserves_aliases_and_output_schema(native_protoco
 
     def execute(rows, compiled):
         assert rows['t._ROW_ID'].equals(batch['t.custom_id'])
-        assert compiled[2][0]['condition'] == {'sql': '"t.custom_id" > 0'}
+        assert compiled[2][0].condition == '"t.custom_id" > 0'
         assert compiled[1].names[0] == '_ROW_ID'
         columns = [rows['t._ROW_ID']]
         if operation == 'update':
-            columns.append(compiled[2][0]['assignments'][0][2](rows))
+            columns.append(compiled[2][0].assignments['value'].value(rows))
         return pa.Table.from_arrays(columns, schema=compiled[1])
 
     native_protocol.execute.side_effect = execute
@@ -189,11 +208,87 @@ def test_native_transports_coalesced_and_missing_column_assignments(native_proto
     transform = _native_update(clauses)
     native_protocol.execute.return_value = _update_schema().empty_table()
     transform(_joined_batch())
-    assert native_protocol.calls[0][2][0]['assignments'] == [
-        ('key', 'target', 'id'), ('source', 'source', 'value'),
-        ('target', 'target', 'value'), ('missing_source', 'literal', None),
-        ('missing_target', 'literal', None), ('constant', 'literal', 9),
-    ]
+    assert native_protocol.calls[0][2][0].assignments == {
+        'key': MergeAssignment.target_column('id'),
+        'source': MergeAssignment.source_column('value'),
+        'target': MergeAssignment.target_column('value'),
+        'missing_source': MergeAssignment.literal(None),
+        'missing_target': MergeAssignment.literal(None),
+        'constant': MergeAssignment.literal(9),
+    }
+
+
+@pytest.mark.parametrize('stream', [False, True], ids=['batch', 'stream'])
+def test_native_full_merge_uses_typed_branches_without_evaluating_callbacks(tmp_path, native_protocol, stream):
+    from pypaimon import CatalogFactory, Schema
+    from pypaimon.write.merge_types import WhenMatched as PublicWhenMatched, WhenNotMatched as PublicWhenNotMatched
+    from pypaimon.write.merge_types import lit, source_col, target_col
+
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('value', pa.int32()), ('other', pa.int32())])
+    catalog.create_table('default.t', Schema.from_pyarrow_schema(schema, options={
+        'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true', 'write.native.enabled': 'true',
+        'deletion-vectors.enabled': 'true',
+    }), False)
+    table = catalog.get_table('default.t')
+    native_table = Mock()
+    builder = (native_table.new_stream_write_builder.return_value if stream else
+               native_table.new_batch_write_builder.return_value)
+    builder.with_commit_user.return_value = builder
+    writer = builder.new_update.return_value
+    writer.merge_into.return_value = []
+    callback = Mock(return_value=pa.array([11], pa.int32()))
+    source = pa.table({'source_id': pa.array([1], pa.int32()), 'value': pa.array([11], pa.int32())})
+    public_builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    with patch('pypaimon.execution.native.write.native_merge_into._native_row_id_table', return_value=native_table), \
+            patch('pypaimon.execution.native.write.native_merge_into.from_native_commit_messages',
+                  side_effect=lambda table, messages: messages):
+        assert public_builder.new_update().merge_into(
+            source, on={'id': 'source_id'}, when_matched=[
+                PublicWhenMatched.delete('s.value < 0'),
+                PublicWhenMatched.update({'value': callback}, 's.source_id > 0'),
+                PublicWhenMatched.update({'value': source_col('value'), 'other': target_col('value')}),
+            ], when_not_matched=[PublicWhenNotMatched(
+                {'id': source_col('source_id'), 'value': lit(5)}, 's.value > 0')],
+            **({'commit_identifier': 31} if stream else {})) == []
+    callback.assert_not_called()
+    args, kwargs = writer.merge_into.call_args
+    assert args[0] is source
+    assert kwargs['on'] == [('id', 'source_id')]
+    if stream:
+        assert kwargs['commit_identifier'] == 31
+    else:
+        assert 'commit_identifier' not in kwargs
+    matched = kwargs['when_matched']
+    assert all(isinstance(clause, WhenMatched) for clause in matched)
+    assert [clause.action for clause in matched] == ['delete', 'update', 'update']
+    assert [clause.condition for clause in matched] == ['"s.value" < 0', '"s.source_id" > 0', None]
+    assert matched[2].assignments == {
+        'value': MergeAssignment.source_column('value'), 'other': MergeAssignment.target_column('value'),
+    }
+    inserted = kwargs['when_not_matched']
+    assert all(isinstance(clause, WhenNotMatched) for clause in inserted)
+    assert inserted[0].condition == '"s.value" > 0'
+    assert inserted[0].assignments == {
+        'id': MergeAssignment.source_column('source_id'), 'value': MergeAssignment.literal(5),
+    }
+    joined = pa.table({'t.id': [1], 't.value': [3], 't.other': [4], 's.value': [11]})
+    assert matched[1].assignments['value'].value(joined).to_pylist() == [11]
+    assert callback.call_args[0][0].column_names == ['s.source_id', 's.value', 't.id', 't.other', 't.value']
+
+
+def test_native_delete_restores_requested_field_and_schema_metadata(native_protocol):
+    schema = pa.schema([pa.field('_ROW_ID', pa.int64(), nullable=False, metadata={b'field': b'value'})],
+                       metadata={b'schema': b'value'})
+    transform = create_merge_batch_transform(
+        'delete', [_NormalizedClause({}, delete=True)], {}, '_ROW_ID', schema, native_enabled=True,
+    )
+    native_protocol.execute.side_effect = lambda batch, compiled: pa.Table.from_arrays(
+        [batch['t._ROW_ID']], schema=compiled[1])
+    result = transform(_joined_batch())
+    assert result.schema.equals(schema, check_metadata=True)
+    assert result['_ROW_ID'].to_pylist() == [7, 8]
 
 
 def test_native_insert_callback_retains_source_aliases_and_dictionary_types(native_protocol):
@@ -216,7 +311,7 @@ def test_native_insert_callback_retains_source_aliases_and_dictionary_types(nati
 
     def execute(rows, compiled):
         assert compiled[3] == 'insert'
-        return pa.Table.from_arrays([compiled[2][0]['assignments'][0][2](rows)], schema=schema)
+        return pa.Table.from_arrays([compiled[2][0].assignments['value'].value(rows)], schema=schema)
 
     native_protocol.execute.side_effect = execute
     assert transform(batch)['value'].to_pylist() == [10, 20]
@@ -263,11 +358,11 @@ def test_native_failure_preserves_exception_identity_without_python_replay(nativ
         raise failure
 
     if phase == 'compile':
-        native_protocol.module.MergeBatchExecution = Mock(side_effect=failure)
+        native_protocol.module.MergeBatchExecution.for_updates = Mock(side_effect=failure)
     elif phase == 'execute':
         native_protocol.execute.side_effect = failure
     else:
-        native_protocol.execute.side_effect = lambda rows, compiled: compiled[2][0]['assignments'][0][2](rows)
+        native_protocol.execute.side_effect = lambda rows, compiled: compiled[2][0].assignments['value'].value(rows)
     with patch('pypaimon.execution.python.write.merge_transform._build_matched_transform') as python:
         transform = _native_update([_NormalizedClause({'value': callback})])
         with pytest.raises(ValueError) as caught:
@@ -368,7 +463,7 @@ def test_native_ray_preparation_does_not_require_python_datafusion(
     batch = (pa.table({'s.id': pa.array([1], pa.int32()), 's.value': pa.array([10], pa.int32())})
              if operation == 'insert' else _joined_batch())
     assert transform(batch).schema == output_schema
-    assert native_protocol.calls[0][2][0]['condition'] == {'sql': '"s.value" > 0'}
+    assert native_protocol.calls[0][2][0].condition == '"s.value" > 0'
 
 
 @pytest.mark.parametrize('operation', ['update', 'delete', 'insert'])
@@ -425,11 +520,15 @@ class RejectOtherBackend(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RejectOtherBackend())
 if native_enabled:
     class MergeBatchExecution:
-        def __init__(self, input_schema, output_schema, clauses, mode):
+        @classmethod
+        def for_updates(cls, input_schema, update_schema, when_matched):
+            return cls(update_schema)
+        def __init__(self, output_schema):
             self.output_schema = output_schema
         def execute(self, batch):
             return self.output_schema.empty_table()
-    module = ModuleType('pypaimon_rust.datafusion')
+    from pypaimon.tests.merge_sdk_test_support import merge_sdk_module
+    module = merge_sdk_module()
     module.MergeBatchExecution = MergeBatchExecution
     sys.modules['pypaimon_rust.datafusion'] = module
 from pypaimon.ray.data_evolution_merge_join import _build_matched_transform

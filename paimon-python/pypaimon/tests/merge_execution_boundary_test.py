@@ -77,6 +77,8 @@ if engine == 'python':
     assert read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id').to_pylist() == [
         {'id': 1, 'value': 9}, {'id': 2, 'value': 7}]
 else:
+    from pypaimon.tests.merge_sdk_test_support import merge_sdk_module
+    sys.modules['pypaimon_rust.datafusion'] = merge_sdk_module()
     core = Mock()
     builder = core.new_batch_write_builder.return_value
     builder.with_commit_user.return_value = builder
@@ -91,10 +93,9 @@ else:
                   side_effect=lambda table, messages: messages):
         assert merge_into(table, data, on=['id'], when_matched=matched, commit_user='test') == []
     writer.merge_into.assert_called_once()
-    callback = writer.merge_into.call_args[1]['when_matched'][0]['assignments'][0][2]
+    callback = writer.merge_into.call_args[1]['when_matched'][0].assignments['value'].value
     assert callback(pa.table({'t.id': [1], 't.value': [3], 's.value': [9]})).to_pylist() == [9]
-    assert writer.merge_into.call_args[1]['when_matched'][0]['condition'] == {
-        'sql': '\"s.value\" > \"t.value\"'}
+    assert writer.merge_into.call_args[1]['when_matched'][0].condition == '\"s.value\" > \"t.value\"'
 assert not any(name.startswith('pypaimon.ray') or name == blocked
                or name.startswith(blocked + '.') for name in sys.modules)
 """
