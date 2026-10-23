@@ -120,7 +120,7 @@ def _table(tmp_path, native=True):
 
 @pytest.fixture
 def sdk(monkeypatch):
-    module = SimpleNamespace(DynamicBucketAssignerRouter=Mock())
+    module = SimpleNamespace(DynamicBucketAssignerRouter=Mock(), DynamicBucketAssigner=Mock())
     monkeypatch.setitem(sys.modules, 'pypaimon_rust.datafusion', module)
     return module
 
@@ -250,29 +250,29 @@ def test_native_dynamic_later_batch_errors_are_terminal(tmp_path, sdk, operation
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_native_assignment_uses_writer_builder_and_precomputed_arrow_hashes(tmp_path, overwrite):
+@pytest.mark.parametrize('base_snapshot_id', [None, 0, 7])
+def test_native_assignment_uses_dedicated_constructor_and_precomputed_arrow_hashes(
+        tmp_path, sdk, overwrite, base_snapshot_id):
     table = _table(tmp_path)
     native_table = Mock()
-    builder = native_table.new_batch_write_builder.return_value
-    builder.with_restore_snapshot.return_value = builder
-    builder.with_overwrite.return_value = builder
-    core = builder.new_dynamic_bucket_assigner.return_value
-    core.restore_snapshot_id = 0 if overwrite else 7
+    core = sdk.DynamicBucketAssigner.return_value
+    core.restore_snapshot_id = 0 if overwrite or base_snapshot_id == 0 else 7
     core.assign.return_value = pa.array([1, 0], type=pa.int32())
     batch = pa.record_batch([[2, 1], ['west', 'west']], names=['id', 'p'])
     hashes = pa.chunked_array([pa.array([42], type=pa.int32()), pa.array([-3], type=pa.int32())])
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
                   return_value=native_table), \
+            patch.object(table, 'new_batch_write_builder', side_effect=AssertionError('Python write builder')), \
             patch('pypaimon.index.dynamic_bucket.DynamicBucketAssigner.__init__',
                   side_effect=AssertionError('Python index restoration')):
-        assigner = create_dynamic_bucket_assigner(table, 2, 2, 1, overwrite, 7)
+        assigner = create_dynamic_bucket_assigner(table, 2, 2, 1, overwrite, base_snapshot_id)
         assert isinstance(assigner, NativeDynamicBucketAssigner)
         assert assigner.restore_snapshot_id == core.restore_snapshot_id
         assert assigner.assign(batch, hashes) is core.assign.return_value
-    builder.with_restore_snapshot.assert_called_once_with(7)
-    assert builder.with_overwrite.call_count == int(overwrite)
-    builder.new_dynamic_bucket_assigner.assert_called_once_with(2, 2, 1)
+    native_table.new_batch_write_builder.assert_not_called()
+    sdk.DynamicBucketAssigner.assert_called_once_with(
+        native_table, 2, 2, 1, restore_snapshot_id=base_snapshot_id, overwrite=overwrite)
     assert core.assign.call_args[0][0] is batch
     assert core.assign.call_args[1]['key_hashes'].equals(hashes.combine_chunks())
 
@@ -283,15 +283,14 @@ def test_native_dynamic_errors_never_replay_python(tmp_path, sdk, operation, pha
     table = _table(tmp_path)
     failure = TableNoPermissionException(table.identifier)
     native_table = Mock()
-    builder = native_table.new_batch_write_builder.return_value
     core = (sdk.DynamicBucketAssignerRouter.return_value if operation == 'route' else
-            builder.new_dynamic_bucket_assigner.return_value)
+            sdk.DynamicBucketAssigner.return_value)
     core.restore_snapshot_id = 0
     if phase == 'prepare':
         if operation == 'route':
             sdk.DynamicBucketAssignerRouter.side_effect = failure
         else:
-            builder.new_dynamic_bucket_assigner.side_effect = failure
+            sdk.DynamicBucketAssigner.side_effect = failure
     else:
         getattr(core, operation).side_effect = failure
     with patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \

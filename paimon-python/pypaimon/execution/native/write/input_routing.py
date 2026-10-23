@@ -147,19 +147,16 @@ class NativeDynamicBucketAssigner:
         self._assigner = None
 
     def _prepare(self, native_table=None):
+        from pypaimon_rust.datafusion import DynamicBucketAssigner
         if native_table is None:
             native_table = create_native_write_table(self.table)
         if native_table is None:
             raise RuntimeError('Native dynamic bucket assignment is unavailable')
-        builder = native_table.new_batch_write_builder()
-        if self._base_snapshot_id is not None:
-            builder = builder.with_restore_snapshot(self._base_snapshot_id)
-        if self._ignore_existing:
-            builder = builder.with_overwrite()
-        self._assigner = builder.new_dynamic_bucket_assigner(
-            self._num_channels, self._num_assigners, self._assign_id)
-        # A restored worker must keep the driver's snapshot even if a new
-        # snapshot was committed after this executor was serialized.
+        self._assigner = DynamicBucketAssigner(
+            native_table, self._num_channels, self._num_assigners, self._assign_id,
+            restore_snapshot_id=self._base_snapshot_id, overwrite=self._ignore_existing)
+        # Core captures the restore point once. Final worker writers must
+        # restore that same snapshot even if another commit finishes later.
         self._base_snapshot_id = self._assigner.restore_snapshot_id
 
     @property
