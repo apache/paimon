@@ -55,10 +55,11 @@ with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
 `scan().export_lance()` writes the scan's logical rows to an independent Lance
 dataset directory and returns a `lance.LanceDataset`. It honors `where()`,
 `select()`, `limit()`, and the snapshot or tag selected by `scan()`.
-Lance is an export destination. Paimon no longer provides Lance as a table data
-or vector file format (`file.format=lance` or `vector.file.format=lance`).
-Rewrite existing tables using these options into a supported format before
-upgrading.
+PyPaimon supports Lance as an export destination only. It does not read or write
+Paimon data or vector files using `file.format=lance` or
+`vector.file.format=lance`. Java's Lance file format support remains available.
+Before accessing an existing table through PyPaimon, rewrite any Lance data or
+vector files into a format supported by PyPaimon.
 Export requires Python 3.10 or later and `pylance>=13,<14` to preserve null Blob
 values across batches.
 Install the optional Lance dependency:

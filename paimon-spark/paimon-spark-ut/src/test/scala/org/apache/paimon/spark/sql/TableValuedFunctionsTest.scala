@@ -394,7 +394,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlan
                   |CREATE TABLE vector_search_source (gid BIGINT, embs ARRAY<FLOAT>, dt STRING)
                   |USING paimon
                   |TBLPROPERTIES (
-                  |  'vector.file.format' = 'parquet',
+                  |  'vector.file.format' = 'lance',
                   |  'vector-field' = 'embs',
                   |  'field.embs.vector-dim' = '3',
                   |  'row-tracking.enabled' = 'true',
@@ -933,7 +933,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlan
                 |CREATE TABLE vector_search_source (gid BIGINT, embs ARRAY<FLOAT>, dt STRING)
                 |USING paimon
                 |TBLPROPERTIES (
-                |  'vector.file.format' = 'parquet',
+                |  'vector.file.format' = 'lance',
                 |  'vector-field' = 'embs',
                 |  'field.embs.vector-dim' = '3',
                 |  'row-tracking.enabled' = 'true',

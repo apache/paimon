@@ -39,14 +39,11 @@ layout; [Data Types](../data-types) describes Paimon's logical types.
 | [CSV](#csv) | Delimited text and type mappings |
 | [Text](#text) | Text records and line delimiters |
 | [JSON](#json) | JSON records and type mappings |
+| [Lance](#lance) | Format integration for ML and vector workloads |
 | [Vortex](#vortex) | Columnar format integration |
 | [Mosaic](#mosaic) | Column bucketing for wide tables |
 | [Row](#row) | Row-oriented blocks with row-number lookup; see the [binary specification](./rowformat) |
 | [BLOB](#blob) | Binary-object storage and [video](#video) handling |
-
-Lance is no longer provided as a Paimon file format. Rewrite existing tables
-containing Lance data or vector files into a supported format before upgrading.
-To create independent Lance datasets, use [PyPaimon's Lance export](../../pypaimon/multimodal-reading#export-to-lance).
 
 ## Parquet
 
@@ -229,6 +226,35 @@ The following table lists the type mapping from Paimon type to JSON type.
 | `ARRAY` | `array` |
 | `MAP` | `object` |
 | `ROW` | `object` |
+
+## Lance
+
+Lance is a modern columnar data format optimized for machine learning and vector search workloads. It provides high-performance read and write operations with native support for Apache Arrow.
+
+The following table lists the type mapping from Paimon type to Lance (Arrow) type.
+
+| Paimon Type | Lance (Arrow) type |
+| --- | --- |
+| CHAR / VARCHAR / STRING | UTF8 |
+| BOOLEAN | BOOL |
+| BINARY / VARBINARY | BINARY |
+| DECIMAL(P, S) | DECIMAL128(P, S) |
+| TINYINT | INT8 |
+| SMALLINT | INT16 |
+| INT | INT32 |
+| BIGINT | INT64 |
+| FLOAT | FLOAT |
+| DOUBLE | DOUBLE |
+| DATE | DATE32 |
+| TIME | TIME32 / TIME64 |
+| TIMESTAMP(P) | TIMESTAMP (unit based on precision) |
+| TIMESTAMP_LOCAL_ZONE(P) | TIMESTAMP (unit based on precision, UTC time zone) |
+| ARRAY | LIST |
+| ROW | STRUCT |
+
+Limitations:
+1. Lance file format does not support `MAP`, `MULTISET` or `VARIANT` types.
+2. Lance file format does not support `BLOB` fields stored inline in data files (`blob-descriptor-field` or `blob-view-field`). Regular `BLOB` fields are written to dedicated blob files and are not affected.
 
 ## Vortex
 

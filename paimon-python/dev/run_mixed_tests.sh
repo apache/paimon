@@ -124,6 +124,12 @@ run_batched_java_write_tests() {
         result=1
     fi
 
+    # Retain Java-only Lance write/read coverage; PyPaimon no longer reads Lance files.
+    local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
+    lance_tests="${lance_tests}+testJavaWriteReadAppendTableLance"
+    if ! run_maven_test_batch "paimon-lance Java write/read tests" "paimon-lance" "$lance_tests" -q; then
+        result=1
+    fi
 
     if [[ "$PYTHON_MINOR" -ge 11 ]]; then
         local vortex_tests="org.apache.paimon.JavaPyVortexE2ETest#testJavaWriteVectorDedicatedFile"
@@ -170,7 +176,7 @@ run_batched_java_write_tests() {
 
 # Function to run Java test
 run_java_write_test() {
-    echo -e "${YELLOW}=== Step 1: Running Java Write Tests (Parquet/Orc/Avro) ===${NC}"
+    echo -e "${YELLOW}=== Step 1: Running Java Write Tests (Parquet/Orc/Avro + Lance) ===${NC}"
 
     if skip_batched_java_write; then
         return 0
@@ -191,8 +197,17 @@ run_java_write_test() {
 
     echo ""
 
+    # These Lance tests write and read with Java, independently of Python support.
+    local lance_result=0
+    echo "Running Maven test for JavaPyLanceE2ETest Java write/read checks (Lance)..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance+testJavaWriteReadAppendTableLance -pl paimon-lance -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java write/read lance test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java write/read lance test failed${NC}"
+        lance_result=1
+    fi
 
-    if [[ $parquet_result -eq 0 ]]; then
+    if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
         return 0
     else
         echo -e "${RED}✗ Java test failed${NC}"
@@ -254,7 +269,6 @@ run_java_read_test() {
     fi
 
     echo ""
-
 
     if [[ $parquet_result -eq 0 ]]; then
         return 0
@@ -761,7 +775,6 @@ run_data_evolution_test() {
             echo -e "${RED}✗ Java data evolution write (parquet/orc/avro) failed${NC}"
             core_result=1
         fi
-
     fi
 
     # Python read data evolution tables
@@ -829,7 +842,6 @@ run_data_evolution_py_write_test() {
         echo -e "${RED}✗ Java data evolution read (parquet/orc/avro) failed${NC}"
         core_result=1
     fi
-
 
     if [[ $core_result -ne 0 ]]; then
         return 1
@@ -1393,9 +1405,9 @@ main() {
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Java Write Test (Parquet/Orc/Avro): PASSED${NC}"
+        echo -e "${GREEN}✓ Java Write Test (Parquet/Orc/Avro + Lance): PASSED${NC}"
     else
-        echo -e "${RED}✗ Java Write Test (Parquet/Orc/Avro): FAILED${NC}"
+        echo -e "${RED}✗ Java Write Test (Parquet/Orc/Avro + Lance): FAILED${NC}"
     fi
 
     if [[ $python_read_result -eq 0 ]]; then

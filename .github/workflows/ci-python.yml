@@ -130,7 +130,7 @@ jobs:
         run: |
           echo "Start compiling modules"
           mvn -T 2C -B -ntp install -DskipTests \
-            -pl paimon-core,paimon-vortex/paimon-vortex-format,paimon-full-text,paimon-lumina,paimon-vector -am
+            -pl paimon-core,paimon-lance,paimon-vortex/paimon-vortex-format,paimon-full-text,paimon-lumina,paimon-vector -am
 
       - name: Install Python dependencies
         shell: bash

@@ -22,8 +22,8 @@ import org.apache.paimon.options.Options;
 
 /**
  * Optional capability for {@link FileIO} implementations that wrap a Hadoop-compatible filesystem
- * and want to expose their underlying hadoop-style options to native readers/writers (such as
- * Vortex) hosted in modules that cannot depend on the FileIO implementation directly.
+ * and want to expose their underlying hadoop-style options to native readers/writers (such as Lance
+ * or Vortex) hosted in modules that cannot depend on the FileIO implementation directly.
  *
  * <p>Without this interface those modules fall back to reflective {@code Class.forName} + {@code
  * Method.invoke} lookups, which silently break when method signatures drift. Implementing this

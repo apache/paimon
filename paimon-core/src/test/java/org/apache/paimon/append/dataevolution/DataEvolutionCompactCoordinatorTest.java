@@ -150,7 +150,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeEntryWithSize("version1.parquet", 30L, 10L, 0, versionSize),
                         makeEntryWithSize("version2.parquet", 30L, 10L, 1, versionSize),
                         makeBlobEntry("large.blob", 0L, 10L, 1000L),
-                        makeVectorStoreEntry("large.vector.parquet", 10L, 10L, 1000L));
+                        makeVectorStoreEntry("large.vector.lance", 10L, 10L, 1000L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
                         false,
@@ -223,7 +223,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 Arrays.asList(
                         makeEntryWithSize("large.parquet", 0L, 10L, 0, 1000L),
                         vector
-                                ? makeVectorStoreEntry("whole.vector.parquet", 0L, 10L, 10L)
+                                ? makeVectorStoreEntry("whole.vector.lance", 0L, 10L, 10L)
                                 : makeBlobEntry("whole.blob", 0L, 10L, 10L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
@@ -240,7 +240,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeEntryWithSize("small1.parquet", 10L, 10L, 0, 20L),
                         makeEntryWithSize("small2.parquet", 20L, 10L, 0, 20L),
                         makeBlobEntry("original.blob", 0L, 5L, 1000L),
-                        makeVectorStoreEntry("original.vector.parquet", 5L, 5L, 1000L));
+                        makeVectorStoreEntry("original.vector.lance", 5L, 5L, 1000L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
                         false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);

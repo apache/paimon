@@ -26,7 +26,7 @@ class PaimonScanBuilderTest extends PaimonSparkTestBase {
       spark.sql("""
                   |CREATE TABLE T (id BIGINT, embs ARRAY<FLOAT>)
                   |TBLPROPERTIES (
-                  |  'vector.file.format' = 'parquet',
+                  |  'vector.file.format' = 'lance',
                   |  'vector-field' = 'embs',
                   |  'field.embs.vector-dim' = '3',
                   |  'row-tracking.enabled' = 'true',
