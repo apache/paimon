@@ -265,6 +265,29 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
+To execute routes separately, use the same public builders and fuse their results:
+
+```python
+builder = (
+    table.new_hybrid_search_builder()
+    .add_vector_route("title_embedding", [1.0, 0.0, 0.0], limit=50)
+    .with_limit(10)
+)
+routes = builder.route_builders()
+route_results = [
+    builder.to_route_result(route, route.execute_local())
+    for route in routes
+]
+result = builder.rank(route_results)
+```
+
+Route capture checks authorization and fixes one snapshot for all routes. Each
+`route.search_builder` remains configurable and supports its ordinary scan/read
+methods. Ranking uses the supplied results and the builder's current limit and
+ranker; it does not read table metadata or execute queries again. Native execution
+supports these phases as well as complete hybrid queries. Both backends use Java's
+float32 scores, weights, and fusion arithmetic.
+
 To search two vector indexes without a full-text route, add two vector routes:
 
 ```java

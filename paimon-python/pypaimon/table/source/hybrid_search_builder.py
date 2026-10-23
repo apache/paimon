@@ -17,6 +17,7 @@
 
 """Builder to build hybrid search."""
 
+import ctypes
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -75,6 +76,7 @@ class HybridSearchRoute:
                 "Query cannot be None for full-text route")
         if self.limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self.limit)
+        self.weight = ctypes.c_float(float(self.weight)).value
         if not math.isfinite(self.weight) or self.weight <= 0:
             raise ValueError(
                 "Weight must be finite and positive, got: %s" % self.weight)
@@ -225,15 +227,15 @@ class HybridSearchBuilder(ABC):
         pass
 
     def execute_local(self) -> ScoredGlobalIndexResult:
-        from pypaimon.execution.python.read.search.hybrid_search import execute_local
-        return execute_local(self)
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self)
 
     def execute(self, executor=None) -> ScoredGlobalIndexResult:
         """Execute complete routes with an optional search-task scheduler."""
         if executor is None:
             return self.execute_local()
-        from pypaimon.execution.python.read.search.hybrid_search import execute
-        return execute(self, executor)
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self, executor)
 
 
 class HybridSearchBuilderImpl(HybridSearchBuilder):
@@ -292,18 +294,27 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         return self
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
-        from pypaimon.execution.python.read.search.hybrid_search import route_builders
-        return route_builders(self)
+        from pypaimon.table.source.search_dispatch import hybrid_route_builders
+        return hybrid_route_builders(self)
 
     def to_route_result(
             self, route_builder: HybridSearchRouteBuilder,
             result: GlobalIndexResult) -> HybridSearchRouteResult:
-        from pypaimon.execution.python.read.search.hybrid_search import to_route_result
-        return to_route_result(self, route_builder, result)
+        # This is public result-type validation, independent of execution. Keep
+        # scored objects intact, including custom score getters and metadata.
+        if isinstance(result, ScoredGlobalIndexResult):
+            scored = result
+        elif result.results().is_empty():
+            scored = ScoredGlobalIndexResult.create_empty()
+        else:
+            raise ValueError(
+                "Hybrid search requires scored index results, but got: %s"
+                % result.__class__.__name__)
+        return HybridSearchRouteResult(route_builder.route, scored)
 
     def rank(self, route_results: List[HybridSearchRouteResult]) -> ScoredGlobalIndexResult:
-        from pypaimon.execution.python.read.search.hybrid_search import rank
-        return rank(self, route_results)
+        from pypaimon.table.source.search_dispatch import rank_hybrid_results
+        return rank_hybrid_results(self, route_results)
 
     def _validate_search(self):
         if not self._routes:

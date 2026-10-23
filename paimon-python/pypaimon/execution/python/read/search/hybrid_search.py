@@ -23,8 +23,9 @@ from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, as_completed
 from threading import Event
 from typing import List
 
+import numpy as np
+
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
-from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult, ScoredGlobalIndexResult
 from pypaimon.table.source.hybrid_search_builder import (
     HybridSearchRouteBuilder, HybridSearchRouteResult,
@@ -33,7 +34,7 @@ from pypaimon.table.source.hybrid_search_builder import (
 
 
 _MAX_ROUTE_WORKERS = 4
-_RRF_K = 60.0
+_RRF_K = np.float32(60.0)
 
 
 def execute(self, executor=None):
@@ -134,21 +135,6 @@ def route_builders(self) -> List[HybridSearchRouteBuilder]:
     return builders
 
 
-def to_route_result(
-        self,
-        route_builder: HybridSearchRouteBuilder,
-        result: GlobalIndexResult) -> HybridSearchRouteResult:
-    if isinstance(result, ScoredGlobalIndexResult):
-        scored = result
-    elif result.results().is_empty():
-        scored = ScoredGlobalIndexResult.create_empty()
-    else:
-        raise ValueError(
-            "Hybrid search requires scored index results, but got: %s"
-            % result.__class__.__name__)
-    return HybridSearchRouteResult(route_builder.route, scored)
-
-
 def rank(
         self,
         route_results: List[HybridSearchRouteResult]) -> ScoredGlobalIndexResult:
@@ -167,18 +153,20 @@ def rank(
 def _rrf(self, route_results):
     scores = {}
     for route_result in route_results:
+        weight = np.float32(route_result.route.weight)
         for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
-            contribution = route_result.route.weight / (_RRF_K + rank + 1.0)
-            scores[row_id] = scores.get(row_id, 0.0) + contribution
+            contribution = weight / (_RRF_K + np.float32(rank) + np.float32(1.0))
+            scores[row_id] = scores.get(row_id, np.float32(0.0)) + contribution
     return _top_k(scores, self._limit)
 
 
 def _mrr(self, route_results):
     scores = {}
     for route_result in route_results:
+        weight = np.float32(route_result.route.weight)
         for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
-            contribution = route_result.route.weight / (rank + 1.0)
-            scores[row_id] = scores.get(row_id, 0.0) + contribution
+            contribution = weight / (np.float32(rank) + np.float32(1.0))
+            scores[row_id] = scores.get(row_id, np.float32(0.0)) + contribution
     return _top_k(scores, self._limit)
 
 
@@ -186,7 +174,7 @@ def _weighted_score(self, route_results):
     scores = {}
     for route_result in route_results:
         result = route_result.result
-        weight = route_result.route.weight
+        weight = np.float32(route_result.route.weight)
         score_getter = result.score_getter()
 
         # Route score scales are heterogeneous (e.g. bounded vector similarity
@@ -195,7 +183,7 @@ def _weighted_score(self, route_results):
         # weights -- not a route's numeric magnitude -- decide its influence on
         # the fused score. This mirrors the Java HybridSearchRanker.
         route_scores = {
-            row_id: (score_getter(row_id) or 0.0)
+            row_id: np.float32(score_getter(row_id) or 0.0)
             for row_id in result.results()
         }
         if not route_scores:
@@ -206,8 +194,8 @@ def _weighted_score(self, route_results):
             # No spread within the route (single hit or all ties) carries no
             # relative signal, so every hit maps to 1.0 rather than zeroed out.
             normalized = (
-                (raw - min_score) / score_range if score_range > 0.0 else 1.0)
-            scores[row_id] = scores.get(row_id, 0.0) + weight * normalized
+                (raw - min_score) / score_range if score_range > 0.0 else np.float32(1.0))
+            scores[row_id] = scores.get(row_id, np.float32(0.0)) + weight * normalized
     return _top_k(scores, self._limit)
 
 
@@ -215,7 +203,7 @@ def _ranked_row_ids(result):
     score_getter = result.score_getter()
     return sorted(
         result.results(),
-        key=lambda row_id: (-(score_getter(row_id) or 0.0), row_id))
+        key=lambda row_id: (-np.float32(score_getter(row_id) or 0.0), row_id))
 
 
 def _top_k(scores, limit):
@@ -228,5 +216,5 @@ def _top_k(scores, limit):
             heapq.heappush(heap, item)
         elif item > heap[0]:
             heapq.heapreplace(heap, item)
-    top_scores = {-neg_row_id: score for score, neg_row_id in heap}
+    top_scores = {-neg_row_id: float(score) for score, neg_row_id in heap}
     return DictBasedScoredIndexResult(top_scores)
