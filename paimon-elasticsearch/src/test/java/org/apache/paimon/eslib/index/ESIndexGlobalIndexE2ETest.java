@@ -1842,8 +1842,8 @@ class ESIndexGlobalIndexE2ETest {
     /**
      * Bypass-archive regression test for the DiskBBQ read path. Writes 1000 random normalised
      * vectors directly to an {@code FSDirectory} via raw Lucene + {@code PaimonLucene912Codec}
-     * ({@code algorithm=diskbbq}) — skipping paimon-eslib's archive layer entirely — and reads them
-     * back through {@code KnnFloatVectorQuery}.
+     * ({@code algorithm=diskbbq}) — skipping paimon-elasticsearch's archive layer entirely — and
+     * reads them back through {@code KnnFloatVectorQuery}.
      *
      * <p>Locks in two fixes in eslib-core {@code lucene9/DiskBBQVectorsReader}:
      *
@@ -1898,7 +1898,7 @@ class ESIndexGlobalIndexE2ETest {
         java.nio.file.Path idxDir = tmp.resolve("fs-diskbbq");
         Files.createDirectories(idxDir);
 
-        // --- write via raw Lucene + PaimonLucene9Codec (the codec paimon-eslib uses;
+        // --- write via raw Lucene + PaimonLucene9Codec (the codec paimon-elasticsearch uses;
         // also the only codec registered in Lucene SPI, so DirectoryReader.open finds it back). ---
         org.apache.lucene.codecs.Codec codec =
                 new org.elasticsearch.eslib.adapter.lucene9.PaimonLucene9Codec(fieldConfigs);

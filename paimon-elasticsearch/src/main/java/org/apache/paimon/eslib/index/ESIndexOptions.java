@@ -321,7 +321,7 @@ public class ESIndexOptions {
         VectorAlgorithm vectorAlgorithm = VectorAlgorithm.fromName(algorithm);
         if (vectorAlgorithm == VectorAlgorithm.NATIVE) {
             throw new IllegalArgumentException(
-                    "Vector algorithm 'native' is not supported by paimon-eslib; "
+                    "Vector algorithm 'native' is not supported by paimon-elasticsearch; "
                             + "use 'hnsw', 'int8_hnsw', or 'diskbbq'");
         }
 
@@ -447,7 +447,7 @@ public class ESIndexOptions {
             throw new IllegalArgumentException(
                     "Analyzer '"
                             + analyzerName
-                            + "' is not supported by paimon-eslib for field '"
+                            + "' is not supported by paimon-elasticsearch for field '"
                             + fieldName
                             + "'; use standard, whitespace, simple, or keyword.");
         }

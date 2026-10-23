@@ -357,7 +357,7 @@ class ESIndexOptionsTest {
                                         Arrays.asList(
                                                 new DataField(0, "title", DataTypes.STRING())),
                                         Options.fromMap(options)))
-                .hasMessageContaining("not supported by paimon-eslib")
+                .hasMessageContaining("not supported by paimon-elasticsearch")
                 .hasMessageContaining("standard, whitespace, simple, or keyword");
     }
 

@@ -84,8 +84,8 @@ case "$suite" in
         goal=test
         ;;
     eslib)
-        profiles=paimon-eslib
-        modules=(paimon-eslib)
+        profiles=paimon-elasticsearch
+        modules=(paimon-elasticsearch)
         threads=1
         ;;
     full-text)

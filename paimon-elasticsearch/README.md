@@ -17,9 +17,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# paimon-eslib: ES Index (Multi-Column Global Index)
+# paimon-elasticsearch: ES Index (Multi-Column Global Index)
 
-`paimon-eslib` provides the `es-index` global index: a **Lucene-backed, multi-column, multi-modal**
+`paimon-elasticsearch` provides the `es-index` global index: a **Lucene-backed, multi-column, multi-modal**
 index. A single `es-index` file indexes a **primary column** (typically a vector) together with
 optional **companion columns** — full-text, keyword, scalar, and date — so vector search and
 full-text search can be served from the same index, and companion columns stay available for scoring
@@ -30,15 +30,15 @@ one dedicated engine — `es-index` groups a primary column plus optional compan
 index. The primary column determines the main modality (usually a vector); companion columns are
 indexed according to their data type and per-field options.
 
-> **Plugin required.** `es-index` is provided by this `paimon-eslib` module. Make sure `paimon-eslib`
+> **Plugin required.** `es-index` is provided by this `paimon-elasticsearch` module. Make sure `paimon-elasticsearch`
 > is on the classpath of your Spark or Flink job (and of any reader) before building or querying an
 > `es-index`. The module and its ESLib/Lucene dependencies require Java 11 or newer. It is excluded
-> from the default Maven reactor; build it explicitly with `-Ppaimon-eslib` on JDK 11 or newer.
+> from the default Maven reactor; build it explicitly with `-Ppaimon-elasticsearch` on JDK 11 or newer.
 
-`paimon-eslib` is distributed as a thin JAR and does not embed ESLib or Lucene classes. Maven and
+`paimon-elasticsearch` is distributed as a thin JAR and does not embed ESLib or Lucene classes. Maven and
 Gradle resolve these dependencies transitively. When installing JARs manually, place
 `eslib-core-lucene9` and `eslib-simdvec-lucene9` 1.0.7, together with their Lucene 9.12
-dependencies, in the same runtime classloader as `paimon-eslib`.
+dependencies, in the same runtime classloader as `paimon-elasticsearch`.
 
 ## ESLib source and artifacts
 
@@ -148,7 +148,7 @@ column.
 | Key | Applies to | Default | Description |
 |---|---|---|---|
 | `type` | any column | inferred from data type | Force the sub-index type: `vector`, `fulltext`, `keyword`, `date`. |
-| `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw`, `int8_hnsw`, or `diskbbq`. `native` is not supported by paimon-eslib. |
+| `algorithm` | vector | `hnsw` | Vector algorithm: `hnsw`, `int8_hnsw`, or `diskbbq`. `native` is not supported by paimon-elasticsearch. |
 | `dimension` | vector | inferred for `VECTOR<FLOAT>` | Vector dimension (1–4096). Required for `ARRAY<FLOAT>`; taken from the type for `VECTOR<FLOAT>`. |
 | `metric` | vector | `cosine` | Distance metric (for example `cosine`, `l2`, `dot_product`). Use the same metric at build and query time. |
 | `m` | vector (`hnsw`, `int8_hnsw`) | engine default | HNSW graph out-degree; valid range: 1–512. |

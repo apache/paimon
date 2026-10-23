@@ -28,8 +28,8 @@ under the License.
         <version>2.2-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-eslib</artifactId>
-    <name>Paimon : ESLib Index</name>
+    <artifactId>paimon-elasticsearch</artifactId>
+    <name>Paimon : Elasticsearch Index</name>
 
     <properties>
         <!-- eslib-api / eslib-core are compiled for Java 11 (Lucene 9.12); compile this module
@@ -67,7 +67,7 @@ under the License.
             <version>${eslib.version}</version>
         </dependency>
         <!-- eslib-native (Havenask JNI) intentionally omitted: it is a JDK 21 module (Phase 3,
-             not implemented) and is not referenced by paimon-eslib. Re-add when NATIVE algorithm
+             not implemented) and is not referenced by paimon-elasticsearch. Re-add when NATIVE algorithm
              support lands. -->
 
         <!-- Lucene (same version as eslib) -->
