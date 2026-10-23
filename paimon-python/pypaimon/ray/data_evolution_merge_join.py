@@ -82,6 +82,7 @@ class _SelfMergeUpdatePlan:
     snapshot_id: int
     callable_input_columns: Optional[List[str]]
     row_id_plan: Any
+    native_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class _SelfMergeUpdateContext:
     row_id_name: str
     snapshot_id: int
     callable_input_columns: Optional[List[str]]
+    native_enabled: bool = False
 
 
 def _resolve_source_projection(
@@ -132,9 +134,13 @@ def _build_matched_transform(
     row_id_name: str,
     update_schema: pa.Schema,
     callable_input_columns: Optional[Sequence[str]] = None,
+    native_enabled: bool = False,
 ):
-    from pypaimon.execution.python.write.merge_transform import _build_matched_transform as execute
-    return execute(clauses, on_map, on_pairs, update_cols, row_id_name, update_schema, callable_input_columns)
+    from pypaimon.write.backend_dispatch import create_merge_batch_transform
+    return create_merge_batch_transform(
+        'update', clauses, on_map, on_pairs, update_cols, row_id_name,
+        update_schema, callable_input_columns, native_enabled=native_enabled,
+    )
 
 
 def _build_matched_delete_transform(
@@ -142,9 +148,13 @@ def _build_matched_delete_transform(
     on_map: Dict[str, str],
     row_id_name: str,
     delete_schema: pa.Schema,
+    native_enabled: bool = False,
 ):
-    from pypaimon.execution.python.write.merge_transform import _build_matched_delete_transform as execute
-    return execute(clauses, on_map, row_id_name, delete_schema)
+    from pypaimon.write.backend_dispatch import create_merge_batch_transform
+    return create_merge_batch_transform(
+        'delete', clauses, on_map, row_id_name, delete_schema,
+        native_enabled=native_enabled,
+    )
 
 
 def build_self_merge_update_plan(
@@ -158,6 +168,7 @@ def build_self_merge_update_plan(
     snapshot_id: Optional[int] = None,
     scan_predicate=None,
     read_columns: Sequence[str] = (),
+    native_enabled: bool = False,
 ) -> _SelfMergeUpdatePlan:
     from pypaimon.common.options.core_options import (
         CoreOptions, GlobalIndexSearchMode,
@@ -229,6 +240,7 @@ def build_self_merge_update_plan(
             if read_columns else None
         ),
         row_id_plan=row_id_plan,
+        native_enabled=native_enabled,
     )
 
 
@@ -262,6 +274,7 @@ def _apply_self_merge_update_group(context, group_plan, collect_row_ids):
         row_id_name=context.row_id_name,
         update_schema=context.update_schema,
         callable_input_columns=context.callable_input_columns,
+        native_enabled=context.native_enabled,
     )
     update_parts = []
     batch_reader = table_read.to_arrow_batch_reader([file_group])
@@ -330,6 +343,7 @@ def distributed_self_merge_update_apply(
         row_id_name=plan.row_id_name,
         snapshot_id=plan.snapshot_id,
         callable_input_columns=plan.callable_input_columns,
+        native_enabled=plan.native_enabled,
     ))
     group_iter = iter(captured.groups)
     max_in_flight = max(1, min(num_partitions, len(captured.groups)))
@@ -388,6 +402,7 @@ def build_self_merge_delete_ds(
     snapshot_id: Optional[int] = None,
     scan_predicate=None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
@@ -453,6 +468,7 @@ def build_self_merge_delete_ds(
         on_map={row_id_name: row_id_name},
         row_id_name=row_id_name,
         delete_schema=delete_schema,
+        native_enabled=native_enabled,
     )
     return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -473,6 +489,7 @@ def build_matched_update_ds(
     estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
@@ -518,6 +535,7 @@ def build_matched_update_ds(
         update_cols=list(update_cols),
         row_id_name=row_id_name,
         update_schema=update_schema,
+        native_enabled=native_enabled,
     )
     return joined.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -536,6 +554,7 @@ def build_matched_delete_ds(
     estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
@@ -579,6 +598,7 @@ def build_matched_delete_ds(
         on_map=dict(zip(source_on, target_on)),
         row_id_name=row_id_name,
         delete_schema=delete_schema,
+        native_enabled=native_enabled,
     )
     return joined.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -1052,6 +1072,7 @@ def build_not_matched_insert_ds(
     target_empty: bool = False,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    native_enabled: bool = False,
 ):
     from pypaimon.ray.ray_paimon import read_paimon
 
@@ -1084,9 +1105,12 @@ def build_not_matched_insert_ds(
             right_on=tuple(f"t.{c}" for c in target_on),
         )
 
-    from pypaimon.execution.python.write.merge_transform import _build_insert_transform
+    from pypaimon.write.backend_dispatch import create_merge_batch_transform
 
-    _transform = _build_insert_transform(clauses, captured_field_names, out_schema)
+    _transform = create_merge_batch_transform(
+        'insert', clauses, captured_field_names, out_schema,
+        native_enabled=native_enabled,
+    )
 
     return unmatched.map_batches(
         _transform, **_map_kwargs(ray_remote_args)

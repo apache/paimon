@@ -274,6 +274,23 @@ def prepare_native_merge_into(*args, **kwargs):
     return create_native_merge_into(*args, **kwargs)
 
 
+def create_merge_batch_transform(operation, *args, native_enabled=False, **kwargs):
+    """Select the joined-batch executor before a Ray task consumes input."""
+    if native_enabled:
+        from pypaimon.execution.native.runtime import native_runtime_available
+        native_enabled = native_runtime_available()
+    if native_enabled:
+        from pypaimon.execution.native.write import merge_transform
+    else:
+        from pypaimon.execution.python.write import merge_transform
+    builders = {
+        'update': merge_transform._build_matched_transform,
+        'delete': merge_transform._build_matched_delete_transform,
+        'insert': merge_transform._build_insert_transform,
+    }
+    return builders[operation](*args, **kwargs)
+
+
 def create_python_row_id_update(table, commit_user, commit_identifier, precomputed=None):
     """Create an updater after Python execution has already been selected."""
     from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId

@@ -394,6 +394,7 @@ def _build_datasets(
     insert_ds = None
     update_cols_union: List[str] = []
     target_empty = _is_target_empty(base_snapshot)
+    native_enabled = table.options.native_write_enabled()
 
     if ctx.is_self_merge:
         if matched_specs and not target_empty:
@@ -409,6 +410,7 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     read_columns=ctx.read_columns,
+                    native_enabled=native_enabled,
                 )
             if any(c.delete for c in matched_specs):
                 delete_ds = build_self_merge_delete_ds(
@@ -420,6 +422,7 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     ray_remote_args=ray_remote_args,
+                    native_enabled=native_enabled,
                 )
         return update_ds, delete_ds, insert_ds, update_cols_union
 
@@ -444,6 +447,7 @@ def _build_datasets(
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
+                native_enabled=native_enabled,
             )
         if any(c.delete for c in matched_specs):
             delete_ds = build_matched_delete_ds(
@@ -459,6 +463,7 @@ def _build_datasets(
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
+                native_enabled=native_enabled,
             )
 
     if not_matched_specs:
@@ -475,6 +480,7 @@ def _build_datasets(
             snapshot_id=base_snapshot_id,
             target_empty=target_empty,
             ray_remote_args=ray_remote_args,
+            native_enabled=native_enabled,
         )
 
     return update_ds, delete_ds, insert_ds, update_cols_union
