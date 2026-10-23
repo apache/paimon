@@ -25,7 +25,7 @@ import pytest
 from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
-from pypaimon.write.input_routing import FixedBucketInputRouter, _hash_bytes_by_words
+from pypaimon.execution.python.write.input_routing import FixedBucketInputRouter, _hash_bytes_by_words
 
 
 # Current Java InternalRowSerializer for [NULL, BinaryString("abcdefghijk")].

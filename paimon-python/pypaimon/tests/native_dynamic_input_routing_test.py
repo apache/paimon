@@ -25,10 +25,10 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.execution.native.write.input_routing import NativeDynamicBucketAssigner, NativeDynamicBucketAssignerRouter
-from pypaimon.index.dynamic_bucket import DynamicBucketAssigner
+from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketAssigner
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 from pypaimon.write.backend_dispatch import create_dynamic_bucket_assigner, create_dynamic_bucket_assigner_router
-from pypaimon.write.input_routing import DynamicBucketInputRouter
+from pypaimon.execution.python.write.input_routing import DynamicBucketInputRouter
 
 pytestmark = pytest.mark.native_plan
 
@@ -62,9 +62,9 @@ def _commit(table, rows):
 def _forbid_python_input_execution():
     stack = ExitStack()
     for target in [
-        'pypaimon.write.input_routing.FixedBucketInputRouter.__init__',
-        'pypaimon.write.input_routing.DynamicBucketInputRouter.__init__',
-        'pypaimon.index.dynamic_bucket.DynamicBucketAssigner.__init__',
+        'pypaimon.execution.python.write.input_routing.FixedBucketInputRouter.__init__',
+        'pypaimon.execution.python.write.input_routing.DynamicBucketInputRouter.__init__',
+        'pypaimon.execution.python.write.dynamic_bucket.DynamicBucketAssigner.__init__',
         'pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
     ]:
         stack.enter_context(patch(target, side_effect=AssertionError('Python input execution: ' + target)))

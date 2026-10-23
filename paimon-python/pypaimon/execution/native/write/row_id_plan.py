@@ -64,3 +64,38 @@ def python_groups(table, plan):
     return [(start, end, deserialize_split_v1(split.serialize(), _partition_fields(table),
                                               table.trimmed_primary_keys_fields))
             for start, end, split in plan.groups()]
+
+
+class NativeRowIdPlan:
+    """Transport Arrow row IDs to Core without reading or replanning files."""
+
+    def __init__(self, table, plan, native=None, groups=None):
+        self.table = table
+        self.plan = plan
+        self._native = native
+        self.groups = groups if groups is not None else python_groups(table, self._ensure_native())
+
+    def _ensure_native(self):
+        if self._native is None:
+            from pypaimon_rust.datafusion import RowIdPlan
+            self._native = RowIdPlan(native_plan(self.table, self.plan))
+        return self._native
+
+    def route(self, row_ids):
+        return self._ensure_native().route(row_ids)
+
+    def route_by_bucket(self, row_ids):
+        return self._ensure_native().route_by_bucket(row_ids)
+
+    def select(self, row_ids):
+        from pypaimon.execution.native.read.plan import _from_native_plan
+        selected = _from_native_plan(self.table, self._ensure_native().select(row_ids))
+        return self.plan._with_splits(selected.splits())
+
+    def for_plan(self, plan, groups):
+        return NativeRowIdPlan(self.table, plan, groups=groups)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['_native'] = None
+        return state

@@ -24,11 +24,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.index.dynamic_bucket import DynamicBucketAssigner
+from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketAssigner
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
-from pypaimon.write.input_routing import DynamicBucketInputRouter, FixedBucketInputRouter
+from pypaimon.execution.python.write.input_routing import DynamicBucketInputRouter, FixedBucketInputRouter
 
 
 def _table(tmp_path, bucket):
@@ -76,7 +76,8 @@ def test_ray_fixed_grouping_executes_input_router_without_python_extractor(tmp_p
 def test_daft_fixed_and_dynamic_routing_do_not_construct_python_extractors(tmp_path, forbid_python_execution):
     daft = pytest.importorskip('daft')
     from pypaimon.daft.daft_datasink import make_dynamic_routing_udf, make_fixed_bucket_udf
-    from pypaimon.index.dynamic_bucket import compute_assigner, to_signed_int32
+    from pypaimon.index.dynamic_bucket import to_signed_int32
+    from pypaimon.execution.python.write.dynamic_bucket import compute_assigner
 
     table = _table(tmp_path, '4')
     rows = {'id': [1, 2, 1], 'value': ['a', 'b', 'c'], 'p': ['p', 'p', 'q']}
@@ -135,8 +136,8 @@ def test_daft_dynamic_assignment_dispatches_pinned_snapshot_and_arrow_hashes(tmp
             'execution.python.write.row_key_extractor.SimpleDynamicBucketAssigner.__init__',
             'execution.python.read.scanner.file_scanner.FileScanner.__init__',
             'execution.python.write.dynamic_bucket.DynamicBucketIndexMaintainer.__init__',
-            'write.input_routing.DynamicBucketInputRouter.__init__',
-            'index.dynamic_bucket.DynamicBucketAssigner.__init__',
+            'execution.python.write.input_routing.DynamicBucketInputRouter.__init__',
+            'execution.python.write.dynamic_bucket.DynamicBucketAssigner.__init__',
         ]:
             stack.enter_context(patch('pypaimon.' + target, side_effect=AssertionError(target)))
         stack.enter_context(patch('pypaimon.daft.daft_datasink._load_worker_table', return_value=table))

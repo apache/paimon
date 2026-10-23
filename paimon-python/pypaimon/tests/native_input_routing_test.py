@@ -30,7 +30,7 @@ from pypaimon.execution.native.write.postpone_bucket import NativePostponeBucket
 from pypaimon.ray.shuffle import _make_bucket_udf
 from pypaimon.write.backend_dispatch import create_input_router, create_postpone_bucket_planner
 from pypaimon.write.bucket_planning import PostponeBucketPlanning
-from pypaimon.write.input_routing import FixedBucketInputRouter, PostponeFixedBucketInputRouter
+from pypaimon.execution.python.write.input_routing import FixedBucketInputRouter, PostponeFixedBucketInputRouter
 
 pytestmark = pytest.mark.native_plan
 

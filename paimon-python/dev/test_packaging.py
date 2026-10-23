@@ -211,7 +211,7 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/globalindex/vindex_reader.py",
             "pypaimon/write/bucket_planning.py",
             "pypaimon/write/commit_options.py",
-            "pypaimon/write/input_routing.py",
+            "pypaimon/execution/python/write/input_routing.py",
         )
         for name in execution_files:
             self.assertIn(name, names)

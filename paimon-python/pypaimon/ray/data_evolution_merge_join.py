@@ -617,7 +617,6 @@ def distributed_update_apply(
     data_context=None,
     materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
-    import numpy as np
     import pickle
 
     import pyarrow.compute as pc
@@ -667,42 +666,9 @@ def distributed_update_apply(
     frid_col = "_FIRST_ROW_ID"
     sentinel_row_id = -1
     captured_sorted = sorted_first_row_ids
-    captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
-    valid_ranges = planner.valid_row_id_ranges
-    range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
-    range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
     def _assign_frid(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return batch.append_column(
-                frid_col, pa.array([], type=pa.int64())
-            )
-        rid_col = batch.column(row_id_name)
-        if rid_col.null_count:
-            raise ValueError(
-                "_ROW_ID is null; planner snapshot is stale "
-                "or matched rows come from a different table."
-            )
-        rids = rid_col.to_numpy(zero_copy_only=False)
-        # Check each row_id belongs to a valid range (vectorized).
-        in_range = np.zeros(len(rids), dtype=bool)
-        for s, e in zip(range_starts, range_ends):
-            in_range |= (rids >= s) & (rids <= e)
-        if not in_range.all():
-            bad = rids[~in_range][0]
-            raise ValueError(
-                f"_ROW_ID {bad} does not belong to any valid range "
-                f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; "
-                f"planner snapshot is stale or matched rows come "
-                f"from a different table."
-            )
-        idx = np.searchsorted(
-            captured_sorted_arr, rids, side="right"
-        ) - 1
-        frids = captured_sorted_arr[idx]
-        return batch.append_column(
-            frid_col, pa.array(frids, type=pa.int64())
-        )
+        return batch.append_column(frid_col, planner.route(batch.column(row_id_name)))
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = update_ds.map_batches(_assign_frid, **map_kwargs)
@@ -814,13 +780,9 @@ def distributed_read_by_row_id(
     ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``, or ``None`` if the target
     is empty. Read-side mirror of ``distributed_update_apply``.
     """
-    import numpy as np
-
     import ray
 
-    from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.utils.range import Range
 
     row_id_name = SpecialFields.ROW_ID.name
     read_cols = list(projection)
@@ -847,41 +809,9 @@ def distributed_read_by_row_id(
 
     precomputed_info_ref = ray.put(planner)
     frid_col = "_FIRST_ROW_ID"
-    sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
-    valid_ranges = planner.valid_row_id_ranges
-    range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
-    range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
     def _assign_frid(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return batch.append_column(frid_col, pa.array([], type=pa.int64()))
-        rid_col = batch.column(row_id_name)
-        if rid_col.null_count:
-            raise ValueError(
-                "_ROW_ID is null; the planner snapshot is stale or the row ids "
-                "come from a different table."
-            )
-        rids = rid_col.to_numpy(zero_copy_only=False)
-        # Foreign-id check: valid_ranges are sorted+merged, so one searchsorted finds
-        # the candidate range (O(rows log ranges), like distributed_delete_apply).
-        ridx = np.searchsorted(range_starts, rids, side="right") - 1
-        safe = np.clip(ridx, 0, len(range_starts) - 1)
-        in_range = (
-            (ridx >= 0)
-            & (rids >= range_starts[safe])
-            & (rids <= range_ends[safe])
-        )
-        if not in_range.all():
-            bad = rids[~in_range][0]
-            raise ValueError(
-                f"_ROW_ID {bad} does not belong to any valid range "
-                f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; the planner "
-                f"snapshot is stale or the row ids come from a different table."
-            )
-        idx = np.searchsorted(sorted_arr, rids, side="right") - 1
-        return batch.append_column(
-            frid_col, pa.array(sorted_arr[idx], type=pa.int64())
-        )
+        return batch.append_column(frid_col, planner.route(batch.column(row_id_name)))
 
     captured_table = planner.table  # read the captured view used for routing
     captured_read_cols = read_cols
@@ -890,18 +820,12 @@ def distributed_read_by_row_id(
     def _read_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
             return captured_empty
-        frid = int(group.column(frid_col)[0].as_py())
         info = ray.get(precomputed_info_ref)
-        owning_split, target_files = info.first_row_id_index[frid]
-        target_names = {file.file_name for file in target_files}
-        origin_split = owning_split.filter_file(lambda file: file.file_name in target_names)
-        # Only matched rows (deduped, contiguous ids -> ranges); blob gets row-index pushdown.
-        wanted = set(group.column(row_id_name).to_pylist())
-        indexed = IndexedSplit(origin_split, Range.to_ranges(list(wanted)))
+        selected = info.select(group.column(row_id_name))
         read = captured_table.new_read_builder().with_projection(
             captured_read_cols
         ).new_read()
-        return read.to_arrow([indexed])
+        return read.to_arrow(selected.splits())
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = row_ids_ds.map_batches(_assign_frid, **map_kwargs)
@@ -921,8 +845,6 @@ def distributed_delete_apply(
     collect_row_ids: bool = False,
     materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
-    import base64
-    import numpy as np
     import pickle
 
     import pyarrow.compute as pc
@@ -949,58 +871,12 @@ def distributed_delete_apply(
 
     precomputed_info_ref = ray.put(anchor_info)
 
-    starts = np.asarray(
-        [a.row_range.from_ for a in anchor_info.anchors], dtype=np.int64
-    )
-    ends = np.asarray(
-        [a.row_range.to for a in anchor_info.anchors], dtype=np.int64
-    )
-
-    def _group_key(anchor) -> str:
-        partition_blob = base64.b64encode(
-            pickle.dumps(tuple(anchor.partition.values))
-        ).decode("ascii")
-        return f"{anchor.bucket}:{partition_blob}"
-
-    group_keys = [_group_key(a) for a in anchor_info.anchors]
-    unique_group_count = len(set(group_keys))
+    bucket_owners = anchor_info.route_by_bucket(pa.array(anchor_info.first_row_ids, type=pa.int64()))
+    unique_group_count = len(set(bucket_owners.to_pylist()))
     group_col = "_DELETE_GROUP_KEY"
-    valid_ranges = [
-        f"[{a.row_range.from_}, {a.row_range.to}]"
-        for a in anchor_info.anchors
-    ]
 
     def _assign_group(batch: pa.Table) -> pa.Table:
-        if batch.num_rows == 0:
-            return batch.append_column(
-                group_col, pa.array([], type=pa.string())
-            )
-        rid_col = batch.column(row_id_name)
-        if rid_col.null_count:
-            raise ValueError(
-                "_ROW_ID is null; planner snapshot is stale "
-                "or matched rows come from a different table."
-            )
-        rids = rid_col.to_numpy(zero_copy_only=False)
-        idx = np.searchsorted(starts, rids, side="right") - 1
-        safe_idx = np.clip(idx, 0, len(starts) - 1)
-        in_range = (
-            (idx >= 0)
-            & (idx < len(starts))
-            & (rids >= starts[safe_idx])
-            & (rids <= ends[safe_idx])
-        )
-        if not in_range.all():
-            bad = rids[~in_range][0]
-            raise ValueError(
-                f"_ROW_ID {bad} does not belong to any valid range "
-                f"{valid_ranges}; planner snapshot is stale or matched "
-                f"rows come from a different table."
-            )
-        return batch.append_column(
-            group_col,
-            pa.array([group_keys[i] for i in safe_idx], type=pa.string()),
-        )
+        return batch.append_column(group_col, anchor_info.route_by_bucket(batch.column(row_id_name)))
 
     map_kwargs = _map_kwargs(ray_remote_args)
     with_group = delete_ds.map_batches(_assign_group, **map_kwargs)
