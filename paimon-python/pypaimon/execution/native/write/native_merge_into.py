@@ -89,11 +89,9 @@ def create_native_merge_into(table, source, on, matched, not_matched, commit_use
         if source_type != target_type or not _supported_upsert_key_type(target_type):
             return None
 
-    def encode(clause):
-        return encode_merge_clause(clause, list(zip(source_keys, target_keys)))
-
-    encoded_matched = [encode(clause) for clause in matched]
-    encoded_not_matched = [encode(clause) for clause in not_matched]
+    on_pairs = list(zip(source_keys, target_keys))
+    encoded_matched = [encode_merge_clause(clause, on_pairs) for clause in matched]
+    encoded_not_matched = [encode_merge_clause(clause, on_pairs, not_matched=True) for clause in not_matched]
     if any(clause is None for clause in encoded_matched + encoded_not_matched):
         return None
     builder = (native_table.new_batch_write_builder().with_commit_user(commit_user)
