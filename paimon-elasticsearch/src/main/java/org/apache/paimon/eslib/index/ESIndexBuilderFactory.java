@@ -18,11 +18,12 @@
 
 package org.apache.paimon.eslib.index;
 
+import org.apache.paimon.eslib.javaindex.JavaESIndexSearcher;
+
 import org.elasticsearch.eslib.api.ESIndexBuilder;
 import org.elasticsearch.eslib.api.ESIndexSearcher;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.builder.DefaultESIndexBuilder;
-import org.elasticsearch.eslib.searcher.DefaultESIndexSearcher;
 
 import java.io.IOException;
 import java.util.Map;
@@ -36,6 +37,10 @@ public class ESIndexBuilderFactory {
     }
 
     public static ESIndexSearcher createSearcher() {
-        return new DefaultESIndexSearcher();
+        return createEsSearcher();
+    }
+
+    static JavaESIndexSearcher createEsSearcher() {
+        return new JavaESIndexSearcher();
     }
 }

@@ -229,3 +229,10 @@ CALL sys.drop_global_index(
     index_type => 'es-index'
 );
 ```
+
+## ES DSL search in Spark, Flink and Java
+
+See [paimon_es_search](docs/paimon-es-search.html) for the shared request contract,
+SQL and Java SDK examples, snapshot requirements, supported queries and tests.
+The module, artifact and Maven profile are now `paimon-elasticsearch`; existing
+Java packages, `es-index` options and persisted archives remain compatible.

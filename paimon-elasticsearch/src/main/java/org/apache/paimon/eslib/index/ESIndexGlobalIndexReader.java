@@ -19,7 +19,9 @@
 package org.apache.paimon.eslib.index;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.eslib.javaindex.JavaESIndexSearcher;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.globalindex.EsSearchQuery;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -41,7 +43,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import org.elasticsearch.eslib.api.ArchiveDataProvider;
-import org.elasticsearch.eslib.api.ESIndexSearcher;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.FullTextParams;
 import org.elasticsearch.eslib.api.model.FullTextQuerySpec;
@@ -115,7 +116,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     // Serializes the one-time lazy load while still allowing already-loaded queries to run in
     // parallel under lifecycleLock's read lock.
     private final Object loadLock = new Object();
-    private volatile ESIndexSearcher searcher;
+    private volatile JavaESIndexSearcher searcher;
     private volatile boolean closed;
     private volatile boolean loaded;
 
@@ -513,6 +514,28 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         return toScoredResult(result, fullTextSearch.limit());
                     } catch (IOException e) {
                         throw new RuntimeException("Full-text search failed", e);
+                    }
+                });
+    }
+
+    @Override
+    public CompletableFuture<ScoredGlobalIndexResult> visitEsSearch(EsSearchQuery query) {
+        return async(
+                () -> {
+                    try {
+                        EsSearchQuery physical =
+                                query.mapFields(
+                                        logical -> {
+                                            if (incompatibleLogicalFields.contains(logical)) {
+                                                throw incompatibleSearchSchema(logical, "ES DSL");
+                                            }
+                                            return physicalField(logical);
+                                        });
+                        ensureLoaded();
+                        return toScoredResult(searcher.esSearch(physical), query.limit())
+                                .orElseGet(ScoredGlobalIndexResult::createEmpty);
+                    } catch (IOException e) {
+                        throw new RuntimeException("ES DSL search failed", e);
                     }
                 });
     }
@@ -1092,13 +1115,13 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             // ESLib's ArchiveIndexInput pools provider forks across clones so concurrent reads
             // remain independent without opening one stream for every query-scoped clone.
             ArchiveDataProvider dataProvider = null;
-            ESIndexSearcher candidateSearcher = null;
+            JavaESIndexSearcher candidateSearcher = null;
             try {
                 // Mount the packed archive as a Lucene index, then open the reader/searcher. Keep
                 // it local until load succeeds so a retry cannot overwrite a partially loaded
                 // searcher and leak its directory/providers.
                 dataProvider = createProvider(meta);
-                candidateSearcher = ESIndexBuilderFactory.createSearcher();
+                candidateSearcher = ESIndexBuilderFactory.createEsSearcher();
                 candidateSearcher.load(dataProvider, fileOffsets, indexOptions.getFieldConfigs());
             } catch (IOException | RuntimeException | Error failure) {
                 Throwable cleanupFailure = cleanupFailedLoad(candidateSearcher, dataProvider);
@@ -1197,7 +1220,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     private Throwable cleanupFailedLoad(
-            ESIndexSearcher candidateSearcher, ArchiveDataProvider dataProvider) {
+            JavaESIndexSearcher candidateSearcher, ArchiveDataProvider dataProvider) {
         Throwable failure = null;
         if (candidateSearcher != null) {
             try {
@@ -1362,7 +1385,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             closed = true;
 
             Throwable failure = null;
-            ESIndexSearcher currentSearcher = searcher;
+            JavaESIndexSearcher currentSearcher = searcher;
             if (currentSearcher != null) {
                 try {
                     currentSearcher.close();

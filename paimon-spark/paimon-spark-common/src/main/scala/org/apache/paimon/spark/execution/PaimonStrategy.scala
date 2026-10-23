@@ -83,6 +83,12 @@ case class PaimonStrategy(spark: SparkSession)
 
   private def applyWithoutMapSelectedKeysPushDown(plan: LogicalPlan): Seq[SparkPlan] = plan match {
 
+    case relation: org.apache.paimon.spark.catalyst.plans.logical.PaimonEsSearchRelation =>
+      org.apache.paimon.spark.query.SparkPaimonSearchTableExec(
+        relation.catalogName,
+        relation.envelope,
+        relation.output)(spark) :: Nil
+
     case PhysicalOperation(projects, filters, relation: DataSourceV2ScanRelation) =>
       relation.scan match {
         case scan: PaimonScan if PostponeMergeOnRead.usesCustomSource(scan.table) =>

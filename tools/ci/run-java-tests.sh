@@ -84,8 +84,12 @@ case "$suite" in
         goal=test
         ;;
     eslib)
-        profiles=paimon-elasticsearch
-        modules=(paimon-elasticsearch)
+        profiles=flink1,spark3,paimon-elasticsearch,java-es-search-tests
+        modules=(paimon-common paimon-elasticsearch paimon-spark/paimon-spark-common
+                 paimon-spark/paimon-spark-ut paimon-flink/paimon-flink-common)
+        test_options+=(-DfailIfNoTests=false
+            -Dtest=EsSearch*Test,ESIndex*Test,PaimonEsSearchProcedureITCase
+            -DwildcardSuites=org.apache.paimon.spark.catalyst.plans.logical.PaimonEsSearchQueryTest,org.apache.paimon.spark.query.PaimonEsSearchJavaTest)
         threads=1
         ;;
     full-text)
@@ -111,7 +115,7 @@ run_maven() {
 
 # -am compiles and installs the selected tests' dependency closure, including
 # test jars. Only the selected modules run tests in the second invocation.
-run_maven -T 2C -B -ntp install -DskipTests -P"$profiles" -pl "$module_list" -am
+run_maven -T 2C -B -ntp install -DskipTests -Dmaven.jar.forceCreation=true -P"$profiles" -pl "$module_list" -am
 
 jvm_timezone=GMT+00:00
 if [[ "${CI_DRY_RUN:-false}" != true ]]; then
