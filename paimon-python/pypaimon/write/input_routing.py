@@ -167,6 +167,10 @@ class PostponeFixedBucketInputRouter(PartitionKeyExtractor):
     def num_buckets(self, partition: Tuple) -> int:
         return self._bucket_plan.num_buckets(partition)
 
+    def route(self, data) -> pa.Int32Array:
+        """Return bucket IDs in input order, as the Native router does."""
+        return pa.array(self.extract_partition_bucket_batch(data)[1], type=pa.int32())
+
     def extract_partition_bucket_batch(
         self, data: pa.RecordBatch
     ) -> Tuple[List[Tuple], List[int]]:
@@ -228,6 +232,10 @@ class FixedBucketInputRouter(PartitionKeyExtractor):
                     'bucket key type must be INT or BIGINT in mod bucket function, but got %s' % key_type)
         elif self.bucket_function not in ('default', 'hive'):
             raise ValueError('Unsupported bucket function type: %s' % self.bucket_function)
+
+    def route(self, data) -> pa.Int32Array:
+        """Return bucket IDs in input order, as the Native router does."""
+        return pa.array(self.extract_partition_bucket_batch(data)[1], type=pa.int32())
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         self._check_automatic_bucket_function()

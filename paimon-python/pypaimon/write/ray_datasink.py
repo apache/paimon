@@ -326,8 +326,7 @@ def write_paimon_dataset(
             )
         )
     ):
-        from pypaimon.write.backend_dispatch import create_postpone_bucket_planner
-        from pypaimon.write.input_routing import PostponeFixedBucketInputRouter
+        from pypaimon.write.backend_dispatch import create_input_router, create_postpone_bucket_planner
 
         planner = (
             postpone_bucket_planner
@@ -351,7 +350,7 @@ def write_paimon_dataset(
             static_partition=static_partition,
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
-            bucket_extractor=PostponeFixedBucketInputRouter(table, plan),
+            bucket_router=create_input_router(table, plan),
             postpone_bucket_plan=plan,
         )
 
@@ -489,7 +488,7 @@ def _write_primary_key_groups(
     static_partition: Optional[Dict[str, Any]],
     concurrency: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]],
-    bucket_extractor=None,
+    bucket_router=None,
     postpone_bucket_plan=None,
 ) -> Optional[PaimonWriteResult]:
     import pickle
@@ -499,7 +498,7 @@ def _write_primary_key_groups(
     )
 
     grouped, bucket_col = _group_by_partition_bucket(
-        dataset, table, extractor=bucket_extractor
+        dataset, table, router=bucket_router
     )
     message_col = "__paimon_commit_messages__"
     error_col = "__paimon_write_error__"
