@@ -172,7 +172,9 @@ assert not any(name.startswith('pypaimon.execution.python') for name in sys.modu
     ('-2', ['id', 'p'], 'PostponeBucketRowKeyExtractor'),
     ('-1', ['id', 'p'], 'DynamicBucketRowKeyExtractor'),
 ])
-def test_public_row_key_factory_preserves_per_row_contract(tmp_path, bucket, primary_keys, expected):
+def test_python_row_key_factory_preserves_per_row_contract(tmp_path, bucket, primary_keys, expected):
+    from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
+
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     arrow_schema = pa.schema([('id', pa.int32()), ('p', pa.string())])
@@ -184,7 +186,7 @@ def test_public_row_key_factory_preserves_per_row_contract(tmp_path, bucket, pri
     rows = pa.record_batch([pa.array([1, 2], pa.int32()), pa.array(['a', 'a'])], schema=arrow_schema)
     with patch('pypaimon.execution.native.runtime.native_runtime_available',
                side_effect=AssertionError('Per-row helper rediscovered the Native writer')):
-        extractor = table.create_row_key_extractor(ignore_existing=True)
+        extractor = create_row_key_extractor(table, ignore_existing=True)
         partitions, buckets = extractor.extract_partition_bucket_batch(rows)
     assert type(extractor).__name__ == expected
     assert partitions == [('a',), ('a',)]

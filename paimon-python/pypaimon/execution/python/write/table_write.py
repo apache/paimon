@@ -78,9 +78,8 @@ class PythonTableWrite:
                 writer.table.table_schema, table=writer.table,
                 ignore_existing=static_partition is not None,
                 base_snapshot_id=writer.restore_snapshot_id)
-        return writer.table.create_row_key_extractor(
-            ignore_existing=static_partition is not None
-        )
+        from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
+        return create_row_key_extractor(writer.table, ignore_existing=static_partition is not None)
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
