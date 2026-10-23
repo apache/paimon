@@ -282,7 +282,8 @@ result = builder.rank(route_results)
 ```
 
 Route capture checks authorization and fixes one snapshot for all routes. Each
-`route.search_builder` remains configurable and supports its ordinary scan/read
+`route.search_builder` is the builder retained by that route. Configuring it changes
+subsequent `route.execute_local()` calls, and it supports its ordinary scan/read
 methods. Ranking uses the supplied results and the builder's current limit and
 ranker; it does not read table metadata or execute queries again. Native execution
 supports these phases as well as complete hybrid queries. Both backends use Java's

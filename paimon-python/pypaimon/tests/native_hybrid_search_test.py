@@ -365,6 +365,59 @@ def test_manual_routes_allow_completing_queries_after_capture(rest_catalog):
     assert set(actual).issubset(set(range(8)))
 
 
+def test_sdk_route_mutations_affect_route_execute_and_keep_the_captured_view(rest_catalog):
+    catalog, _ = rest_catalog
+    table = _table(catalog, indexed=False)
+    table.create_global_index('content', index_type='full-text')
+    native = _native_table(table).new_hybrid_search_builder()
+    native.add_vector_route('embedding', [0., 0.], 16)
+    native.add_full_text_route('content', match_query('paimon'), 16).with_limit(16)
+    vector_route, text_route = native.route_builders()
+    vector, text = vector_route.search_builder(), text_route.search_builder()
+    assert vector is vector_route.search_builder()
+    assert text is text_route.search_builder()
+
+    # A commit after route capture must not enter either reconfigured query.
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    pb = table.new_read_builder().new_predicate_builder()
+    keep = _predicate_to_native(pb.greater_than('id', 4))
+    vector.with_query_vector([6., 0.]).with_limit(1).with_filter(keep)
+    text.with_query('content', match_query('lake')).with_limit(1).with_filter(keep)
+    vector_result, text_result = vector_route.execute(), text_route.execute()
+    assert set(vector_result.row_ids()) == {6}
+    assert set(text_result.row_ids()) == {5}
+    assert vector_result.row_ids() == vector.execute().row_ids()
+    assert text_result.row_ids() == text.execute().row_ids()
+    assert vector_result.snapshot_id() == vector_route.snapshot().id()
+    assert text_result.snapshot_id() == text_route.snapshot().id()
+
+    # Repeated getters share the same state, including later reconfiguration.
+    vector_route.search_builder().with_limit(2)
+    assert set(vector_route.execute().row_ids()) == {5, 6}
+    ranked = native.rank([native.to_route_result(vector_route, vector_result),
+                          native.to_route_result(text_route, text_result)])
+    batches = ranked.new_read_builder().with_projection(['id']).read()
+    assert sorted(pa.Table.from_batches(batches)['id'].to_pylist()) == [5, 6]
+
+
+@pytest.mark.parametrize('native', [False, True])
+def test_public_route_uses_mutated_search_builder(rest_catalog, native):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'read.native.enabled': str(native).lower()}, indexed=False)
+    table.create_global_index('content', index_type='full-text')
+    builder = _builder(table)
+    vector_route, text_route = builder.route_builders()
+    vector, text = vector_route.search_builder, text_route.search_builder
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    pb = table.new_read_builder().new_predicate_builder()
+    vector.with_query_vector([6., 0.]).with_limit(1).with_filter(pb.greater_than('id', 4))
+    text.with_query('content', match_query('lake')).with_limit(1).with_filter(pb.greater_than('id', 4))
+    assert set(_scores(vector_route.execute_local())) == {6}
+    assert set(_scores(text_route.execute_local())) == {5}
+    vector.with_limit(2)
+    assert set(_scores(vector_route.execute_local())) == {5, 6}
+
+
 def _multimodal_query(table, catalog, **kwargs):
     return (MultimodalTable(catalog, 'default.indexes', table).search_hybrid([
         vector_route('embedding', [0., 0.]), text_route('paimon', column='content')], **kwargs)

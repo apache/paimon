@@ -136,7 +136,11 @@ class HybridSearchRouteResult:
 
 
 class HybridSearchRouteBuilder:
-    """A route plus its configured search builder."""
+    """A route retaining the search builder used by every execute_local() call.
+
+    Reconfigure search_builder to change subsequent executions of this route.
+    The builder keeps the read view captured by route_builders().
+    """
 
     def __init__(self, route, search_builder):
         self.route = route
