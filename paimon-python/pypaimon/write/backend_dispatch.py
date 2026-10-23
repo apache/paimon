@@ -220,6 +220,37 @@ def create_input_router(table, bucket_plan=None):
     return FixedBucketInputRouter(table.table_schema)
 
 
+def create_dynamic_bucket_assigner_router(table, num_channels, num_assigners):
+    """Select routing to dynamic bucket assigners before a task receives rows."""
+    if table.options.native_write_enabled():
+        from pypaimon.execution.native.write.input_routing import create_native_dynamic_bucket_assigner_router
+        try:
+            native = create_native_dynamic_bucket_assigner_router(table, num_channels, num_assigners)
+        except NotImplementedError:
+            native = None
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.input_routing import PythonDynamicBucketAssignerRouter
+    return PythonDynamicBucketAssignerRouter(table, num_channels, num_assigners)
+
+
+def create_dynamic_bucket_assigner(table, num_channels, num_assigners, assign_id,
+                                   ignore_existing=False, base_snapshot_id=None):
+    """Select restoration before assignment; authorization failures are terminal."""
+    if table.options.native_write_enabled():
+        from pypaimon.execution.native.write.input_routing import create_native_dynamic_bucket_assigner
+        # Resolving the writer snapshot can authorize and read HASH metadata.
+        # Only an explicitly unsupported environment returns None; never turn
+        # an authorization/restoration exception into another backend attempt.
+        native = create_native_dynamic_bucket_assigner(
+            table, num_channels, num_assigners, assign_id, ignore_existing, base_snapshot_id)
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.input_routing import PythonDynamicBucketAssigner
+    return PythonDynamicBucketAssigner(
+        table, num_channels, num_assigners, assign_id, ignore_existing, base_snapshot_id)
+
+
 def load_postpone_bucket_metadata(table):
     """Select metadata planning before public bucket arithmetic consumes input."""
     if table.options.native_write_enabled():

@@ -100,6 +100,41 @@ def test_native_router_passes_arrow_without_python_row_hashing(tmp_path, sdk):
     sdk.BucketRouter.return_value.route.assert_called_once_with(batch)
 
 
+def _uncombined_table(batch):
+    # Arrow may keep multiple binary chunks to avoid a buffer overflow. Model
+    # that contract with small batches instead of allocating several GiB.
+    chunked = pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)])
+    data = Mock(spec=pa.Table)
+    data.schema = chunked.schema
+    data.num_rows = chunked.num_rows
+    data.to_batches.return_value = chunked.to_batches()
+    data.combine_chunks.return_value = chunked
+    return data
+
+
+def test_native_router_preserves_every_batch_of_binary_input(tmp_path, sdk):
+    batch = pa.record_batch([['west', 'east', 'west'], [1, 2, 3]], names=['p', 'id'])
+    router = NativeInputRouter(_table(tmp_path))
+    router._router = sdk.BucketRouter.return_value
+    router._router.route.side_effect = [pa.array([2], type=pa.int32()), pa.array([1, 3], type=pa.int32())]
+    data = _uncombined_table(batch)
+    assert router.route(data).to_pylist() == [2, 1, 3]
+    assert [call.args[0].num_rows for call in router._router.route.call_args_list] == [1, 2]
+    data.combine_chunks.assert_not_called()
+
+
+def test_native_router_later_batch_failure_is_terminal(tmp_path, sdk):
+    router = NativeInputRouter(_table(tmp_path))
+    router._router = sdk.BucketRouter.return_value
+    failure = ValueError('later routing batch failed')
+    router._router.route.side_effect = [pa.array([0], type=pa.int32()), failure]
+    data = _uncombined_table(pa.record_batch([[1, 2, 3]], names=['id']))
+    with patch.object(FixedBucketInputRouter, '__init__', side_effect=AssertionError('Python replay')):
+        with pytest.raises(ValueError) as raised:
+            router.route(data)
+    assert raised.value is failure
+
+
 def test_native_router_failure_propagates_without_selecting_python(tmp_path, sdk):
     table = _table(tmp_path)
     router = NativeInputRouter(table)
@@ -157,6 +192,22 @@ def test_native_planner_transports_group_statistics_positionally(tmp_path, sdk):
     assert grouped.schema.names == ['row_count', 'row_count', 'data_size']
     assert [column.to_pylist() for column in grouped.columns] == [['west'], [3], [80]]
     assert grouped.column(1).type == pa.int64() and grouped.column(2).type == pa.int64()
+
+
+def test_native_planner_combines_partition_statistics_from_all_input_batches(tmp_path, sdk):
+    table = _table(tmp_path, bucket='-2')
+    planner = NativePostponeBucketPlanner(table, {}, Mock())
+    schema = pa.schema([('p', pa.string()), ('row_count', pa.int64()), ('data_size', pa.int64())])
+    sdk.PostponeBucketPlanner.return_value.input_statistics.side_effect = [
+        pa.record_batch([['west'], [1], [10]], schema=schema),
+        pa.record_batch([['west', 'east'], [1, 1], [20, 30]], schema=schema),
+    ]
+    batch = pa.record_batch([['west', 'west', 'east'], [1, 2, 3]], names=['p', 'id'])
+    data = _uncombined_table(batch)
+    assert planner.input_partition_stats(data) == {('west',): (2, 30), ('east',): (1, 30)}
+    assert [call.args[0].num_rows
+            for call in sdk.PostponeBucketPlanner.return_value.input_statistics.call_args_list] == [1, 2]
+    data.combine_chunks.assert_not_called()
 
 
 def test_native_planner_pickle_keeps_resolved_counts_and_worker_failures(tmp_path, sdk):

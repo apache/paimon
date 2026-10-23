@@ -20,7 +20,7 @@
 import pyarrow as pa
 
 from pypaimon.execution.native.runtime import native_runtime_available
-from pypaimon.execution.native.write.input_routing import as_record_batch
+from pypaimon.execution.native.write.input_routing import input_batches
 from pypaimon.execution.native.write.native_commit import create_native_write_table
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.write.bucket_plan import PostponeBucketPlan
@@ -87,10 +87,16 @@ class NativePostponeBucketPlanner:
         return PostponeBucketPlan(self._known_num_buckets)
 
     def input_partition_stats(self, data):
-        stats = self._ensure_planner().input_statistics(as_record_batch(data))
-        columns = [column.to_pylist() for column in stats.columns]
-        return {tuple(column[row] for column in columns[:-2]):
-                (columns[-2][row], columns[-1][row]) for row in range(stats.num_rows)}
+        planner = self._ensure_planner()
+        partition_stats = {}
+        for batch in input_batches(data):
+            stats = planner.input_statistics(batch)
+            columns = [column.to_pylist() for column in stats.columns]
+            for row in range(stats.num_rows):
+                partition = tuple(column[row] for column in columns[:-2])
+                count, size = partition_stats.get(partition, (0, 0))
+                partition_stats[partition] = (count + columns[-2][row], size + columns[-1][row])
+        return partition_stats
 
     def plan(self, partition_stats):
         fields = [self.table.field_dict[name] for name in self.table.partition_keys]
