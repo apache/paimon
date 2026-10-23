@@ -134,7 +134,10 @@ def execute_full_text_search(builder):
 
 
 def execute_hybrid_search(builder, executor=None):
-    if _native_requested(builder):
+    from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
+    # Custom implementations execute through their public route/rank hooks;
+    # only the default implementation owns the native configuration protocol.
+    if isinstance(builder, HybridSearchBuilderImpl) and _native_requested(builder):
         from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
         result = (try_native_hybrid_search(builder) if executor is None else
                   try_native_hybrid_search(builder, executor=executor))

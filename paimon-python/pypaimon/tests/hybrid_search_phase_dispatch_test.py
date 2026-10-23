@@ -154,8 +154,17 @@ def test_python_phases_do_not_load_native(search_table):
     assert list(ranked.results()) == [7]
 
 
-def test_abstract_builder_executes_public_hooks_without_private_table_state():
+@pytest.mark.parametrize('keep_table', [False, True])
+@pytest.mark.parametrize('entry_point', ['execute_local', 'execute'])
+def test_abstract_builder_executes_public_hooks(search_table, keep_table, entry_point):
+    from pypaimon.execution.native.read import native_hybrid_search
+
     result = DictBasedScoredIndexResult({7: 0.5})
+    calls = []
+
+    def execute_route():
+        calls.append('execute route')
+        return result
 
     class CustomHybridSearch(HybridSearchBuilder):
         def _configure(self, *args, **kwargs):
@@ -164,14 +173,26 @@ def test_abstract_builder_executes_public_hooks_without_private_table_state():
         with_limit = with_ranker = with_filter = with_partition_filter = add_route = _configure
 
         def route_builders(self):
-            return [HybridSearchRouteBuilder(None, SimpleNamespace(execute_local=lambda: result))]
+            calls.append('build routes')
+            return [HybridSearchRouteBuilder(None, SimpleNamespace(execute_local=execute_route))]
 
         def to_route_result(self, route, result):
+            calls.append('convert result')
             return result
 
         def rank(self, results):
+            calls.append('rank')
             return results[0]
 
     builder = CustomHybridSearch()
-    assert builder.execute_local() is result
-    assert builder.execute() is result
+    if keep_table:
+        # Keeping a native-enabled table does not opt a public implementation
+        # into HybridSearchBuilderImpl's private configuration protocol.
+        builder._table = search_table
+    with patch.object(native_hybrid_search, 'native_runtime_available', return_value=True), \
+            patch.object(native_hybrid_search, '_rest_catalog_supported', return_value=True), \
+            patch.object(native_hybrid_search, 'try_native_hybrid_search',
+                         wraps=native_hybrid_search.try_native_hybrid_search) as native:
+        assert getattr(builder, entry_point)() is result
+    native.assert_not_called()
+    assert calls == ['build routes', 'execute route', 'convert result', 'rank']
