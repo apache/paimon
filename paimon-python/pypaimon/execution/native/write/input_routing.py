@@ -62,7 +62,7 @@ class NativeInputRouter:
             router = router.with_bucket_plan(self._bucket_plan.to_arrow(self.table))
         self._router = router
 
-    def route(self, data):
+    def route(self, data) -> pa.Int32Array:
         if self._router is None:
             self._prepare()
         return self._router.route(as_record_batch(data))

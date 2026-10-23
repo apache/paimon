@@ -64,6 +64,24 @@ def test_bucket_router_selection_finishes_before_input(tmp_path, native):
     assert prepare.call_count == int(native)
 
 
+@pytest.mark.parametrize('bucket', ['4', '-2'])
+@pytest.mark.parametrize('chunked', [False, True])
+def test_python_router_returns_arrow_buckets_for_the_shared_route_interface(tmp_path, bucket, chunked):
+    table = _table(tmp_path, bucket=bucket, native=False)
+    plan = PostponeBucketPlan({('west',): 3, ('east',): 2}) if bucket == '-2' else None
+    router = create_input_router(table, plan)
+    batch = pa.record_batch([['west', 'east', 'west'], [1, 2, 3]], names=['p', 'id'])
+    expected = router.extract_partition_bucket_batch(batch)[1]
+    data = pa.Table.from_batches([batch.slice(0, 1), batch.slice(1)]) if chunked else batch
+    buckets = router.route(data)
+    assert isinstance(buckets, pa.Int32Array)
+    assert buckets.to_pylist() == expected
+    assert buckets.null_count == 0
+    empty = router.route(data.slice(0, 0))
+    assert isinstance(empty, pa.Int32Array)
+    assert len(empty) == 0
+
+
 def test_native_router_passes_arrow_without_python_row_hashing(tmp_path, sdk):
     table = _table(tmp_path)
     batch = pa.record_batch([['west', 'east'], [1, 2]], names=['p', 'id'])

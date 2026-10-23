@@ -161,7 +161,7 @@ def test_native_ray_planning_uses_native_metadata_and_input_routing(
         args = write.call_args[1]
         assert args['postpone_bucket_plan'].as_dict() == expected
         batch = pa.record_batch([[1, 2], ['existing', 'new'], [10, 20]], names=['id', 'p', 'value'])
-        buckets = args['bucket_extractor'].route(batch).to_pylist()
+        buckets = args['bucket_router'].route(batch).to_pylist()
         assert 0 <= buckets[0] < expected[('existing',)]
         assert 0 <= buckets[1] < 8
         if overwrite:
