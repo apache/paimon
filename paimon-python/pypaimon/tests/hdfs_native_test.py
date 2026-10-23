@@ -888,6 +888,7 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
         table = pyarrow.table({"a": [1, 2]})
         writer = MagicMock(name="LanceFileWriter")
         fake_lance = types.ModuleType("lance")
+        fake_lance.__version__ = "13.0.0"
         fake_lance.file = types.SimpleNamespace(
             LanceFileWriter=MagicMock(return_value=writer))
         with patch.dict(sys.modules, {"lance": fake_lance}), \
@@ -897,6 +898,7 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
         spec.assert_called_once()
         _, kwargs = fake_lance.file.LanceFileWriter.call_args
         self.assertEqual(kwargs.get("storage_options"), {"opt": "v"})
+        self.assertEqual(kwargs.get("version"), "2.0")
         writer.close.assert_called_once()
 
     def test_write_vortex_delegates_to_vortex_specified(self):

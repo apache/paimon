@@ -19,8 +19,22 @@ import os
 from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
 
+from packaging.version import Version
+
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.config import OssOptions
+
+
+def lance_file_writer_options(options):
+    """Keep Paimon data files compatible with its Lance 0.39 Java reader."""
+    import lance
+
+    options = dict(options)
+    if Version(lance.__version__) >= Version("13.0.0"):
+        # Modern writers default to 2.2. Older Python 3.8 Lance writers do
+        # not accept a version argument, so leave their options untouched.
+        options.setdefault("version", "2.0")
+    return options
 
 
 def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:

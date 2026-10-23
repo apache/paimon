@@ -87,6 +87,24 @@ class ScanQuery:
         return read_builder.new_read()._to_managed_arrow_batch_reader(
             splits, blob_parallelism=blob_parallelism)
 
+    def export_lance(
+            self, uri, *, mode="create", blob_mode="materialize",
+            storage_options=None, blob_parallelism=64):
+        """Export this scan to an independent Lance dataset and return it.
+
+        Filter, projection, limit and snapshot selection are preserved. Scalar
+        BLOBs use native Lance Blob storage; ARRAY and MAP BLOB values use
+        ordinary binary payloads. MAPs become lists of key/value structs.
+        Selected VARIANT and video-frame columns are unsupported.
+        Requires ``pypaimon[lance]`` with pylance >= 13 (Python >= 3.10).
+        """
+        if self._result_factory is not None:
+            raise TypeError("export_lance is only supported on scan(), not search queries.")
+        from pypaimon.multimodal.lance_export import export_lance
+        return export_lance(
+            self, uri, mode=mode, blob_mode=blob_mode,
+            storage_options=storage_options, blob_parallelism=blob_parallelism)
+
     def _configured_read_builder(self, table=None):
         read_builder = (
             self._table if table is None else table
@@ -597,6 +615,9 @@ class _PreFilterQuery(ScanQuery):
 
     def stream_blobs(self, *args, **kwargs):
         raise TypeError("stream_blobs is only supported on scan(), not search queries.")
+
+    def export_lance(self, *args, **kwargs):
+        raise TypeError("export_lance is only supported on scan(), not search queries.")
 
     def to_ray(self, *, execution="ray", concurrency=None, ray_remote_args=None,
                override_num_blocks=None):
