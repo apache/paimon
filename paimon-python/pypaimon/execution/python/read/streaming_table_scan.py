@@ -294,6 +294,10 @@ class AsyncStreamingTableScan:
         if future is not None:
             future.cancel()
 
+    def cancel_prefetch(self):
+        """Discard speculative work when a public polling iterator stops."""
+        self._discard_prefetch()
+
     def close(self):
         """Discard speculative work without acknowledging pending rows.
 

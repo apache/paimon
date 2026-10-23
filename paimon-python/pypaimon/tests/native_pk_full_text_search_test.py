@@ -155,7 +155,8 @@ def test_pk_plan_validates_source_family_and_reader_requirements(source, case):
     elif case == 'filter':
         reader = _native(table)
         reader.with_filter(_predicate_to_native(table.new_read_builder().new_predicate_builder().equal('id', 1)))
-        with pytest.raises(Exception, match='non-partition filters'):
+        with pytest.raises(NotImplementedError,
+                           match='full-text row filters require a row-tracked Parquet append table'):
             reader.new_full_text_read()
     elif case == 'kind':
         changed = table.copy({'pk-full-text.index.columns': ''})

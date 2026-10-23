@@ -41,8 +41,8 @@ class ShardUpdateValidationTest(unittest.TestCase):
                     update = update_type(table, 'writer').with_update_type([])
                     with patch('pypaimon.write.update_dispatch.prepare_native_write_operation',
                                side_effect=AssertionError('Prepared a backend for invalid columns')) as prepare, \
-                            patch.object(update, '_new_python_shard_updator',
-                                         side_effect=AssertionError('Created a Python shard updater')) as python:
+                            patch('pypaimon.write.backend_dispatch.create_python_shard_updator',
+                                  side_effect=AssertionError('Created a Python shard updater')) as python:
                         with self.assertRaisesRegex(ValueError, 'Shard update columns must not be empty'):
                             update.new_shard_updator(0, 1)
                     prepare.assert_not_called()

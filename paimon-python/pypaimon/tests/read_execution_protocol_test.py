@@ -19,7 +19,7 @@
 
 from inspect import signature
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
@@ -30,6 +30,7 @@ from pypaimon.execution.native.read.table_read import NativeTableRead
 from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_request import ScanRequest
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
               pytest.mark.python_write, pytest.mark.python_commit]
@@ -40,7 +41,7 @@ def test_bound_read_executors_have_the_same_call_contract(method):
     assert signature(getattr(PythonTableRead, method)) == signature(getattr(NativeTableRead, method))
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 def test_bound_scan_executors_have_the_same_call_contract(method):
     assert signature(getattr(PythonTableScan, method)) == signature(getattr(NativeTableScan, method))
 
@@ -68,7 +69,7 @@ def table(tmp_path):
 
 @pytest.mark.parametrize('backend', ['python', 'native'])
 @pytest.mark.parametrize('method', ['read_rows', 'read_batches'])
-def test_bound_read_uses_live_configuration_and_preserves_public_reader_hooks(table, backend, method):
+def test_bound_read_uses_live_configuration_and_selected_executor(table, backend, method):
     splits = table.new_read_builder().new_scan().plan().splits()
     if backend == 'native':
         table = table.copy({'read.native.enabled': 'true'})
@@ -95,8 +96,8 @@ def test_bound_read_uses_live_configuration_and_preserves_public_reader_hooks(ta
         return batches()
 
     with patch('pypaimon.execution.native.read.table_read.native_read', side_effect=native_batches) as native, \
-            patch.object(read, '_TableRead__create_reader_for_split',
-                         wraps=read._TableRead__create_reader_for_split) as python:
+            patch.object(PythonTableRead, '_create_reader_for_split', autospec=True,
+                         side_effect=PythonTableRead._create_reader_for_split) as python:
         if method == 'read_rows':
             values = [row.get_field(0) for row in execution.read_rows(splits)]
         else:
@@ -145,16 +146,16 @@ def test_python_bound_all_files_restores_scanner_configuration_on_success_or_fai
         return expected
 
     scanner.scan = scan
-    execution = PythonTableScan(SimpleNamespace(file_scanner=scanner, _query_auth_fn=None))
+    execution = PythonTableScan(SimpleNamespace(_python_file_scanner=scanner, _query_auth_fn=None))
     if failure:
         with pytest.raises(OSError, match='planning failed'):
-            execution.plan_all_files()
+            execution.plan_all()
     else:
-        assert execution.plan_all_files() is expected
+        assert execution.plan_all() is expected
     assert scanner.skip_level0 is True
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 def test_native_bound_scan_uses_live_configuration_without_creating_a_python_scanner(table, method):
     scan = table.new_read_builder().new_scan()
     execution = NativeTableScan(scan)
@@ -165,11 +166,11 @@ def test_native_bound_scan_uses_live_configuration_without_creating_a_python_sca
         result = getattr(execution, method)()
     assert (result[0] if method == 'scan_with_stats' else result).snapshot_id == 9
     assert native.call_args[1]['limit'] == 1
-    assert bool(native.call_args[1].get('all_files')) is (method == 'plan_all_files')
+    assert bool(native.call_args[1].get('all_files')) is (method == 'plan_all')
     assert scan._file_scanner is None
 
 
-@pytest.mark.parametrize('method', ['plan', 'plan_all_files', 'scan_with_stats'])
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
 def test_native_bound_scan_does_not_turn_preparation_failure_into_an_empty_plan(table, method):
     scan = table.new_read_builder().new_scan()
     execution = NativeTableScan(scan)
@@ -189,3 +190,38 @@ def test_native_bound_batches_preserve_the_requested_order_mode(table, ordered):
         assert list(execution.read_batches([split], schema, parallelism=3, ordered=ordered)) == []
     assert native.call_args[1]['parallelism'] == 3
     assert native.call_args[1]['ordered'] is ordered
+
+
+def test_python_scanner_uses_private_cache_and_captured_configuration(table):
+    request = ScanRequest(idx_of_this_subtask=1, number_of_para_subtasks=3,
+                          row_ranges=((7, 9),))
+    configure = Mock(side_effect=lambda scanner: setattr(scanner, 'skip_level0', False))
+
+    class PublicScanner:
+        _is_dispatch_file_scanner = True
+        _configure_python_scanner = staticmethod(configure)
+
+    class Scan:
+        _python_file_scanner = None
+        _file_scanner = PublicScanner()
+        _query_auth_fn = None
+
+        @property
+        def file_scanner(self):
+            raise AssertionError('Python execution entered public scanner dispatch')
+
+        def _scan_request(self):
+            return request
+
+    scan = Scan()
+    scan.table = table
+    scanner = Mock(skip_level0=True)
+    with patch.object(PythonTableScan, '_create_file_scanner', return_value=scanner) as create:
+        assert PythonTableScan(scan)._file_scanner() is scanner
+        assert PythonTableScan(scan)._scanner(None) is scanner
+    create.assert_called_once()
+    configure.assert_called_once_with(scanner)
+    scanner.with_shard.assert_called_once_with(1, 3)
+    ranges, = scanner.with_row_ranges.call_args.args
+    assert [(value.from_, value.to) for value in ranges] == [(7, 9)]
+    assert scan._python_file_scanner is scanner and not scanner.skip_level0

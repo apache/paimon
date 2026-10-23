@@ -16,21 +16,58 @@
 # under the License.
 
 import logging
+import struct
 from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import (
+    CoreOptions,
+    GlobalIndexSearchMode,
+)
+from pypaimon.execution.python.globalindex.index_freshness import key_indexes_are_fresh
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.read.table_read import TableRead
+from pypaimon.schema.data_types import AtomicType
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import require_columns
-from pypaimon.write.table_write import StreamTableWrite
+from pypaimon.write.update_validation import _authorize_update
+from pypaimon.write.backend_dispatch import create_python_write
 
 # Composite key is represented as a tuple of values
 _KeyTuple = Tuple[Any, ...]
 
 logger = logging.getLogger(__name__)
+
+
+def _key_predicate(builder, field, values):
+    # Python equality treats signed zero as the same key, whereas index Bloom
+    # filters can distinguish the serialized floating-point representations.
+    if not isinstance(field.type, AtomicType) or field.type.type.upper() in ('FLOAT', 'DOUBLE'):
+        return None
+    try:
+        serializer = create_serializer(field.type)
+        literals = []
+        for value in values:
+            if value is not None:
+                literal = serializer.deserialize(serializer.serialize(value))
+                # A lossy conversion or incompatible row-key type must keep
+                # the original scan, including all of this column's keys.
+                if literal != value:
+                    return None
+                literals.append(literal)
+    except (ArithmeticError, TypeError, ValueError, struct.error):
+        return None
+
+    predicates = []
+    if literals:
+        predicates.append(builder.equal(field.name, literals[0]) if len(literals) == 1
+                          else builder.is_in(field.name, literals))
+    if None in values:
+        predicates.append(builder.is_null(field.name))
+    return builder.or_predicates(predicates)
 
 
 class PythonTableUpsert:
@@ -44,16 +81,16 @@ class PythonTableUpsert:
         self._rows = rows
 
     def upsert(self):
-        context = self._context
         if self._rows:
-            return context._upsert_rows(self._data, self._upsert_keys, self._update_cols)
-        return context._upsert_arrow(self._data, self._upsert_keys, self._update_cols)
+            return self._upsert_rows(self._data, self._upsert_keys, self._update_cols)
+        return self._upsert_arrow(self._data, self._upsert_keys, self._update_cols)
 
     def _new_row_id_updater(self):
         context = self._context
-        from pypaimon.write.write_builder import _new_update_by_row_id
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-        return _new_update_by_row_id(
+        _authorize_update(context.table)
+        return TableUpdateByRowId._from_python(
             context.table, context.commit_user, context.commit_identifier)
 
     def _group_rows_by_partition(
@@ -96,10 +133,10 @@ class PythonTableUpsert:
                 if isinstance(value, Blob):
                     raise ValueError("Blob values are not supported as upsert keys.")
 
-        row_items, input_key_tuples = context._dedup_row_items_last_write_wins(
+        row_items, input_key_tuples = self._dedup_row_items_last_write_wins(
             row_items, input_key_tuples, partition_spec)
 
-        key_to_row_ids = context._build_key_to_row_ids_map(
+        key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples)
         )
 
@@ -122,14 +159,14 @@ class PythonTableUpsert:
             )
             for _, values_by_name in matched_items:
                 require_columns(values_by_name, cols_to_update, "upsert_by_key")
-            commit_messages.extend(context._new_row_id_updater().update_rows_columns(
+            commit_messages.extend(self._new_row_id_updater().update_rows_columns(
                 [row for row, _ in matched_items],
                 matched_row_ids,
                 cols_to_update,
             ))
 
         if new_items:
-            commit_messages.extend(context._append_rows(new_items))
+            commit_messages.extend(self._append_rows(new_items))
 
         return commit_messages
 
@@ -219,14 +256,13 @@ class PythonTableUpsert:
         ]
 
         # 2. Deduplicate – keep the LAST occurrence of every repeated key.
-        partition_data, input_key_tuples = context._dedup_last_write_wins(
+        partition_data, input_key_tuples = self._dedup_last_write_wins(
             partition_data, input_key_tuples, partition_spec,
         )
 
-        # 3. Scan partition once, keeping key → [_ROW_ID, ...] for keys that
-        #    appear in the input (memory ∝ matched existing rows, not the
-        #    whole partition).
-        key_to_row_ids = context._build_key_to_row_ids_map(
+        # 3. Look up candidate rows using key predicates and available indexes,
+        #    keeping only exact input-key matches.
+        key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
 
@@ -251,12 +287,12 @@ class PythonTableUpsert:
 
         commit_messages: List[CommitMessage] = []
         if matched_indices:
-            commit_messages.extend(context._do_updates(
+            commit_messages.extend(self._do_updates(
                 partition_data, matched_indices,
                 input_key_tuples, key_to_row_ids, update_cols,
             ))
         if new_indices:
-            commit_messages.extend(context._do_appends(partition_data, new_indices))
+            commit_messages.extend(self._do_appends(partition_data, new_indices))
         return commit_messages
 
     @staticmethod
@@ -297,11 +333,10 @@ class PythonTableUpsert:
         Scan the partition in batches and collect key → [_ROW_ID, ...] for
         rows whose composite key is in *input_key_set*.
 
-        The partition spec (if any) is pushed down as an ``and`` of per-key
-        equality predicates so non-matching partitions are pruned by the
-        scanner. The match-key filter itself is applied in Python on each
-        batch — this keeps memory proportional to the input key set rather
-        than the entire partition.
+        Partition and match-key predicates let the scanner prune files and
+        use available scalar indexes. Per-column candidate sets may include
+        extra composite-key combinations; exact tuple matching still happens
+        on each batch. Unindexed data is always included in the lookup.
 
         Args:
             match_keys:     Column names used as the composite match key
@@ -311,20 +346,42 @@ class PythonTableUpsert:
             input_key_set:   Set of composite key tuples from the input data.
         """
         context = self._context
-        read_builder = context.table.new_read_builder()
+        scan_options = {
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
+        }
+        scan_table = context.table.copy_without_time_travel(scan_options)
+        read_builder = scan_table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        sub_predicates = []
 
         if partition_spec:
-            predicate_builder = read_builder.new_predicate_builder()
-            sub_predicates = [
+            sub_predicates.extend([
                 (predicate_builder.is_null(k) if v is None
                  else predicate_builder.equal(k, v))
                 for k, v in partition_spec.items()
-            ]
-            partition_predicate = predicate_builder.and_predicates(sub_predicates)
-            read_builder = read_builder.with_filter(partition_predicate)
+            ])
+        if scan_table.options.global_index_enabled():
+            from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+
+            snapshot = TimeTravelUtil.resolve_snapshot(scan_table)
+            scan_table = scan_table._copy_with_snapshot(snapshot)
+            if not key_indexes_are_fresh(
+                    scan_table, snapshot, match_keys,
+                    predicate_builder.and_predicates(sub_predicates)):
+                scan_table = scan_table.copy_without_time_travel({
+                    CoreOptions.GLOBAL_INDEX_ENABLED.key(): 'false',
+                })
+            read_builder = scan_table.new_read_builder()
+        for i, key in enumerate(match_keys):
+            predicate = _key_predicate(
+                predicate_builder, context.table.field_dict[key],
+                {key_tuple[i] for key_tuple in input_key_set})
+            if predicate is not None:
+                sub_predicates.append(predicate)
+        read_builder.with_filter(predicate_builder.and_predicates(sub_predicates))
 
         scan = read_builder.new_scan()
-        splits = scan.plan_all_files().splits()
+        splits = scan.plan_all().splits()
         if not splits:
             return {}
 
@@ -333,7 +390,7 @@ class PythonTableUpsert:
         read_type = key_fields + [SpecialFields.ROW_ID]
 
         table_read = TableRead(
-            table=context.table, predicate=None, read_type=read_type
+            table=scan_table, predicate=None, read_type=read_type
         )
 
         # Stream batches and filter against input_key_set on-the-fly
@@ -371,7 +428,7 @@ class PythonTableUpsert:
         )
 
         cols_to_update = list(update_cols) if update_cols else list(context.table.field_names)
-        return context._new_row_id_updater().update_columns(
+        return self._new_row_id_updater().update_columns(
             update_data, cols_to_update)
 
     def _do_appends(
@@ -397,7 +454,7 @@ class PythonTableUpsert:
         all_ordered_cols = [c for c in context.table.field_names if c in new_data.column_names]
         new_data = new_data.select(all_ordered_cols)
 
-        table_write = StreamTableWrite(context.table, context.commit_user)
+        table_write = create_python_write(context.table, context.commit_user, stream=True)
         try:
             table_write.with_write_type(all_ordered_cols)
             table_write.write_arrow(new_data)
@@ -410,9 +467,9 @@ class PythonTableUpsert:
             row_items: List[Tuple[Any, Dict[str, Any]]],
     ) -> List[CommitMessage]:
         context = self._context
-        all_ordered_cols = context._append_row_column_names(row_items)
+        all_ordered_cols = self._append_row_column_names(row_items)
 
-        table_write = StreamTableWrite(context.table, context.commit_user)
+        table_write = create_python_write(context.table, context.commit_user, stream=True)
         try:
             table_write.with_write_type(all_ordered_cols)
             for row, _ in row_items:
@@ -451,12 +508,11 @@ class PythonTableUpsert:
         ]
 
     def _upsert_arrow(self, data, upsert_keys, effective_update_cols):
-        context = self._context
         all_commit_messages: List[CommitMessage] = []
 
         # Process each partition independently
-        for partition_spec, partition_data in context._group_by_partition(data):
-            msgs = context._upsert_partition(
+        for partition_spec, partition_data in self._group_by_partition(data):
+            msgs = self._upsert_partition(
                 partition_data, upsert_keys, partition_spec, effective_update_cols
             )
             all_commit_messages.extend(msgs)
@@ -464,11 +520,10 @@ class PythonTableUpsert:
         return all_commit_messages
 
     def _upsert_rows(self, row_items, upsert_keys, effective_update_cols):
-        context = self._context
         commit_messages: List[CommitMessage] = []
-        for partition_spec, partition_items in context._group_rows_by_partition(row_items):
+        for partition_spec, partition_items in self._group_rows_by_partition(row_items):
             commit_messages.extend(
-                context._upsert_row_partition(
+                self._upsert_row_partition(
                     partition_items,
                     upsert_keys,
                     partition_spec,

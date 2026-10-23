@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Local global-index builds delegated to Rust, retaining Python's commit API."""
+"""Global-index builds delegated to Rust, retaining Python's commit API."""
 
 from pypaimon.execution.native.table import (_native_table, _option_value_to_string)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
@@ -23,7 +23,7 @@ from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
 
 
-def build_native_global_index(builder, partition_filter):
+def build_native_global_index(builder, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
     """Return unpublished messages, or None before building for an ineligible table.
 
     Rust owns snapshot selection, range planning and index file generation.
@@ -77,4 +77,16 @@ def build_native_global_index(builder, partition_filter):
     native.with_options(options)
     if partition_filter is not None:
         native.with_partition_filter(_predicate_to_native(partition_filter))
+    if execution == "ray":
+        from pypaimon.ray.vector_index_build import build_native_vector_index
+        # Planning may authorize and capture inputs; its errors must not select
+        # another engine or restart a build that may already have side effects.
+        plan = native.plan()
+        return build_native_vector_index(table, plan, concurrency, ray_remote_args)
     return from_native_commit_messages(table, native.build())
+
+
+def build_native_index_shard(table, shard):
+    """Execute captured metadata in Core; workers never replan or publish."""
+    native = _native_table(table).new_global_index_build_builder()
+    return from_native_commit_messages(table, native.build_shard(shard))

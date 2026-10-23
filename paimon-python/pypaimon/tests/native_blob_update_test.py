@@ -17,6 +17,7 @@
 
 """Native updates share the Java Blob placeholder and row-id layout."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from contextlib import ExitStack
 from unittest.mock import patch
 from urllib.parse import urlparse
@@ -34,7 +35,6 @@ from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 pytestmark = pytest.mark.native_plan
@@ -78,13 +78,16 @@ def _read(table, descriptors=False, projection=None, resolve_views=True):
         builder.with_projection(projection)
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         return read.to_arrow(splits).sort_by('id').to_pylist()
 
 
 def _native_only():
     stack = ExitStack()
-    for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
+    for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
                         (TableUpdate, '_build_predicate_update_table'),
                         (TableUpsertByKey, '_upsert_partition'),
                         (TableUpsertByKey, '_upsert_row_partition'),
@@ -666,8 +669,11 @@ def test_view_prescan_keeps_inline_descriptor_predicate(tmp_path, native_rest_ca
         read_builder.with_filter(PredicateBuilder(view.fields).equal('reference', reference))
         plan = read_builder.new_scan().plan()
         read = read_builder.new_read()
-        with (patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback'))
-              if native else ExitStack()):
+        guard = (patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ) if native else ExitStack())
+        with guard:
             rows = read.to_arrow(plan.splits()).to_pylist()
             assert len(rows) == 1 and rows[0]['id'] == 0
             actual = BlobDescriptor.deserialize(rows[0]['payload'])

@@ -81,7 +81,10 @@ def _read(table, native, projection=None, filtered=False, limit=None):
     read = builder.new_read()
     splits = builder.new_scan().plan().splits()
     if native:
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python video read fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python video read fallback')
+        ):
             return read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()
     return read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()
 
@@ -127,7 +130,7 @@ def test_native_update_of_normal_columns_keeps_packed_video_frames(tmp_path, nat
     before = _read(table, True)[0].to_pylist()
     builder = table.new_batch_write_builder()
     update = builder.new_update().with_update_type(['id'])
-    with patch('pypaimon.write.table_update.BatchTableUpdate._update_by_arrow_batches_with_row_id',
+    with patch('pypaimon.execution.python.write.table_update.PythonTableUpdate._update_by_arrow_batches_with_row_id',
                side_effect=AssertionError('Python update fallback')):
         messages = update.update_by_arrow_batches_with_row_id(iter([
             pa.table({'_ROW_ID': [0], 'id': [20]}, schema=pa.schema([('_ROW_ID', pa.int64()), ('id', pa.int32())]))]))
@@ -167,7 +170,10 @@ def test_native_video_placeholder_falls_back_but_null_stops_older_frames(tmp_pat
                          total_buckets=split.total_buckets)
     expected = [dict(row) for row in before]
     expected[1]['left'] = None
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         for result in (read.to_arrow([combined]), read.to_arrow_batch_reader([combined]).read_all()):
             assert result.to_pylist() == expected
 

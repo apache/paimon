@@ -4061,10 +4061,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "pypaimon.multimodal.blob_read.fetch_blob_bodies",
                 wraps=fetch_blob_bodies) as fetch:
             last, first = dataset.__getitems__([4, 0])
-            scanner = dataset._frame_locator._scanner
-            dataset._frame_locator.locate([2])
         self.assertEqual(0, len(scan_calls))
-        self.assertIs(scanner, dataset._frame_locator._scanner)
         self.assertEqual(1, read.call_count)
         self.assertEqual([0, 1, 3, 4], read.call_args.args[0])
         self.assertEqual(1, fetch.call_count)
@@ -4085,15 +4082,13 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([True, False, False],
                          first["action_is_pad"].tolist())
 
-        restored_locator = pickle.loads(pickle.dumps(
-            dataset._frame_locator))
-        with patch.object(TableScan, "plan", new=counted_plan):
-            restored_splits, restored_needs_filter = \
-                restored_locator.locate([2])
-        self.assertEqual(0, len(scan_calls))
-        self.assertTrue(restored_splits)
-        self.assertFalse(restored_needs_filter)
-        restored_locator.close()
+        restored_reader = pickle.loads(pickle.dumps(dataset.reader))
+        try:
+            # Both execution backends preserve indexed lookup after transport.
+            self.assertEqual(
+                [2], restored_reader.read_indices([2], ["index"])["index"].to_pylist())
+        finally:
+            restored_reader.close()
 
         worker_indices = []
         for batch in DataLoader(
@@ -4176,8 +4171,13 @@ class LeRobotImportTest(unittest.TestCase):
     def test_paimon_dataset_rejects_unavailable_frame_index(self):
         self.connection.load_from_lerobot(
             "missing_frame_index", self.image_source)
+        # Exercise the Python locator's failures explicitly; Native lookup
+        # does not open this scanner or invoke its internal hooks.
         dataset = pmm.PaimonLeRobotDataset(
-            self.connection.get_table("missing_frame_index"))
+            self.connection.get_table("missing_frame_index").copy({
+                "read.native.enabled": "false",
+                "scan.native-plan.enabled": "false",
+            }))
 
         with patch.object(
                 dataset._frame_locator, "_index_scanner",

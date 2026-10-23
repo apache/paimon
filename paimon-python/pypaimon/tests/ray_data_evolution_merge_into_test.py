@@ -123,7 +123,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         read_builder = table.new_read_builder().with_projection(
             list(table.field_names) + [SpecialFields.ROW_ID.name]
         )
-        plan = read_builder.new_scan().plan_all_files()
+        plan = read_builder.new_scan().plan_all()
         old_files = [
             file for split in plan.splits() for file in split.files
         ]
@@ -2516,7 +2516,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self._write(target, self._source(ids=(1, 2)))
         self._write(target, self._source(ids=(3, 4)))
         table = self.catalog.get_table(target)
-        packed_splits = table.new_read_builder().new_scan().plan_all_files().splits()
+        packed_splits = table.new_read_builder().new_scan().plan_all().splits()
         self.assertEqual(len(packed_splits), 1)
 
         with patch.object(
@@ -3311,7 +3311,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ):
                 messages, count, row_ids = (
                     join_module._apply_self_merge_update_group(
-                        context, plan.file_groups[0], True,
+                        context, plan.row_id_plan.for_split(plan.file_groups[0]), True,
                     )
                 )
 

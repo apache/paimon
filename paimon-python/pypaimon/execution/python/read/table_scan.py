@@ -21,7 +21,40 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
+from pypaimon.read.scan_config import validate_scan_options
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
+from pypaimon.utils.range import Range
+
+
+def _resolve_incremental_snapshot_range(table):
+    """Resolve Python scan boundaries only after selecting this backend."""
+    window = validate_scan_options(table)
+    if window is None:
+        return None
+    start_timestamp, end_timestamp = window
+    snapshot_manager = table.snapshot_manager()
+    latest_snapshot = snapshot_manager.get_latest_snapshot()
+    earliest_snapshot = snapshot_manager.try_get_earliest_snapshot() if latest_snapshot is not None else None
+    if earliest_snapshot is None or latest_snapshot is None:
+        return None
+    if start_timestamp > end_timestamp:
+        raise ValueError(
+            "Ending timestamp %s should be >= starting timestamp %s."
+            % (end_timestamp, start_timestamp))
+    if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
+            or end_timestamp < earliest_snapshot.time_millis):
+        return None
+
+    starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
+    earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
+    if starting_snapshot is None or (earliest_snapshot and earliest_snapshot.time_millis > start_timestamp):
+        start_id = earliest_snapshot.id - 1 if earliest_snapshot else -1
+    else:
+        start_id = starting_snapshot.id
+    end_snapshot = snapshot_manager.earlier_or_equal_time_mills(end_timestamp)
+    latest_snapshot = snapshot_manager.get_latest_snapshot()
+    end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
+    return start_id, end_id
 
 
 class PythonTableScan:
@@ -41,13 +74,14 @@ class PythonTableScan:
         has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
 
         if has_incremental:
-            if scan._incremental_snapshot_range is None:
+            snapshot_range = _resolve_incremental_snapshot_range(scan.table)
+            if snapshot_range is None:
                 return FileScanner(
                     scan.table,
                     lambda: ([], None),
                     partition_predicate=scan.partition_predicate,
                 )
-            start_id, end_id = scan._incremental_snapshot_range
+            start_id, end_id = snapshot_range
             # Java's AUTO mode uses physical changelogs when a producer is
             # configured, and APPEND deltas otherwise.
             changelog = scan.table.options.changelog_producer() != ChangelogProducer.NONE
@@ -111,9 +145,32 @@ class PythonTableScan:
             skip_level0=scan.table.options.batch_scan_skip_level0(),
         )
 
+    def _file_scanner(self):
+        """Return the private Python scanner without entering public dispatch."""
+        scan = self._scan
+        scanner = getattr(scan, '_python_file_scanner', None)
+        if scanner is None:
+            scanner = self._create_file_scanner()
+            request = scan._scan_request()
+            if request.idx_of_this_subtask is not None:
+                scanner.with_shard(request.idx_of_this_subtask, request.number_of_para_subtasks)
+            if request.start_pos_of_this_subtask is not None:
+                scanner.with_slice(request.start_pos_of_this_subtask, request.end_pos_of_this_subtask)
+            if request.global_index_result is not None:
+                scanner.with_global_index_result(request.global_index_result)
+            if request.row_ranges is not None:
+                scanner.with_row_ranges([Range(start, end) for start, end in request.row_ranges])
+            if request.chunk_shuffle is not None:
+                scanner.with_chunk_shuffle(*request.chunk_shuffle)
+            public_scanner = getattr(scan, '_file_scanner', None)
+            if getattr(type(public_scanner), '_is_dispatch_file_scanner', False) is True:
+                public_scanner._configure_python_scanner(scanner)
+            scan._python_file_scanner = scanner
+        return scanner
+
     def _scanner(self, auth_result):
         scan = self._scan
-        scanner = scan.file_scanner
+        scanner = self._file_scanner()
         if scan._query_auth_fn is not None:
             prune_scanner_by_auth(scan.table, scanner, auth_result)
         return scanner
@@ -121,7 +178,7 @@ class PythonTableScan:
     def plan(self, auth_result=None):
         return wrap_plan_with_auth(auth_result, self._scanner(auth_result).scan())
 
-    def plan_all_files(self):
+    def plan_all(self):
         scanner = self._scanner(None)
         # Writer restore/overwrite must see L0 even when batch reads hide it.
         skip_level0 = scanner.skip_level0

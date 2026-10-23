@@ -28,6 +28,7 @@ from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
+from pypaimon.write.row_id_conflict import RowIdExistenceConflict
 from pypaimon.execution.python.write.commit.commit_scanner import CommitScanner
 
 
@@ -163,23 +164,6 @@ class _WriteRange:
     def __init__(self, range_, field_ids):
         self.range = range_
         self.field_ids = field_ids
-
-
-class RowIdExistenceConflict(RuntimeError):
-    """A staged row-id file no longer matches the current base-file layout."""
-
-    def __init__(self, entry):
-        self.entry = entry
-        super().__init__(
-            "Row ID existence conflict: file '{}' references "
-            "firstRowId={}, rowCount={} in bucket {}, "
-            "but no matching file exists in the current snapshot. "
-            "The referenced file may have been rewritten by a "
-            "concurrent compaction or removed by an overwrite.".format(
-                entry.file.file_name,
-                entry.file.first_row_id,
-                entry.file.row_count,
-                entry.bucket))
 
 
 class ConflictDetection:
@@ -488,6 +472,16 @@ class ConflictDetection:
     def check_row_id_existence(self, base_entries, delta_entries, next_row_id=None):
         if not self.data_evolution_enabled:
             return None
+
+        # File identity excludes row IDs. A DELETE must still describe the
+        # current ADD before identifier-based manifest merging cancels it.
+        deleted = {entry.identifier(): entry for entry in delta_entries if entry.kind == 1}
+        for current in base_entries:
+            stale = deleted.get(current.identifier()) if current.kind == 0 else None
+            if stale is not None and (
+                    current.file.first_row_id != stale.file.first_row_id
+                    or current.file.row_count != stale.file.row_count):
+                return RowIdExistenceConflict._from_delete(stale, current)
 
         if next_row_id is None:
             return None

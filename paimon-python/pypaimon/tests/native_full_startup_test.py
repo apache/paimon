@@ -90,7 +90,10 @@ def test_full_batch_startup_reads(source, native, mode, method, filtered):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-            stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read')
+            ))
         plan = scan.plan()
         if method == 'arrow':
             rows = read.to_arrow(plan.splits()).to_pylist()
@@ -153,7 +156,10 @@ def test_full_startup_empty_table(rest_catalog, native, mode):
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-            stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read')
+            ))
         plan = scan.plan()
         assert plan.snapshot_id is None
         assert plan.splits() == []
@@ -277,7 +283,7 @@ def test_merge_authorized_source_failures_never_modify_target(rest_catalog, nati
             stack.enter_context(patch.object(server, '_table_query_auth_handle', return_value=denied))
         with pytest.raises(Exception) as caught:
             # No value column is used by this MERGE, but a mask on that column
-            # still prevents plan_all_files from exposing the source table.
+            # still prevents plan_all from exposing the source table.
             builder.new_update().merge_into(source, on=['id'], when_matched=[WhenMatched.delete()])
         assert not isinstance(caught.value, AssertionError)
     assert target.snapshot_manager().get_latest_snapshot().id == before

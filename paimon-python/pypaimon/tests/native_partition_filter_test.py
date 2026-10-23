@@ -91,8 +91,10 @@ def _read(table, native, selector, predicate=None, limit=None, selector_first=Fa
         if native:
             stack.enter_context(patch.object(scan.file_scanner, 'scan',
                                              side_effect=AssertionError('Native plan fell back')))
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                      side_effect=AssertionError('Native read fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Native read fell back')
+            ))
         plan = scan.plan()
         rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
     if native:
@@ -144,6 +146,32 @@ def test_replacing_and_clearing_partition_selector(source):
         builder.with_partition_filter(None)
         plan = builder.new_scan().plan()
         assert sorted(row['id'] for row in builder.new_read().to_arrow(plan.splits()).to_pylist()) == [1, 3]
+
+
+def test_clearing_file_selector_restores_derived_pruning_in_both_backends(source):
+    table, _, _ = source
+    predicates = PredicateBuilder(table.fields)
+    for native in (False, True):
+        selected = table.copy({'scan.native-plan.enabled': str(native).lower(),
+                               'read.native.enabled': str(native).lower()})
+        builder = selected.new_read_builder().with_projection(['id'])
+        builder.with_filter(predicates.equal('p', 'a'))
+        builder.with_partition_filter(predicates.equal('region', 'west'))
+        scan = builder.new_scan()
+        scanner = scan.file_scanner
+        # None removes the explicit selection; p=a still prunes partitions.
+        scanner.partition_key_predicate = None
+        with ExitStack() as stack:
+            if native:
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_scan.FileScanner',
+                    side_effect=AssertionError('Native planning initialized Python')))
+            plan = scan.plan()
+            assert {tuple(split.partition.values) for split in plan.splits()} == {
+                ('east', 'a'), ('west', 'a')}
+            assert sorted(row['id'] for row in builder.new_read().to_arrow(plan.splits()).to_pylist()) == [1, 3]
+            assert {tuple(entry.partition.values) for entry in scanner.plan_files()} == {
+                ('east', 'a'), ('west', 'a')}
 
 
 def test_unmasked_partition_selector_with_a_masked_row_predicate(source):

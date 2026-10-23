@@ -83,29 +83,27 @@ def _frame(table, snapshot, mode, native, bucket_filter=None, projection=None, p
                 stack.enter_context(patch(
                     'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
                     side_effect=AssertionError('Python incremental planning')))
-            if native:
-                if mode != 'initial':
-                    scan.restore(snapshot.id)
-                plan = scan.plan()
-            else:
-                plan = getattr(scan, '_create_{}_plan'.format(mode))(snapshot)
+            if mode != 'initial':
+                scan.restore(snapshot.id)
+            plan = scan.plan()
         if plan is None:
-            assert native and mode != 'initial'
+            assert mode != 'initial'
             assert scan.checkpoint() == snapshot.id + 1
             return None, []
         reader = builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(
-                    reader, '_create_split_read', side_effect=AssertionError('Python read')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read')
+                ))
             rows = reader.to_arrow(plan.splits()).to_pylist()
         assert plan.snapshot_id == snapshot.id
         if native:
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
         return plan, sorted(rows, key=lambda row: (row.get('id', 0), repr(row)))
     finally:
-        if getattr(scan, '_prefetch_executor', None) is not None:
-            scan._prefetch_executor.shutdown(wait=True)
+        scan.close()
 
 
 @pytest.mark.parametrize('engine', ['deduplicate', 'first-row'])
@@ -159,7 +157,8 @@ def test_bucket_filter_is_applied_to_every_streaming_frame(tmp_path, mode, selec
     python_plan, expected = _frame(table, snapshot, mode, False, callback, predicate=predicate)
     native_plan, actual = _frame(table, snapshot, mode, True, callback, predicate=predicate)
     assert actual == expected
-    splits = python_plan.splits() + (native_plan.splits() if native_plan is not None else [])
+    splits = ((python_plan.splits() if python_plan is not None else [])
+              + (native_plan.splits() if native_plan is not None else []))
     assert all(split.bucket in selected for split in splits)
     if not selected:
         assert not actual and (native_plan is None or not native_plan.splits())

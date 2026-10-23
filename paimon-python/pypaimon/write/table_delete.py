@@ -27,50 +27,23 @@ class TableDeleteByRowId:
     """Prepare row deletion messages for a table."""
 
     def __init__(self, table, _precomputed_anchor_ranges: Optional['_AnchorRangesInfo'] = None):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self).initialize(table, _precomputed_anchor_ranges)
+        self.table = table
+        from pypaimon.write.backend_dispatch import create_row_id_delete_execution
+        self._execution = create_row_id_delete_execution(table, _precomputed_anchor_ranges)
+
+    @classmethod
+    def _from_python(cls, table, _precomputed_anchor_ranges=None):
+        """Create within an operation that has already selected Python execution."""
+        owner = cls.__new__(cls)
+        owner.table = table
+        from pypaimon.write.backend_dispatch import create_python_row_id_delete
+        owner._execution = create_python_row_id_delete(table, _precomputed_anchor_ranges)
+        return owner
 
     def delete(self, row_ids: Sequence[int]) -> List[CommitMessage]:
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self).delete(row_ids)
+        return self._execution.delete(row_ids)
 
     def _snapshot_anchor_ranges(self):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._snapshot_anchor_ranges()
-
-    def _validate_delete(self):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._validate_delete()
-
-    @staticmethod
-    def _deduplicate_row_ids(row_ids):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId._deduplicate_row_ids(row_ids)
-
-    def _load_anchor_ranges(self):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._load_anchor_ranges()
-
-    def _scan_anchor_ranges(self):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._scan_anchor_ranges()
-
-    def _group_delete_targets(self, row_ids, anchors):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._group_delete_targets(row_ids, anchors)
-
-    def _build_commit_message(self, partition, bucket, file_positions, snapshot_id):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._build_commit_message(partition, bucket, file_positions, snapshot_id)
-
-    def _read_existing_deletion_vectors(self, partition, bucket, snapshot_id):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._read_existing_deletion_vectors(partition, bucket, snapshot_id)
-
-    def _write_deletion_vector_index(self, partition, bucket, deletion_vectors):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._write_deletion_vector_index(partition, bucket, deletion_vectors)
-
-    def _index_file_path(self, index_file, partition, bucket):
-        from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-        return PythonTableDeleteByRowId(self)._index_file_path(index_file, partition, bucket)
+        # Ray's metadata coordinator selects _from_python explicitly. Native
+        # writers must never initialize Python's anchor planner on demand.
+        return self._execution._snapshot_anchor_ranges()

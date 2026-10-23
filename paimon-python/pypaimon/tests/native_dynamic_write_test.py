@@ -73,7 +73,10 @@ def _rows(table, native):
     splits = builder.new_scan().plan().splits()
     reader = builder.new_read()
     if native:
-        with patch.object(reader, '_create_split_read', side_effect=AssertionError('fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('fallback')
+        ):
             rows = reader.to_arrow(splits).to_pylist()
     else:
         rows = reader.to_arrow(splits).to_pylist()

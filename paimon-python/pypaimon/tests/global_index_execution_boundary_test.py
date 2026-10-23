@@ -180,7 +180,7 @@ from pypaimon.globalindex.vindex_options import VINDEX_IDENTIFIERS
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 
 read_builder = Mock()
-read_builder.new_scan.return_value.plan_all_files.return_value.splits.return_value = []
+read_builder.new_scan.return_value.plan_all.return_value.splits.return_value = []
 table = SimpleNamespace(
     options=CoreOptions(Options({
         'bucket': '-1', 'row-tracking.enabled': 'true', 'write.native.enabled': 'false',

@@ -107,7 +107,7 @@ def pytest_configure(config):
 
         TableScan._try_native_plan = tracked_plan
 
-        from pypaimon.read.streaming_table_scan import StreamTableScan
+        from pypaimon.execution.native.read.streaming_table_scan import StreamTableScan
 
         original_stream_plan = StreamTableScan.plan
 

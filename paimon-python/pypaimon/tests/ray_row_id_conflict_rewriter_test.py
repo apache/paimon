@@ -26,7 +26,7 @@ from pypaimon.ray.row_id_conflict_rewriter import (
 )
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.execution.python.write.commit.conflict_detection import RowIdExistenceConflict
+from pypaimon.write.row_id_conflict import RowIdExistenceConflict
 
 
 class RayRowIdConflictRewriterTest(unittest.TestCase):

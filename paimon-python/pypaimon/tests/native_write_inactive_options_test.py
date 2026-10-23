@@ -65,7 +65,7 @@ def test_inactive_changelog_format_qualifies_for_native_write(
     assert isinstance(writer, NativeWrite)
     create.assert_called_once_with(table)
     builder = (native_table.new_stream_write_builder.return_value.with_commit_user.return_value if stream
-               else native_table.new_batch_write_builder.return_value._with_commit_user.return_value)
+               else native_table.new_batch_write_builder.return_value.with_commit_user.return_value)
     if partition is not None:
         builder.with_overwrite.assert_called_once_with(partition)
         builder = builder.with_overwrite.return_value

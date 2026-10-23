@@ -107,7 +107,7 @@ def _seed_snapshot(table):
     writer.close()
     commit.close()
     snapshot = table.snapshot_manager().get_latest_snapshot()
-    splits = pure.new_read_builder().new_scan().plan_all_files().splits()
+    splits = pure.new_read_builder().new_scan().plan_all().splits()
     plan = Plan([deserialize_split_v1(
         serialize_split_v1(split), table.partition_keys_fields,
         table.trimmed_primary_keys_fields) for split in splits])

@@ -268,8 +268,10 @@ def test_authorized_python_and_serialized_splits_use_native_reader(guarded_table
                   for split in splits]
     assert all(getattr(split, '_native_split', None) is None for split in splits)
     builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(['id', 'value'])
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native read fell back')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native read fell back')
+    ):
         rows = builder.new_read().to_arrow(splits).sort_by([('id', 'ascending')]).to_pylist()
     assert rows == [{'id': 2, 'value': 'ABCABC'}, {'id': 3, 'value': ''}, {'id': 4, 'value': None}]
 
@@ -342,7 +344,7 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([])) as planner, \
             patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True):
         with pytest.raises(TableNoPermissionException):
-            scan.plan_all_files()
+            scan.plan_all()
         planner.assert_not_called()
 
 

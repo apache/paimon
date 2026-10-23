@@ -22,7 +22,8 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.push_down_utils import (
-    _get_all_fields, predicate_for_physical_fields, predicate_matches_physical_names,
+    _get_all_fields,
+    predicate_for_physical_fields, predicate_matches_physical_names,
     rewrite_predicate_indices, trim_and_transform_predicate, trim_predicate_by_fields)
 from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.split import DataSplit
@@ -62,7 +63,7 @@ class ScanRequest:
     read_limit: Optional[int] = None
     partition_filter: Optional[Predicate] = None
     read_type: Optional[Tuple[DataField, ...]] = None
-    incremental_snapshot_range: Optional[Tuple[int, int]] = None
+    file_filters: Optional[Tuple[bool, bool]] = None
 
     @classmethod
     def for_table(cls, table, predicate=None, limit=None, partition_predicate=None):

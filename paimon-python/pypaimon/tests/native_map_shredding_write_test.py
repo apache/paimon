@@ -17,6 +17,7 @@
 
 """Native MAP shared-shredding writes must preserve Java's physical contract."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from contextlib import nullcontext
 from unittest.mock import patch
 
@@ -82,7 +83,10 @@ def _read(table, native, projection=None):
         builder.with_projection(projection)
     reader = builder.new_read()
     splits = builder.new_scan().plan().splits()
-    guard = patch.object(reader, '_create_split_read', side_effect=AssertionError('Python reader fallback'))
+    guard = patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python reader fallback')
+    )
     with guard if native else nullcontext():
         return sorted(reader.to_arrow(splits).to_pylist(), key=lambda row: row['id'])
 
@@ -236,7 +240,6 @@ def test_native_map_abort_removes_rolled_files(tmp_path):
 
 @pytest.mark.parametrize('native_update', [False, True])
 def test_map_row_id_update_keeps_physical_layout(tmp_path, native_update):
-    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
     table, schema = _table(tmp_path, 'evolution')
     _write(table, schema, [
@@ -250,7 +253,7 @@ def test_map_row_id_update_keeps_physical_layout(tmp_path, native_update):
     ], schema=update_schema)
     table = table.copy({'write.native.enabled': str(native_update).lower()})
     builder = table.new_batch_write_builder()
-    guard = patch.object(TableUpdateByRowId, '_load_existing_files_info',
+    guard = patch.object(PythonTableUpdateByRowId, '_load_existing_files_info',
                          side_effect=AssertionError('Python update fallback'))
     with guard if native_update else nullcontext():
         messages = builder.new_update().with_update_type(['metrics']).update_by_arrow_with_row_id(update)
@@ -276,7 +279,6 @@ def test_native_map_predicate_update_and_upsert(tmp_path, stream, operation):
     from contextlib import ExitStack
     from pypaimon.common.predicate_builder import PredicateBuilder
     from pypaimon.write.table_update import TableUpdate
-    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
     from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
     table, schema = _table(tmp_path, 'evolution')
@@ -288,7 +290,7 @@ def test_native_map_predicate_update_and_upsert(tmp_path, stream, operation):
     update = builder.new_update().with_update_type(['metrics'])
     replacement = [('new', 7), ('a', None)]
     with ExitStack() as stack:
-        for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
+        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
                             (TableUpdate, '_build_predicate_update_table'),
                             (TableUpsertByKey, '_upsert_partition')]:
             stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))

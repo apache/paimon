@@ -124,7 +124,7 @@ def test_dynamic_branch_uses_native_catalog(rest_source, rest_catalog, from_tag)
     assert _resolved_rest_table_response(branch) is None
     plan = native_plan(branch)
     assert plan.snapshot_id == (1 if from_tag else None)
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+    with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                side_effect=AssertionError('native read fell back')):
         rows = branch.new_read_builder().new_read().to_arrow(plan.splits()).to_pylist()
     assert rows == ([{'id': 1, 'value': 'old'}] if from_tag else [])
@@ -270,7 +270,7 @@ def test_rest_blob_view_limit_filters_before_resolving_unselected_view(rest_cata
         plan = scan.plan()
     assert all(getattr(split, '_native_split', None) is not None
                for split in plan.splits())
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
+    with patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                side_effect=AssertionError('native view read fell back')):
         assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [
             {'id': 11, 'payload': b'selected'}]
@@ -433,7 +433,7 @@ def test_rest_blob_view_dependency_read_via(rest_blob_views, native, nested):
     guard, requests = _require_blob_view_read_via(server, root.identifier)
     with guard, ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
+            stack.enter_context(patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                                       side_effect=AssertionError('native Blob view read fell back')))
         builder = root.new_read_builder()
         rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist()
@@ -582,8 +582,9 @@ def test_rest_blob_view_payload_uses_upstream_token(rest_blob_views, native):
             guard, dependency_requests = _require_blob_view_read_via(rest_server, view.identifier)
             with guard, ExitStack() as stack:
                 if native:
-                    stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                              side_effect=AssertionError('token view read fell back')))
+                    stack.enter_context(patch(
+                        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                        side_effect=AssertionError('token view read fell back')))
                 builder = view.new_read_builder()
                 result = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id')
             assert result.to_pylist() == [dict(id=0, payload=b'actual'), dict(id=1, payload=None)]
@@ -635,7 +636,7 @@ def test_native_rest_blob_views_group_upstream_fields_by_id(rest_catalog):
     # Drop an ordinary column so BLOB field IDs differ from their positions.
     catalog.alter_table('default.upstream', [SchemaChange.drop_column('id')])
     guard, requests = _require_blob_view_read_via(server, view.identifier)
-    with guard, patch('pypaimon.read.table_read.TableRead._create_split_read',
+    with guard, patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                       side_effect=AssertionError('multi-field view read fell back')):
         builder = view.new_read_builder()
         rows = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist()
@@ -674,7 +675,7 @@ def test_rest_blob_view_keeps_branch_and_explicit_outer_context(rest_blob_views,
     guard, requests = _require_blob_view_read_via(server, expected)
     with guard, ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
+            stack.enter_context(patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                                       side_effect=AssertionError('branch view read fell back')))
         builder = view.new_read_builder()
         result = builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id')
@@ -695,7 +696,7 @@ def test_native_rest_blob_view_does_not_bypass_denied_dependency(rest_blob_views
         return route(method, path, parameters, data, headers)
 
     with patch.object(server, '_route_request', side_effect=deny_upstream), \
-            patch('pypaimon.read.table_read.TableRead._create_split_read',
+            patch('pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                   side_effect=AssertionError('denied dependency fell back')):
         builder = root.new_read_builder()
         with pytest.raises(Exception, match='upstream denied'):

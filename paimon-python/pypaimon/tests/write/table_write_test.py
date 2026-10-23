@@ -24,6 +24,7 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.arrow_schema import read_arrow_schema
 import pyarrow as pa
@@ -36,12 +37,14 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.write.table_write import TableWrite
+from pypaimon.execution.python.write.table_write import PythonTableWrite
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
     def test_large_string_compatibility_rejects_other_type_changes(self):
         writer = object.__new__(TableWrite)
+        writer._execution = PythonTableWrite(writer)
         writer.file_store_write = Mock(write_cols=None)
         writer.table_pyarrow_schema = pa.schema([
             ('id', pa.int32()),
@@ -51,7 +54,7 @@ class TableWriteTest(unittest.TestCase):
             ('id', pa.int32()),
             ('nested', pa.struct([pa.field('text', pa.large_string(), nullable=False)])),
         ])
-        writer._validate_pyarrow_schema(valid)
+        PythonTableWrite(writer)._validate_pyarrow_schema(valid)
         invalid = [
             valid.set(0, pa.field('id', pa.int64())),
             pa.schema(list(reversed(list(valid)))),
@@ -63,7 +66,7 @@ class TableWriteTest(unittest.TestCase):
         for schema in invalid:
             with self.subTest(schema=schema):
                 with self.assertRaisesRegex(ValueError, 'consistent'):
-                    writer._validate_pyarrow_schema(schema)
+                    PythonTableWrite(writer)._validate_pyarrow_schema(schema)
 
     @parameterized.expand([('append', False, '-1'), ('primary', True, '1'), ('postpone', True, '-2')])
     def test_large_string_input_roundtrip(self, mode, primary_key, bucket):
@@ -230,11 +233,11 @@ class TableWriteTest(unittest.TestCase):
     @staticmethod
     def _mock_table_write(partitions, buckets, schema):
         table_write = object.__new__(TableWrite)
+        table_write._execution = PythonTableWrite(table_write)
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(schema).fields)
         table_write.table_pyarrow_schema = schema
-        table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock(write_cols=None)
         table_write.row_key_extractor.extract_partition_bucket_groups.side_effect = (
@@ -308,11 +311,11 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write._execution = PythonTableWrite(table_write)
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(data.schema).fields)
         table_write.table_pyarrow_schema = data.schema
-        table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock(write_cols=None)
         table_write.row_key_extractor = Mock()
         table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
@@ -336,11 +339,11 @@ class TableWriteTest(unittest.TestCase):
             'payload': [b'a', b'b', b'c', b'd'],
         })
         table_write = object.__new__(TableWrite)
+        table_write._execution = PythonTableWrite(table_write)
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(data.schema).fields)
         table_write.table_pyarrow_schema = data.schema
-        table_write._validate_pyarrow_schema = Mock()
         table_write.file_store_write = Mock(write_cols=None)
         table_write.row_key_extractor = Mock()
         table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
@@ -1515,7 +1518,7 @@ class TableWriteTest(unittest.TestCase):
             self.assertEqual({2}, {m.total_buckets for m in messages})
             fixed_commit.commit(messages)
 
-        scanner = fixed.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(fixed.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.manifest_file_manager.read_entries_parallel(
             manifests, drop_stats=False
@@ -2001,13 +2004,13 @@ class TableWriteTest(unittest.TestCase):
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
-        table_write._validate_pyarrow_schema(pa.schema([
+        PythonTableWrite(table_write)._validate_pyarrow_schema(pa.schema([
             ('id', pa.int32()),
             ('payload', pa.binary(4)),
         ]))
 
         table_write.with_write_type(['payload'])
-        table_write._validate_pyarrow_schema(pa.schema([
+        PythonTableWrite(table_write)._validate_pyarrow_schema(pa.schema([
             ('payload', pa.binary(4)),
         ]))
 

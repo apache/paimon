@@ -250,6 +250,7 @@ def test_native_bridge_leaves_nested_value_validation_to_core(tmp_path):
 
 def test_schema_only_writer_keeps_strict_nested_validation():
     from pypaimon.write.table_write import TableWrite
+    from pypaimon.execution.python.write.table_write import PythonTableWrite
 
     writer = TableWrite.__new__(TableWrite)
     writer.file_store_write = SimpleNamespace(write_cols=None)
@@ -257,11 +258,11 @@ def test_schema_only_writer_keeps_strict_nested_validation():
         ('items', pa.list_(pa.field('element', pa.int32(), nullable=False)))])
     data = pa.table({'items': [[None]]}, schema=pa.schema([('items', pa.list_(pa.int32()))]))
     with pytest.raises(ValueError, match='consistent'):
-        writer._prepare_arrow_data(data)
+        PythonTableWrite(writer)._prepare_arrow_data(data)
 
 
 def test_python_filters_before_nested_normalization(tmp_path):
-    from pypaimon.write.table_write import TableWrite
+    from pypaimon.execution.python.write.table_write import PythonTableWrite
 
     table, _ = _table(tmp_path)
     writer = table.new_batch_write_builder().new_write()
@@ -283,7 +284,7 @@ def test_python_filters_before_nested_normalization(tmp_path):
         with patch(
                 'pypaimon.execution.python.write.table_write.normalize_arrow_write_nullability',
                 side_effect=normalize):
-            selected = TableWrite._prepare_arrow_data(writer, data)
+            selected = PythonTableWrite(writer)._prepare_arrow_data(data)
         assert selected.to_pydict() == {'id': [2], 'op': ['+I'], 'seq': [2], 'value': [[42]]}
     finally:
         writer.close()
@@ -291,6 +292,8 @@ def test_python_filters_before_nested_normalization(tmp_path):
 
 @pytest.mark.parametrize('ignored', [False, True])
 def test_python_retained_nested_schema_stays_strict_without_native_extension(tmp_path, ignored):
+    from pypaimon.execution.python.write.table_write import PythonTableWrite
+
     table, _ = _table(tmp_path)
     writer = table.new_batch_write_builder().new_write()
     writer.table_pyarrow_schema = pa.schema([field if field.name != 'value' else field.with_type(
@@ -301,10 +304,10 @@ def test_python_retained_nested_schema_stays_strict_without_native_extension(tmp
     try:
         with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
             if ignored:
-                assert writer._prepare_arrow_data(data).num_rows == 0
+                assert PythonTableWrite(writer)._prepare_arrow_data(data).num_rows == 0
             else:
                 with pytest.raises(ValueError, match='consistent'):
-                    writer._prepare_arrow_data(data)
+                    PythonTableWrite(writer)._prepare_arrow_data(data)
         assert not writer.file_store_write.data_writers
     finally:
         writer.close()

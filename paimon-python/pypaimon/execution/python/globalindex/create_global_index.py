@@ -49,6 +49,7 @@ from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer imp
     VindexVectorIndexWriter,
 )
 from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.index.data_evolution_index_source_meta import DataEvolutionIndexSourceMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
@@ -78,7 +79,7 @@ class PythonGlobalIndexBuilder:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
         scan = read_builder.new_scan()
-        plan = scan.plan_all_files()
+        plan = scan.plan_all()
         splits = plan.splits()
         if not splits:
             return []
@@ -114,7 +115,8 @@ class PythonGlobalIndexBuilder:
 
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
             return self._build_sorted_index(
-                splits, unindexed_ranges, index_field, table_read, index_path)
+                splits, unindexed_ranges, index_field, table_read, index_path,
+                DataEvolutionIndexSourceMeta(snapshot.id).serialize() if snapshot else None)
         if execution == "ray":
             from pypaimon.ray.vector_index_build import build_vector_index
             return build_vector_index(
@@ -131,7 +133,8 @@ class PythonGlobalIndexBuilder:
         return snapshot_manager.get_latest_snapshot()
 
     def _build_sorted_index(
-        self, splits, unindexed_ranges, index_field, table_read, index_path: str
+        self, splits, unindexed_ranges, index_field, table_read, index_path: str,
+        source_meta=None,
     ) -> List[CommitMessage]:
         key_serializer = create_serializer(index_field.type)
         configured_records_per_range = (
@@ -174,6 +177,7 @@ class PythonGlobalIndexBuilder:
                         index_field.id,
                         self._index_type,
                         result_entries,
+                        source_meta=source_meta,
                     )
                 )
             if index_adds:
@@ -479,6 +483,7 @@ def _to_index_manifest_entries(
     index_field_id: int,
     index_type: str,
     result_entries,
+    source_meta=None,
 ) -> List[IndexManifestEntry]:
     path_factory = table.path_factory().global_index_path_factory()
     entries = []
@@ -497,6 +502,7 @@ def _to_index_manifest_entries(
                 index_field_id=index_field_id,
                 extra_field_ids=None,
                 index_meta=result.meta,
+                source_meta=source_meta,
             ),
             external_path=external_path,
         )

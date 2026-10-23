@@ -77,28 +77,32 @@ def create_native_update(table, commit_user, columns):
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
-              ._with_commit_user(commit_user)
+              .with_commit_user(commit_user)
               .new_update())
     if columns is not None:
         writer.with_update_type(columns)
     return NativeBatchTableUpdate(table, writer)
 
 
-def create_native_update_by_row_id(table, commit_user, commit_identifier):
+def create_native_update_by_row_id(table, commit_user, commit_identifier, plan=None):
     """Create a core updater sharing one snapshot across incremental calls."""
     # Columns are selected per call; one core updater pins the snapshot and
     # tracks overlaps across Parquet and dedicated Blob updates.
     if not _native_update_columns_supported(table, None):
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(
+        table._copy_with_snapshot(plan.table._read_snapshot) if plan is not None else table)
     if native_table is None:
         return None
     if commit_identifier == BATCH_COMMIT_IDENTIFIER:
-        writer = (native_table.new_batch_write_builder()._with_commit_user(commit_user)
-                  .new_update().new_update_by_row_id())
+        update = native_table.new_batch_write_builder().with_commit_user(commit_user).new_update()
     else:
-        writer = (native_table.new_stream_write_builder().with_commit_user(commit_user)
-                  .new_update().new_update_by_row_id(commit_identifier))
+        update = native_table.new_stream_write_builder().with_commit_user(commit_user).new_update()
+    if plan is not None:
+        from pypaimon.execution.native.write.row_id_plan import native_plan
+        update.with_plan(native_plan(plan.table, plan.plan))
+    writer = (update.new_update_by_row_id() if commit_identifier == BATCH_COMMIT_IDENTIFIER
+              else update.new_update_by_row_id(commit_identifier))
     return NativeTableUpdateByRowId(
         table, commit_user, commit_identifier, writer)
 
@@ -111,7 +115,7 @@ def create_native_shard_updator(table, commit_user, projection, columns, shard, 
     if native_table is None:
         return None
     builder = (native_table.new_stream_write_builder().with_commit_user(commit_user) if stream else
-               native_table.new_batch_write_builder()._with_commit_user(commit_user))
+               native_table.new_batch_write_builder().with_commit_user(commit_user))
     update = builder.new_update()
     read_builder = table.new_read_builder()
     if projection is not None:
@@ -379,11 +383,11 @@ def create_native_upsert(table, commit_user, data, keys, columns):
                    for name in key_names):
             return None
     writer = (native_table.new_batch_write_builder()
-              ._with_commit_user(commit_user)
+              .with_commit_user(commit_user)
               .new_update()
               .with_update_type(columns))
     if blob_rows is not None:
-        writer._with_blob_uri_reader_factory(blob_rows)
+        writer.with_blob_uri_reader_factory(blob_rows)
     return NativeTableUpsert(table, writer, keys, data, blob_rows)
 
 
@@ -401,7 +405,7 @@ def create_native_predicate_update(table, commit_user, predicate, columns=None):
         # reading and callback execution belong to the core operation below.
         native_table.new_read_builder().with_filter(native_predicate)
     writer = (native_table.new_batch_write_builder()
-              ._with_commit_user(commit_user).new_update())
+              .with_commit_user(commit_user).new_update())
     return NativePredicateTableUpdate(table, writer, native_predicate)
 
 
@@ -434,21 +438,40 @@ def create_native_predicate_delete(table, commit_user, predicate):
         # Resolve all fields/operators before selecting the mutating operation.
         native_table.new_read_builder().with_filter(native_predicate)
     writer = (native_table.new_batch_write_builder()
-              ._with_commit_user(commit_user).new_update())
+              .with_commit_user(commit_user).new_update())
     return NativePredicateTableUpdate(table, writer, native_predicate)
 
 
-def create_native_delete(table, commit_user):
+def create_native_delete(table, commit_user, plan=None):
     """Select Rust's deletion-vector writer for supported batch deletes."""
     if not table.options.deletion_vectors_enabled(False):
         return None
-    native_table = _native_row_id_table(table)
+    native_table = _native_row_id_table(
+        table._copy_with_snapshot(plan.table._read_snapshot) if plan is not None else table)
     if native_table is None:
         return None
     writer = (native_table.new_batch_write_builder()
-              ._with_commit_user(commit_user)
+              .with_commit_user(commit_user)
               .new_update())
+    if plan is not None:
+        from pypaimon.execution.native.write.row_id_plan import native_plan
+        writer.with_plan(native_plan(plan.table, plan.plan))
     return NativeBatchTableUpdate(table, writer)
+
+
+def create_native_row_id_delete(table, plan=None):
+    """Adapt the direct deletion API to the existing core table updater."""
+    operation = create_native_delete(table, table.new_batch_write_builder().commit_user, plan)
+    return None if operation is None else NativeTableDeleteByRowId(operation)
+
+
+class NativeTableDeleteByRowId:
+
+    def __init__(self, operation):
+        self._operation = operation
+
+    def delete(self, row_ids):
+        return self._operation.delete_by_row_id(row_ids)
 
 
 def _raise_native_row_id_error(error):
@@ -533,11 +556,11 @@ class NativeTableUpdateByRowId(RowIdUpdateInputMixin):
                 arrow_field = pa.field(name, pa.list_(entries), nullable=arrow_field.nullable)
             data = data.append_column(arrow_field, pa.array(
                 [blobs.encode(value, field.type) for value in values], type=arrow_field.type))
-        self.writer._with_blob_uri_reader_factory(blobs)
+        self.writer.with_blob_uri_reader_factory(blobs)
         try:
             return self.update_columns(data, column_names)
         finally:
-            self.writer._with_blob_uri_reader_factory(None)
+            self.writer.with_blob_uri_reader_factory(None)
 
 
 class NativeTableUpsert:

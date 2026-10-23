@@ -224,20 +224,37 @@ def test_blob_consumer_flush_makes_local_payload_visible_before_prepare(tmp_path
         writer.close()
 
 
-def test_blob_consumer_can_be_replaced_cleared_and_cannot_change_after_write(tmp_path):
-    table = _table(tmp_path)
-    writer = table.new_batch_write_builder().new_write()
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('stream', [False, True])
+def test_blob_consumer_can_be_replaced_and_cleared_before_and_after_write(tmp_path, native, stream):
+    table = _table(tmp_path, {'write.native.enabled': str(native).lower()})
+    builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+    writer, commit = builder.new_write(), builder.new_commit()
+    received = []
     try:
+        if native:
+            assert isinstance(writer, NativeTableWrite)
         writer.with_blob_consumer(lambda name, descriptor: pytest.fail('replaced consumer invoked'))
         with pytest.raises(TypeError, match='callable'):
             writer.with_blob_consumer(123)
         writer.with_blob_consumer(None)
         writer.write_arrow(_data())
-        with pytest.raises(RuntimeError, match='before any write'):
-            writer.with_blob_consumer(None)
-        assert writer._python_writer is None
+        assert writer.with_blob_consumer(lambda name, descriptor: received.append((name, descriptor))) is writer
+        writer.write_arrow(_data(2))
+        # Java updates the factory setting; the existing bucket retains the
+        # cleared consumer it captured when its writer was first created.
+        assert not received
+        assert writer.with_blob_consumer(None) is writer
+        if stream:
+            commit.commit(writer.prepare_commit(1), 1)
+        else:
+            commit.commit(writer.prepare_commit())
+        assert _read(table, True, True) == _data().to_pylist() + _data(2).to_pylist()
+        if native:
+            assert writer._python_writer is None
     finally:
         writer.close()
+        commit.close()
 
 
 def test_blob_consumer_survives_switch_to_row_writer(tmp_path):

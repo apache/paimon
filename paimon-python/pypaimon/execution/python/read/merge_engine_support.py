@@ -81,6 +81,14 @@ _FIELD_IGNORE_RETRACT_SUFFIX = ".ignore-retract"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
 
 
+def validate_read(read) -> None:
+    """Check Python merge capabilities once, after this backend is selected."""
+    if getattr(read, '_python_merge_validated', False):
+        return
+    check_supported(read.table)
+    read._python_merge_validated = True
+
+
 def check_supported(table) -> None:
     """Raise ``NotImplementedError`` if the table's merge-engine
     configuration is outside what pypaimon's read path implements, or
@@ -206,6 +214,6 @@ def _option_is_truthy(raw) -> bool:
     return bool(raw)
 
 __all__ = [
-    "check_supported", "check_sequence_field_valid", "check_sequence_field_supported",
+    "validate_read", "check_supported", "check_sequence_field_valid", "check_sequence_field_supported",
     "partial_update_unsupported_options", "aggregation_unsupported_options",
 ]

@@ -52,6 +52,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
@@ -729,7 +730,7 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         # rows we picked.
         rb = table.new_read_builder().with_filter(pred)
         scan = rb.new_scan()
-        self.assertIsNone(scan.file_scanner._bucket_selector,
+        self.assertIsNone(PythonTableScan(scan)._file_scanner()._bucket_selector,
                           "value-only predicate must NOT produce a selector")
 
     def test_range_on_pk_falls_back_to_full_scan(self):
@@ -787,7 +788,7 @@ class BucketPruningIntegrationTest(unittest.TestCase):
     def test_manifest_bucket_pruning_keeps_unknown_metadata(self):
         table = self._create_pk_table('manifest_bucket_fallback')
         predicate = table.new_read_builder().new_predicate_builder().equal('id', 0)
-        scanner = table.new_read_builder().with_filter(predicate).new_scan().file_scanner
+        scanner = PythonTableScan(table.new_read_builder().with_filter(predicate).new_scan())._file_scanner()
         selected = next(iter(self._expected_buckets(table, [0])))
         other = (selected + 1) % self.NUM_BUCKETS
         meta = ManifestFileMeta('manifest', 1, 1, 0, SimpleStats.empty_stats(), 0,
@@ -861,7 +862,7 @@ class BucketPruningIntegrationTest(unittest.TestCase):
 
         rb = table.new_read_builder().with_filter(
             table.new_read_builder().new_predicate_builder().equal('id', 1))
-        scanner = rb.new_scan().file_scanner
+        scanner = PythonTableScan(rb.new_scan())._file_scanner()
         # Must NOT raise: the broken option falls back to "no pruning",
         # and the scan still finds the row.
         self.assertIsNone(scanner._init_bucket_selector())

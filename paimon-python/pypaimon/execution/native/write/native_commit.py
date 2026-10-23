@@ -56,7 +56,7 @@ def create_native_commit(table, commit_user, overwrite_partition=None, *, batch=
     if native_table is None:
         return None
     if batch or overwrite_partition is not None:
-        builder = native_table.new_batch_write_builder()._with_commit_user(commit_user)
+        builder = native_table.new_batch_write_builder().with_commit_user(commit_user)
         if overwrite_partition is not None:
             builder = builder.with_overwrite(overwrite_partition)
         return builder.new_commit()
@@ -200,6 +200,40 @@ def from_native_commit_messages(table, messages):
             file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
                 table, message.partition, message.bucket, file.file_name)
     return decoded
+
+
+def native_commit_error(error):
+    """Keep retry classification structured; never infer it from error text."""
+    from pypaimon_rust import RowIdExistenceConflict as NativeRowIdConflict
+    from pypaimon.write.row_id_conflict import RowIdExistenceConflict
+
+    if not isinstance(error, NativeRowIdConflict):
+        return error
+    return RowIdExistenceConflict._from_fields(
+        file_name=error.file_name, first_row_id=error.first_row_id,
+        row_count=error.row_count, bucket=error.bucket,
+        current_first_row_id=error.current_first_row_id,
+        current_row_count=error.current_row_count)
+
+
+def prepare_native_row_id_conflict_check(table, messages):
+    """Prepare a check without creating Python publication or conflict state."""
+    from pypaimon.execution.native.write.commit import NativeTableCommit
+
+    if not native_messages_supported(table, messages):
+        return None
+    native = create_native_commit(table, 'row-id-conflict-check', batch=True)
+    if native is None:
+        return None
+    try:
+        converted = to_native_commit_messages(table, messages)
+    except BaseException:
+        try:
+            native.close()
+        except BaseException:
+            pass
+        raise
+    return NativeTableCommit(native, is_batch=True), converted
 
 
 def native_commit_callback(table, callbacks):

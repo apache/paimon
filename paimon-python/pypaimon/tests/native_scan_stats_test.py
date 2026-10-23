@@ -371,6 +371,8 @@ def test_native_explain_preserves_the_authorized_plan_and_captured_policy(guarde
     assert plan.splits()
     assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse()
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native authorized read fell back')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native authorized read fell back')
+    ):
         assert reader.new_read().to_arrow(plan.splits()).to_pylist() == [{'id': 2, 'value': 'ab'}]

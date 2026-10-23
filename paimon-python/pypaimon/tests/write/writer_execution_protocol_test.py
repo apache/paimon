@@ -132,15 +132,20 @@ def test_stream_prepare_requires_one_signed_identifier_before_io(tmp_path, nativ
         writer.close()
 
 
-def test_bound_python_writer_keeps_live_context_and_dynamic_batch_hook():
+def test_bound_python_writer_uses_executor_helpers_and_live_context():
     batches = []
     original = pa.record_batch([pa.array([1], pa.int32())], names=['id'])
     replacement = pa.record_batch([pa.array([2], pa.int32())], names=['id'])
-    owner = SimpleNamespace(_prepare_arrow_schema=lambda data: original,
-                            write_arrow_batch=lambda batch, bucket=None: batches.append((batch, bucket)))
-    execution = PythonTableWrite(owner)
+    owner = SimpleNamespace(data=original)
+
+    class SelectingWriter(PythonTableWrite):
+        def _prepare_arrow_schema(self, data):
+            return self.writer.data
+
+    owner.write_arrow_batch = lambda batch, bucket=None: batches.append((batch, bucket))
+    execution = SelectingWriter(owner)
     execution.write_arrow('first', 1)
-    owner._prepare_arrow_schema = lambda data: replacement
+    owner.data = replacement
     execution.write_arrow('second', 2)
     assert batches == [(original, 1), (replacement, 2)]
     assert execution.writer is owner
@@ -297,3 +302,58 @@ def test_native_unpartitioned_rows_only_call_the_write_interface(tmp_path):
         assert core.write_arrow.call_args[0][0].to_pydict() == {'id': [2]}
     finally:
         writer.close()
+
+
+@pytest.mark.parametrize('postpone', [False, True])
+@pytest.mark.parametrize('input_', ['table', 'batch', 'row', 'pandas'])
+def test_python_executor_writes_without_private_writer_hooks(tmp_path, postpone, input_):
+    """Routing and prepare stay in the executor, including postpone overrides."""
+    from pypaimon.execution.python.write.postpone_batch_table_write import PythonPostponeFixedBucketWrite
+    from pypaimon.table.row.generic_row import GenericRow
+
+    schema = pa.schema([
+        pa.field('id', pa.int32(), nullable=False),
+        pa.field('pt', pa.string(), nullable=False),
+        ('value', pa.int32()),
+    ])
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    catalog.create_table('default.input', Schema.from_pyarrow_schema(
+        schema, primary_keys=['id', 'pt'] if postpone else [], partition_keys=['pt'], options={
+            'bucket': '-2' if postpone else '1',
+            'postpone.target-row-num-per-bucket': '1',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+            'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+        }), False)
+    table = catalog.get_table('default.input')
+    builder = table.new_batch_write_builder()
+    # The context exposes only public batch delegation, with no private schema
+    # or routing hooks from the public writer implementation.
+    owner = SimpleNamespace()
+    execution = (PythonPostponeFixedBucketWrite(owner) if postpone else PythonTableWrite(owner))
+    owner.write_arrow_batch = execution.write_arrow_batch
+    execution.initialize(table, builder.commit_user)
+    commit = builder.new_commit()
+    rows = [{'id': 1, 'pt': 'a', 'value': 10}, {'id': 2, 'pt': 'b', 'value': 20}]
+    data = pa.Table.from_pylist(rows, schema=schema)
+    try:
+        if input_ == 'table':
+            execution.write_arrow(data)
+        elif input_ == 'batch':
+            execution.write_arrow_batch(data.to_batches()[0])
+        elif input_ == 'row':
+            for row in rows:
+                execution.write_row(GenericRow([row[name] for name in schema.names], table.fields))
+        else:
+            execution.write_pandas(data.to_pandas())
+        messages = execution.prepare_commit(BATCH_COMMIT_IDENTIFIER)
+        assert len(messages) == 2
+        assert {tuple(message.partition) for message in messages} == {('a',), ('b',)}
+        assert all(message.bucket == 0 for message in messages)
+        commit.commit(messages)
+    finally:
+        execution.close()
+        commit.close()
+    read = table.new_read_builder()
+    actual = read.new_read().to_arrow(read.new_scan().plan().splits()).to_pylist()
+    assert sorted(actual, key=lambda row: row['id']) == rows

@@ -26,10 +26,10 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 from pypaimon.execution.native.read.plan import (native_plan)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.write.write_dispatch import NativeTableWrite
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 
 
 pytestmark = pytest.mark.native_plan
@@ -94,8 +94,10 @@ def _read(table, native_scan, native_read, streaming=False, snapshot=None):
     read = builder.new_read()
     with ExitStack() as stack:
         if native_read:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         if streaming:
             reader = read.to_arrow_batch_reader(plan.splits())
             try:
@@ -169,7 +171,7 @@ def test_data_directory_updates_deletes_history_and_abort(tmp_path, directory, n
     update = builder.new_update().with_update_type(['value'])
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(TableUpsertByKey, '_upsert_partition',
+            stack.enter_context(patch.object(PythonTableUpsert, '_upsert_partition',
                                              side_effect=AssertionError('Python upsert fallback')))
         messages = update.upsert_by_arrow_with_key(
             pa.table({'id': [1, 4], 'pt': ['a', 'b'], 'value': [11, 40]}, schema=_SCHEMA), ['id'])

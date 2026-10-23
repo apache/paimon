@@ -182,9 +182,10 @@ def _append_mutation(table, native, operation, only_matched=False, stream=False)
                     schema=pa.schema([('id', pa.int32()), ('value', pa.int32()), ('keep', pa.int32())]))
     with ExitStack() as stack:
         if native:
-            for method in ('pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_partition',
-                           'pypaimon.write.table_upsert_by_key.TableUpsertByKey._upsert_row_partition',
-                           'pypaimon.execution.python.write.merge_into._build_tables'):
+            for method in (
+                    'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._upsert_partition',
+                    'pypaimon.execution.python.write.table_upsert_by_key.PythonTableUpsert._upsert_row_partition',
+                    'pypaimon.execution.python.write.merge_into._build_tables'):
                 stack.enter_context(patch(method, side_effect=AssertionError('Python historical mutation fallback')))
         if operation == 'upsert':
             return update.upsert_by_arrow_with_key(data, ['id'], **kwargs)

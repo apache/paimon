@@ -17,8 +17,8 @@
 
 """Read existing bucket layouts through Rust before distributed input work."""
 
-from pypaimon.execution.native.read.plan import native_plan
 from pypaimon.execution.native.runtime import native_runtime_available
+from pypaimon.execution.native.write.native_commit import create_native_write_table
 from pypaimon.write.bucket_planning import PostponeBucketPlanning
 
 
@@ -33,18 +33,14 @@ class NativePostponeBucketPlanner(PostponeBucketPlanning):
 
     @staticmethod
     def _load_bucket_metadata(table):
-        # PartitionStat does not carry total_buckets. Complete file planning
-        # preserves that layout in the shared Split v1 metadata without ever
-        # creating a Python scanner, reader or data writer.
-        known = {}
-        for split in native_plan(table, all_files=True).splits():
-            if split.bucket < 0 or split.total_buckets is None or split.total_buckets <= 0:
-                continue
-            partition = tuple(split.partition.values)
-            previous = known.get(partition)
-            if previous is not None and previous != split.total_buckets:
-                raise RuntimeError(
-                    "Partition {} has different total buckets {} and {}"
-                    .format(partition, previous, split.total_buckets))
-            known[partition] = split.total_buckets
-        return known
+        # Writer restoration uses the catalog's write identity. Query plans
+        # would add SELECT rules and can combine different physical layouts.
+        native_table = create_native_write_table(table)
+        if native_table is None:
+            raise RuntimeError('Native bucket metadata planning is unavailable')
+        plan = native_table.new_postpone_fixed_bucket_write_builder().resolve_bucket_plan()
+        # A partition key may itself be called total_buckets. Keep the
+        # positional schema used by the Core plan and with_bucket_plan input.
+        columns = [column.to_pylist() for column in plan.columns]
+        return {tuple(column[row] for column in columns[:-1]): columns[-1][row]
+                for row in range(plan.num_rows)}

@@ -22,9 +22,10 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_scan import PythonTableScan
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.table_read import TableRead
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -155,7 +156,7 @@ def test_limit_is_applied_after_masked_filter(table):
     assert read(table, predicate, projection=['id'], limit=1) == [{'id': 2}]
 
 
-def test_plan_all_files_authorizes_every_column_before_exposing_inventory(table):
+def test_plan_all_authorizes_every_column_before_exposing_inventory(table):
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
     table = table.copy({'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'})
     selected = []
@@ -170,7 +171,7 @@ def test_plan_all_files_authorizes_every_column_before_exposing_inventory(table)
     scan = table.new_read_builder().with_projection(['id']).new_scan()
     assert scan.plan().splits()
     with pytest.raises(TableNoPermissionException):
-        scan.plan_all_files()
+        scan.plan_all()
     assert selected == [['id'], None]
 
 
@@ -220,14 +221,14 @@ def test_or_arms_match_independently(table, masked_value, expected):
 def test_unmasked_conjunct_is_pushed_to_split_reads(table, monkeypatch):
     authorize(table, rules())
     pushed = []
-    create_split_read = TableRead._create_split_read
+    create_split_read = PythonTableRead._create_split_read
 
     def recording(self, *args, **kwargs):
         split_read = create_split_read(self, *args, **kwargs)
         pushed.append(split_read.predicate)
         return split_read
 
-    monkeypatch.setattr(TableRead, '_create_split_read', recording)
+    monkeypatch.setattr(PythonTableRead, '_create_split_read', recording)
     predicates = PredicateBuilder(table.fields)
     unmasked = predicates.greater_than('id', 1)
     for combine, expected_push, expected_ids in [
@@ -262,8 +263,8 @@ def test_unmasked_conjunct_keeps_its_pushdown(table):
     predicate = PredicateBuilder.and_predicates([unmasked, predicates.is_null('secret')])
     scan = table.new_read_builder().with_filter(predicate).new_scan()
     scan.plan()
-    assert scan.file_scanner.predicate == unmasked
-    assert scan.file_scanner.auth_has_non_partition_filter
+    assert PythonTableScan(scan)._file_scanner().predicate == unmasked
+    assert PythonTableScan(scan)._file_scanner().auth_has_non_partition_filter
 
 
 def test_same_scan_refreshes_masked_filter_rules(table):
@@ -289,12 +290,43 @@ def test_explain_keeps_masked_filter_candidates(table):
 
 
 @pytest.mark.parametrize('table', ['partitioned-append', 'partitioned-primary-key'], indirect=True)
-def test_explicit_partition_filter_on_masked_key_is_rejected(table):
+@pytest.mark.parametrize('file_scanner_selector', [False, True])
+def test_explicit_partition_filter_on_masked_key_is_rejected(table, file_scanner_selector):
     authorize(table, rules())
     predicate = PredicateBuilder(table.fields).equal('secret', 'alpha')
-    scan = table.new_read_builder().with_partition_filter(predicate).new_scan()
+    builder = table.new_read_builder()
+    if file_scanner_selector:
+        scan = builder.new_scan()
+        scan.file_scanner.partition_key_predicate = predicate.new_index(0)
+    else:
+        scan = builder.with_partition_filter(predicate).new_scan()
     with pytest.raises(ValueError, match='partition filters cannot reference masked columns'):
         scan.plan()
+
+
+@pytest.mark.parametrize('table', ['partitioned-append', 'partitioned-primary-key'], indirect=True)
+@pytest.mark.parametrize('derived_partition', [False, True])
+@pytest.mark.parametrize('selected_partition', [None, 'beta'])
+def test_file_partition_selection_survives_masked_predicate_pruning(
+        table, derived_partition, selected_partition):
+    authorize(table, TableQueryAuthResult(None, {'salt': json.dumps({'name': 'NULL'})}))
+    predicates = PredicateBuilder(table.fields)
+    predicate = predicates.is_null('salt')
+    if derived_partition:
+        predicate = predicates.and_predicates([predicate, predicates.equal('secret', 'alpha')])
+    builder = table.new_read_builder().with_filter(predicate).with_projection(['id'])
+    scan = builder.new_scan()
+    scan.file_scanner.partition_key_predicate = (
+        None if selected_partition is None else predicates.equal('secret', selected_partition).new_index(0))
+    plan = scan.plan()
+    expected = ({'alpha'} if derived_partition else {'alpha', 'beta', 'gamma'})
+    if selected_partition is not None:
+        expected = {'beta'}
+    assert {split.partition.values[0] for split in plan.splits()} == expected
+    expected_ids = [1] if derived_partition else [1, 2, 3]
+    if selected_partition is not None:
+        expected_ids = [] if derived_partition else [2]
+    assert sorted(row['id'] for row in builder.new_read().to_arrow(plan.splits()).to_pylist()) == expected_ids
 
 
 @pytest.mark.parametrize('phase', ['initial', 'follow_up', 'catch_up'])
@@ -320,9 +352,9 @@ def test_write_scan_restores_filter_after_rules_are_removed(table):
     scan = builder.new_scan()
     scan.plan()
     state[0] = None
-    splits = scan.plan_all_files().splits()
-    assert scan.file_scanner.predicate == predicate
-    assert not scan.file_scanner.auth_has_non_partition_filter
+    splits = scan.plan_all().splits()
+    assert PythonTableScan(scan)._file_scanner().predicate == predicate
+    assert not PythonTableScan(scan)._file_scanner().auth_has_non_partition_filter
     assert arrow_rows(builder.new_read().to_arrow(splits)) == []
 
 

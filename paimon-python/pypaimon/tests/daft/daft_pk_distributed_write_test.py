@@ -34,6 +34,7 @@ pypaimon = pytest.importorskip("pypaimon")
 daft = pytest.importorskip("daft")
 
 from daft.recordbatch.micropartition import MicroPartition
+from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.daft import daft_datasink
 from pypaimon.daft.daft_paimon import _read_table, _write_table
 from pypaimon.daft.daft_datasink import PaimonDataSink
@@ -235,7 +236,7 @@ def test_postpone_mode_primary_key_write_preserves_existing_path(catalog):
 
     assert sum(summary["rows"]) == 2
     assert table.snapshot_manager().get_latest_snapshot() is not None
-    scanner = table.new_read_builder().new_scan().file_scanner
+    scanner = PythonTableScan(table.new_read_builder().new_scan())._file_scanner()
     manifests, _ = scanner.manifest_scanner()
     entries = scanner.manifest_file_manager.read_entries_parallel(manifests)
     assert {entry.bucket for entry in entries} == {-2}
