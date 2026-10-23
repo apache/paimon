@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -51,23 +52,41 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
             LoggerFactory.getLogger(PartitionValuesTimeExpireStrategy.class);
 
     private final PartitionTimeExtractor timeExtractor;
+    private final boolean retainLatest;
 
     public PartitionValuesTimeExpireStrategy(CoreOptions options, RowType partitionType) {
         super(partitionType, options.partitionDefaultName());
         String timePattern = options.partitionTimestampPattern();
         String timeFormatter = options.partitionTimestampFormatter();
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
+        this.retainLatest = options.partitionExpireRetainLatest();
     }
 
     @Override
     public List<PartitionEntry> selectExpiredPartitions(
             FileStoreScan scan, LocalDateTime expirationTime) {
-        return scan.withPartitionFilter(new PartitionValuesTimePredicate(expirationTime))
-                .readPartitionEntries();
+        PartitionValuesTimePredicate predicate = new PartitionValuesTimePredicate(expirationTime);
+        if (!retainLatest) {
+            return scan.withPartitionFilter(predicate).readPartitionEntries();
+        }
+
+        List<PartitionEntry> partitions = scan.readPartitionEntries();
+        List<PartitionEntry> expired =
+                partitions.stream()
+                        .filter(entry -> predicate.test(entry.partition()))
+                        .collect(Collectors.toList());
+        retainLatestPartition(
+                partitions, expired, Comparator.comparing(this::extractPartitionTime));
+        return expired;
     }
 
     public boolean isExpired(LocalDateTime expireDateTime, BinaryRow partition) {
         return new PartitionValuesTimePredicate(expireDateTime).test(partition);
+    }
+
+    private LocalDateTime extractPartitionTime(PartitionEntry entry) {
+        return timeExtractor.extract(
+                partitionKeys, Arrays.asList(convertPartition(entry.partition())));
     }
 
     /** The expired partition predicate uses the date-format value of the partition. */
