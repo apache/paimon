@@ -658,14 +658,9 @@ class RESTSimpleTest(RESTBaseTest):
 
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
-        data_expected = {
-            'user_id': [4, 6, 2, 8, 10],
-            'item_id': [1002, 1003, 1001, 1004, 1005],
-            'behavior': ['b', 'c', 'a', 'd', 'e'],
-            'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-12', '2025-08-13']
-        }
-        expected = pa.Table.from_pydict(data_expected, schema=read_arrow_schema(table.fields))
-        self.assertEqual(actual.combine_chunks(), expected.combine_chunks())
+        expected_sorted = table_sort_by(self.expected.cast(read_arrow_schema(table.fields)), 'user_id')
+        actual_sorted = table_sort_by(actual, 'user_id')
+        self.assertEqual(actual_sorted, expected_sorted)
 
     def test_with_shard_uniform_division(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

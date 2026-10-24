@@ -110,9 +110,10 @@ def _read(table, native, window=(0, 300), shard=None, predicate=None,
         scan.with_shard(*shard)
     with ExitStack() as stack:
         if native:
+            # Public scanner hooks select Python; guard the implementation instead.
             for method in ('scan', 'scan_with_stats'):
-                stack.enter_context(patch.object(
-                    scan.file_scanner, method,
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.' + method,
                     side_effect=AssertionError('batch changelog planning used Python')))
         plan = scan.scan_with_stats()[0] if with_stats else scan.plan()
     read = builder.new_read()
