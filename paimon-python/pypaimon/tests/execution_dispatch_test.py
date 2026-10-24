@@ -58,8 +58,9 @@ def test_fork_error_is_never_retried_by_python():
 
 def test_native_write_error_cannot_trigger_python_replay():
     failure = OSError('write may already have created a file')
-    native = SimpleNamespace(stream=False, write_arrow_batch=Mock(side_effect=failure))
     table = SimpleNamespace(options=SimpleNamespace(native_write_enabled=lambda: True))
+    native = SimpleNamespace(table=table, commit_user='writer', static_partition=None,
+                             stream=False, write_arrow_batch=Mock(side_effect=failure))
     with patch('pypaimon.read.merge_engine_support.check_sequence_field_supported'), \
             patch('pypaimon.execution.native.write.native_write.create_native_write', return_value=native), \
             patch.object(dispatch, 'create_python_write') as python_write:
@@ -67,6 +68,7 @@ def test_native_write_error_cannot_trigger_python_replay():
         with pytest.raises(OSError) as caught:
             writer.write_arrow_batch('batch')
         assert caught.value is failure
+        native.write_arrow_batch.assert_called_once_with('batch', None)
         python_write.assert_not_called()
 
 

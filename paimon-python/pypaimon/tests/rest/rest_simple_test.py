@@ -26,12 +26,8 @@ from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, Ta
     DatabaseNotExistException, TableNotExistException
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-from pypaimon.execution.python.write.row_key_extractor import (
-    FixedBucketRowKeyExtractor,
-    DynamicBucketRowKeyExtractor,
-    UnawareBucketRowKeyExtractor,
-)
 
 if sys.version_info[:2] == (3, 6):
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by
@@ -136,7 +132,7 @@ class RESTSimpleTest(RESTBaseTest):
 
         # Write data with single partition
         table_write = write_builder.new_write()
-        self.assertIsInstance(table_write._execution.row_key_extractor, UnawareBucketRowKeyExtractor)
+        self.assertEqual(table.bucket_mode(), BucketMode.BUCKET_UNAWARE)
 
         table_commit = write_builder.new_commit()
         data = {
@@ -616,7 +612,7 @@ class RESTSimpleTest(RESTBaseTest):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        self.assertIsInstance(table_write._execution.row_key_extractor, DynamicBucketRowKeyExtractor)
+        self.assertEqual(table.bucket_mode(), BucketMode.HASH_DYNAMIC)
 
         pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
@@ -646,7 +642,7 @@ class RESTSimpleTest(RESTBaseTest):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        self.assertIsInstance(table_write._execution.row_key_extractor, FixedBucketRowKeyExtractor)
+        self.assertEqual(table.bucket_mode(), BucketMode.HASH_FIXED)
 
         pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
