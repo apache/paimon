@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
 from pypaimon.read.plan import Plan
@@ -69,7 +70,7 @@ def test_native_scan_does_not_construct_python_executors(table, method, unrestri
 
 def test_python_scanner_is_constructed_only_after_native_preparation_fails(table):
     with patch('pypaimon.execution.python.read.table_scan.FileScanner', wraps=FileScanner) as create, \
-            patch('pypaimon.read.table_scan.TableScan._native_plan_supported', return_value=True), \
+            patch('pypaimon.execution.native.read.plan.NativeTableScan._native_plan_supported', return_value=True), \
             patch('pypaimon.execution.native.read.plan.native_plan', side_effect=RuntimeError('prepare')):
         scan = table.new_read_builder().new_scan().with_shard(1, 3).with_row_ranges([Range(1, 4)])
         create.assert_not_called()
@@ -90,7 +91,7 @@ def test_native_timestamp_scan_delegates_snapshot_selection_and_authorization(ta
         stack.enter_context(patch.object(
             table.catalog_environment, 'table_query_auth', return_value=object()))
         stack.enter_context(patch(
-            'pypaimon.read.table_scan.TableScan._native_plan_supported', return_value=True))
+            'pypaimon.execution.native.read.plan.NativeTableScan._native_plan_supported', return_value=True))
         stack.enter_context(patch(
             'pypaimon.execution.native.table._native_query_auth_supported', return_value=True))
         stack.enter_context(patch(
@@ -111,7 +112,7 @@ def test_explicit_scanner_access_and_mutation_remain_visible_to_native(table):
     assert scanner is scan.file_scanner
     scanner.with_slice(2, 9).with_row_ranges([Range(20, 30)])
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)) as native:
-        scan._try_native_plan()
+        NativeTableScan(scan).plan()
     assert native.call_args.kwargs['row_position_slice'] == (2, 9)
     assert native.call_args.kwargs['row_ranges'] == [(20, 30)]
 

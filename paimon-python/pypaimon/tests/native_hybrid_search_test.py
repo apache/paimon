@@ -458,13 +458,13 @@ def test_multimodal_search_and_row_lookup_share_resolved_metadata(rest_catalog, 
 
 
 def test_unsupported_literal_qualifies_before_core_execution(rest_catalog):
+    from pypaimon.execution.python.read.search import hybrid_search
     catalog, _ = rest_catalog
     table = _table(catalog)
     predicate = table.new_read_builder().new_predicate_builder().equal('id', 1.0)
     classic = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
     expected = _scores(_builder(classic, predicate=predicate).execute_local())
-    original = HybridSearchBuilderImpl.route_builders
-    with patch.object(HybridSearchBuilderImpl, 'route_builders', autospec=True, side_effect=original) as fallback:
+    with patch.object(hybrid_search, 'route_builders', wraps=hybrid_search.route_builders) as fallback:
         actual = _scores(_builder(table, predicate=predicate).execute_local())
     fallback.assert_called_once()
     assert set(actual) == {1}

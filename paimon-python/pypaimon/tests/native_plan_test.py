@@ -22,6 +22,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import pyarrow
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
 from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
@@ -514,7 +515,7 @@ class NativePlanTest(unittest.TestCase):
             fs = Mock(partition_key_predicate=None)
             scan = _scan(True, fs)
             setattr(scan.table.catalog_environment.catalog_loader.context(), attr, object())
-            self.assertTrue(scan._native_plan_supported())
+            self.assertTrue(NativeTableScan(scan)._native_plan_supported())
 
     def test_plan_native_empty_preserves_snapshot_without_fallback(self):
         for snapshot_id in (None, 7):

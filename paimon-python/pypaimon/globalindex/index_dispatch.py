@@ -106,19 +106,6 @@ def build_global_index_drop(request, partition_filter):
     return execute(request, partition_filter)
 
 
-def build_python_vector_index(builder, splits, unindexed_ranges, index_field, table_read,
-                              index_path, concurrency, remote_args):
-    from pypaimon.execution.python.globalindex.ray_index_build import build_vector_index
-    return build_vector_index(
-        builder, splits, unindexed_ranges, index_field, table_read,
-        index_path, concurrency, remote_args)
-
-
-def build_python_vector_index_shard(context, shard, file_name):
-    from pypaimon.execution.python.globalindex.ray_index_build import _build_shard
-    return _build_shard(context, shard, file_name)
-
-
 def build_native_vector_index_shard(table, shard):
     from pypaimon.execution.native.write.native_index_build import build_native_index_shard
     return build_native_index_shard(table, shard)

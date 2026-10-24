@@ -159,11 +159,17 @@ def execute_full_text_search(builder):
     return builder.new_full_text_read().read_plan(builder.new_full_text_scan().scan())
 
 
-def execute_hybrid_search(builder, executor=None):
+def _standard_hybrid_builder(builder):
     from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
-    # Custom implementations execute through their public route/rank hooks;
-    # only the default implementation owns the native configuration protocol.
-    if isinstance(builder, HybridSearchBuilderImpl) and _native_requested(builder):
+    # Instance and subclass hooks own their execution protocol. Native cannot
+    # replace them, and copying their owner would change observable side effects.
+    return type(builder) is HybridSearchBuilderImpl and not any(name in vars(builder) for name in (
+        'route_builders', 'to_route_result', 'rank', '_new_vector_search_builder', '_new_full_text_search_builder'))
+
+
+def execute_hybrid_search(builder, executor=None):
+    standard = _standard_hybrid_builder(builder)
+    if standard and _native_requested(builder):
         from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
         result = (try_native_hybrid_search(builder) if executor is None else
                   try_native_hybrid_search(builder, executor=executor))

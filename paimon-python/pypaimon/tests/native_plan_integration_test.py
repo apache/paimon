@@ -28,6 +28,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -232,7 +233,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         scan = builder.new_scan()
         # Force the capability branch that motivates this bridge: Python owns
         # planning, while Rust still performs the physical read.
-        with patch.object(scan, '_native_plan_supported', return_value=False):
+        with patch.object(NativeTableScan, '_native_plan_supported', return_value=False):
             plan = scan.plan()
         self.assertTrue(plan.splits())
         self.assertTrue(all(
@@ -268,7 +269,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         })
         builder = table.new_read_builder()
         scan = builder.new_scan().with_row_ranges([Range(1, 1)])
-        with patch.object(scan, '_native_plan_supported', return_value=False):
+        with patch.object(NativeTableScan, '_native_plan_supported', return_value=False):
             plan = scan.plan()
 
         with patch(
@@ -1325,7 +1326,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         scan = builder.new_scan().with_global_index_result(
             GlobalIndexResult.from_range(Range(1, 1)))
 
-        self.assertTrue(scan._native_plan_supported())
+        self.assertTrue(NativeTableScan(scan)._native_plan_supported())
         with patch.object(
                 scan.file_scanner, 'scan', side_effect=AssertionError("fallback")):
             plan = scan.plan()

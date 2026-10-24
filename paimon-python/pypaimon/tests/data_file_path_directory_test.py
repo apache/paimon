@@ -27,6 +27,7 @@ from unittest import mock
 
 import pyarrow as pa
 
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon import CatalogFactory, Schema
 
 
@@ -103,7 +104,7 @@ class DataFilePathDirectoryTest(unittest.TestCase):
             "db.t_native", {"data-file.path-directory": "data"})
         scan = table.new_read_builder().new_scan()
         with mock.patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True):
-            self.assertTrue(scan._native_plan_supported())
+            self.assertTrue(NativeTableScan(scan)._native_plan_supported())
 
     def test_native_write_dispatches_with_configured_directory(self):
         table = self._create_with_options(
@@ -111,12 +112,16 @@ class DataFilePathDirectoryTest(unittest.TestCase):
                                   "write.native.enabled": "true"})
         from pypaimon.write.write_dispatch import NativeTableWrite
 
-        adapter = mock.Mock(spec=['write_arrow_batch', 'prepare_commit', 'close', 'stream', '_batch_committed'])
+        adapter = mock.Mock(spec=['table', 'commit_user', 'static_partition',
+                                  'write_arrow_batch', 'prepare_commit', 'close', 'stream', '_batch_committed'])
+        builder = table.new_batch_write_builder()
+        adapter.table = table
+        adapter.commit_user = builder.commit_user
+        adapter.static_partition = None
         adapter.stream = False
         adapter._batch_committed = False
         messages = []
         adapter.prepare_commit.return_value = messages
-        builder = table.new_batch_write_builder()
         with mock.patch("pypaimon.execution.native.write.native_write.create_native_write",
                         return_value=adapter) as prepare:
             writer = builder.new_write()

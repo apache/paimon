@@ -115,7 +115,7 @@ def test_raw_file_dispatch_does_not_probe_query_result_capabilities(table):
     table = table.copy({'scan.native-plan.enabled': 'true'})
     scan = table.new_read_builder().with_limit(1).new_scan()
     scanner = scan.file_scanner.with_chunk_shuffle(1, 2)
-    with patch.object(scan, '_native_plan_supported', side_effect=AssertionError('Query transform probe')), \
+    with patch.object(NativeTableScan, '_native_plan_supported', side_effect=AssertionError('Query transform probe')), \
             patch.object(NativeTableScan, 'plan_files', return_value=(['file'], 7)) as native:
         assert scanner.plan_files() == ['file']
     native.assert_called_once_with(False, False)
@@ -125,11 +125,11 @@ def test_file_filters_are_forwarded_only_after_explicit_configuration(table):
     scan = table.new_read_builder().new_scan()
     facade = scan.file_scanner
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)) as native:
-        scan._try_native_plan()
+        NativeTableScan(scan).plan()
         assert 'file_filters' not in native.call_args[1]
         facade.skip_level0 = True
         facade.with_all_buckets()
-        scan._try_native_plan()
+        NativeTableScan(scan).plan()
         assert native.call_args[1]['file_filters'] == (True, False)
 
 
@@ -143,7 +143,7 @@ def test_changed_file_predicate_is_used_by_native_planning(table, assign_directl
     else:
         scanner._set_predicate(predicate)
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)) as native:
-        scan._try_native_plan()
+        NativeTableScan(scan).plan()
     assert native.call_args[1]['predicate'] is predicate
 
 
@@ -203,7 +203,7 @@ def test_clearing_partition_selector_restores_derived_pruning_without_native_fal
         return None
 
     scan._query_auth_fn = authorize
-    with patch.object(scan, '_native_plan_supported', return_value=True), \
+    with patch.object(NativeTableScan, '_native_plan_supported', return_value=True), \
             patch('pypaimon.execution.native.read.plan.native_plan',
                   return_value=expected) as native, \
             patch('pypaimon.execution.python.read.table_scan.FileScanner',
@@ -302,7 +302,7 @@ def test_incremental_facade_retains_level_zero_after_native_preparation_fails(tm
                            'incremental-between-timestamp': '0,9223372036854775807'})
     scan = selected.new_read_builder().new_scan()
     assert scan.file_scanner.skip_level0 is False
-    with patch.object(scan, '_native_plan_supported', return_value=True), \
+    with patch.object(NativeTableScan, '_native_plan_supported', return_value=True), \
             patch('pypaimon.execution.native.read.plan.native_plan', return_value=None):
         plan = scan.plan()
     assert len(plan.splits()) == 1
@@ -352,7 +352,7 @@ def test_raw_metadata_never_falls_back_past_restricted_authorization(table, nati
     table = table.copy({'scan.native-plan.enabled': str(native_failure).lower()})
     scan = table.new_read_builder().new_scan()
     scan._query_auth_fn = object()
-    with patch.object(scan, '_native_plan_supported', return_value=True), \
+    with patch.object(NativeTableScan, '_native_plan_supported', return_value=True), \
             patch('pypaimon.execution.native.table._native_query_auth_supported', return_value=True), \
             patch.object(NativeTableScan, 'plan_files', return_value=None), \
             patch('pypaimon.read.table_scan.authorize', return_value=object()) as authorize, \

@@ -16,7 +16,7 @@
 # under the License.
 
 from dataclasses import replace
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Optional, Tuple, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.auth_support import (
@@ -184,44 +184,6 @@ class TableScan:
     def _create_file_scanner(self) -> "FileScanner":
         from pypaimon.read.read_dispatch import new_file_scanner
         return new_file_scanner(self)
-
-    def _native_requested(self) -> bool:
-        from pypaimon.read.read_dispatch import native_plan_requested
-        return native_plan_requested(self)
-
-    def _native_plan_supported(self) -> bool:
-        # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        return NativeTableScan(self)._native_plan_supported()
-
-    def _native_plan_supported_impl(self) -> bool:
-        """Fall back to the Python scanner for scans native can't carry:
-        a primary-key table whose trimmed PK is empty (PK equals the partition
-        key; Rust rejects this schema), unsupported time travel selectors,
-        custom authorization, a missing pypaimon-rust, or a catalog / identifier Rust
-        cannot reconstruct. Keep this capability gate in sync when adding scan
-        features."""
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        return NativeTableScan(self)._native_plan_supported_impl()
-
-    def _native_global_index_result_supported(self, request: Optional[ScanRequest] = None) -> bool:
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        return NativeTableScan(self)._native_global_index_result_supported(request)
-
-    def _native_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        return NativeTableScan(self)._native_row_ranges()
-
-    def _try_native_plan(self, all_files=False) -> Optional[Plan]:
-        """Plan via pypaimon_rust, then drop partitions the predicate rejects.
-
-        Predicate and limit are pushed into Rust planning and are still enforced
-        by the reader. Snapshot metadata is preserved even when pruning removes
-        every split.
-        """
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        execution = NativeTableScan(self)
-        return execution.plan_all() if all_files else execution.plan()
 
 
 __all__ = [

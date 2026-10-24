@@ -124,6 +124,11 @@ consumed by the explicitly selected Python workers without per-worker rescans.
 Python Blob View and search readers keep their internal source reads and scans
 in Python, including captured snapshot views. Public table copies only share
 resource containers; backend caches are allocated by the backend that uses them.
+Hybrid queries that select Python keep their default route planning, child
+execution and rank fusion in Python. Explicit subclass and instance hooks retain
+their original owners; standalone public route and rank calls still select their
+own backend. Scan selection, including LeRobot's indexed-read preference, belongs
+to `read_dispatch`; public scans do not mirror private Native capability methods.
 
 Postpone bucket metadata is writer state. Native obtains it from the Core write
 builder, preserving per-file layout validation and write authorization without
@@ -283,7 +288,9 @@ preserve the configured changelog sequence.
 Both shard updaters expose `arrow_reader()`, `update_by_arrow_batch(data)`,
 `prepare_commit()` and `close()`. They track actual visible row IDs, require a
 complete read/update cycle before preparation and preserve prepared files when
-closed. This matters when deletion vectors hide physical rows.
+closed. This matters when deletion vectors hide physical rows. The selected
+executor owns the reader, writer, pending batches and read/update cycle state;
+the public facade only delegates these operations.
 
 Python executors bind an explicit public context and retain its instance hooks;
 Native adapters own Rust handles. The context is not copied or hidden behind a

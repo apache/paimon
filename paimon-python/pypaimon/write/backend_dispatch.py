@@ -313,12 +313,10 @@ def create_python_row_id_delete(table, precomputed=None):
     return PythonTableDeleteByRowId().initialize(table, precomputed)
 
 
-def create_python_shard_updator(owner, table, projection, columns, commit_user, shard, shard_count):
+def create_python_shard_updator(table, projection, columns, commit_user, shard, shard_count):
     """Initialize the Python shard resources only after backend selection."""
     from pypaimon.execution.python.write.table_update import ShardTableUpdator
-    execution = ShardTableUpdator(owner)
-    execution.initialize(table, projection, columns, commit_user, shard, shard_count)
-    return execution
+    return ShardTableUpdator(table, projection, columns, commit_user, shard, shard_count)
 
 
 def create_python_update_operation(context, commit_identifier, predicate=None, *, has_callable=False, has_array=False):
@@ -339,7 +337,7 @@ def create_python_merge_into_operation(
         commit_user=commit_user, commit_identifier=commit_identifier)
 
 
-def create_shard_update_execution(owner, table, projection, columns, commit_user, shard, shard_count):
+def create_shard_update_execution(table, projection, columns, commit_user, shard, shard_count):
     """Select the direct shard constructor's backend before capturing files."""
     from pypaimon.write.update_validation import _authorize_update
     _authorize_update(table)
@@ -347,7 +345,7 @@ def create_shard_update_execution(owner, table, projection, columns, commit_user
         'shard_update', table, commit_user, projection, columns, shard, shard_count)
     if native is not None:
         return native
-    return create_python_shard_updator(owner, table, projection, columns, commit_user, shard, shard_count)
+    return create_python_shard_updator(table, projection, columns, commit_user, shard, shard_count)
 
 
 def create_row_id_plan_execution(table, plan):

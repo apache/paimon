@@ -80,7 +80,7 @@ def test_raw_scope_clears_cached_query_rules(table, restriction, native_fallback
     scan.plan()
     source = scan._python_file_scanner
     state['rules'] = None
-    with patch.object(scan, '_native_requested', return_value=native_fallback), \
+    with patch('pypaimon.read.read_dispatch.native_plan_requested', return_value=native_fallback), \
             patch.object(NativeTableScan, 'plan_files', return_value=None) as native:
         entries = scan.file_scanner.plan_files()
     assert {tuple(entry.partition.values) for entry in entries} == (
@@ -104,7 +104,7 @@ def test_restricted_raw_scope_does_not_clear_cached_rules(table, operation):
     with patch.object(source, 'plan_files', side_effect=AssertionError('Unauthorized file access')), \
             patch.object(NativeTableScan, 'plan_files',
                          side_effect=AssertionError('Unauthorized Native file access')) as native, \
-            patch.object(scan, '_try_native_plan',
+            patch.object(NativeTableScan, 'plan_all',
                          side_effect=AssertionError('Unauthorized Native planning')) as native_plan:
         with pytest.raises(TableNoPermissionException):
             plan()
