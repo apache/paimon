@@ -22,9 +22,9 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -66,25 +66,15 @@ public class ListUtils {
             List<? extends E> list, List<?> replaced, List<? extends E> replacement) {
         checkArgument(!replaced.isEmpty(), "Cannot replace an empty list.");
 
-        for (int start = 0; start <= list.size() - replaced.size(); start++) {
-            boolean found = true;
-            for (int i = 0; i < replaced.size(); i++) {
-                if (!Objects.equals(list.get(start + i), replaced.get(i))) {
-                    found = false;
-                    break;
-                }
-            }
-
-            if (found) {
-                ArrayList<E> result =
-                        new ArrayList<>(list.size() - replaced.size() + replacement.size());
-                result.addAll(list.subList(0, start));
-                result.addAll(replacement);
-                result.addAll(list.subList(start + replaced.size(), list.size()));
-                return result;
-            }
+        int start = Collections.indexOfSubList(list, replaced);
+        if (start < 0) {
+            return null;
         }
 
-        return null;
+        ArrayList<E> result = new ArrayList<>(list.size() - replaced.size() + replacement.size());
+        result.addAll(list.subList(0, start));
+        result.addAll(replacement);
+        result.addAll(list.subList(start + replaced.size(), list.size()));
+        return result;
     }
 }
