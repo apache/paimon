@@ -64,5 +64,6 @@ def wrap_record_reader_with_blob_inline_convert(
         split_read.table,
         prescan_reader_factory=lambda names: split_read._create_blob_view_prescan_reader(names),
         blob_parallelism=split_read._blob_parallelism,
+        field_names=[field.name for field in read_fields],
     )
     return BatchToRecordReaderAdapter(batch_reader)

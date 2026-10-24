@@ -16,11 +16,14 @@
 # under the License.
 
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.execution.python.read.reader.filter_record_batch_reader import (FilterRecordBatchReader)
+from pypaimon.execution.python.read.reader.filter_record_batch_reader import (
+    FilterRecordBatchReader, _record_batch_from_table)
+from pypaimon.read.reader.managed_blob_record_batch_reader import _replace_batch_column
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import AtomicType, DataField
 
@@ -62,3 +65,36 @@ class FilterRecordBatchReaderTest(unittest.TestCase):
             self.assertIsNone(reader.read_arrow_batch())
         finally:
             reader.close()
+
+    def test_large_filter_keeps_every_row(self):
+        count = 140000
+        batch = pa.RecordBatch.from_arrays([pa.array(range(count))], names=['id'])
+        reader = FilterRecordBatchReader(
+            _Batches([batch]), Predicate('greaterOrEqual', 0, 'id', [0]))
+        result = reader.read_arrow_batch()
+        self.assertEqual(result.num_rows, count)
+        self.assertEqual(result.column(0).to_pylist(), list(range(count)))
+        self.assertIsNone(reader.read_arrow_batch())
+
+    def test_record_batch_from_table_without_concat_batches(self):
+        count = 140000
+        half = count // 2
+        table = pa.Table.from_batches([
+            pa.RecordBatch.from_arrays([pa.array(range(half))], names=['id']),
+            pa.RecordBatch.from_arrays([pa.array(range(half, count))], names=['id']),
+        ])
+        self.assertGreater(len(table.to_batches()), 1)
+        with patch.object(pa, 'concat_batches', None, create=True):
+            result = _record_batch_from_table(table)
+        self.assertEqual(result.num_rows, count)
+        self.assertEqual(result.column(0).to_pylist(), list(range(count)))
+
+    def test_replace_record_batch_column_without_set_column(self):
+        field = pa.field('payload', pa.large_binary())
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([1]), pa.array([b'old'], type=pa.large_binary())],
+            schema=pa.schema([pa.field('id', pa.int64()), field]))
+        updated = _replace_batch_column(
+            batch, 1, field, pa.array([b'new'], type=pa.large_binary()))
+        self.assertEqual(updated.column(0).to_pylist(), [1])
+        self.assertEqual(updated.column(1).to_pylist(), [b'new'])

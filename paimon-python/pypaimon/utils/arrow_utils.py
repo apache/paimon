@@ -18,6 +18,34 @@
 import pyarrow as pa
 
 
+_ROW_KIND = b'paimon.row-kind'
+
+
+def row_kind_field(schema):
+    """Give internal row kinds a marked column that cannot shadow user data."""
+    name = '_row_kind'
+    while name in schema.names:
+        name = '_' + name
+    return pa.field(name, pa.string(), metadata={_ROW_KIND: b'true'})
+
+
+def row_kind_column_index(schema):
+    for index, field in enumerate(schema):
+        if _ROW_KIND in (field.metadata or {}):
+            return index
+    if _ROW_KIND in (schema.metadata or {}):
+        return -1
+    # Older batch readers use the conventional transport column without a marker.
+    return schema.get_field_index('_row_kind')
+
+
+def with_no_row_kind(schema):
+    """Mark all columns as data, including a user column named _row_kind."""
+    metadata = dict(schema.metadata or {})
+    metadata[_ROW_KIND] = b'none'
+    return schema.with_metadata(metadata)
+
+
 def zero_column_batch(num_rows: int, metadata=None) -> pa.RecordBatch:
     """Build a zero-column batch without losing its logical row count."""
     empty_struct = pa.Array.from_buffers(
