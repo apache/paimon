@@ -42,6 +42,8 @@ def live_rows(table, partition_filter=None, snapshot=None, row_ranges=None) -> O
         return None
 
     read_table = table_at_snapshot(table, snapshot)
+    read_table = read_table.copy_without_time_travel({
+        'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
     read_builder = read_table.new_read_builder()
     if partition_filter is not None:
         read_builder = read_builder.with_partition_filter(partition_filter)

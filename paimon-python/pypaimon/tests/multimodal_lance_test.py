@@ -472,7 +472,6 @@ def test_export_lance_rejects_variant_but_allows_projection(conn, tmp_path):
 def test_export_lance_closes_source_on_failure(conn, tmp_path, failure):
     from pypaimon.execution.python.read.table_read import PythonTableRead
     from pypaimon.multimodal import lance_export
-    from pypaimon.read.table_read import TableRead
 
     table = _table(conn, "failure", {"id": pa.int32(), "image": pa.large_binary()}, [
         {"id": i, "image": b"body"} for i in range(3)
@@ -503,7 +502,7 @@ def test_export_lance_closes_source_on_failure(conn, tmp_path, failure):
 
     write = failed_write if failure == "write" else lance.write_dataset
     expected_error = {"read": "source read failed", "write": "destination write failed", "blob": "payload fetch failed"}
-    with patch.object(TableRead, "_try_native_batches", return_value=None), \
+    with patch("pypaimon.read.read_dispatch._native_read_execution", return_value=None), \
             patch.object(PythonTableRead, "_arrow_batch_generator", tracked_read), \
             patch.object(lance_export, "fetch_blob_bodies", side_effect=fetch), \
             patch.object(lance, "write_dataset", write):

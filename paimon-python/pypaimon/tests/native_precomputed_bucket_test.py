@@ -194,17 +194,17 @@ def test_pinned_dynamic_configuration_survives_early_python_selection(tmp_path, 
     initial.new_commit().commit(first.prepare_commit())
     first.close()
     pinned_id = table.snapshot_manager().get_latest_snapshot().id
-    writer = table.new_batch_write_builder().with_restore_snapshot(pinned_id).new_write()
+    from pypaimon.write.backend_dispatch import create_python_write
+    writer = create_python_write(table, 'pinned-python', restore_snapshot_id=pinned_id)
     try:
         later = table.new_batch_write_builder()
         second = later.new_write()
         second.write_arrow(_batch([2], ['later']), bucket=0)
         later.new_commit().commit(second.prepare_commit())
         second.close()
-        # BlobConsumer is native now; explicitly select the Python branch whose
-        # pinned snapshot transport this test exercises before any write.
-        writer._switch_to_python()
-        assert writer._python_writer.row_key_extractor.base_snapshot_id == pinned_id
+        # The already-selected Python writer keeps its original restore point
+        # even when the source table's default execution is Native.
+        assert writer._execution.row_key_extractor.base_snapshot_id == pinned_id
         writer.write_arrow(_batch([1], ['restored']), bucket=0)
         messages = writer.prepare_commit()
         assert messages[0].new_files[0].min_sequence_number == 1

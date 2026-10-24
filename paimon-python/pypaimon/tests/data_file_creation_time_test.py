@@ -132,8 +132,9 @@ try:
             with ExitStack() as stack:
                 stack.enter_context(patch.object(server, '_table_commit_handle', side_effect=publish))
                 if sys.argv[2] == 'true':
-                    stack.enter_context(patch.object(commit.file_store_commit, '_try_commit',
-                                                     side_effect=AssertionError('native commit fell back')))
+                    stack.enter_context(patch(
+                        'pypaimon.execution.python.write.file_store_commit.FileStoreCommit._try_commit',
+                        side_effect=AssertionError('native commit fell back')))
                 commit.commit(messages)
             callback.call.assert_called_once()
             entries = callback.call.call_args[0][0].commit_entries

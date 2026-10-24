@@ -105,23 +105,23 @@ class NativeTableRead:
         """Return Rust-read batches, or ``None`` when this read must fall back."""
         read = self._read
         if not read.table.options.native_read_enabled():
-            return read._native_fallback("read.native.enabled is false")
+            return self._fallback("read.native.enabled is false")
         if read.table.options.file_format() not in _NATIVE_READ_FILE_FORMATS:
-            return read._native_fallback(
+            return self._fallback(
                 "the table file format is not supported")
         if not splits:
             return []
-        if not read._native_blob_view_supported():
-            return read._native_fallback(
+        if not self._blob_view_supported():
+            return self._fallback(
                 "the table uses an unsupported BLOB view")
         try:
             from pypaimon.execution.native.read.split_adapter import native_split_from_python
         except Exception as e:
-            return read._native_fallback(str(e), e, log=True)
+            return self._fallback(str(e), e, log=True)
         rust_splits = []
         for split in splits:
-            if not read._native_split_files_supported(split):
-                return read._native_fallback(
+            if not self._split_files_supported(split):
+                return self._fallback(
                     "a split contains a file unsupported by the native reader")
             rust_split = getattr(split, '_native_split', None)
             if rust_split is None:
@@ -129,7 +129,7 @@ class NativeTableRead:
                     rust_split = native_split_from_python(split, ranges_use_row_ids=(
                         read.table.options.row_tracking_enabled() or read.table.options.data_evolution_enabled()))
                 except Exception as e:
-                    return read._native_fallback(
+                    return self._fallback(
                         "native split conversion failed: %s" % e,
                         e,
                         log=True)
@@ -142,13 +142,17 @@ class NativeTableRead:
                 read.table, rust_splits,
                 parallelism=effective,
                 ordered=ordered,
-                **read._native_read_kwargs(blob_parallelism))
+                **self._read_kwargs(blob_parallelism))
         except Exception as error:
             runtime._raise_if_native_fork_safety_error(error)
-            return read._native_fallback(str(error), error, log=True)
-        return read._convert_native_batches(batches, schema)
+            return self._fallback(str(error), error, log=True)
+        return self.convert_batches(batches, schema)
 
-    def _native_read_kwargs(self, blob_parallelism=None):
+    def _fallback(self, reason, error=None, log=False):
+        from pypaimon.read.read_dispatch import native_read_fallback
+        return native_read_fallback(self._read, reason, error, log)
+
+    def _read_kwargs(self, blob_parallelism=None):
         read = self._read
         kwargs = {
             'predicate': read.predicate,
@@ -162,7 +166,7 @@ class NativeTableRead:
         return kwargs
 
     @staticmethod
-    def _native_split_files_supported(split):
+    def _split_files_supported(split):
         for data_file in split.files:
             file_name = data_file.file_name.lower()
             if (not file_name.endswith(_NATIVE_READ_FILE_SUFFIXES)
@@ -170,14 +174,14 @@ class NativeTableRead:
                 return False
         return True
 
-    def _convert_native_batches(self, batches, schema):
+    def convert_batches(self, batches, schema):
         read = self._read
         failure = None
         try:
             for batch in batches:
                 if batch.num_rows == 0:
                     continue
-                batch = read._prepare_native_batch(batch, schema)
+                batch = self._prepare_batch(batch)
                 batch = read._project_batch_to_output(batch)
                 yield read._try_to_pad_batch_by_schema(batch, schema)
         except BaseException as error:
@@ -186,7 +190,7 @@ class NativeTableRead:
         finally:
             close_read_source(batches, failure)
 
-    def _prepare_native_batch(self, batch, schema):
+    def _prepare_batch(self, batch):
         read = self._read
         if read.include_row_kind and 'rowkind' in batch.schema.names:
             index = batch.schema.get_field_index('rowkind')
@@ -195,10 +199,10 @@ class NativeTableRead:
                 for position, name in enumerate(batch.schema.names)
             ])
         if read.nested_name_paths:
-            batch = read._flatten_native_nested_batch(batch, schema)
+            batch = self._flatten_nested_batch(batch)
         return batch
 
-    def _flatten_native_nested_batch(self, batch, schema):
+    def _flatten_nested_batch(self, batch):
         read = self._read
         _, paths = read._reader_adapter()
         # Rust already evaluated the complete predicate and projected away
@@ -222,7 +226,7 @@ class NativeTableRead:
             fields.insert(0, batch.schema.field(read._row_kind_column))
         return pyarrow.RecordBatch.from_arrays(arrays, schema=pyarrow.schema(fields))
 
-    def _native_blob_view_supported(self) -> bool:
+    def _blob_view_supported(self) -> bool:
         read = self._read
         from pypaimon.execution.native.table import _native_blob_view_supported
         return _native_blob_view_supported(read.table, (field.name for field in read._scan_read_type))
@@ -239,7 +243,7 @@ class NativeTableRead:
         read._row_kind_column = 'rowkind'
         schema = read._add_row_kind_to_schema(read._output_arrow_schema(splits), read._row_kind_column)
         fields = output_fields(read.read_type, read.output_projection)
-        batches = read._try_native_batches(splits, schema, parallelism=1, ordered=True)
+        batches = NativeTableRead(read).read_batches(splits, schema, parallelism=1, ordered=True)
         if batches is None:
             return None
 

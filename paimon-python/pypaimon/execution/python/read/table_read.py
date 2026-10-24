@@ -94,6 +94,18 @@ class PythonTableRead:
         self._read = read
 
     @staticmethod
+    def _resolve_row_group_cache(request):
+        from pypaimon.read.read_support import _ParquetRowGroupCacheRequest
+
+        if not isinstance(request, _ParquetRowGroupCacheRequest):
+            return request
+        with request._lock:
+            if request._cache is None:
+                from pypaimon.execution.python.read.reader.format_pyarrow_reader import _DecodedRowGroupCache
+                request._cache = _DecodedRowGroupCache(request.max_size)
+            return request._cache
+
+    @staticmethod
     def _emit_overflow_safe_batches(
         pydict: Dict[str, list],
         row_count: int,
@@ -440,8 +452,7 @@ class PythonTableRead:
             defer_blob_resolution,
         )
         sr._blob_parallelism = blob_parallelism
-        from pypaimon.read.read_dispatch import python_row_group_cache
-        sr._parquet_row_group_cache = python_row_group_cache(read._parquet_row_group_cache)
+        sr._parquet_row_group_cache = self._resolve_row_group_cache(read._parquet_row_group_cache)
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,

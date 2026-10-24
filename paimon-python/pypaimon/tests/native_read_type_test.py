@@ -24,6 +24,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.native.read.table_read import NativeTableRead
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.map_shared_shredding import is_map_selected_keys_field
@@ -133,7 +134,7 @@ def test_nested_map_variant_share_read_type(tmp_path, mode, shredded, stream):
             assert read.to_arrow(splits, parallelism=parallelism).sort_by('id').to_pylist() == expected
             result = read.to_arrow_batch_reader(splits, parallelism=parallelism).read_all()
             assert result.sort_by('id').to_pylist() == expected
-    assert set(read._native_read_kwargs()) == {'predicate', 'limit', 'read_type'}
+    assert set(NativeTableRead(read)._read_kwargs()) == {'predicate', 'limit', 'read_type'}
 
 
 @pytest.mark.parametrize('native', [False, True])

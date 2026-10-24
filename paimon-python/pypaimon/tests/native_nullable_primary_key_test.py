@@ -233,12 +233,12 @@ def test_null_partition_requires_complete_dynamic_bucket_index(rest_catalog):
     from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     table = _table(rest_catalog[0], 'missing_hash', -1)
-    builder = table.new_batch_write_builder()
+    builder = table.copy({'write.native.enabled': 'false'}).new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
         # Simulate existing data whose HASH metadata is incomplete. Restoring
         # this partition must fail instead of assigning its keys new buckets.
-        writer.row_key_extractor = DynamicBucketRowKeyExtractor(table.table_schema)
+        writer._execution.row_key_extractor = DynamicBucketRowKeyExtractor(table.table_schema)
         writer.write_arrow(pa.Table.from_arrays([
             pa.array([None], type=pa.int32()), pa.array([None], type=pa.int32()),
             pa.array([10], type=pa.int32())], schema=_SCHEMA))

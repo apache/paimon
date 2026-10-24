@@ -30,6 +30,7 @@ import pyarrow.compute as pc
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.ray import (
     WhenMatched, WhenNotMatched, merge_into, read_paimon,
     source_col, target_col, lit,
@@ -143,7 +144,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         messages[0].deleted_files.extend(old_files)
 
         commit = write_builder.new_commit()
-        file_store_commit = commit.file_store_commit
+        file_store_commit = python_commit(commit).file_store_commit
         original_try_commit = file_store_commit._try_commit
         file_store_commit._try_commit = (
             lambda commit_kind, *args, **kwargs:
@@ -2875,7 +2876,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
             injected[0] = True
             coordinator_commit_users.append(write_builder.commit_user)
-            file_store_commit = commit.file_store_commit
+            file_store_commit = python_commit(commit).file_store_commit
             real_atomic_commit = file_store_commit.snapshot_commit.commit
             real_duplicate_check = file_store_commit._is_duplicate_commit
 

@@ -28,7 +28,6 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.bucket_plan import PostponeBucketPlan
 from pypaimon.write.postpone_batch_table_write import PostponeFixedBucketBatchTableWrite
@@ -41,14 +40,14 @@ WRITERS = [TableWrite, BatchTableWrite, StreamTableWrite, PostponeFixedBucketBat
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read, pytest.mark.python_commit]
 
 
-def _table(tmp_path, writer_class):
+def _table(tmp_path, writer_class, primary_key=False):
     postpone = issubclass(writer_class, PostponeFixedBucketBatchTableWrite)
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int32()), ('value', pa.int32())])
     catalog.create_table('default.direct', Schema.from_pyarrow_schema(
-        schema, primary_keys=['id'] if postpone else [], options={
-            'bucket': '-2' if postpone else '-1', 'postpone.default-bucket-num': '2',
+        schema, primary_keys=['id'] if postpone or primary_key else [], options={
+            'bucket': '-2' if postpone else '1' if primary_key else '-1', 'postpone.default-bucket-num': '2',
             'write.native.enabled': 'true', 'commit.native.enabled': 'false',
             'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
         }), False)
@@ -115,20 +114,20 @@ def test_direct_writer_selects_native_without_python_initialization(tmp_path, wr
 @pytest.mark.parametrize('writer_class', WRITERS)
 def test_direct_writer_metadata_inspection_does_not_select_python(tmp_path, writer_class):
     table, _ = _table(tmp_path, writer_class)
-    schema = PyarrowFieldParser.from_paimon_schema(table.fields)
     with _native_backend() as (core, create):
         writer = _construct(writer_class, table)
         try:
             assert writer.table is table
             assert writer.commit_user == 'direct-writer'
             assert writer.static_partition is None
-            assert writer.table_pyarrow_schema == schema
-            assert writer.restore_snapshot_id is None
+            for name in ('file_store_write', 'row_key_extractor', 'table_pyarrow_schema',
+                         'restore_snapshot_id', 'batch_committed'):
+                assert not hasattr(writer, name)
+                with pytest.raises(AttributeError):
+                    getattr(writer, name)
             assert not hasattr(writer, 'missing_writer_attribute')
             with pytest.raises(AttributeError):
                 getattr(writer, 'missing_writer_attribute')
-            if isinstance(writer, BatchTableWrite):
-                assert writer.batch_committed is False
             create.assert_called_once_with(table)
             core.close.assert_not_called()
         finally:
@@ -139,7 +138,6 @@ def test_direct_writer_metadata_inspection_does_not_select_python(tmp_path, writ
 @pytest.mark.parametrize('native', [False, True])
 def test_direct_writer_public_api_is_backend_independent(tmp_path, writer_class, native):
     table, _ = _table(tmp_path, writer_class)
-    schema = PyarrowFieldParser.from_paimon_schema(table.fields)
     with ExitStack() as stack:
         if native:
             stack.enter_context(_native_backend())
@@ -152,12 +150,11 @@ def test_direct_writer_public_api_is_backend_independent(tmp_path, writer_class,
             assert writer.table is table
             assert writer.commit_user == 'direct-writer'
             assert writer.static_partition is None
-            assert writer.table_pyarrow_schema == schema
-            assert writer.restore_snapshot_id is None
-            if isinstance(writer, BatchTableWrite):
-                assert writer.batch_committed is False
-            else:
-                assert not hasattr(writer, 'batch_committed')
+            for name in ('file_store_write', 'row_key_extractor', 'table_pyarrow_schema',
+                         'restore_snapshot_id', 'batch_committed'):
+                assert not hasattr(writer, name)
+                with pytest.raises(AttributeError):
+                    getattr(writer, name)
             if writer_class is TableWrite:
                 # The base API intentionally leaves preparation to its subclass.
                 # Discovering optional methods must not leak the selected executor.
@@ -254,8 +251,8 @@ def test_direct_native_writer_preserves_public_batch_override(tmp_path, writer_c
 
 @pytest.mark.parametrize('writer_class', WRITERS)
 @pytest.mark.parametrize('pandas', [False, True])
-def test_direct_writer_diagnostic_switch_preserves_outer_batch_override(tmp_path, writer_class, pandas):
-    table, schema = _table(tmp_path, writer_class)
+def test_direct_writer_pk_subset_fallback_preserves_outer_batch_override(tmp_path, writer_class, pandas):
+    table, schema = _table(tmp_path, writer_class, primary_key=True)
 
     class ObservingWriter(writer_class):
         def write_arrow_batch(self, data, bucket=None):
@@ -266,10 +263,13 @@ def test_direct_writer_diagnostic_switch_preserves_outer_batch_override(tmp_path
         writer = _construct(ObservingWriter, table)
         writer.observed = []
         try:
-            # Explicit Python diagnostics select that backend before mutation.
-            # The outer public subclass must continue to observe batch writes.
-            assert writer.file_store_write is writer.file_store_write
+            # PK partial writes select Python before mutation; the public
+            # subclass must continue observing its batch override.
+            assert writer.with_write_type(['id']) is writer
             core.close.assert_called_once_with()
+            # Restoring a supported full PK schema keeps the selected Python
+            # executor and must preserve the outer public batch override.
+            assert writer.with_write_type(['id', 'value']) is writer
             data = pa.table({'id': [1], 'value': [10]}, schema=schema)
             writer.write_pandas(data.to_pandas()) if pandas else writer.write_arrow(data)
             assert len(writer.observed) == 1
@@ -284,14 +284,12 @@ def test_direct_writer_diagnostic_switch_preserves_outer_batch_override(tmp_path
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_direct_postpone_diagnostic_switch_reuses_python_distributed_planner(tmp_path, overwrite):
+def test_selected_python_postpone_reuses_its_distributed_planner(tmp_path, overwrite):
     table, _ = _table(tmp_path, PostponeFixedBucketBatchTableWrite)
-    with _native_backend(forbid_python=False):
+    with patch('pypaimon.execution.native.write.native_write.create_native_write', return_value=None):
         writer = _construct(PostponeFixedBucketBatchTableWrite, table)
         try:
-            assert writer.file_store_write is writer.file_store_write
-            pure = writer._execution._python_writer
-            planner = pure._planner
+            planner = writer._execution._planner
             with patch('pypaimon.write.backend_dispatch.create_postpone_bucket_planner',
                        side_effect=AssertionError('distributed write selected a second planner')):
                 options = writer._distributed_write_options(overwrite=overwrite)
@@ -311,11 +309,9 @@ def test_direct_native_batch_preparation_failure_consumes_one_attempt(tmp_path, 
             with pytest.raises(TypeError):
                 writer.prepare_commit(1)
             core.prepare_commit.assert_not_called()
-            assert writer.batch_committed is False
             with pytest.raises(OSError) as caught:
                 writer.prepare_commit()
             assert caught.value is failure
-            assert writer.batch_committed is True
             with pytest.raises(RuntimeError, match='one-time committing'):
                 writer.prepare_commit()
             core.prepare_commit.assert_called_once_with()

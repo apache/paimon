@@ -34,6 +34,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.format_file_writer import write_blob_file
 from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
@@ -3366,7 +3367,7 @@ class BlobEndToEndTest(unittest.TestCase):
         blob_file_path = Path(self.temp_dir) / (blob_field_name + ".blob")
         blob_file_url = _to_url(blob_file_path)
         blob_files[blob_field_name] = blob_file_url
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
         self.assertTrue(file_io.exists(blob_file_url))
 
         # ========== Step 3: Read Data and Check Data ==========
@@ -3414,7 +3415,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / (blob_field_name + "_inline.blob")
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         counting_file_io = CountingFileIO(file_io)
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
@@ -3748,7 +3749,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / "row_indices.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         reader = FormatBlobReader(
@@ -3782,7 +3783,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([blob_data], schema=schema)
         blob_file_path = Path(self.temp_dir) / "row_indices_out_of_range.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         with self.assertRaises(IndexError) as context:
@@ -3828,7 +3829,7 @@ class BlobEndToEndTest(unittest.TestCase):
             GenericRowSerializer.to_bytes(array_row)
         self.assertIn("AtomicType", str(context.exception))
 
-        # Note: FileIO.write_blob validation for complex types is tested separately below
+        # Note: Python blob codec validation for complex types is tested separately below
 
         # ========== Test MultisetType(nullable=True, element_type=AtomicType("BLOB")) ==========
         multiset_fields = [
@@ -3870,8 +3871,8 @@ class BlobEndToEndTest(unittest.TestCase):
             GenericRowSerializer.to_bytes(map_row)
         self.assertIn("AtomicType", str(context.exception))
 
-        # ========== Test FileIO.write_blob validation for complex types ==========
-        # Test that FileIO.write_blob properly validates and rejects complex types
+        # ========== Test Python blob codec validation for complex types ==========
+        # Test that Python blob codec properly validates and rejects complex types
 
         # Create a table with multiple columns (should fail - blob format requires single column)
         multi_column_schema = pa.schema([
@@ -3888,16 +3889,16 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should throw RuntimeError for multiple columns
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_column_url, multi_column_table)
+            write_blob_file(file_io, multi_column_url, multi_column_table)
         self.assertIn("single column", str(context.exception))
 
-        # Test that FileIO.write_blob supports null values and round-trips correctly
+        # Test that Python blob codec supports null values and round-trips correctly
         null_schema = pa.schema([pa.field("blob_with_nulls", pa.large_binary())])
         null_table = pa.table([[b"data", None]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "null_data.blob"
         null_file_url = _to_url(null_file)
-        file_io.write_blob(null_file_url, null_table)
+        write_blob_file(file_io, null_file_url, null_table)
 
         null_read_fields = [DataField(0, "blob_with_nulls", AtomicType("BLOB"))]
         null_reader = FormatBlobReader(
@@ -3922,7 +3923,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         valid_blob_file = Path(self.temp_dir) / "valid_blob.blob"
         valid_blob_url = _to_url(valid_blob_file)
-        file_io.write_blob(valid_blob_url, valid_table)
+        write_blob_file(file_io, valid_blob_url, valid_table)
 
         # Try to read with complex type field definition - this should fail
         # because FormatBlobReader tries to create PyArrow schema with complex types
@@ -3969,7 +3970,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         header_test_file = Path(self.temp_dir) / "header_test.blob"
         header_test_url = _to_url(header_test_file)
-        file_io.write_blob(header_test_url, valid_table)
+        write_blob_file(file_io, header_test_url, valid_table)
 
         # Read the file and corrupt the header (last 5 bytes: index_length + version)
         with open(header_test_file, 'rb') as f:
@@ -4008,7 +4009,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         full_blob_file = Path(self.temp_dir) / "full_blob.blob"
         full_blob_url = _to_url(full_blob_file)
-        file_io.write_blob(full_blob_url, large_table)
+        write_blob_file(file_io, full_blob_url, large_table)
 
         # Read the full file and truncate it in the middle
         with open(full_blob_file, 'rb') as f:
@@ -4047,7 +4048,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         zero_blob_file = Path(self.temp_dir) / "zero_length.blob"
         zero_blob_url = _to_url(zero_blob_file)
-        file_io.write_blob(zero_blob_url, zero_table)
+        write_blob_file(file_io, zero_blob_url, zero_table)
 
         # Verify file was created
         self.assertTrue(file_io.exists(zero_blob_url))
@@ -4090,7 +4091,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         large_sim_file = Path(self.temp_dir) / "large_simulation.blob"
         large_sim_url = _to_url(large_sim_file)
-        file_io.write_blob(large_sim_url, large_sim_table)
+        write_blob_file(file_io, large_sim_url, large_sim_table)
 
         # Verify large file was written
         large_sim_size = file_io.get_file_size(large_sim_url)
@@ -4163,7 +4164,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should reject multi-field table
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_field_url, multi_field_table)
+            write_blob_file(file_io, multi_field_url, multi_field_table)
         self.assertIn("single column", str(context.exception))
 
         # Test that blob format rejects non-binary field types
@@ -4175,7 +4176,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Should reject non-binary field
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(non_binary_url, non_binary_table)
+            write_blob_file(file_io, non_binary_url, non_binary_table)
         # Should fail due to type conversion issues (non-binary field can't be converted to BLOB)
         self.assertTrue(
             "large_binary" in str(context.exception) or
@@ -4190,7 +4191,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
         null_file = Path(self.temp_dir) / "with_nulls.blob"
         null_file_url = _to_url(null_file)
-        file_io.write_blob(null_file_url, null_table)
+        write_blob_file(file_io, null_file_url, null_table)
 
         null_read_fields = [DataField(0, "blob_with_null", AtomicType("BLOB"))]
         null_reader = FormatBlobReader(
@@ -4218,7 +4219,7 @@ class BlobEndToEndTest(unittest.TestCase):
         table = pa.table([[raw_bytes]], schema=schema)
 
         # Should be treated as plain bytes instead of descriptor bytes.
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         fields = [DataField(0, "payload", AtomicType("BLOB"))]
         reader = FormatBlobReader(
@@ -4273,7 +4274,7 @@ class BlobEndToEndTest(unittest.TestCase):
         # Write the blob file. The write path adaptively handles descriptor bytes.
         blob_file_path = Path(self.temp_dir) / "descriptor_blob.blob"
         blob_file_url = _to_url(blob_file_path)
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
         # Verify the blob file was created
         self.assertTrue(file_io.exists(blob_file_url))
         file_size = file_io.get_file_size(blob_file_url)
@@ -4732,7 +4733,7 @@ class BlobEndToEndTest(unittest.TestCase):
             [pa.array([[b"one", None], None, [b"two"]], type=arrow_type)],
             schema=pa.schema([pa.field("blob_array", arrow_type)]),
         )
-        file_io.write_blob(blob_file_url, table)
+        write_blob_file(file_io, blob_file_url, table)
 
         fields = [
             DataField(

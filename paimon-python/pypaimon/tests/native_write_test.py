@@ -214,8 +214,9 @@ def test_escaped_partition_file_path_and_abort(tmp_path, native_rest_catalog, di
 
         commit = builder.new_commit()
         try:
-            with patch.object(commit.file_store_commit, 'abort',
-                              side_effect=AssertionError('Python fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.abort',
+                       side_effect=AssertionError('Python fallback')):
                 commit.abort(messages)
             assert not table.file_io.exists(file.file_path)
         finally:
@@ -254,8 +255,9 @@ def test_rest_native_write_and_commit(tmp_path, native_rest_catalog):
     commit = builder.new_commit()
     try:
         writer.write_arrow_batch(_batch([1, 2], ['a', 'b']))
-        with patch.object(commit.file_store_commit, 'commit',
-                          side_effect=AssertionError('Python commit fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=AssertionError('Python commit fallback')):
             commit.commit(writer.prepare_commit())
         assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
         shard_rows = []
@@ -342,8 +344,9 @@ def test_writer_abort_preserves_native_commit_files(native_rest_catalog, failure
 
         proxy.commit.side_effect = publish
         with patch.object(commit, '_prepare_native_commit', return_value=(proxy, native_messages)), \
-                patch.object(commit.file_store_commit, 'commit',
-                             side_effect=AssertionError('Python commit fallback')):
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.commit',
+                      side_effect=AssertionError('Python commit fallback')):
             if failure:
                 with pytest.raises(RuntimeError, match='Native commit outcome is unknown'):
                     commit.commit(messages)

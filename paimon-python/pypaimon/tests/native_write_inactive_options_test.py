@@ -96,8 +96,9 @@ def _write(table, rows, stream=False, overwrite=None):
         if native:
             assert isinstance(writer, NativeTableWrite)
             for method in ('commit', 'overwrite'):
-                stack.enter_context(patch.object(
-                    commit.file_store_commit, method, side_effect=AssertionError('Python commit fallback')))
+                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.' + method,
+                                          side_effect=AssertionError('Python commit fallback')))
         try:
             messages = []
             # Stream checkpoints exercise reuse after the first prepared batch.

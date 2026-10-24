@@ -77,10 +77,10 @@ def test_filtered_events_check_required_nulls_before_routing(tmp_path, input_, s
     invalid[field] = None
     try:
         with pytest.raises(ValueError, match=r'non-null column\(%s\)' % field), \
-                patch.object(writer.row_key_extractor, 'extract_partition_bucket_groups',
+                patch.object(writer._execution.row_key_extractor, 'extract_partition_bucket_groups',
                              side_effect=AssertionError('invalid event reached bucket routing')):
             _write(writer, table, schema, [invalid], input_)
-        assert not writer.file_store_write.data_writers
+        assert not writer._execution.file_store_write.data_writers
     finally:
         writer.close()
 
@@ -167,7 +167,7 @@ def test_native_pandas_facade_preserves_null_payload_for_core_filtering(tmp_path
     transported = native.write_arrow.call_args[0][0]
     assert transported.to_pylist() == rows
     assert transported.schema.field('value').nullable
-    assert not writer._schema.field('value').nullable
+    assert not writer._execution._schema.field('value').nullable
     assert writer._python_writer is None
 
 
@@ -197,12 +197,12 @@ def test_pandas_non_filtering_writers_keep_not_null_validation(tmp_path, primary
             transported = facade._native_writer.write_arrow.call_args[0][0]
             assert transported.column('value').to_pylist() == [None]
             assert transported.schema.field('value').nullable
-            assert not facade._schema.field('value').nullable
+            assert not facade._execution._schema.field('value').nullable
         else:
             with pytest.raises(ValueError, match='non-nullable'):
                 facade.write_pandas(data)
             facade._native_writer.write_arrow.assert_not_called()
-        assert not writer.file_store_write.data_writers
+        assert not writer._execution.file_store_write.data_writers
     finally:
         writer.close()
 
@@ -227,7 +227,7 @@ def test_internal_row_kinds_check_required_nulls_before_filtering(tmp_path, kind
     try:
         with pytest.raises(ValueError, match=r'non-null column\(%s\)' % field):
             writer.write_row(GenericRow([values[field.name] for field in table.fields], table.fields, kind))
-        assert not writer.file_store_write.data_writers
+        assert not writer._execution.file_store_write.data_writers
     finally:
         writer.close()
 
@@ -253,24 +253,23 @@ def test_schema_only_writer_keeps_strict_nested_validation():
     from pypaimon.execution.python.write.table_write import PythonTableWrite
 
     writer = TableWrite.__new__(TableWrite)
-    writer.file_store_write = SimpleNamespace(write_cols=None)
-    writer.table_pyarrow_schema = pa.schema([
+    writer._execution = PythonTableWrite(writer)
+    writer._execution.file_store_write = SimpleNamespace(write_cols=None)
+    writer._execution.table_pyarrow_schema = pa.schema([
         ('items', pa.list_(pa.field('element', pa.int32(), nullable=False)))])
     data = pa.table({'items': [[None]]}, schema=pa.schema([('items', pa.list_(pa.int32()))]))
     with pytest.raises(ValueError, match='consistent'):
-        PythonTableWrite(writer)._prepare_arrow_data(data)
+        writer._execution._prepare_arrow_data(data)
 
 
 def test_python_filters_before_nested_normalization(tmp_path):
-    from pypaimon.execution.python.write.table_write import PythonTableWrite
-
     table, _ = _table(tmp_path)
     writer = table.new_batch_write_builder().new_write()
     declared = pa.schema([field if field.name != 'value' else field.with_type(
-        pa.list_(pa.field('element', pa.int32(), nullable=False))) for field in writer.table_pyarrow_schema])
+        pa.list_(pa.field('element', pa.int32(), nullable=False))) for field in writer._execution.table_pyarrow_schema])
     # Use a real table for options and routing, but a schema-only writer facade
     # to observe normalization before any actual Parquet output is attempted.
-    writer.table_pyarrow_schema = declared
+    writer._execution.table_pyarrow_schema = declared
     transport = pa.schema([field if field.name != 'value' else field.with_type(pa.list_(pa.int32()))
                            for field in declared])
     data = pa.table({'id': [1, 2], 'op': ['-D', '+I'], 'seq': [1, 2], 'value': [[None], [42]]}, schema=transport)
@@ -284,7 +283,7 @@ def test_python_filters_before_nested_normalization(tmp_path):
         with patch(
                 'pypaimon.execution.python.write.table_write.normalize_arrow_write_nullability',
                 side_effect=normalize):
-            selected = PythonTableWrite(writer)._prepare_arrow_data(data)
+            selected = writer._execution._prepare_arrow_data(data)
         assert selected.to_pydict() == {'id': [2], 'op': ['+I'], 'seq': [2], 'value': [[42]]}
     finally:
         writer.close()
@@ -292,22 +291,20 @@ def test_python_filters_before_nested_normalization(tmp_path):
 
 @pytest.mark.parametrize('ignored', [False, True])
 def test_python_retained_nested_schema_stays_strict_without_native_extension(tmp_path, ignored):
-    from pypaimon.execution.python.write.table_write import PythonTableWrite
-
     table, _ = _table(tmp_path)
     writer = table.new_batch_write_builder().new_write()
-    writer.table_pyarrow_schema = pa.schema([field if field.name != 'value' else field.with_type(
-        pa.list_(pa.field('element', pa.int32(), nullable=False))) for field in writer.table_pyarrow_schema])
+    writer._execution.table_pyarrow_schema = pa.schema([field if field.name != 'value' else field.with_type(
+        pa.list_(pa.field('element', pa.int32(), nullable=False))) for field in writer._execution.table_pyarrow_schema])
     transport = pa.schema([field if field.name != 'value' else field.with_type(pa.list_(pa.int32()))
-                           for field in writer.table_pyarrow_schema])
+                           for field in writer._execution.table_pyarrow_schema])
     data = pa.table({'id': [1], 'op': ['-D' if ignored else '+I'], 'seq': [1], 'value': [[None]]}, schema=transport)
     try:
         with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
             if ignored:
-                assert PythonTableWrite(writer)._prepare_arrow_data(data).num_rows == 0
+                assert writer._execution._prepare_arrow_data(data).num_rows == 0
             else:
                 with pytest.raises(ValueError, match='consistent'):
-                    PythonTableWrite(writer)._prepare_arrow_data(data)
-        assert not writer.file_store_write.data_writers
+                    writer._execution._prepare_arrow_data(data)
+        assert not writer._execution.file_store_write.data_writers
     finally:
         writer.close()

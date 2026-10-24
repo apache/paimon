@@ -72,9 +72,12 @@ def test_native_truncate_publication_error_never_retries_or_aborts(tmp_path, ope
     getattr(native_commit, operation).side_effect = cause
     try:
         with patch.object(commit, '_prepare_native_commit', return_value=(native_commit, [])), \
-                patch.object(commit.file_store_commit, 'truncate_table') as truncate, \
-                patch.object(commit.file_store_commit, 'drop_partitions') as drop, \
-                patch.object(commit.file_store_commit, 'abort') as abort:
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.truncate_table') as truncate, \
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.drop_partitions') as drop, \
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.abort') as abort:
             with pytest.raises(RuntimeError) as error:
                 getattr(commit, operation)(*args)
         assert error.value is cause
@@ -96,7 +99,8 @@ def test_abort_then_truncate_partitions_then_commit_keeps_batch_lifecycle(tmp_pa
                 side_effect=[stream, batch]) as create, \
                 patch('pypaimon.execution.native.write.native_commit.to_native_commit_messages', return_value=[]), \
                 patch('pypaimon.execution.native.write.native_commit.native_messages_supported', return_value=True), \
-                patch.object(commit.file_store_commit, 'commit') as fallback:
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.commit') as fallback:
             commit.abort([])
             commit.truncate_partitions([{'pt': 'a'}])
             # Java truncatePartitions does not consume the one-shot batch commit.
@@ -212,7 +216,9 @@ def test_fuse_native_write_commit_and_truncate_preserve_bound_mount(
     assert isinstance(writer, NativeTableWrite)
     try:
         writer.write_arrow(pa.Table.from_pylist([{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}], schema=_SCHEMA))
-        with patch.object(commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=AssertionError('Python commit')):
             commit.commit(writer.prepare_commit())
     finally:
         writer.close()
@@ -221,10 +227,14 @@ def test_fuse_native_write_commit_and_truncate_preserve_bound_mount(
     assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
     commit = table.new_batch_write_builder().new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'drop_partitions', side_effect=AssertionError('Python truncate')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.drop_partitions',
+                   side_effect=AssertionError('Python truncate')):
             commit.truncate_partitions([{'pt': 'a'}])
         assert _rows(table) == [{'id': 2, 'pt': 'b'}]
-        with patch.object(commit.file_store_commit, 'truncate_table', side_effect=AssertionError('Python truncate')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.truncate_table',
+                   side_effect=AssertionError('Python truncate')):
             commit.truncate_table()
         assert _rows(table) == []
     finally:
@@ -448,7 +458,9 @@ def test_native_truncate_partition_specs_use_java_typed_strings(tmp_path, native
         commit.close()
     commit = table.new_batch_write_builder().new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'drop_partitions', side_effect=AssertionError('Python truncate')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.drop_partitions',
+                   side_effect=AssertionError('Python truncate')):
             commit.truncate_partitions([{'pt': text}])
         assert [row['id'] for row in _rows(table)] == [2]
     finally:

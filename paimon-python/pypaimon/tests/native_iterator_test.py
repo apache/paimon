@@ -272,7 +272,8 @@ def test_iterator_setup_failure_falls_back_before_native_rows(tmp_path):
 
 def test_iterator_qualifies_every_split_before_starting_native(tmp_path):
     read, splits = _planned_read(tmp_path)
-    with patch.object(read, '_native_split_files_supported', side_effect=[True, False]), \
+    with patch('pypaimon.execution.native.read.table_read.NativeTableRead._split_files_supported',
+               side_effect=[True, False]), \
             patch('pypaimon.execution.native.read.table_read.native_read') as prepare:
         assert len(_rows(read, splits)) == 3
     prepare.assert_not_called()

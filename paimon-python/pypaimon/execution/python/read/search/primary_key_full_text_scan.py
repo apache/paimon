@@ -47,6 +47,8 @@ class PrimaryKeyFullTextScan(FullTextScan):
             return PrimaryKeyFullTextScanPlan(0, [])
 
         scan_table = table_at_snapshot(self._table, snapshot)
+        scan_table = scan_table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         builder = scan_table.new_read_builder()
         if self._partition_filter is not None:
             builder = builder.with_partition_filter(self._partition_filter)

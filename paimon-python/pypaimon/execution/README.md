@@ -68,7 +68,7 @@ pypaimon/
     vector_index_build.py       Ray index tasks, shard workers and failure draining
   execution/
     python/
-      casting/                  Old-file array casts and executable-cast probes
+      casting/                  Old-file array value casts
       map_blob_key_serializer.py Physical MAP BLOB key encoding for readers/writers
       read/                     File scanners/readers and merge execution
         search/                 Vector/text/hybrid search and Python factories
@@ -91,7 +91,7 @@ pypaimon/
 ## Public APIs and dependencies
 
 Corresponding Paimon APIs keep configuration, validation and explicit delegation;
-they do not inherit either backend. Public method signatures, defaults, class
+they do not inherit either backend. Documented public method signatures, defaults, class
 paths and supported subclass/instance hooks remain stable. Shared input/result
 contracts include schemas, predicates, plans, splits and commit messages.
 
@@ -113,11 +113,17 @@ use the same selection boundary as builders while retaining their public class
 and subclass hooks. Writer resources and update executors are created in
 `write/backend_dispatch.py`; the public classes only delegate to the selected
 implementation. Python-only nested writers use explicit Python factories.
-An operation that selected Python keeps its nested update/delete writers in
-Python, including MERGE actions. Private schema, routing and rewrite algorithms
+An operation that selected Python keeps its nested update/delete writers and
+writer-owned metadata restoration in Python, including MERGE actions and
+dynamic-bucket HASH validation. A committer that selected Python retains it
+for subsequent rounds even if later messages could use Native. Private schema,
+routing and rewrite algorithms
 call their executor's helpers; public method overrides and user callbacks remain
 public hooks. Broadcast file indexes retain their captured snapshot and are
 consumed by the explicitly selected Python workers without per-worker rescans.
+Python Blob View and search readers keep their internal source reads and scans
+in Python, including captured snapshot views. Public table copies only share
+resource containers; backend caches are allocated by the backend that uses them.
 
 Postpone bucket metadata is writer state. Native obtains it from the Core write
 builder, preserving per-file layout validation and write authorization without
@@ -126,9 +132,11 @@ outside either backend.
 
 Manifest-source and follow-up-scanner callbacks belong to Python execution
 internals. Public scanner configuration selects the existing snapshot, delta
-or changelog strategies without accepting custom scanner callbacks. Explicit
-Python router/committer properties retain their implementation-specific APIs.
-Ordinary configuration and metadata inspection do not select that backend.
+or changelog strategies without accepting custom scanner callbacks.
+Public writers and committers do not expose file writers, key extractors or
+file committers. Inspecting an unknown attribute never initializes another
+backend. Backend-owned schemas, routing and file state remain on the selected
+executor; public table/user/partition configuration stays on the facade.
 
 Deletion-vector codecs, file loading and row filtering belong to Python
 execution, corresponding to Rust Core's deletion-vector implementation.
@@ -143,9 +151,9 @@ adapters. Native index planning performs source selection and grouping in Rust.
 Arrow read schemas and logical type-change rules stay in `schema`. Shared
 numeric, calendar and metadata text helpers stay in `utils`; Native read and
 commit adapters use them without importing Python cast executors. Array value
-conversion and the local schema manager's executable-cast probe belong to
-Python execution. The schema manager delegates that probe lazily when validating
-a local type change. Python commit partition-spec parsing also belongs to its
+conversion belongs to Python execution. The schema manager validates local
+type changes using the shared static executable-cast rules. Python commit
+partition-spec parsing also belongs to its
 executor; Native commits pass the spec to Rust.
 
 Physical MAP/VARIANT codecs and Blob View resolution belong to Python
@@ -166,7 +174,9 @@ existing-file resolution, loading a provider when a caller allocates a new file.
 MAP BLOB key serializers implement the physical file format and are
 shared within the Python backend. Generic URI/FileIO contracts, resource
 caches and integer codecs stay in `common`; Native Blob inputs also use the
-URI reader contract.
+URI reader contract. FileIO supplies streams and locations. Physical Row, Blob
+and Vortex codec construction belongs to the selected Python executor, rather
+than to format-specific FileIO convenience methods.
 
 Standalone Arrow predicate and transform helpers live in `common/arrow_predicate`.
 JSON field-reference extraction and rule/schema validation remain independent
@@ -234,7 +244,8 @@ Both batch scanners expose `plan(auth_result=None)`, `plan_all()` and
 `scan_with_stats(auth_result=None)`. Both readers expose `read_rows(splits)` and
 `read_batches(splits, schema, parallelism=None, blob_parallelism=1,
 ordered=False)`. Output materialization and Python parallel-read helpers are
-separate from this execution protocol.
+separate from this execution protocol. Native read adaptation calls its own
+helpers directly; TableRead does not mirror private Native methods.
 
 Writer executors take an explicit identifier in `prepare_commit(identifier)`.
 The public batch facade exposes only `prepare_commit()`, with a one-time guard;

@@ -116,7 +116,9 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
 
         candidate_result = PrimaryKeyScoredResult(
             plan.snapshot_id, source_splits, candidates)
-        reader = self._table.new_read_builder().with_projection(
+        read_table = self._table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+        reader = read_table.new_read_builder().with_projection(
             [self._vector_column.name]).new_read()
         metric = self._search_metric(index_type)
 
@@ -170,7 +172,9 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         metric = self._search_metric(
             self._table.options.primary_key_vector_index_type(
                 self._vector_column.name))
-        read_builder = self._table.new_read_builder().with_projection(
+        read_table = self._table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+        read_builder = read_table.new_read_builder().with_projection(
             [self._vector_column.name])
         reader = read_builder.new_read()
         for split in plan.splits():

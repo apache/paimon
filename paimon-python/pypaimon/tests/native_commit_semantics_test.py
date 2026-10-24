@@ -79,10 +79,13 @@ def _publication(server, commit, use_native, lose_response=False):
     with patch.object(server, '_table_commit_handle', side_effect=publish), \
             patch.object(server, '_table_query_auth_handle',
                          side_effect=AssertionError('publication must not request SELECT')), \
-            patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('implicit abort')):
+            patch('pypaimon.execution.python.write.file_store_commit.'
+                  'FileStoreCommit.abort',
+                  side_effect=AssertionError('implicit abort')):
         if use_native:
-            with patch.object(commit.file_store_commit, '_try_commit',
-                              side_effect=AssertionError('native commit fell back')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit._try_commit',
+                       side_effect=AssertionError('native commit fell back')):
                 yield attempts
         else:
             yield attempts

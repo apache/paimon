@@ -376,6 +376,10 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             table_schema = schema
             fields = schema.fields
 
+            def copy_without_time_travel(self, options):
+                copied_options.append(options)
+                return self
+
             def new_read_builder(self):
                 source_snapshots.append(self._read_snapshot)
                 plan = SimpleNamespace(splits=lambda: [])

@@ -50,7 +50,6 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.update_validation import predicate_fields
 from pypaimon.execution.python.write.row_id_file_index import RowIdFileIndex
 from pypaimon.write.table_delete import TableDeleteByRowId
-from pypaimon.execution.python.write.writer.data_writer import DataWriter
 from pypaimon.utils.arrow_utils import zero_column_batch
 
 from pypaimon.write.update_validation import _authorize_update
@@ -709,46 +708,3 @@ class ShardTableUpdator:
         context._group_batches = []
         if context._reader is not None:
             context._reader.close()
-
-
-class SingleWriter:
-
-    def __init__(self, context):
-        self._context = context
-
-    def initialize(self, writer: DataWriter, partition, first_row_id: int, row_count: int):
-        context = self._context
-        context.writer: DataWriter = writer
-        context._partition = partition
-        context.first_row_id = first_row_id
-        context.row_count = row_count
-        context.written_records_count = 0
-
-    def capacity(self) -> int:
-        context = self._context
-        return context.row_count - context.written_records_count
-
-    def write(self, data: pa.RecordBatch):
-        context = self._context
-        if data.num_rows > self.capacity():
-            raise Exception("Data num size exceeds capacity.")
-        context.written_records_count += data.num_rows
-        context.writer.write(data)
-        return
-
-    def partition(self) -> Tuple:
-        context = self._context
-        return context._partition
-
-    def end(self) -> DataFileMeta:
-        context = self._context
-        if self.capacity() != 0:
-            raise Exception("There still capacity left in the writer.")
-        files = context.writer.prepare_commit()
-        if len(files) != 1:
-            raise Exception("Should have one file.")
-        file = files[0]
-        if file.row_count != context.row_count:
-            raise Exception("File row count mismatch.")
-        file = file.assign_first_row_id(context.first_row_id)
-        return file

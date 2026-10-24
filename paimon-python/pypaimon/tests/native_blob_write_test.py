@@ -238,14 +238,18 @@ def test_native_blob_abort_preserves_files_after_commit_exception(tmp_path, publ
         writer.write_arrow(_data())
         messages = writer.prepare_commit()
         prepared = _physical_files(tmp_path)
-        original_commit = commit.file_store_commit.commit
+        from pypaimon.execution.python.write.table_commit import create_python_commit
+        commit._python_commit = create_python_commit(commit)
+        original_commit = commit._python_commit.file_store_commit.commit
 
         def fail_commit(**kwargs):
             if published:
                 original_commit(**kwargs)
             raise RuntimeError('Commit outcome is unknown')
 
-        with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=fail_commit):
             with pytest.raises(RuntimeError, match='Commit outcome is unknown'):
                 commit.commit(messages)
         writer.abort()

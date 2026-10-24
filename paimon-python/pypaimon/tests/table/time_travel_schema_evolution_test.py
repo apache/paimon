@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import pyarrow as pa
 import pytest
 
@@ -68,7 +69,7 @@ class TestTimeTravelSchemaEvolution:
         self._write(original, {'id': 1})
         builder = original.new_batch_write_builder()
         writer, commit = builder.new_write(), builder.new_commit()
-        snapshot_commit = commit.file_store_commit.snapshot_commit
+        snapshot_commit = python_commit(commit).file_store_commit.snapshot_commit
         publish = snapshot_commit.commit
         attempted_schemas = []
 

@@ -157,8 +157,9 @@ def test_inactive_vector_option_preserves_parquet_blob_mutations(rest_catalog, n
     try:
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(
-                    commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit fallback')))
+                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.commit',
+                                          side_effect=AssertionError('Python commit fallback')))
             commit.commit(messages, 7) if stream else commit.commit(messages)
     finally:
         commit.close()

@@ -120,13 +120,10 @@ def test_native_read_preparation_distinguishes_empty_results_from_unsupported(ta
     read = table.copy({'read.native.enabled': 'true'}).new_read_builder().new_read()
     execution = NativeTableRead(read)
     schema = read._output_arrow_schema([])
-    with patch.object(read, '_try_native_batches', return_value=[]) as prepare:
-        if method == 'read_rows':
-            assert list(execution.read_rows([])) == []
-        else:
-            assert list(execution.read_batches([], schema)) == []
-        if method != 'read_batches':
-            prepare.assert_called_once()
+    if method == 'read_rows':
+        assert list(execution.read_rows([])) == []
+    else:
+        assert list(execution.read_batches([], schema)) == []
     read.table = table
     if method == 'read_rows':
         assert execution.read_rows([]) is None

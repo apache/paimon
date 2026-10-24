@@ -144,8 +144,9 @@ def test_stream_dynamic_index_checkpoints(tmp_path, native_rest_catalog, native_
             adds = [entry for m in messages for entry in m.index_adds]
             assert len(adds) == (0 if checkpoint == 2 else 1)
             if native_commit:
-                with patch.object(commit.file_store_commit, 'commit',
-                                  side_effect=AssertionError('Python commit fallback')):
+                with patch('pypaimon.execution.python.write.file_store_commit.'
+                           'FileStoreCommit.commit',
+                           side_effect=AssertionError('Python commit fallback')):
                     commit.commit(messages, checkpoint)
             else:
                 commit.commit(messages, checkpoint)

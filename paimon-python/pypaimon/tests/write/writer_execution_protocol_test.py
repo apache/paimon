@@ -88,20 +88,17 @@ def test_native_writer_factory_selects_a_concrete_mode_without_python_execution(
 
 
 @pytest.mark.parametrize('native', [False, True])
-@pytest.mark.parametrize('fallback', [False, True])
 @pytest.mark.parametrize('args, kwargs', [
     ((None,), {}), ((1,), {}), ((), {'commit_identifier': None}),
     ((), {'commit_identifier': BATCH_COMMIT_IDENTIFIER}), ((1, 2), {}),
 ])
 def test_batch_prepare_rejects_every_argument_before_mutating_either_backend(
-        tmp_path, native, fallback, args, kwargs):
+        tmp_path, native, args, kwargs):
     table = _table(tmp_path)
     core = Mock()
     writer = (NativeTableWrite(table, 'writer', None, False, core) if native else
               table.new_batch_write_builder().new_write())
     try:
-        if native and fallback:
-            assert writer.file_store_write is writer._python_writer.file_store_write
         prepare = Mock(side_effect=AssertionError('invalid prepare started'))
         if native:
             core.prepare_commit = prepare
@@ -110,7 +107,11 @@ def test_batch_prepare_rejects_every_argument_before_mutating_either_backend(
         with pytest.raises(TypeError):
             writer.prepare_commit(*args, **kwargs)
         prepare.assert_not_called()
-        assert writer.batch_committed is False
+        assert not hasattr(writer, 'batch_committed')
+        if native:
+            assert writer._execution._batch_committed is False
+        else:
+            assert writer._batch_committed is False
     finally:
         writer.close()
 
@@ -127,7 +128,7 @@ def test_stream_prepare_requires_one_signed_identifier_before_io(tmp_path, nativ
             writer.prepare_commit(*args)
         core.prepare_commit.assert_not_called()
         if not native:
-            assert not writer.file_store_write.data_writers
+            assert not writer._execution.file_store_write.data_writers
     finally:
         writer.close()
 
@@ -136,19 +137,22 @@ def test_bound_python_writer_uses_executor_helpers_and_live_context():
     batches = []
     original = pa.record_batch([pa.array([1], pa.int32())], names=['id'])
     replacement = pa.record_batch([pa.array([2], pa.int32())], names=['id'])
-    owner = SimpleNamespace(data=original)
+    owner = SimpleNamespace()
 
     class SelectingWriter(PythonTableWrite):
         def _prepare_arrow_schema(self, data):
-            return self.writer.data
+            return self.data
 
     owner.write_arrow_batch = lambda batch, bucket=None: batches.append((batch, bucket))
     execution = SelectingWriter(owner)
+    execution.data = original
     execution.write_arrow('first', 1)
-    owner.data = replacement
+    execution.data = replacement
     execution.write_arrow('second', 2)
     assert batches == [(original, 1), (replacement, 2)]
-    assert execution.writer is owner
+    assert execution.public_writer is owner
+    assert not hasattr(owner, 'data')
+    assert not hasattr(execution, 'writer')
     assert not hasattr(execution, '__getattr__')
 
 
@@ -161,7 +165,8 @@ def test_internal_prepare_validates_the_identifier_before_file_preparation(nativ
         execution.stream = True
         execution._native_writer = source
     else:
-        execution = PythonTableWrite(SimpleNamespace(file_store_write=source))
+        execution = PythonTableWrite(SimpleNamespace())
+        execution.file_store_write = source
     with pytest.raises((TypeError, OverflowError)):
         execution.prepare_commit(identifier)
     source.prepare_commit.assert_not_called()
@@ -333,6 +338,9 @@ def test_python_executor_writes_without_private_writer_hooks(tmp_path, postpone,
     execution = (PythonPostponeFixedBucketWrite(owner) if postpone else PythonTableWrite(owner))
     owner.write_arrow_batch = execution.write_arrow_batch
     execution.initialize(table, builder.commit_user)
+    assert execution.table is table
+    for attribute in ('file_store_write', 'row_key_extractor', 'table_pyarrow_schema', 'restore_snapshot_id'):
+        assert not hasattr(owner, attribute)
     commit = builder.new_commit()
     rows = [{'id': 1, 'pt': 'a', 'value': 10}, {'id': 2, 'pt': 'b', 'value': 20}]
     data = pa.Table.from_pylist(rows, schema=schema)

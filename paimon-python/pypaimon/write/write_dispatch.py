@@ -28,7 +28,7 @@ from pypaimon.write.commit_message import CommitMessage
 
 
 class NativeTableWrite:
-    """Keep one selected writer and allow explicit pre-mutation diagnostics."""
+    """Keep one writer and configure supported capabilities before mutation."""
 
     def __new__(cls, *args, **kwargs):
         if cls is NativeTableWrite:
@@ -40,8 +40,15 @@ class NativeTableWrite:
                  restore_snapshot_id=None):
         from pypaimon.execution.native.write.native_write import NativeTableWrite as NativeWrite
 
-        self._execution = NativeWrite(table, commit_user, static_partition, stream,
-                                      native_writer, restore_snapshot_id)
+        self._initialize(NativeWrite(table, commit_user, static_partition, stream,
+                                     native_writer, restore_snapshot_id))
+
+    def _initialize(self, execution):
+        self._execution = execution
+        self.table = execution.table
+        self.commit_user = execution.commit_user
+        self.static_partition = execution.static_partition
+        self.stream = execution.stream
         self._python_writer = None
         self._public_writer = self
 
@@ -56,15 +63,8 @@ class NativeTableWrite:
         else:
             selected = NativeStreamTableWrite if native.stream else NativeBatchTableWrite
         result = object.__new__(selected)
-        result._execution = native
-        result._python_writer = None
-        result._public_writer = result
+        result._initialize(native)
         return result
-
-    def __getattr__(self, name):
-        # Metadata or unknown-attribute inspection must never select a backend.
-        execution = object.__getattribute__(self, '_execution')
-        return getattr(execution, name)
 
     @property
     def _native_writer(self):
@@ -83,18 +83,18 @@ class NativeTableWrite:
 
         writer = create_python_write(
             self.table, self.commit_user, self.static_partition, self.stream,
-            restore_snapshot_id=self._restore_snapshot_id, public_writer=self._public_writer)
+            restore_snapshot_id=self._execution._restore_snapshot_id, public_writer=self._public_writer)
         return self._configure_python_writer(writer)
 
     def _configure_python_writer(self, writer):
         if not self.stream:
-            writer.batch_committed = self._batch_committed
-        if self._write_cols is not None:
-            writer.with_write_type(self._write_cols)
-        if self._blob_consumer is not None:
-            writer.with_blob_consumer(self._blob_consumer)
-        if self._blob_uri_reader_factory is not None:
-            writer.with_blob_uri_reader_factory(self._blob_uri_reader_factory)
+            writer._batch_committed = self._execution._batch_committed
+        if self._execution._write_cols is not None:
+            writer.with_write_type(self._execution._write_cols)
+        if self._execution._blob_consumer is not None:
+            writer.with_blob_consumer(self._execution._blob_consumer)
+        if self._execution._blob_uri_reader_factory is not None:
+            writer.with_blob_uri_reader_factory(self._execution._blob_uri_reader_factory)
         return writer
 
     def _switch_to_python(self):
@@ -102,58 +102,12 @@ class NativeTableWrite:
 
         return switch_writer_to_python(self)
 
-    @property
-    def file_store_write(self):
-        return self._switch_to_python().file_store_write
-
-    @file_store_write.setter
-    def file_store_write(self, writer):
-        self._switch_to_python().file_store_write = writer
-
-    @property
-    def row_key_extractor(self):
-        return self._switch_to_python().row_key_extractor
-
-    @row_key_extractor.setter
-    def row_key_extractor(self, extractor):
-        self._switch_to_python().row_key_extractor = extractor
-
-    @property
-    def table_pyarrow_schema(self):
-        return (self._python_writer.table_pyarrow_schema
-                if self._python_writer is not None else self._table_schema)
-
-    @table_pyarrow_schema.setter
-    def table_pyarrow_schema(self, schema):
-        self._switch_to_python().table_pyarrow_schema = schema
-
-    @property
-    def restore_snapshot_id(self):
-        return (self._python_writer.restore_snapshot_id
-                if self._python_writer is not None else self._restore_snapshot_id)
-
-    @restore_snapshot_id.setter
-    def restore_snapshot_id(self, snapshot_id):
-        self._switch_to_python().restore_snapshot_id = snapshot_id
-
-    @property
-    def batch_committed(self):
-        if self._python_writer is not None:
-            return self._python_writer.batch_committed
-        if self.stream:
-            raise AttributeError('batch_committed')
-        return self._batch_committed
-
-    @batch_committed.setter
-    def batch_committed(self, value):
-        self._switch_to_python().batch_committed = value
-
     def with_write_type(self, write_cols):
         names = validate_write_columns(write_cols)
         if self._python_writer is not None:
             self._python_writer.with_write_type(names)
             return self
-        full_names = self._table_schema.names
+        full_names = self._execution._table_schema.names
         if (self.table.is_primary_key_table
                 and not (len(names) == len(full_names) and set(names) == set(full_names))):
             self._switch_to_python().with_write_type(names)
@@ -194,7 +148,7 @@ class NativeTableWrite:
         from pypaimon.write.input_adapter import _pandas_write_batch
 
         return self._public_writer.write_arrow_batch(_pandas_write_batch(
-            self.table, dataframe, self._schema, self._table_schema))
+            self.table, dataframe, self._execution._schema, self._execution._table_schema))
 
     def write_row(self, row):
         execution = self._python_writer if self._python_writer is not None else self._execution
@@ -234,7 +188,7 @@ class NativeBatchTableWrite(NativeTableWrite):
     def prepare_commit(self) -> List[CommitMessage]:
         if self._python_writer is not None:
             return self._python_writer.prepare_commit()
-        if self._batch_committed:
+        if self._execution._batch_committed:
             raise RuntimeError('BatchTableWrite only supports one-time committing.')
         return self._execution.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
@@ -257,21 +211,19 @@ class NativePostponeFixedBucketTableWrite(NativeBatchTableWrite):
             NativePostponeFixedBucketTableWrite as NativePostponeWrite,
         )
 
-        self._execution = NativePostponeWrite(
-            table, commit_user, static_partition, bucket_plan, native_writer)
-        self._python_writer = None
-        self._public_writer = self
+        self._initialize(NativePostponeWrite(
+            table, commit_user, static_partition, bucket_plan, native_writer))
 
     def _new_python_writer(self):
         from pypaimon.write.backend_dispatch import create_python_write
 
         return self._configure_python_writer(create_python_write(
             self.table, self.commit_user, self.static_partition,
-            fixed_bucket=True, bucket_plan=self._bucket_plan, public_writer=self._public_writer))
+            fixed_bucket=True, bucket_plan=self._execution._bucket_plan, public_writer=self._public_writer))
 
     def _distributed_write_options(self, *, overwrite=False):
         if self._python_writer is not None:
             return self._python_writer._distributed_write_options(overwrite=overwrite)
         from pypaimon.write.input_adapter import postpone_distributed_write_options
 
-        return postpone_distributed_write_options(self.table, self._bucket_plan, overwrite)
+        return postpone_distributed_write_options(self.table, self._execution._bucket_plan, overwrite)

@@ -138,11 +138,12 @@ def test_hive_precomputed_bucket_does_not_calculate_hashes(rest_catalog, native)
         with ExitStack() as guard:
             if native:
                 guard.enter_context(patch.object(writer, '_switch_to_python', side_effect=AssertionError('fallback')))
-                guard.enter_context(patch.object(
-                    commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit fallback')))
+                guard.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.commit',
+                                          side_effect=AssertionError('Python commit fallback')))
             else:
                 guard.enter_context(patch.object(
-                    writer.row_key_extractor, '_extract_buckets_batch',
+                    writer._execution.row_key_extractor, '_extract_buckets_batch',
                     side_effect=AssertionError('automatic routing')))
             writer.write_arrow(pa.table({'id': pa.array([17], pa.int32()), 'value': ['explicit']}), bucket=3)
             messages = writer.prepare_commit()
@@ -178,8 +179,9 @@ def test_mod_regular_and_precomputed_writes_share_buckets(
         with ExitStack() as guards:
             if native:
                 guards.enter_context(patch.object(writer, '_switch_to_python', side_effect=AssertionError('fallback')))
-                guards.enter_context(patch.object(
-                    commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit fallback')))
+                guards.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                           'FileStoreCommit.commit',
+                                           side_effect=AssertionError('Python commit fallback')))
             if row_input:
                 for value in values:
                     writer.write_row(GenericRow([value, 'original'], table.fields))

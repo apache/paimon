@@ -302,8 +302,9 @@ def test_query_auth_writes_do_not_require_select_and_reads_still_authorize(rest_
             with ExitStack() as stack:
                 if use_native:
                     assert isinstance(writer, NativeTableWrite)
-                    stack.enter_context(patch.object(commit.file_store_commit, 'commit',
-                                                     side_effect=AssertionError('Python commit')))
+                    stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                              'FileStoreCommit.commit',
+                                              side_effect=AssertionError('Python commit')))
                 try:
                     writer.write_arrow(pa.Table.from_pylist(rows, schema=SCHEMA))
                     commit.commit(writer.prepare_commit())
@@ -386,10 +387,12 @@ def test_guarded_overwrite_and_truncate_keep_rest_publication(rest_catalog, use_
             with ExitStack() as stack:
                 if use_native:
                     assert isinstance(writer, NativeTableWrite)
-                    stack.enter_context(patch.object(commit.file_store_commit, 'commit',
-                                                     side_effect=AssertionError('Python commit')))
-                    stack.enter_context(patch.object(commit.file_store_commit, 'overwrite',
-                                                     side_effect=AssertionError('Python overwrite')))
+                    stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                              'FileStoreCommit.commit',
+                                              side_effect=AssertionError('Python commit')))
+                    stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                              'FileStoreCommit.overwrite',
+                                              side_effect=AssertionError('Python overwrite')))
                 try:
                     writer.write_arrow(pa.Table.from_pylist(rows, schema=SCHEMA))
                     commit.commit(writer.prepare_commit())
@@ -400,10 +403,12 @@ def test_guarded_overwrite_and_truncate_keep_rest_publication(rest_catalog, use_
         commit = table.new_batch_write_builder().new_commit()
         with ExitStack() as stack:
             if use_native:
-                stack.enter_context(patch.object(commit.file_store_commit, 'drop_partitions',
-                                                 side_effect=AssertionError('Python drop')))
-                stack.enter_context(patch.object(commit.file_store_commit, 'truncate_table',
-                                                 side_effect=AssertionError('Python truncate')))
+                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.drop_partitions',
+                                          side_effect=AssertionError('Python drop')))
+                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.truncate_table',
+                                          side_effect=AssertionError('Python truncate')))
             try:
                 commit.truncate_partitions([{'pt': 'b'}])
                 assert table.snapshot_manager().get_latest_snapshot().total_record_count == 1

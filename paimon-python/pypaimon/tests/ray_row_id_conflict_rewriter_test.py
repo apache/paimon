@@ -119,21 +119,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         self.assertEqual(2, commit.commit.call_count)
         self.assertEqual(2, commit.close.call_count)
 
-    def test_commit_preserves_file_store_rollback(self):
-        rollback = Mock()
-        commit = Mock()
-        commit.file_store_commit.rollback = rollback
-        table = self._table([commit], [Mock(id=1)])
-
-        commit_self_merge_with_compaction_retry(
-            table,
-            [],
-            [],
-            num_partitions=1,
-        )
-
-        self.assertIs(commit.file_store_commit.rollback, rollback)
-
     def test_rewrite_error_keeps_row_id_conflict_as_cause(self):
         conflict = self._conflict('compact')
         rewrite_error = ValueError('rewrite failed')

@@ -860,10 +860,7 @@ class PickleTest(unittest.TestCase):
 
 
 class HdfsNativeWriteFormatTest(unittest.TestCase):
-    """HdfsNativeFileIO is the default hdfs:// backend, so it must keep the
-    same write surface as the pyarrow backend it replaces — including
-    vortex, which otherwise falls through to FileIO's NotImplementedError.
-    """
+    """The Python Vortex codec uses the shared HDFS location conversion."""
 
     def setUp(self):
         self._fake, self._client_cls, _ = _install_fake_hdfs_native()
@@ -873,13 +870,6 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
 
     def tearDown(self):
         _uninstall_fake_hdfs_native()
-
-    def test_vortex_is_overridden(self):
-        # The regression this guards: with these unimplemented, an HDFS table
-        # using file.format=vortex would hit FileIO's NotImplementedError.
-        from pypaimon.common.file_io import FileIO
-        self.assertIsNot(
-            type(self.fio).write_vortex, FileIO.write_vortex)
 
     def test_write_vortex_delegates_to_vortex_specified(self):
         import pyarrow
@@ -896,10 +886,11 @@ class HdfsNativeWriteFormatTest(unittest.TestCase):
             "vortex._lib": fake_lib,
             "vortex._lib.io": fake_io,
         }
+        from pypaimon.execution.python.write.format_file_writer import write_vortex_file
         with patch.dict(sys.modules, fake_modules), \
-                patch("pypaimon.execution.python.read.reader.vortex_utils.to_vortex_specified",
+                patch("pypaimon.execution.python.write.format_file_writer.to_vortex_specified",
                       return_value=("hdfs://ns/x.vortex", None)):
-            self.fio.write_vortex("hdfs://ns/x.vortex", table)
+            write_vortex_file(self.fio, "hdfs://ns/x.vortex", table)
         fake_io.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")
 
 

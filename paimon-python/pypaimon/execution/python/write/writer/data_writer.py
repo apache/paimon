@@ -21,6 +21,9 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
+from pypaimon.execution.python.write.format_file_writer import (
+    write_blob_file, write_row_file, write_vortex_file
+)
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
@@ -262,13 +265,13 @@ class DataWriter(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_AVRO:
             self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
-            self.file_io.write_blob(file_path, data)
+            write_blob_file(self.file_io, file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
+            write_vortex_file(self.file_io, file_path, data)
         elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
             self.file_io.write_mosaic(file_path, data, options=self.mosaic_writer_options)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
-            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
+            write_row_file(self.file_io, file_path, data, zstd_level=self.zstd_level)
         else:
             raise ValueError(f"Unsupported file format: {file_format}")
         return {}
@@ -302,7 +305,8 @@ class DataWriter(ABC):
             if self._should_write_row_sidecar():
                 row_sidecar_name = f"{file_name}{self.ROW_SIDECAR_SUFFIX}"
                 row_sidecar_path = f"{file_path}{self.ROW_SIDECAR_SUFFIX}"
-                self.file_io.write_row(
+                write_row_file(
+                    self.file_io,
                     row_sidecar_path,
                     logical_data,
                     fields=self._row_sidecar_fields(logical_data),

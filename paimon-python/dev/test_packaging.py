@@ -122,7 +122,8 @@ class PackagingTest(unittest.TestCase):
         self.assertIn("pypaimon/_version.py", names)
         execution_files = (
             "pypaimon/common/transform_schema.py",
-            "pypaimon/filesystem/format_dispatch.py",
+            "pypaimon/filesystem/vortex_utils.py",
+            "pypaimon/execution/python/write/format_file_writer.py",
             "pypaimon/table/source/search_execution.py",
             "pypaimon/ray/search_execution.py",
             "pypaimon/execution/native/read/search_execution.py",
@@ -204,7 +205,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/native/read/vindex_reader.py",
             "pypaimon/execution/native/write/native_write.py",
             "pypaimon/execution/native/write/native_commit.py",
-            "pypaimon/execution/native/write/bucket_metadata.py",
             "pypaimon/execution/native/write/postpone_bucket.py",
             "pypaimon/read/blob_read_support.py",
             "pypaimon/read/scan_request.py",

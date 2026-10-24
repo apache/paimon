@@ -108,8 +108,8 @@ def _read(table, predicate, native_plan, native_read, projection=('id',)):
     reader = builder.new_read()
     with ExitStack() as stack:
         if native_read:
-            stack.enter_context(patch.object(reader, '_native_fallback',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch('pypaimon.read.read_dispatch.native_read_fallback',
+                                      side_effect=AssertionError('Python read fallback')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python split reader')
