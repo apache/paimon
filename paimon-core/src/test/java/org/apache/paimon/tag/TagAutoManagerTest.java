@@ -388,6 +388,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
         commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:12:00")));
         commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
+        commit.commit(new ManifestCommittable(4, utcMills("2023-07-18T16:30:00")));
 
         Snapshot snapshot1 =
                 new Snapshot(

@@ -39,16 +39,20 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -64,10 +68,18 @@ public class TagManager {
 
     public static final String TAG_PREFIX = "tag-";
 
+    /**
+     * One reentrant lock per table and branch, shared by every {@link TagManager} for that key so
+     * tag creation and snapshot expiration cannot interleave.
+     */
+    private static final ConcurrentHashMap<String, ReentrantLock> COORDINATION_LOCKS =
+            new ConcurrentHashMap<>();
+
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
     @Nullable private final TagPeriodHandler tagPeriodHandler;
+    @Nullable private volatile Runnable beforeTagCommit;
 
     public TagManager(FileIO fileIO, Path tablePath) {
         this(fileIO, tablePath, DEFAULT_MAIN_BRANCH, (TagPeriodHandler) null);
@@ -124,6 +136,23 @@ public class TagManager {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Reentrant lock that coordinates tag creation with snapshot expiration for this table and
+     * branch. Separate manager instances use the same lock when they address the same key.
+     */
+    public ReentrantLock coordinationLock() {
+        return COORDINATION_LOCKS.computeIfAbsent(coordinationKey(), key -> new ReentrantLock());
+    }
+
+    /**
+     * Test hook invoked while this manager holds {@link #coordinationLock()}, after the existence
+     * check and before the snapshot is revalidated and tag metadata is written.
+     */
+    @VisibleForTesting
+    public void setBeforeTagCommit(@Nullable Runnable beforeTagCommit) {
+        this.beforeTagCommit = beforeTagCommit;
+    }
+
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(
             Snapshot snapshot,
@@ -132,11 +161,127 @@ public class TagManager {
             List<TagCallback> callbacks,
             boolean ignoreIfExists) {
         checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
-        if (tagExists(tagName)) {
-            checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
+        // The existence check and metadata write must not race with snapshot expiration, which
+        // deletes files based on a tag set collected under the same lock.
+        ReentrantLock coordinationLock = coordinationLock();
+        coordinationLock.lock();
+        try {
+            if (tagExists(tagName)) {
+                checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
+                return;
+            }
+            Runnable beforeCommit = beforeTagCommit;
+            if (beforeCommit != null) {
+                beforeCommit.run();
+            }
+            ensureSnapshotRetained(snapshot, tagName, false);
+            createOrReplaceTag(snapshot, tagName, timeRetained, callbacks, true);
+        } finally {
+            coordinationLock.unlock();
+        }
+    }
+
+    private String coordinationKey() {
+        return tablePath.toString() + '\u0000' + branch;
+    }
+
+    /**
+     * Reject a tag whose snapshot was removed while this creation waited behind expiration, unless
+     * an existing tag still retains that snapshot's files. The post-write check ({@code
+     * excludeSelf}) does not treat another tag as protection: that tag may be an in-flight creator
+     * that will roll back. It requires the snapshot file or its manifest list to still exist, and
+     * honors {@link #createExpirationMarker(long, String)}.
+     */
+    private void ensureSnapshotRetained(Snapshot snapshot, String tagName, boolean excludeSelf) {
+        if (excludeSelf) {
+            if (expirationMarkerExists(snapshot.id()) || !snapshotFilesExist(snapshot)) {
+                throw missingSnapshot(tagName, snapshot);
+            }
             return;
         }
-        createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
+        if (new SnapshotManager(fileIO, tablePath, branch, null, null)
+                .snapshotExists(snapshot.id())) {
+            return;
+        }
+        for (Map.Entry<Snapshot, List<String>> entry : tags().entrySet()) {
+            if (entry.getKey().id() == snapshot.id() && !entry.getValue().isEmpty()) {
+                return;
+            }
+        }
+        throw missingSnapshot(tagName, snapshot);
+    }
+
+    private SnapshotNotExistException missingSnapshot(String tagName, Snapshot snapshot) {
+        return new SnapshotNotExistException(
+                String.format(
+                        "Cannot create tag '%s' because snapshot #%s doesn't exist.",
+                        tagName, snapshot.id()));
+    }
+
+    /**
+     * Cross-process fence for one expiration run, written before its final tag scan. A creator that
+     * still sees any run's marker missed that scan and must roll the tag back. Only the owning run
+     * deletes its marker.
+     */
+    public void createExpirationMarker(long snapshotId, String owner) {
+        try {
+            Path path = expirationMarkerPath(snapshotId, owner);
+            if (!fileIO.tryToWriteAtomic(path, "1") && !fileIO.exists(path)) {
+                throw new IOException("Failed to write expiration marker " + path);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public void deleteExpirationMarker(long snapshotId, String owner) {
+        fileIO.deleteQuietly(expirationMarkerPath(snapshotId, owner));
+    }
+
+    private boolean expirationMarkerExists(long snapshotId) {
+        Path dir = expirationMarkerDir(snapshotId);
+        try {
+            if (!fileIO.exists(dir)) {
+                return false;
+            }
+            FileStatus[] statuses = fileIO.listStatus(dir);
+            return statuses != null && statuses.length > 0;
+        } catch (FileNotFoundException e) {
+            return false;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private Path expirationMarkerDir(long snapshotId) {
+        return new Path(branchPath(tablePath, branch) + "/expire-marker/" + snapshotId);
+    }
+
+    private Path expirationMarkerPath(long snapshotId, String owner) {
+        return new Path(expirationMarkerDir(snapshotId), owner);
+    }
+
+    /** Snapshot metadata, or the manifest list a previous tag retained after metadata expired. */
+    private boolean snapshotFilesExist(Snapshot snapshot) {
+        if (new SnapshotManager(fileIO, tablePath, branch, null, null)
+                .snapshotExists(snapshot.id())) {
+            return true;
+        }
+        return manifestExists(snapshot.deltaManifestList())
+                || manifestExists(snapshot.baseManifestList());
+    }
+
+    private boolean manifestExists(@Nullable String manifestList) {
+        if (manifestList == null) {
+            return false;
+        }
+        try {
+            return fileIO.exists(
+                    new Path(
+                            new Path(tablePath, FileStorePathFactory.MANIFEST_PATH), manifestList));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** Replace a tag from given snapshot and save it in the storage. */
@@ -150,14 +295,16 @@ public class TagManager {
                 timeRetained,
                 callbacks.stream()
                         .filter(callback -> callback instanceof IcebergCommitCallback)
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                false);
     }
 
     private void createOrReplaceTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
-            @Nullable List<TagCallback> callbacks) {
+            @Nullable List<TagCallback> callbacks,
+            boolean rollbackIfSnapshotExpired) {
         validateNoAutoTag(tagName, snapshot);
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
@@ -179,6 +326,15 @@ public class TagManager {
                                     + "Cannot clean up because we can't determine the success.",
                             tagName, tagPath),
                     e);
+        }
+
+        if (rollbackIfSnapshotExpired) {
+            try {
+                ensureSnapshotRetained(snapshot, tagName, true);
+            } catch (RuntimeException e) {
+                fileIO.deleteQuietly(tagPath);
+                throw e;
+            }
         }
 
         if (callbacks != null) {
