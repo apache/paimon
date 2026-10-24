@@ -31,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.mosaic.ColumnStatistics;
 import org.apache.paimon.mosaic.MosaicReader;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
@@ -214,7 +215,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedFieldCount = projectedRowType.getFieldCount();
-        this.predicates = predicates;
+        this.predicates = resolvePredicates(predicates, dataSchemaRowType);
         this.selection = selection;
         this.allocator = allocator;
 
@@ -296,6 +297,28 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             }
         }
         return Math.max(1, bytes);
+    }
+
+    /**
+     * Resolves predicate fields by name against the file's row type. Callers such as Format Tables
+     * and primary-key tables pass predicates whose indices refer to a different row type.
+     */
+    @Nullable
+    private static List<Predicate> resolvePredicates(
+            @Nullable List<Predicate> predicates, RowType dataSchemaRowType) {
+        if (predicates == null || predicates.isEmpty()) {
+            return predicates;
+        }
+        List<Predicate> resolved = new ArrayList<>(predicates.size());
+        for (Predicate predicate : predicates) {
+            try {
+                resolved.add(PredicateRemapper.remap(predicate, dataSchemaRowType));
+            } catch (IllegalArgumentException e) {
+                // The field is not in this file's row type. Dropping the conjunct only relaxes
+                // row-group pruning.
+            }
+        }
+        return resolved;
     }
 
     int prefetchDepth() {
