@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriter;
@@ -53,6 +54,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.LongConsumer;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -251,6 +253,77 @@ class DataEvolutionSplitReadTest {
                 DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 1L, 0.02d));
         assertFalse(
                 DataEvolutionSplitRead.shouldReadRowSidecar(file, rowRanges, bitmap, 2L, 0.01d));
+    }
+
+    @Test
+    public void testShouldReadRowSidecarUsesDvLiveRowsWithoutFileIndex() {
+        DataFileMeta file =
+                createFile("file1.parquet", 0L, 20_000, 1, Collections.singletonList("file1.row"));
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        for (int i = 0; i < 19_000; i++) {
+            deletionVector.delete(i);
+        }
+
+        assertTrue(
+                DataEvolutionSplitRead.shouldReadRowSidecar(
+                        file, null, null, deletionVector, 20_000L, 1.0d));
+    }
+
+    @Test
+    public void testSelectedRowCountUsesDeletionVectorAnchorRange() {
+        // The file starts at row 100, while the DV positions are relative to an anchor at row 0.
+        DataFileMeta file =
+                createFile("file1.parquet", 100L, 100, 1, Collections.singletonList("file1.row"));
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(100L);
+        deletionVector.delete(150L);
+        deletionVector.delete(250L); // outside the file range
+
+        assertEquals(
+                98L,
+                DataEvolutionSplitRead.selectedRowCount(
+                        file, null, null, deletionVector, new Range(0L, 299L)));
+    }
+
+    @Test
+    public void testSelectedRowCountUsesDvCardinalityForMatchingAnchorRange() {
+        DataFileMeta file =
+                createFile("file1.parquet", 100L, 100, 1, Collections.singletonList("file1.row"));
+        BitmapDeletionVector deletionVector =
+                new BitmapDeletionVector() {
+                    @Override
+                    public void forEachDeletedPosition(LongConsumer consumer) {
+                        throw new AssertionError("matching anchor range should use cardinality");
+                    }
+                };
+        deletionVector.delete(0L);
+        deletionVector.delete(50L);
+
+        assertEquals(
+                98L,
+                DataEvolutionSplitRead.selectedRowCount(
+                        file, null, null, deletionVector, file.nonNullRowIdRange()));
+    }
+
+    @Test
+    public void testSelectedRowCountIteratesSparseDvInsteadOfSelection() {
+        DataFileMeta file =
+                createFile("file1.parquet", 0L, 10_000, 1, Collections.singletonList("file1.row"));
+        BitmapIndexResult bitmap =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOfRange(0L, 10_000L));
+        BitmapDeletionVector deletionVector =
+                new BitmapDeletionVector() {
+                    @Override
+                    public boolean isDeleted(long position) {
+                        throw new AssertionError("sparse DV should not probe every selected row");
+                    }
+                };
+        deletionVector.delete(5L);
+
+        assertEquals(
+                9_999L,
+                DataEvolutionSplitRead.selectedRowCount(
+                        file, null, bitmap, deletionVector, file.nonNullRowIdRange()));
     }
 
     @Test
