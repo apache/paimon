@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 from pypaimon.write.backend_dispatch import (
     abort_table_commit, close_table_commit, commit_table_messages, prepare_native_commit,
-    python_commit, set_python_commit, truncate_partitions_commit, truncate_table_commit,
+    truncate_partitions_commit, truncate_table_commit,
 )
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback
@@ -80,22 +80,13 @@ class TableCommit:
     def close(self):
         return close_table_commit(self)
 
-    @property
-    def file_store_commit(self):
-        """Access the Python committer explicitly, creating it on first use."""
-        return python_commit(self).file_store_commit
-
-    @file_store_commit.setter
-    def file_store_commit(self, commit):
-        set_python_commit(self, commit)
-
 
 class BatchTableCommit(TableCommit):
     """Batch-mode commit; supports at most one commit per instance."""
 
     def __init__(self, table, commit_user: str, static_partition: Optional[dict]):
         super().__init__(table, commit_user, static_partition)
-        self.batch_committed = False
+        self._batch_committed = False
 
     def commit(
             self,
@@ -117,9 +108,9 @@ class BatchTableCommit(TableCommit):
         return truncate_partitions_commit(self, partitions, BATCH_COMMIT_IDENTIFIER)
 
     def _check_committed(self):
-        if self.batch_committed:
+        if self._batch_committed:
             raise RuntimeError("BatchTableCommit only supports one-time committing.")
-        self.batch_committed = True
+        self._batch_committed = True
 
 
 class StreamTableCommit(TableCommit):

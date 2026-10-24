@@ -76,17 +76,20 @@ def _initialize_python_write(owner, table, commit_user, static_partition, stream
                              restore_snapshot_id, fixed_bucket, bucket_plan, public_writer=None):
     if fixed_bucket:
         from pypaimon.execution.python.write.postpone_batch_table_write import PythonPostponeFixedBucketWrite
-        execution = PythonPostponeFixedBucketWrite(owner, public_writer)
+        execution = PythonPostponeFixedBucketWrite(public_writer if public_writer is not None else owner)
         execution.initialize(table, commit_user, static_partition, bucket_plan)
     else:
         from pypaimon.execution.python.write.table_write import PythonTableWrite
-        execution = PythonTableWrite(owner, public_writer)
+        execution = PythonTableWrite(public_writer if public_writer is not None else owner)
         execution.initialize(table, commit_user, static_partition,
                              restore_snapshot_id=restore_snapshot_id)
+    owner.table = table
+    owner.commit_user = commit_user
+    owner.static_partition = static_partition
     owner._execution = execution
     from pypaimon.write.table_write import BatchTableWrite
     if isinstance(owner, BatchTableWrite):
-        owner.__dict__['batch_committed'] = False
+        owner._batch_committed = False
 
 
 def _prepare_write(table, commit_user, static_partition, stream,
@@ -131,33 +134,6 @@ def create_write(table, commit_user, static_partition=None, stream=False,
         table, commit_user, static_partition, stream, restore_snapshot_id, fixed_bucket, bucket_plan)
 
 
-def get_write_attribute(owner, name):
-    from pypaimon.write.write_dispatch import NativeTableWrite
-    execution = owner.__dict__.get('_execution')
-    if isinstance(execution, NativeTableWrite):
-        return getattr(execution, name)
-    try:
-        return owner.__dict__[name]
-    except KeyError:
-        raise AttributeError(name) from None
-
-
-def write_property(name):
-    """Preserve public writer attributes without selecting a second backend."""
-    def get(owner):
-        return get_write_attribute(owner, name)
-
-    def set_(owner, value):
-        from pypaimon.write.write_dispatch import NativeTableWrite
-        execution = owner.__dict__.get('_execution')
-        if isinstance(execution, NativeTableWrite):
-            setattr(execution, name, value)
-        else:
-            owner.__dict__[name] = value
-
-    return property(get, set_)
-
-
 def prepare_write_commit(owner, commit_identifier):
     from pypaimon.write.write_dispatch import NativeTableWrite
     execution = owner._execution
@@ -173,9 +149,9 @@ def prepare_batch_write(owner):
     execution = owner._execution
     if isinstance(execution, NativeTableWrite):
         return execution.prepare_commit()
-    if owner.batch_committed:
+    if owner._batch_committed:
         raise RuntimeError('BatchTableWrite only supports one-time committing.')
-    owner.batch_committed = True
+    owner._batch_committed = True
     return owner._prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
 
@@ -265,21 +241,8 @@ def load_postpone_bucket_metadata(table):
     return PythonPostponeBucketPlanner._load_bucket_metadata(table)
 
 
-def dynamic_bucket_data_buckets(table, partition, snapshot):
-    """Resolve complete bucket metadata before assigning any input keys."""
-    if table.options.native_write_enabled():
-        def prepare():
-            from pypaimon.execution.native.write.bucket_metadata import dynamic_bucket_data_buckets as native_buckets
-            return native_buckets(table, partition, snapshot)
-        native = try_prepare_native(prepare)
-        if native is not None:
-            return native
-    from pypaimon.execution.python.write.bucket_metadata import dynamic_bucket_data_buckets as python_buckets
-    return python_buckets(table, partition, snapshot)
-
-
 def prepare_native_commit(owner, messages, *, batch=False):
-    if not owner.table.options.native_commit_enabled():
+    if owner._python_commit is not None or not owner.table.options.native_commit_enabled():
         return None
 
     def prepare():
@@ -355,14 +318,6 @@ def create_python_shard_updator(owner, table, projection, columns, commit_user, 
     from pypaimon.execution.python.write.table_update import ShardTableUpdator
     execution = ShardTableUpdator(owner)
     execution.initialize(table, projection, columns, commit_user, shard, shard_count)
-    return execution
-
-
-def create_python_single_writer(owner, writer, partition, first_row_id, row_count):
-    """Wrap an already selected Python data writer."""
-    from pypaimon.execution.python.write.table_update import SingleWriter
-    execution = SingleWriter(owner)
-    execution.initialize(writer, partition, first_row_id, row_count)
     return execution
 
 
@@ -474,13 +429,6 @@ def python_commit(owner):
         from pypaimon.execution.python.write.table_commit import create_python_commit
         owner._python_commit = create_python_commit(owner)
     return owner._python_commit
-
-
-def set_python_commit(owner, commit):
-    """Install an explicitly supplied Python committer without selecting Native."""
-    from pypaimon.execution.python.write.table_commit import PythonTableCommit
-    owner._python_commit = (None if commit is None else
-                            PythonTableCommit(commit, owner.overwrite_partition))
 
 
 def commit_table_messages(

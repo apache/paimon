@@ -121,10 +121,11 @@ def pytest_configure(config):
         StreamTableScan.plan = tracked_stream_plan
 
     if _native_read_enabled():
-        from pypaimon.read.table_read import TableRead
+        from pypaimon.execution.native.read.table_read import NativeTableRead
 
-        original_read = TableRead._try_native_batches
+        original_read = NativeTableRead.read_batches
 
+        @wraps(original_read)
         def tracked_read(self, splits, *args, **kwargs):
             global _native_read_count
             batches = original_read(self, splits, *args, **kwargs)
@@ -132,7 +133,7 @@ def pytest_configure(config):
                 _native_read_count += 1
             return batches
 
-        TableRead._try_native_batches = tracked_read
+        NativeTableRead.read_batches = tracked_read
 
     if _native_write_enabled():
         from pypaimon.execution.native.write.native_write import NativeTableWrite

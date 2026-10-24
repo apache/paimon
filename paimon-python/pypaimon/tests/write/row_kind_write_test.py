@@ -155,7 +155,7 @@ def test_input_changelog_retry_preserves_published_chunks_and_all_inputs(tmp_pat
             schema=pa.schema([('id', pa.int64()), ('value', pa.int64())])))
         # Delay rolling until prepare so a retry can preserve already published
         # log chunks. These rows fold into one data row, but remain three logs.
-        bucket_writer = next(iter(writer.file_store_write.data_writers.values()))
+        bucket_writer = next(iter(writer._execution.file_store_write.data_writers.values()))
         bucket_writer.target_file_size = 1
         original = table.file_io.write_parquet
         state = {'changelogs': 0, 'failed': False}

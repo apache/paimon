@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import os
 import shutil
 import sys
@@ -383,7 +384,7 @@ class AoReaderTest(unittest.TestCase):
                     file=file
                 ))
         # mock retry
-        success = table_commit.file_store_commit._try_commit_once(
+        success = python_commit(table_commit).file_store_commit._try_commit_once(
             CommitFailRetryResult(None),
             "APPEND",
             commit_entries,

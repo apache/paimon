@@ -40,7 +40,8 @@ def _commit(table, messages, native=False):
     commit = table.new_batch_write_builder().new_commit()
     try:
         if native:
-            with patch.object(commit.file_store_commit, 'commit', side_effect=AssertionError('Python fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.FileStoreCommit.commit',
+                       side_effect=AssertionError('Python fallback')):
                 commit.commit(messages)
         else:
             commit.commit(messages)

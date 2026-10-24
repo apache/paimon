@@ -26,7 +26,6 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketAssigner
 from pypaimon.read.plan import Plan
-from pypaimon.read.split import DataSplit
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.execution.python.write.input_routing import DynamicBucketInputRouter, FixedBucketInputRouter
 
@@ -161,26 +160,18 @@ def test_daft_dynamic_assignment_dispatches_pinned_snapshot_and_arrow_hashes(tmp
     assert execution.assign.call_args[1]['key_hashes'].equals(pa.array(hashes, type=pa.int32()))
 
 
-def test_native_dynamic_metadata_preserves_missing_hash_index_validation(tmp_path):
-    table = _table(tmp_path, '-1')
-    snapshot, plan = _seed_snapshot(table)
-    split = plan.splits()[0]
-    plan = Plan([DataSplit(files=split.files, partition=split.partition, bucket=7)])
-    with patch('pypaimon.execution.native.read.plan.native_plan', return_value=plan), \
-            patch('pypaimon.execution.python.read.scanner.file_scanner.FileScanner.__init__',
-                  side_effect=AssertionError('Pure scanner')):
-        assigner = DynamicBucketAssigner(table, 1, 1, 0, 1, -1, snapshot=snapshot)
-        with pytest.raises(RuntimeError, match='no complete HASH index.*7'):
-            assigner.assign(('p',), 0, 123)
-
-
-def test_dynamic_metadata_preparation_fallback_happens_before_assignment(tmp_path):
-    table = _table(tmp_path, '-1')
+def test_selected_python_dynamic_assigner_validates_real_live_buckets(tmp_path):
+    table = _table(tmp_path, '-1').copy({
+        'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false'})
     snapshot, _ = _seed_snapshot(table)
-    from pypaimon.write.backend_dispatch import dynamic_bucket_data_buckets
-    with patch('pypaimon.execution.native.read.plan.native_plan',
-               side_effect=RuntimeError('unrestricted grant needed')), \
-            patch('pypaimon.execution.python.write.bucket_metadata.dynamic_bucket_data_buckets',
-                  return_value={3}) as pure:
-        assert dynamic_bucket_data_buckets(table, ('p',), snapshot) == {3}
-        pure.assert_called_once_with(table, ('p',), snapshot)
+    # A real data file without its HASH index must still fail validation. The
+    # selected Python assigner obtains complete live metadata from its own
+    # scanner even though the original table requests Native writes.
+    with patch('pypaimon.execution.python.write.dynamic_bucket.IndexFileHandler') as indexes, \
+            patch('pypaimon.execution.native.read.plan.native_plan',
+                  side_effect=AssertionError('Selected Python assigner entered Native')) as native_plan:
+        indexes.return_value.scan.return_value = []
+        assigner = DynamicBucketAssigner(table, 1, 1, 0, 1, -1, snapshot=snapshot)
+        with pytest.raises(RuntimeError, match='no complete HASH index.*0'):
+            assigner.assign(('p',), 0, 123)
+    native_plan.assert_not_called()

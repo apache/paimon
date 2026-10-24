@@ -40,120 +40,110 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         static_partition: Optional[dict] = None,
         bucket_plan=None,
     ):
-        writer = self.writer
-        writer._planner = PostponeBucketPlanner(
+        self._planner = PostponeBucketPlanner(
             table,
             known_num_buckets=(
                 bucket_plan.as_dict() if bucket_plan is not None
                 else {} if static_partition is not None else None
             ),
         )
-        writer._bucket_plan = (
+        self._bucket_plan = (
             bucket_plan
             if bucket_plan is not None
-            else writer._planner.current_plan()
+            else self._planner.current_plan()
         )
-        writer._plan_provided = bucket_plan is not None
-        writer._pending_inputs = []
+        self._plan_provided = bucket_plan is not None
+        self._pending_inputs = []
         super().initialize(table, commit_user, static_partition)
 
     def _create_file_store_write(self, commit_user):
-        writer = self.writer
-        return PostponeFixedBucketFileStoreWrite(writer.table, commit_user)
+        return PostponeFixedBucketFileStoreWrite(self.table, commit_user)
 
     def _create_row_key_extractor(self, static_partition):
-        writer = self.writer
         return PostponeFixedBucketRowKeyExtractor(
-            writer.table, writer._bucket_plan)
+            self.table, self._bucket_plan)
 
     def _write_partition_bucket_batch(self, partition, bucket, data):
-        writer = self.writer
-        writer.file_store_write.write(
+        self.file_store_write.write(
             partition,
             bucket,
             data,
-            writer.row_key_extractor.num_buckets(partition),
+            self.row_key_extractor.num_buckets(partition),
         )
 
     def _write_partition_bucket_row(
         self, partition, bucket, row, values_by_name
     ):
-        writer = self.writer
-        writer.file_store_write.write_row(
+        self.file_store_write.write_row(
             partition,
             bucket,
             row,
             values_by_name,
-            writer.row_key_extractor.num_buckets(partition),
+            self.row_key_extractor.num_buckets(partition),
         )
 
     def _buffer_input(self, data) -> bool:
-        writer = self.writer
-        if writer._plan_provided:
+        if self._plan_provided:
             return False
         return any(
-            not writer._bucket_plan.contains(partition)
-            for partition in writer._planner.input_partition_stats(data)
+            not self._bucket_plan.contains(partition)
+            for partition in self._planner.input_partition_stats(data)
         )
 
     def write_arrow(self, table: pa.Table, bucket=None):
-        writer = self.writer
         if bucket is not None:
             raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         table = self._prepare_arrow_data(table)
         if not self._buffer_input(table):
             return super().write_arrow(table)
-        writer._pending_inputs.extend(
+        self._pending_inputs.extend(
             ("batch", batch) for batch in table.to_batches())
 
     def write_arrow_batch(self, data: pa.RecordBatch, bucket=None):
-        writer = self.writer
         if bucket is not None:
             raise ValueError('Precomputed bucket writes require HASH_FIXED or HASH_DYNAMIC tables')
         data = self._prepare_arrow_data(data)
         if not self._buffer_input(data):
             return super().write_arrow_batch(data)
-        writer._pending_inputs.append(("batch", data))
+        self._pending_inputs.append(("batch", data))
 
     def write_row(self, row):
-        writer = self.writer
-        if writer._plan_provided:
+        if self._plan_provided:
             return super().write_row(row)
 
         values_by_name = row_to_named_values(
-            row, writer.table.table_schema.fields)
+            row, self.table.table_schema.fields)
         column_names = (
-            writer.file_store_write.write_cols
-            if writer.file_store_write.write_cols is not None
-            else list(writer.table.field_names)
+            self.file_store_write.write_cols
+            if self.file_store_write.write_cols is not None
+            else list(self.table.field_names)
         )
         require_columns(values_by_name, column_names, "write_row")
-        require_columns(values_by_name, writer.table.partition_keys, "write_row")
+        require_columns(values_by_name, self.table.partition_keys, "write_row")
         from pypaimon.write.row_kind import skip_write_row
 
-        if skip_write_row(writer.table, values_by_name, row.get_row_kind(), writer.file_store_write.write_cols):
+        if skip_write_row(self.table, values_by_name, row.get_row_kind(), self.file_store_write.write_cols):
             return
         partition = tuple(
-            values_by_name[key] for key in writer.table.partition_keys)
-        if writer._bucket_plan.contains(partition):
+            values_by_name[key] for key in self.table.partition_keys)
+        if self._bucket_plan.contains(partition):
             return super().write_row(row)
 
         arrow_row = row_values_to_arrow_table(
-            values_by_name, writer.table.table_schema.fields, column_names)
-        size = writer._planner.input_partition_stats(arrow_row)[partition][1]
-        writer._pending_inputs.append(
+            values_by_name, self.table.table_schema.fields, column_names)
+        size = self._planner.input_partition_stats(arrow_row)[partition][1]
+        self._pending_inputs.append(
             ("row", (row, partition, size)))
 
     def _flush_pending_inputs(self):
-        writer = self.writer
-        if not writer._pending_inputs:
+        if not self._pending_inputs:
             return
 
         partition_stats = {}
-        for input_type, value in writer._pending_inputs:
+        for input_type, value in self._pending_inputs:
             if input_type == "batch":
                 stats_by_partition = (
-                    writer._planner.input_partition_stats(value))
+                    self._planner.input_partition_stats(value))
             else:
                 _, partition, size = value
                 stats_by_partition = {partition: (1, size)}
@@ -162,12 +152,12 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
                 partition_stats[partition] = (
                     rows + stats[0], size + stats[1])
 
-        writer._bucket_plan = writer._planner.plan(
+        self._bucket_plan = self._planner.plan(
             partition_stats,
         )
-        writer.row_key_extractor.with_bucket_plan(writer._bucket_plan)
-        inputs = writer._pending_inputs
-        writer._pending_inputs = []
+        self.row_key_extractor.with_bucket_plan(self._bucket_plan)
+        inputs = self._pending_inputs
+        self._pending_inputs = []
         for input_type, value in inputs:
             if input_type == "batch":
                 super().write_arrow_batch(value)
@@ -179,17 +169,14 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         return super().prepare_commit(commit_identifier)
 
     def _distributed_write_options(self, *, overwrite=False) -> Dict[str, Any]:
-        writer = self.writer
-        if overwrite and not writer._plan_provided:
-            return {"postpone_bucket_planner": PostponeBucketPlanner(writer.table, known_num_buckets={})}
-        return {"postpone_bucket_planner": writer._planner}
+        if overwrite and not self._plan_provided:
+            return {"postpone_bucket_planner": PostponeBucketPlanner(self.table, known_num_buckets={})}
+        return {"postpone_bucket_planner": self._planner}
 
     def close(self):
-        writer = self.writer
-        writer._pending_inputs = []
+        self._pending_inputs = []
         super().close()
 
     def abort(self):
-        writer = self.writer
-        writer._pending_inputs = []
+        self._pending_inputs = []
         super().abort()

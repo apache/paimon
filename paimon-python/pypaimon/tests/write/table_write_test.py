@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import datetime
 import glob
 import os
@@ -46,8 +47,8 @@ class TableWriteTest(unittest.TestCase):
     def test_large_string_compatibility_rejects_other_type_changes(self):
         writer = object.__new__(TableWrite)
         writer._execution = PythonTableWrite(writer)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.table_pyarrow_schema = pa.schema([
+        writer._execution.file_store_write = Mock(write_cols=None)
+        writer._execution.table_pyarrow_schema = pa.schema([
             ('id', pa.int32()),
             ('nested', pa.struct([pa.field('text', pa.string(), nullable=False)])),
         ])
@@ -55,7 +56,7 @@ class TableWriteTest(unittest.TestCase):
             ('id', pa.int32()),
             ('nested', pa.struct([pa.field('text', pa.large_string(), nullable=False)])),
         ])
-        PythonTableWrite(writer)._validate_pyarrow_schema(valid)
+        writer._execution._validate_pyarrow_schema(valid)
         invalid = [
             valid.set(0, pa.field('id', pa.int64())),
             pa.schema(list(reversed(list(valid)))),
@@ -67,7 +68,7 @@ class TableWriteTest(unittest.TestCase):
         for schema in invalid:
             with self.subTest(schema=schema):
                 with self.assertRaisesRegex(ValueError, 'consistent'):
-                    PythonTableWrite(writer)._validate_pyarrow_schema(schema)
+                    writer._execution._validate_pyarrow_schema(schema)
 
     @parameterized.expand([('append', False, '-1'), ('primary', True, '1'), ('postpone', True, '-2')])
     def test_large_string_input_roundtrip(self, mode, primary_key, bucket):
@@ -238,10 +239,10 @@ class TableWriteTest(unittest.TestCase):
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(schema).fields)
-        table_write.table_pyarrow_schema = schema
-        table_write.row_key_extractor = Mock()
-        table_write.file_store_write = Mock(write_cols=None)
-        table_write.row_key_extractor.extract_partition_bucket_groups.side_effect = (
+        table_write._execution.table_pyarrow_schema = schema
+        table_write._execution.row_key_extractor = Mock()
+        table_write._execution.file_store_write = Mock(write_cols=None)
+        table_write._execution.row_key_extractor.extract_partition_bucket_groups.side_effect = (
             lambda data: TableWriteTest._groups_from_rows(
                 partitions, buckets, data.num_rows))
         return table_write
@@ -258,7 +259,7 @@ class TableWriteTest(unittest.TestCase):
             table_write.write_arrow_batch(data)
 
         take.assert_not_called()
-        written = table_write.file_store_write.write.call_args[0][2]
+        written = table_write._execution.file_store_write.write.call_args[0][2]
         self.assertIs(data, written)
 
     def test_write_arrow_batch_uses_zero_copy_for_contiguous_groups(self):
@@ -273,7 +274,7 @@ class TableWriteTest(unittest.TestCase):
             table_write.write_arrow_batch(data)
 
         take.assert_not_called()
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual(2, len(calls))
         self.assertEqual({'id': [0, 1], 'payload': [b'a', b'b']},
                          calls[0][0][2].to_pydict())
@@ -296,7 +297,7 @@ class TableWriteTest(unittest.TestCase):
             table_write.write_arrow_batch(data)
 
         self.assertEqual(2, take.call_count)
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual({'id': [0, 2], 'payload': [b'a', b'c']},
                          calls[0][0][2].to_pydict())
         self.assertEqual({'id': [1, 3], 'payload': [b'b', b'd']},
@@ -316,17 +317,17 @@ class TableWriteTest(unittest.TestCase):
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(data.schema).fields)
-        table_write.table_pyarrow_schema = data.schema
-        table_write.file_store_write = Mock(write_cols=None)
-        table_write.row_key_extractor = Mock()
-        table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
+        table_write._execution.table_pyarrow_schema = data.schema
+        table_write._execution.file_store_write = Mock(write_cols=None)
+        table_write._execution.row_key_extractor = Mock()
+        table_write._execution.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p1',), 0, pa.array([0, 2, 3], type=pa.int64())),
             (('p2',), 0, pa.array([1], type=pa.int64())),
         ]
 
         table_write.write_arrow_batch(data)
 
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual(2, len(calls))
         # Order-sensitive: sequence numbers are assigned in the delivered order.
         self.assertEqual([0, 2, 3], calls[0][0][2].column('id').to_pylist())
@@ -344,10 +345,10 @@ class TableWriteTest(unittest.TestCase):
         table_write.table = Mock(
             is_primary_key_table=False, options=CoreOptions(Options({})),
             fields=Schema.from_pyarrow_schema(data.schema).fields)
-        table_write.table_pyarrow_schema = data.schema
-        table_write.file_store_write = Mock(write_cols=None)
-        table_write.row_key_extractor = Mock()
-        table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
+        table_write._execution.table_pyarrow_schema = data.schema
+        table_write._execution.file_store_write = Mock(write_cols=None)
+        table_write._execution.row_key_extractor = Mock()
+        table_write._execution.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p0',), 0, pa.array([0], type=pa.int64())),
             (('p1',), 0, pa.array([1, 2, 3], type=pa.int64())),
         ]
@@ -356,7 +357,7 @@ class TableWriteTest(unittest.TestCase):
             table_write.write_arrow_batch(data)
 
         take.assert_not_called()
-        calls = table_write.file_store_write.write.call_args_list
+        calls = table_write._execution.file_store_write.write.call_args_list
         self.assertEqual([1, 2, 3], calls[1][0][2].column('id').to_pylist())
 
     def _unaware_partitioned_extractor(self, name, partition_keys):
@@ -655,7 +656,7 @@ class TableWriteTest(unittest.TestCase):
         table_commit.commit(cm, 2)
         table_write.close()
         table_commit.close()
-        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+        self.assertEqual(2, table_write._execution.file_store_write.commit_identifier)
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
@@ -781,7 +782,7 @@ class TableWriteTest(unittest.TestCase):
         table_commit.commit(cm, 2)
         table_write.close()
         table_commit.close()
-        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+        self.assertEqual(2, table_write._execution.file_store_write.commit_identifier)
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
@@ -1401,6 +1402,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             [2], self._read_sorted(table, 'id').column('id').to_pylist())
 
+    @pytest.mark.python_write
     def test_postpone_batch_fixed_bucket_reuses_existing_bucket_num(self):
         table = self._create_postpone_table(
             'default.test_postpone_reuse',
@@ -1433,8 +1435,8 @@ class TableWriteTest(unittest.TestCase):
             .with_bucket_plan(plan)
             .new_write()
         )
-        self.assertEqual(2, copied_write.row_key_extractor.num_buckets(('p1',)))
-        self.assertEqual(3, copied_write.row_key_extractor.num_buckets(('p2',)))
+        self.assertEqual(2, copied_write._execution.row_key_extractor.num_buckets(('p1',)))
+        self.assertEqual(3, copied_write._execution.row_key_extractor.num_buckets(('p2',)))
         copied_write.close()
 
     def test_postpone_reuses_bucket_num_for_int_date_partition(self):
@@ -1564,13 +1566,13 @@ class TableWriteTest(unittest.TestCase):
                 'dt': ['p1'],
             }, schema=self.pk_pa_schema))
             messages = write.prepare_commit()
-            real_commit = commit.file_store_commit.snapshot_commit.commit
+            real_commit = python_commit(commit).file_store_commit.snapshot_commit.commit
 
             def capture_statistics(base_snapshot_uuid, snapshot, statistics):
                 captured_statistics.extend(statistics)
                 return real_commit(base_snapshot_uuid, snapshot, statistics)
 
-            commit.file_store_commit.snapshot_commit.commit = capture_statistics
+            python_commit(commit).file_store_commit.snapshot_commit.commit = capture_statistics
             commit.commit(messages)
 
         self.assertEqual(2, captured_statistics[0].total_buckets)
@@ -1637,7 +1639,7 @@ class TableWriteTest(unittest.TestCase):
                     return False
                 raise AssertionError('Bucket conflict should precede another CAS')
 
-            commit_three.file_store_commit.snapshot_commit.commit = (
+            python_commit(commit_three).file_store_commit.snapshot_commit.commit = (
                 fail_cas_after_concurrent_commit)
             with self.assertRaisesRegex(RuntimeError, "Total buckets"):
                 commit_three.commit(messages_three)
@@ -1673,7 +1675,7 @@ class TableWriteTest(unittest.TestCase):
                 for file in message.new_files
             ]
             uncertain_error = TimeoutError('lost commit response')
-            file_store_commit = commit.file_store_commit
+            file_store_commit = python_commit(commit).file_store_commit
             file_store_commit.commit_max_retries = 1
             snapshot_commit = file_store_commit.snapshot_commit
             real_commit = snapshot_commit.commit
@@ -2005,13 +2007,13 @@ class TableWriteTest(unittest.TestCase):
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
-        PythonTableWrite(table_write)._validate_pyarrow_schema(pa.schema([
+        table_write._execution._validate_pyarrow_schema(pa.schema([
             ('id', pa.int32()),
             ('payload', pa.binary(4)),
         ]))
 
         table_write.with_write_type(['payload'])
-        PythonTableWrite(table_write)._validate_pyarrow_schema(pa.schema([
+        table_write._execution._validate_pyarrow_schema(pa.schema([
             ('payload', pa.binary(4)),
         ]))
 

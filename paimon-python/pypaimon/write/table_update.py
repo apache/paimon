@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import TYPE_CHECKING, Any, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Sequence
 
 import pyarrow
 import pyarrow as pa
@@ -24,8 +24,6 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.utils.range import Range
 
-if TYPE_CHECKING:
-    from pypaimon.execution.python.write.writer.data_writer import DataWriter
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
@@ -33,7 +31,7 @@ from pypaimon.write.row_input import RowIdInput
 from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-__all__ = ["TableUpdate", "BatchTableUpdate", "StreamTableUpdate", "ShardTableUpdator", "SingleWriter"]
+__all__ = ["TableUpdate", "BatchTableUpdate", "StreamTableUpdate", "ShardTableUpdator"]
 
 
 class TableUpdate:
@@ -358,22 +356,3 @@ class ShardTableUpdator:
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):
         return self._execution.update_by_arrow_batch(data)
-
-
-class SingleWriter:
-
-    def __init__(self, writer: 'DataWriter', partition, first_row_id: int, row_count: int):
-        from pypaimon.write.backend_dispatch import create_python_single_writer
-        self._execution = create_python_single_writer(self, writer, partition, first_row_id, row_count)
-
-    def capacity(self) -> int:
-        return self._execution.capacity()
-
-    def write(self, data: pa.RecordBatch):
-        return self._execution.write(data)
-
-    def partition(self) -> Tuple:
-        return self._execution.partition()
-
-    def end(self) -> DataFileMeta:
-        return self._execution.end()

@@ -57,6 +57,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.native.read.table_read import NativeTableRead
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_shredding import (
     VARIANT_ARROW_TYPE,
@@ -1342,7 +1343,7 @@ class TestVariantPaimonTable(unittest.TestCase):
                 splits = builder.new_scan().plan().splits()
                 self.assertTrue(splits)
                 read = builder.new_read()
-                kwargs = read._native_read_kwargs()
+                kwargs = NativeTableRead(read)._read_kwargs()
                 self.assertEqual(
                     [field.name for field in kwargs['read_type']], projection)
                 self.assertNotIn('nested_projection', kwargs)

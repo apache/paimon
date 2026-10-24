@@ -20,6 +20,9 @@ import uuid
 import pyarrow as pa
 from typing import Optional, Tuple, Dict
 
+from pypaimon.execution.python.write.format_file_writer import (
+    write_blob_file
+)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.table.row.blob import (
@@ -208,7 +211,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1
         file_path = self._generate_file_path(file_name)
 
-        self.file_io.write_blob(file_path, data)
+        write_blob_file(self.file_io, file_path, data)
 
         file_size = self.file_io.get_file_size(file_path)
 

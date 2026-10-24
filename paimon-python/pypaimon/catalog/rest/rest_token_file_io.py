@@ -288,17 +288,12 @@ class RESTTokenFileIO(FileIO):
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         return self.file_io().write_avro(path, data, avro_schema, compression, zstd_level, **kwargs)
 
-    def write_blob(self, path: str, data, **kwargs):
-        return self.file_io().write_blob(path, data, **kwargs)
-
-    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
-        return self.file_io().write_row(path, data, fields, zstd_level, **kwargs)
-
     @property
     def uri_reader_factory(self):
         if self._uri_reader_factory_cache is None:
-            catalog_options = self.catalog_options or Options({})
-            self._uri_reader_factory_cache = UriReaderFactory(catalog_options)
+            # Bind readers to the token-aware wrapper so opening a lazy
+            # descriptor refreshes credentials and preserves authorization.
+            self._uri_reader_factory_cache = UriReaderFactory.from_file_io(self)
 
         return self._uri_reader_factory_cache
 

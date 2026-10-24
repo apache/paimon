@@ -315,7 +315,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         blob_writer.write_arrow(test_data)
 
         # Verify that a DedicatedFormatWriter was created internally
-        data_writers = blob_writer.file_store_write.data_writers
+        data_writers = blob_writer._execution.file_store_write.data_writers
         self.assertGreater(len(data_writers), 0)
 
         # Check that the writer is a DedicatedFormatWriter
@@ -360,7 +360,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         writer.write_arrow(test_data)
 
         # Verify that a regular writer was created (not DedicatedFormatWriter)
-        data_writers = writer.file_store_write.data_writers
+        data_writers = writer._execution.file_store_write.data_writers
         self.assertGreater(len(data_writers), 0)
 
         # Check that the writer is NOT a DedicatedFormatWriter

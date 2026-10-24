@@ -126,26 +126,26 @@ class ArrowSchemaTest(unittest.TestCase):
     def test_schema_only_writer_normalizes_input(self, entry):
         writer = object.__new__(TableWrite)
         writer._execution = PythonTableWrite(writer)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
+        writer._execution.file_store_write = Mock(write_cols=None)
+        writer._execution.table_pyarrow_schema = pa.schema([('text', pa.string())])
         source = pa.Table.from_pydict({'text': ['中文', None]}, schema=pa.schema([('text', pa.large_string())]))
         if entry == 'batch':
             source = source.to_batches()[0]
 
-        result = PythonTableWrite(writer)._prepare_arrow_data(source)
+        result = writer._execution._prepare_arrow_data(source)
 
         self.assertIsInstance(result, type(source))
-        self.assertEqual(result.schema, writer.table_pyarrow_schema)
+        self.assertEqual(result.schema, writer._execution.table_pyarrow_schema)
         self.assertEqual(result.to_pydict(), source.to_pydict())
-        writer.file_store_write.write.assert_not_called()
+        writer._execution.file_store_write.write.assert_not_called()
 
     @parameterized.expand([('table',), ('batch',)])
     def test_normalization_failure_fails_before_routing(self, entry):
         writer = object.__new__(TableWrite)
         writer._execution = PythonTableWrite(writer)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.row_key_extractor = Mock()
-        writer.table_pyarrow_schema = pa.schema([('text', pa.string())])
+        writer._execution.file_store_write = Mock(write_cols=None)
+        writer._execution.row_key_extractor = Mock()
+        writer._execution.table_pyarrow_schema = pa.schema([('text', pa.string())])
         source = pa.Table.from_pydict({'text': ['中文']}, schema=pa.schema([('text', pa.large_string())]))
         error = ValueError('Cannot convert large_string input to string')
         with patch('pypaimon.execution.python.write.table_write.normalize_arrow_strings', side_effect=error):
@@ -155,16 +155,16 @@ class ArrowSchemaTest(unittest.TestCase):
                 else:
                     writer.write_arrow(source)
         self.assertIs(raised.exception, error)
-        writer.row_key_extractor.extract_partition_bucket_groups.assert_not_called()
-        writer.file_store_write.write.assert_not_called()
+        writer._execution.row_key_extractor.extract_partition_bucket_groups.assert_not_called()
+        writer._execution.file_store_write.write.assert_not_called()
 
     @unittest.skipUnless(int(pa.__version__.split('.')[0]) == 6, 'Arrow 6 lacks struct cast kernels')
     def test_unsupported_nested_cast_fails_before_routing(self):
         writer = object.__new__(TableWrite)
         writer._execution = PythonTableWrite(writer)
-        writer.file_store_write = Mock(write_cols=None)
-        writer.row_key_extractor = Mock()
-        writer.table_pyarrow_schema = pa.schema([('nested', pa.struct([('text', pa.string())]))])
+        writer._execution.file_store_write = Mock(write_cols=None)
+        writer._execution.row_key_extractor = Mock()
+        writer._execution.table_pyarrow_schema = pa.schema([('nested', pa.struct([('text', pa.string())]))])
         source = pa.Table.from_pydict(
             {'nested': [{'text': '中文'}]},
             schema=pa.schema([('nested', pa.struct([('text', pa.large_string())]))]),
@@ -173,5 +173,5 @@ class ArrowSchemaTest(unittest.TestCase):
             writer.write_arrow(source)
         with self.assertRaisesRegex(ValueError, 'Cannot convert large_string input to string'):
             writer.write_arrow_batch(source.to_batches()[0])
-        writer.row_key_extractor.extract_partition_bucket_groups.assert_not_called()
-        writer.file_store_write.write.assert_not_called()
+        writer._execution.row_key_extractor.extract_partition_bucket_groups.assert_not_called()
+        writer._execution.file_store_write.write.assert_not_called()

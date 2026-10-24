@@ -18,7 +18,6 @@
 """Preparation selection for reading and planning; execution is never replayed."""
 
 import logging
-import threading
 from typing import Iterator, List, Optional, Tuple
 
 import pyarrow
@@ -29,37 +28,19 @@ from pypaimon.read.split import Split
 from pypaimon.read.scan_stats import ScanStats
 
 
-class _ParquetRowGroupCacheRequest:
-    """Share cache configuration until a Python reader needs decoded rows."""
-
-    def __init__(self, max_size):
-        self.max_size = max_size
-        self._cache = None
-        self._lock = threading.Lock()
-
-    def __getstate__(self):
-        # Decoded batches and locks belong to the process that reads them.
-        return {'max_size': self.max_size}
-
-    def __setstate__(self, state):
-        self.__init__(state['max_size'])
-
-
-def python_row_group_cache(request):
-    if not isinstance(request, _ParquetRowGroupCacheRequest):
-        return request
-    with request._lock:
-        if request._cache is None:
-            from pypaimon.execution.python.read.reader.format_pyarrow_reader import _DecodedRowGroupCache
-            request._cache = _DecodedRowGroupCache(request.max_size)
-        return request._cache
-
-
 def validate_read_backend(read):
     """Validate the explicitly selected Python backend without loading Native."""
     if not read.table.options.native_read_enabled():
         from pypaimon.execution.python.read.merge_engine_support import validate_read
         validate_read(read)
+
+
+def _native_read_execution(read):
+    """Select Native before importing its reader; disabled reads stay Python."""
+    if not read.table.options.native_read_enabled():
+        return native_read_fallback(read, 'read.native.enabled is false')
+    from pypaimon.execution.native.read.table_read import NativeTableRead
+    return NativeTableRead(read)
 
 
 def to_iterator(self, splits: List[Split]) -> Iterator:
@@ -79,7 +60,8 @@ def to_iterator(self, splits: List[Split]) -> Iterator:
     def _record_generator():
         if limit is not None and limit <= 0:
             return
-        rows = self._try_native_rows(splits)
+        native = _native_read_execution(self)
+        rows = None if native is None else native.read_rows(splits)
         if rows is not None:
             try:
                 yield from rows
@@ -103,7 +85,8 @@ def _new_arrow_batch_reader(
         schema = self._add_row_kind_to_schema(schema)
     effective = self._resolve_parallelism(parallelism, len(splits))
     effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-    native_batches = self._try_native_batches(
+    native = _native_read_execution(self)
+    native_batches = None if native is None else native.read_batches(
         splits,
         schema,
         parallelism=effective,
@@ -159,7 +142,8 @@ def to_arrow(
     if self.include_row_kind:
         schema = self._add_row_kind_to_schema(schema)
 
-    native_batches = self._try_native_batches(
+    native = _native_read_execution(self)
+    native_batches = None if native is None else native.read_batches(
         splits,
         schema,
         parallelism=effective,

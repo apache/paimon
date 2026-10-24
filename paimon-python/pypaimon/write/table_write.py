@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.backend_dispatch import (
-    initialize_write, prepare_batch_write, prepare_write_commit, write_property,
+    initialize_write, prepare_batch_write, prepare_write_commit,
 )
 from pypaimon.write.commit_identifier import validate_commit_identifier
 from pypaimon.write.commit_message import CommitMessage
@@ -37,11 +37,6 @@ class TableWrite:
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None, *, restore_snapshot_id=None):
         initialize_write(self, table, commit_user, static_partition,
                          restore_snapshot_id=restore_snapshot_id)
-
-    file_store_write = write_property('file_store_write')
-    row_key_extractor = write_property('row_key_extractor')
-    table_pyarrow_schema = write_property('table_pyarrow_schema')
-    restore_snapshot_id = write_property('restore_snapshot_id')
 
     def write_arrow(self, data, bucket: Optional[int] = None):
         """Write Arrow data, optionally to a bucket assigned upstream."""
@@ -119,8 +114,6 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    batch_committed = write_property('batch_committed')
-
     def __init__(self, table, commit_user, static_partition: Optional[dict] = None,
                  *, restore_snapshot_id=None):
         super().__init__(table, commit_user, static_partition,

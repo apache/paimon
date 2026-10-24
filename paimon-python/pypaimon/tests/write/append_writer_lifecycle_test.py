@@ -123,7 +123,7 @@ def test_idle_retirement_does_not_reopen_uri_reader_factory_configuration(tmp_pa
         commit.commit(writer.prepare_commit(1), 1)
         assert writer.prepare_commit(2) == []
         if not native:
-            assert writer.file_store_write.data_writers == {}
+            assert writer._execution.file_store_write.data_writers == {}
         with pytest.raises(RuntimeError, match='before any write'):
             writer.with_blob_uri_reader_factory(factory)
         _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'old'}])
@@ -161,7 +161,7 @@ def test_uri_reader_factory_locks_once_bucket_creation_succeeds(tmp_path, failur
     creation = ({'side_effect': failure} if failure_stage == 'create'
                 else {'return_value': Mock(write=Mock(side_effect=failure))})
     try:
-        with patch.object(writer.file_store_write, '_create_data_writer', **creation):
+        with patch.object(writer._execution.file_store_write, '_create_data_writer', **creation):
             with pytest.raises(OSError) as caught:
                 _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}])
         assert caught.value is failure
@@ -185,7 +185,7 @@ def test_fixed_idle_prepare_requires_strictly_newer_commit_of_same_user(tmp_path
         _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}], 'precomputed')
         commit.commit(writer.prepare_commit(1), 1)
         if not native:
-            reference = weakref.ref(writer.file_store_write.data_writers[(('old',), 0)])
+            reference = weakref.ref(writer._execution.file_store_write.data_writers[(('old',), 0)])
         # Equality is insufficient, even if another checkpoint is being prepared.
         assert writer.prepare_commit(2) == []
         if not native:
@@ -283,7 +283,7 @@ def test_fixed_snapshot_search_stops_at_expired_gap(tmp_path, missing, lookup):
                 side_effect=AssertionError('writer cleanup must not use the catalog snapshot loader')):
             assert writer.prepare_commit(2) == []
         assert get.call_args_list == ([] if lookup == 'latest' else [((2,), {})])
-        assert (('old',), 0) in writer.file_store_write.data_writers
+        assert (('old',), 0) in writer._execution.file_store_write.data_writers
         _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'old'}], 'precomputed')
         messages = writer.prepare_commit(3)
         assert [file.write_cols for message in messages for file in message.new_files] == [['id', 'pt']]
@@ -342,7 +342,7 @@ def test_failed_prepare_does_not_retire_idle_writers_or_release_other_files(tmp_
         delivered_files = set(tmp_path.rglob('*.parquet'))
         _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'new'},
                                {'id': 3, 'value': 30, 'pt': 'last'}])
-        store = writer.file_store_write
+        store = writer._execution.file_store_write
         old = store.data_writers[(('old',), 0)]
         last = store.data_writers[(('last',), 0)]
         failure = OSError('last partition cannot prepare')
@@ -373,7 +373,7 @@ def test_retirement_close_failure_keeps_active_files_for_retry(tmp_path):
         _write(writer, table, [{'id': 1, 'value': 10, 'pt': 'old'}])
         writer.prepare_commit(1)
         _write(writer, table, [{'id': 2, 'value': 20, 'pt': 'new'}])
-        store = writer.file_store_write
+        store = writer._execution.file_store_write
         old = store.data_writers[(('old',), 0)]
         failure = OSError('cannot close idle writer')
         with patch.object(old, 'close', side_effect=failure):

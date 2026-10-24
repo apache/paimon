@@ -85,9 +85,9 @@ def test_native_commit_tracking_forwards_batch_truncate(monkeypatch, operation, 
     instrumentation.pytest_configure(Mock())
     instrumentation._force_native_commit_for_test = True
     commit = object.__new__(BatchTableCommit)
-    commit.batch_committed = False
+    commit._batch_committed = False
     commit.overwrite_partition = None
-    commit.file_store_commit = Mock()
+    commit._python_commit = Mock()
     error = RuntimeError('snapshot may already have published')
     if fail:
         getattr(backend, operation).side_effect = error
@@ -99,5 +99,5 @@ def test_native_commit_tracking_forwards_batch_truncate(monkeypatch, operation, 
     assert calls == [([], True)]
     assert instrumentation._native_commit_count == 1
     getattr(backend, operation).assert_called_once_with(*args, BATCH_COMMIT_IDENTIFIER)
-    commit.file_store_commit.truncate_table.assert_not_called()
-    commit.file_store_commit.drop_partitions.assert_not_called()
+    commit._python_commit.truncate_table.assert_not_called()
+    commit._python_commit.truncate_partitions.assert_not_called()

@@ -88,6 +88,7 @@ def test_native_adapter_owns_only_one_backend(tmp_path):
     core.close.assert_called_once_with()
 
 
+@pytest.mark.python_write
 def test_invalid_blob_configuration_keeps_the_configured_consumer(tmp_path):
     table = _table(tmp_path)
     writer = table.new_batch_write_builder().new_write()
@@ -100,12 +101,12 @@ def test_invalid_blob_configuration_keeps_the_configured_consumer(tmp_path):
             writer.with_blob_consumer(42)
         with pytest.raises(TypeError, match='factory must provide callable create'):
             writer.with_blob_uri_reader_factory(42)
-        assert writer.file_store_write.blob_consumer is consumer
-        assert writer.file_store_write.blob_uri_reader_factory is factory
+        assert writer._execution.file_store_write.blob_consumer is consumer
+        assert writer._execution.file_store_write.blob_uri_reader_factory is factory
         assert writer.with_blob_consumer(None) is writer
         assert writer.with_blob_uri_reader_factory(None) is writer
-        assert writer.file_store_write.blob_consumer is None
-        assert writer.file_store_write.blob_uri_reader_factory is None
+        assert writer._execution.file_store_write.blob_consumer is None
+        assert writer._execution.file_store_write.blob_uri_reader_factory is None
     finally:
         writer.close()
 
@@ -130,27 +131,23 @@ def test_native_uri_reader_factory_validation_precedes_core_configuration(tmp_pa
         writer.close()
 
 
-@pytest.mark.parametrize('method,attribute', [
-    ('with_write_type', 'write_cols'),
-    ('with_blob_consumer', 'blob_consumer'),
-    ('with_blob_uri_reader_factory', 'blob_uri_reader_factory'),
+@pytest.mark.parametrize('attribute', [
+    'file_store_write', 'row_key_extractor', 'table_pyarrow_schema',
+    'restore_snapshot_id', 'batch_committed',
 ])
-def test_native_facade_configuration_keeps_identity_after_python_selection(tmp_path, method, attribute):
+def test_native_facade_does_not_expose_execution_state(tmp_path, attribute):
     from pypaimon.write.write_dispatch import NativeTableWrite
 
-    table = _table(tmp_path)
     core = Mock()
-    writer = NativeTableWrite(table, 'job', None, False, core)
+    writer = NativeTableWrite(_table(tmp_path), 'job', None, False, core)
     try:
-        store = writer.file_store_write
-        value = ['value'] if method == 'with_write_type' else Mock()
-        reset = table.field_names if method == 'with_write_type' else None
-        configure = getattr(writer, method)
-        assert configure(value) is writer
-        assert getattr(store, attribute) == value
-        assert configure(reset) is writer
-        assert getattr(store, attribute) is None
-        getattr(core, method).assert_not_called()
+        with patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
+                   side_effect=AssertionError('attribute inspection selected Python')):
+            assert not hasattr(writer, attribute)
+            with pytest.raises(AttributeError):
+                getattr(writer, attribute)
+            core.close.assert_not_called()
+            assert writer._python_writer is None
     finally:
         writer.close()
     core.close.assert_called_once_with()

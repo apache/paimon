@@ -2177,8 +2177,6 @@ class MultimodalTableTest(unittest.TestCase):
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
 
     def test_scan_stream_blobs_closes_underlying_iterator(self):
-        from pypaimon.read.table_read import TableRead
-
         table = self.conn.create_table(
             "stream_cleanup", schema=_schema({
                 "id": pa.int32(), "image": pa.large_binary(),
@@ -2195,7 +2193,7 @@ class MultimodalTableTest(unittest.TestCase):
                 reader.close()
                 closed.append(True)
 
-        with patch.object(TableRead, "_try_native_batches", return_value=None), \
+        with patch("pypaimon.read.read_dispatch._native_read_execution", return_value=None), \
                 patch.object(PythonTableRead, "_arrow_batch_generator", tracked_read):
             stream = table.scan().stream_blobs("image")
             next(stream)

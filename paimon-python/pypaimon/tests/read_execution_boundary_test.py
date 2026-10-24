@@ -21,9 +21,12 @@ import importlib
 import subprocess
 import sys
 import textwrap
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+
+from pypaimon.execution.native.read.table_read import NativeTableRead
 
 
 def _run(script):
@@ -84,9 +87,40 @@ def test_native_read_scan_and_stream_preparation_do_not_import_python_execution(
     """)
 
 
+def test_python_read_entrypoints_do_not_import_native_execution():
+    _run("""
+        import importlib.abc
+        import sys
+        import tempfile
+
+        class RejectNativeRead(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.startswith('pypaimon.execution.native'):
+                    raise AssertionError('Native execution imported: ' + fullname)
+
+        sys.meta_path.insert(0, RejectNativeRead())
+        import pyarrow as pa
+        from pypaimon import CatalogFactory, Schema
+
+        with tempfile.TemporaryDirectory() as path:
+            catalog = CatalogFactory.create({'warehouse': path})
+            catalog.create_database('default', True)
+            catalog.create_table('default.lazy', Schema.from_pyarrow_schema(
+                pa.schema([('id', pa.int32())]), options={
+                    'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false',
+                }), False)
+            read = catalog.get_table('default.lazy').new_read_builder().new_read()
+            assert read.to_arrow([]).num_rows == 0
+            reader = read.to_arrow_batch_reader([])
+            assert reader.read_all().num_rows == 0
+            reader.close()
+            assert list(read.to_iterator([])) == []
+        assert not any(name.startswith('pypaimon.execution.native') for name in sys.modules)
+    """)
+
+
 @pytest.mark.parametrize('failure', [False, True])
 def test_native_stream_failure_does_not_create_a_python_reader(failure):
-    from types import SimpleNamespace
     import pyarrow as pa
     from pypaimon.read.table_read import TableRead
 
@@ -109,8 +143,9 @@ def test_native_stream_failure_does_not_create_a_python_reader(failure):
     read.predicate = None
     read._deferred_blob_fields = set()
     read._output_arrow_schema = lambda splits: schema
-    read._try_native_batches = Mock(return_value=batches())
-    with patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
+    native = SimpleNamespace(read_batches=Mock(return_value=batches()))
+    with patch('pypaimon.read.read_dispatch._native_read_execution', return_value=native), \
+            patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
         reader = read.to_arrow_batch_reader([], parallelism=1)
         assert reader.read_next_batch().to_pydict() == {'id': [1]}
         if failure:
@@ -173,8 +208,9 @@ def test_native_materialization_always_closes_a_retained_batch_source(outcome, c
     read._read_parallelism = 1
     read.include_row_kind = False
     read._output_arrow_schema = lambda splits: schema
-    read._try_native_batches = Mock(return_value=source)
-    with patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
+    native = SimpleNamespace(read_batches=Mock(return_value=source))
+    with patch('pypaimon.read.read_dispatch._native_read_execution', return_value=native), \
+            patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
         if outcome == 'schema-error':
             with pytest.raises(TypeError, match="has type int64, expected int32"):
                 read.to_arrow([], parallelism=1)
@@ -230,9 +266,10 @@ def test_native_converter_preserves_primary_failure_when_retained_source_close_f
 
     source = Source()
     read = TableRead.__new__(TableRead)
-    read._prepare_native_batch = lambda batch, schema: batch
+    read.include_row_kind = False
+    read.output_projection = None
     read._project_batch_to_output = lambda batch: batch
-    converted = read._convert_native_batches(source, schema)
+    converted = NativeTableRead(read).convert_batches(source, schema)
     with patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
         if failure == 'schema':
             with pytest.raises(TypeError, match='has type int64, expected int32'):
@@ -247,7 +284,6 @@ def test_native_converter_preserves_primary_failure_when_retained_source_close_f
 
 
 def test_native_row_conversion_keeps_its_failure_when_closing_batches_also_fails():
-    from types import SimpleNamespace
     import pyarrow as pa
     from pypaimon.read.table_read import TableRead
     from pypaimon.schema.data_types import AtomicType, DataField
@@ -259,11 +295,11 @@ def test_native_row_conversion_keeps_its_failure_when_closing_batches_also_fails
     read.read_type = [DataField(0, 'id', AtomicType('INT'))]
     read.output_projection = None
     read._output_arrow_schema = lambda splits: pa.schema([('id', pa.int32())])
-    read._try_native_batches = Mock(return_value=source)
     row_iterator = importlib.import_module('pypaimon.execution.native.read.row_iterator')
-    with patch.object(row_iterator, 'native_rows', side_effect=primary), \
+    with patch.object(NativeTableRead, 'read_batches', return_value=source), \
+            patch.object(row_iterator, 'native_rows', side_effect=primary), \
             patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
-        rows = read._try_native_rows([])
+        rows = NativeTableRead(read).read_rows([])
         with pytest.raises(ValueError) as caught:
             next(rows)
     assert caught.value is primary
@@ -271,7 +307,6 @@ def test_native_row_conversion_keeps_its_failure_when_closing_batches_also_fails
 
 
 def _python_read_source(primary=None, cleanup=None):
-    from types import SimpleNamespace
     import pyarrow as pa
     from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
     from pypaimon.read.read_support import _try_to_pad_batch_by_schema

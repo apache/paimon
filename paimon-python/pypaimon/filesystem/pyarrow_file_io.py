@@ -43,8 +43,6 @@ from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
-from pypaimon.schema.data_types import (AtomicType, DataField,
-                                        PyarrowFieldParser)
 
 
 def _pyarrow_lt_7():
@@ -997,64 +995,6 @@ class PyArrowFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
-
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import vortex
-            from vortex import store
-
-            from pypaimon.filesystem.format_dispatch import vortex_location
-            file_path_for_vortex, store_kwargs = vortex_location(self, path)
-
-            if store_kwargs:
-                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                from vortex._lib.io import write as vortex_write
-                vortex_write(vortex.array(data), file_path_for_vortex)
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
-
-    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
-        try:
-            from pypaimon.filesystem.format_dispatch import new_row_writer
-
-            if fields is None:
-                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
-
-            with self.new_output_stream(path) as output_stream:
-                writer = new_row_writer(output_stream, fields, zstd_level=zstd_level)
-                writer.write_table(data)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
-
-    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
-        from pypaimon.filesystem.format_dispatch import new_blob_writer
-
-        try:
-            if data.num_columns != 1:
-                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
-            field = data.schema[0]
-            if pyarrow.types.is_large_binary(field.type):
-                fields = [DataField(0, field.name, AtomicType("BLOB"))]
-            else:
-                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
-                fields = [DataField(0, field.name, paimon_type)]
-            records_dict = data.to_pydict()
-            num_rows = data.num_rows
-            field_name = fields[0].name
-            with self.new_output_stream(path) as output_stream:
-                writer = new_blob_writer(output_stream)
-                for i in range(num_rows):
-                    writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
-                writer.close()
-
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
     def to_filesystem_path(self, path: str) -> str:
         import re

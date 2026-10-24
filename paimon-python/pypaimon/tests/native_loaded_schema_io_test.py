@@ -53,7 +53,9 @@ def _evolved(catalog, native):
 def _commit(table, messages, native):
     commit = table.new_batch_write_builder().new_commit()
     try:
-        guard = (patch.object(commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit fallback'))
+        guard = (patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.commit',
+                       side_effect=AssertionError('Python commit fallback'))
                  if native else ExitStack())
         with guard:
             commit.commit(messages)

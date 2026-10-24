@@ -60,8 +60,9 @@ def _prepare(builder, ids, partition='a', identifier=None):
 def _commit(builder, messages, identifier=None, overwrite=False):
     commit = builder.new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'overwrite' if overwrite else 'commit',
-                          side_effect=AssertionError('Python commit fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
+                   side_effect=AssertionError('Python commit fallback')):
             if identifier is None:
                 commit.commit(messages)
             else:
@@ -242,8 +243,9 @@ def test_stream_abort_preserves_published_row_ids(native_rest_catalog):
     assert pending_paths and all(table.file_io.exists(path) for path in pending_paths)
     commit = builder.new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'abort',
-                          side_effect=AssertionError('Python abort fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.abort',
+                   side_effect=AssertionError('Python abort fallback')):
             commit.abort(pending)
     finally:
         commit.close()

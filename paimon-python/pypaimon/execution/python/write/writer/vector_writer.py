@@ -20,6 +20,9 @@ from typing import List, Tuple
 
 import pyarrow as pa
 
+from pypaimon.execution.python.write.format_file_writer import (
+    write_vortex_file
+)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -94,7 +97,7 @@ class VectorWriter(AppendOnlyDataWriter):
                                        zstd_level=self.zstd_level,
                                        **self.parquet_writer_options)
         elif self.vector_file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
+            write_vortex_file(self.file_io, file_path, data)
         else:
             raise ValueError(f"Unsupported vector file format: {self.vector_file_format}")
 

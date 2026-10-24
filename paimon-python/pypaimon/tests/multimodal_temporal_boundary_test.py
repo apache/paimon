@@ -39,8 +39,10 @@ def test_selected_native_batches_do_not_initialize_the_python_cache():
     result = subprocess.run([sys.executable, '-B', '-c', '''
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 import pyarrow as pa
-from pypaimon.read.read_dispatch import _ParquetRowGroupCacheRequest, to_arrow
+from pypaimon.read.read_dispatch import to_arrow
+from pypaimon.read.read_support import _ParquetRowGroupCacheRequest
 schema = pa.schema([('value', pa.int32())])
 batch = pa.record_batch([pa.array([7], type=pa.int32())], schema=schema)
 request = _ParquetRowGroupCacheRequest(1024)
@@ -50,9 +52,10 @@ read = SimpleNamespace(
     _output_arrow_schema=lambda splits: schema,
     _resolve_parallelism=lambda value, count: 1,
     _resolve_blob_parallelism=lambda value: 1,
-    _try_native_batches=lambda *args, **kwargs: [batch],
     _batches_to_arrow=lambda batches, output_schema: pa.Table.from_batches(batches, schema=output_schema))
-assert to_arrow(read, [object()]).to_pydict() == {'value': [7]}
+with patch('pypaimon.read.read_dispatch._native_read_execution',
+           return_value=SimpleNamespace(read_batches=lambda *args, **kwargs: [batch])):
+    assert to_arrow(read, [object()]).to_pydict() == {'value': [7]}
 assert request._cache is None
 loaded = [name for name in sys.modules if name.startswith('pypaimon.execution.python.')]
 assert not loaded, loaded
@@ -111,12 +114,29 @@ def test_temporal_mask_schema_rejects_invalid_rules(transform):
 
 
 def test_temporal_cache_is_created_only_for_python_and_recreated_after_transport():
-    from pypaimon.read.read_dispatch import _ParquetRowGroupCacheRequest, python_row_group_cache
+    from pypaimon.read.read_support import _ParquetRowGroupCacheRequest
+    from pypaimon.execution.python.read.table_read import PythonTableRead
 
     request = _ParquetRowGroupCacheRequest(1024)
     assert request._cache is None
-    cached = python_row_group_cache(request)
-    assert python_row_group_cache(request) is cached
+    cached = PythonTableRead._resolve_row_group_cache(request)
+    assert PythonTableRead._resolve_row_group_cache(request) is cached
     restored = pickle.loads(pickle.dumps(request))
     assert restored._cache is None
-    assert python_row_group_cache(restored) is not cached
+    assert PythonTableRead._resolve_row_group_cache(restored) is not cached
+
+
+def test_python_split_readers_share_decoded_cache_without_public_dispatch():
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+    from pypaimon.read.read_support import _ParquetRowGroupCacheRequest
+    from pypaimon.execution.python.read.table_read import PythonTableRead
+
+    request = _ParquetRowGroupCacheRequest(1024)
+    execution = PythonTableRead(SimpleNamespace(_parquet_row_group_cache=request))
+    execution._build_split_read = Mock(side_effect=lambda *args: SimpleNamespace())
+    with patch.dict(sys.modules, {'pypaimon.read.read_dispatch': None}):
+        first = execution._create_split_read(object())
+        second = execution._create_split_read(object())
+    assert first._parquet_row_group_cache is second._parquet_row_group_cache
+    assert first._parquet_row_group_cache is request._cache

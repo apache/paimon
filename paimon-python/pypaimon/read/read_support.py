@@ -19,6 +19,7 @@
 
 import os
 import struct
+import threading
 from typing import List, Optional
 
 import pyarrow
@@ -32,6 +33,22 @@ from pypaimon.schema.data_types import is_blob_file_field
 from pypaimon.utils.arrow_utils import zero_column_batch
 
 _RECORD_BATCH_READER_FROM_STREAM = getattr(pyarrow.ipc.RecordBatchReader, 'from_stream', None)
+
+
+class _ParquetRowGroupCacheRequest:
+    """Share cache configuration until a Python reader needs decoded rows."""
+
+    def __init__(self, max_size):
+        self.max_size = max_size
+        self._cache = None
+        self._lock = threading.Lock()
+
+    def __getstate__(self):
+        # Decoded batches and locks belong to the process that reads them.
+        return {'max_size': self.max_size}
+
+    def __setstate__(self, state):
+        self.__init__(state['max_size'])
 
 
 class _ClosableArrowBatchReader:
@@ -256,7 +273,7 @@ def _should_run_parallel(
 def _deferred_blob_limit_may_prune(self, splits: List[Split]) -> bool:
     return (self.limit is not None
             and (self._deferred_blob_fields
-                 or self._native_resolved_blob_fields())
+                 or _resolved_blob_fields(self))
             and not self._limit_covers_all_splits(splits))
 
 
@@ -348,8 +365,8 @@ def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema)
     return pyarrow.RecordBatch.from_pydict(pydict, schema=schema)
 
 
-def _native_resolved_blob_fields(self) -> set:
-    """BLOB fields Rust resolves before emitting a batch."""
+def _resolved_blob_fields(self) -> set:
+    """Projected BLOB fields materialized before emitting a batch."""
     options = self.table.options
     if options.blob_as_descriptor():
         return set()

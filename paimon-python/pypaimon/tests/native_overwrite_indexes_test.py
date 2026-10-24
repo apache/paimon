@@ -18,7 +18,7 @@
 """Overwrite retires matching index metadata without deleting historical files."""
 
 import json
-from contextlib import ExitStack
+from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import Mock, patch
 
@@ -104,9 +104,23 @@ def _index_paths(table, entries):
         factory.global_index_path_factory().to_path(entry.index_file.file_name)) for entry in entries]
 
 
+@contextmanager
 def _native_only(commit, use_native):
-    return (patch.object(commit.file_store_commit, '_try_commit', side_effect=AssertionError('Python fallback'))
-            if use_native else ExitStack())
+    if not use_native:
+        yield
+        return
+    from pypaimon.execution.python.write.table_commit import create_python_commit
+
+    def create_for_owner(owner):
+        if owner is commit:
+            raise AssertionError('Python fallback')
+        # The mock REST server can concurrently commit through its own Python
+        # storage table. Guard only the client's selected execution backend.
+        return create_python_commit(owner)
+
+    assert commit._python_commit is None
+    with patch('pypaimon.execution.python.write.table_commit.create_python_commit', side_effect=create_for_owner):
+        yield
 
 
 @pytest.mark.parametrize('use_native', _ENGINES)

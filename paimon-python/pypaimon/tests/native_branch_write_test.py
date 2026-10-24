@@ -65,8 +65,9 @@ def _commit(builder, messages, checkpoint=None, overwrite=False):
             else:
                 commit.commit(messages, checkpoint)
         if builder.table.catalog_environment.supports_version_management:
-            with patch.object(commit.file_store_commit, 'overwrite' if overwrite else 'commit',
-                              side_effect=AssertionError('Python commit fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.' + ('overwrite' if overwrite else 'commit'),
+                       side_effect=AssertionError('Python commit fallback')):
                 publish()
         else:
             publish()
@@ -390,8 +391,9 @@ def test_native_branch_abort_removes_only_unpublished_output(tmp_path, native_re
     commit = builder.new_commit()
     try:
         if rest:
-            with patch.object(commit.file_store_commit, 'abort',
-                              side_effect=AssertionError('Python abort fallback')):
+            with patch('pypaimon.execution.python.write.file_store_commit.'
+                       'FileStoreCommit.abort',
+                       side_effect=AssertionError('Python abort fallback')):
                 commit.abort(messages)
         else:
             commit.abort(messages)

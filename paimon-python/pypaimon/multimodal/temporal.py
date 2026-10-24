@@ -33,8 +33,7 @@ from pypaimon.common.transform_schema import effective_masked_schema as _effecti
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result
-from pypaimon.read.read_dispatch import _ParquetRowGroupCacheRequest
-from pypaimon.read.read_support import _ClosableArrowBatchReader
+from pypaimon.read.read_support import _ClosableArrowBatchReader, _ParquetRowGroupCacheRequest
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields

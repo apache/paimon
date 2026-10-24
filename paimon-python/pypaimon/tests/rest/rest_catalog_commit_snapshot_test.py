@@ -16,6 +16,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 import json
 import time
 import unittest
@@ -346,13 +347,13 @@ class TestRESTCommit(RESTBaseTest):
         tw.write_arrow(data)
         cm = tw.prepare_commit()
 
-        real_commit = tc.file_store_commit.snapshot_commit.commit
+        real_commit = python_commit(tc).file_store_commit.snapshot_commit.commit
 
         def commit_then_raise(base_snapshot_uuid, sn, st):
             real_commit(base_snapshot_uuid, sn, st)
             raise RuntimeError("simulated")
 
-        with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
+        with patch.object(python_commit(tc).file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
             with self.assertRaises(RuntimeError):
                 tc.commit(cm)
         tw.close()

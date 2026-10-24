@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.uri_reader import UriReaderFactory
 
 
 class ResolvingFileIO(FileIO):
@@ -53,6 +54,12 @@ class ResolvingFileIO(FileIO):
     @property
     def properties(self):
         return self._options
+
+    @property
+    def uri_reader_factory(self):
+        # Resolve each descriptor URI through this FileIO, independently of
+        # the destination format file's scheme and authority.
+        return UriReaderFactory.from_file_io(self)
 
     def is_object_store(self) -> bool:
         """Check if the warehouse path points to an object store (not local or HDFS)."""
@@ -128,18 +135,8 @@ class ResolvingFileIO(FileIO):
         return self._get_fileio(path).write_avro(path, data, avro_schema,
                                                  compression, zstd_level, **kwargs)
 
-    def write_blob(self, path: str, data, **kwargs):
-        return self._get_fileio(path).write_blob(path, data, **kwargs)
-
     def write_mosaic(self, path: str, data, **kwargs):
         return self._get_fileio(path).write_mosaic(path, data, **kwargs)
-
-    def write_vortex(self, path: str, data, **kwargs):
-        return self._get_fileio(path).write_vortex(path, data, **kwargs)
-
-    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
-        return self._get_fileio(path).write_row(path, data, fields,
-                                                zstd_level, **kwargs)
 
     def close(self):
         for fileio in self._fileio_cache.values():

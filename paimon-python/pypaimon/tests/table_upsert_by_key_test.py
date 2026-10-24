@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import os
 from contextlib import contextmanager
@@ -318,7 +319,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         messages[0].deleted_files.extend(old_files)
 
         commit = wb.new_commit()
-        file_store_commit = commit.file_store_commit
+        file_store_commit = python_commit(commit).file_store_commit
         original_try_commit = file_store_commit._try_commit
         file_store_commit._try_commit = (
             lambda commit_kind, *args, **kwargs:

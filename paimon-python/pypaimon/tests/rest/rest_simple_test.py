@@ -136,7 +136,7 @@ class RESTSimpleTest(RESTBaseTest):
 
         # Write data with single partition
         table_write = write_builder.new_write()
-        self.assertIsInstance(table_write.row_key_extractor, UnawareBucketRowKeyExtractor)
+        self.assertIsInstance(table_write._execution.row_key_extractor, UnawareBucketRowKeyExtractor)
 
         table_commit = write_builder.new_commit()
         data = {
@@ -616,7 +616,7 @@ class RESTSimpleTest(RESTBaseTest):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        self.assertIsInstance(table_write.row_key_extractor, DynamicBucketRowKeyExtractor)
+        self.assertIsInstance(table_write._execution.row_key_extractor, DynamicBucketRowKeyExtractor)
 
         pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
@@ -646,7 +646,7 @@ class RESTSimpleTest(RESTBaseTest):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        self.assertIsInstance(table_write.row_key_extractor, FixedBucketRowKeyExtractor)
+        self.assertIsInstance(table_write._execution.row_key_extractor, FixedBucketRowKeyExtractor)
 
         pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)

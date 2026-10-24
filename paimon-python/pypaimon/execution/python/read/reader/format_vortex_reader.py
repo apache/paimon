@@ -41,7 +41,7 @@ class FormatVortexReader(RecordBatchReader):
                  predicate_fields: Optional[Set[str]] = None):
         import vortex
 
-        from pypaimon.execution.python.read.reader.vortex_utils import to_vortex_specified
+        from pypaimon.filesystem.vortex_utils import to_vortex_specified
         file_path_for_vortex, store_kwargs = to_vortex_specified(file_io, file_path)
 
         if store_kwargs:

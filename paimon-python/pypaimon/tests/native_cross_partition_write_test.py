@@ -72,8 +72,9 @@ def _commit(commit, messages, native_commit=False, checkpoint=None):
         else:
             commit.commit(messages, checkpoint)
     if native_commit:
-        with patch.object(commit.file_store_commit, 'commit',
-                          side_effect=AssertionError('Python commit fallback')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=AssertionError('Python commit fallback')):
             publish()
     else:
         publish()

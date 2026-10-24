@@ -137,9 +137,10 @@ class NativeShardTableUpdator:
         self.read = read
 
     def arrow_reader(self):
+        from pypaimon.execution.native.read.table_read import NativeTableRead
         from pypaimon.read.read_support import _ClosableArrowBatchReader
         schema = self.read._output_arrow_schema()
-        batches = self.read._convert_native_batches(self.writer.arrow_reader(), schema)
+        batches = NativeTableRead(self.read).convert_batches(self.writer.arrow_reader(), schema)
         return _ClosableArrowBatchReader(pa.ipc.RecordBatchReader.from_batches(schema, batches), batches)
 
     def update_by_arrow_batch(self, data):

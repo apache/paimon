@@ -93,9 +93,11 @@ def test_python_committer_is_created_once_only_when_fallback_is_selected(native_
         create.assert_not_called()
         with patch('pypaimon.execution.native.write.native_commit.native_messages_supported', return_value=False):
             commit.commit([_message()], 2)
-            commit.commit([_message()], 3)
-        assert commit.file_store_commit is pure
-        assert commit.file_store_commit is pure
+        # Once Python was selected, later Core-compatible messages must not
+        # revisit Native selection or allocate another executor.
+        commit.commit([_message()], 3)
+        assert commit._python_commit.file_store_commit is pure
+        native_bridge.commit.assert_called_once()
         create.assert_called_once()
         table.new_snapshot_commit.assert_called_once_with()
         assert create.call_args[1]['close_commit_callbacks'] is False
@@ -154,6 +156,21 @@ def test_ignored_empty_commit_and_close_do_not_allocate_either_backend():
         commit.close()
     table.new_snapshot_commit.assert_not_called()
     callback.close.assert_called_once_with()
+
+
+def test_commit_executor_attribute_inspection_does_not_allocate_a_backend():
+    table = _table()
+    with patch('pypaimon.execution.native.write.native_commit.create_native_commit',
+               side_effect=AssertionError('attribute inspection selected Native')), \
+            patch('pypaimon.execution.python.write.file_store_commit.FileStoreCommit',
+                  side_effect=AssertionError('attribute inspection selected Python')):
+        commit = BatchTableCommit(table, 'user', None)
+        assert not hasattr(commit, 'file_store_commit')
+        with pytest.raises(AttributeError):
+            _ = commit.file_store_commit
+        assert commit._python_commit is None
+        table.new_snapshot_commit.assert_not_called()
+        commit.close()
 
 
 def test_callback_closure_is_owned_once_even_if_native_close_fails(native_bridge):
@@ -391,7 +408,8 @@ def test_native_writer_attribute_queries_never_select_python(tmp_path, stream, w
                side_effect=AssertionError('attribute query constructed Python writer')):
         if written:
             writer.write_arrow_batch(pa.record_batch([[1], [2]], names=['id', 'value']))
-        for name in ('flush', 'missing_attribute'):
+        for name in ('flush', 'missing_attribute', 'file_store_write', 'row_key_extractor',
+                     'table_pyarrow_schema', 'restore_snapshot_id', 'batch_committed'):
             assert not hasattr(writer, name)
             with pytest.raises(AttributeError):
                 getattr(writer, name)
@@ -399,67 +417,13 @@ def test_native_writer_attribute_queries_never_select_python(tmp_path, stream, w
         for name in dir(TableWrite):
             if not name.startswith('_') and callable(getattr(TableWrite, name)):
                 assert callable(getattr(writer, name))
-        assert writer.table_pyarrow_schema.names == ['id', 'value']
-        assert writer.restore_snapshot_id == 7
-        if stream:
-            assert not hasattr(writer, 'batch_committed')
-        else:
-            assert writer.batch_committed is False
         assert writer._python_writer is None
         core.close.assert_not_called()
         writer.close()
     core.close.assert_called_once_with()
 
 
-def test_native_writer_explicit_python_diagnostics_keep_lazy_fallback(tmp_path):
-    from pypaimon.write.write_dispatch import NativeTableWrite
-
-    table = _data_evolution_table(tmp_path)
-    core = Mock()
-    pure = SimpleNamespace(
-        file_store_write=object(), row_key_extractor=object(),
-        table_pyarrow_schema=object(), restore_snapshot_id=3, batch_committed=False)
-    writer = NativeTableWrite(table, 'user', None, False, core)
-    with patch.object(writer, '_new_python_writer', return_value=pure) as create:
-        assert writer.file_store_write is pure.file_store_write
-        assert writer.row_key_extractor is pure.row_key_extractor
-        assert writer.table_pyarrow_schema is pure.table_pyarrow_schema
-        assert writer.restore_snapshot_id == 3
-        assert writer.batch_committed is False
-        writer.file_store_write = 'files'
-        writer.row_key_extractor = 'router'
-        writer.table_pyarrow_schema = 'schema'
-        writer.restore_snapshot_id = 5
-        writer.batch_committed = True
-        assert writer.file_store_write == 'files'
-        assert writer.row_key_extractor == 'router'
-        assert writer.table_pyarrow_schema == 'schema'
-        assert writer.restore_snapshot_id == 5
-        assert writer.batch_committed is True
-        assert not hasattr(writer, 'missing_attribute')
-        create.assert_called_once_with()
-        core.close.assert_called_once_with()
-
-
-@pytest.mark.parametrize('attribute', [
-    'file_store_write', 'row_key_extractor', 'table_pyarrow_schema', 'restore_snapshot_id', 'batch_committed',
-])
-def test_native_writer_diagnostic_assignment_selects_python_before_changing_configuration(tmp_path, attribute):
-    from pypaimon.write.write_dispatch import NativeTableWrite
-
-    table = _data_evolution_table(tmp_path)
-    core = Mock()
-    writer = NativeTableWrite(table, 'user', None, False, core)
-    pure = SimpleNamespace()
-    value = object()
-    with patch.object(writer, '_new_python_writer', return_value=pure) as create:
-        setattr(writer, attribute, value)
-        assert getattr(pure, attribute) is value
-        create.assert_called_once_with()
-        core.close.assert_called_once_with()
-
-
-def test_native_batch_preparation_failure_retains_public_lifecycle_state_without_python(tmp_path):
+def test_native_batch_preparation_failure_retains_execution_lifecycle_state_without_python(tmp_path):
     from pypaimon.write.write_dispatch import NativeTableWrite
 
     core = Mock()
@@ -468,17 +432,17 @@ def test_native_batch_preparation_failure_retains_public_lifecycle_state_without
     writer = NativeTableWrite(_data_evolution_table(tmp_path), 'user', None, False, core)
     with patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
                side_effect=AssertionError('lifecycle query constructed Python writer')):
-        assert writer.batch_committed is False
+        assert writer._execution._batch_committed is False
         with pytest.raises(OSError) as raised:
             writer.prepare_commit()
         assert raised.value is failure
-        assert writer.batch_committed is True
+        assert writer._execution._batch_committed is True
         assert writer._python_writer is None
     writer.close()
 
 
 @pytest.mark.parametrize('failed', [False, True])
-def test_explicit_python_diagnostics_preserve_empty_native_batch_preparation_state(tmp_path, failed):
+def test_native_preparation_is_one_attempt_without_exposing_executor_state(tmp_path, failed):
     from pypaimon.write.write_dispatch import NativeTableWrite
 
     core = Mock()
@@ -493,18 +457,19 @@ def test_explicit_python_diagnostics_preserve_empty_native_batch_preparation_sta
                 writer.prepare_commit()
         else:
             assert writer.prepare_commit() == []
-    assert writer.batch_committed is True
+    assert writer._execution._batch_committed is True
     assert writer._python_writer is None
 
-    # Explicit diagnostic access may select Python, but cannot reopen a batch
-    # whose one preparation attempt has already finished or failed.
-    assert writer.file_store_write is writer._python_writer.file_store_write
-    assert writer.batch_committed is True
+    for attribute in ('file_store_write', 'row_key_extractor', 'batch_committed'):
+        with pytest.raises(AttributeError):
+            getattr(writer, attribute)
+    assert writer._python_writer is None
     with pytest.raises(RuntimeError, match='one-time committing'):
         writer.prepare_commit()
     core.prepare_commit.assert_called_once_with()
-    core.close.assert_called_once_with()
+    core.close.assert_not_called()
     writer.close()
+    core.close.assert_called_once_with()
 
 
 def test_importing_native_write_does_not_initialize_python_group_by_kernels():
