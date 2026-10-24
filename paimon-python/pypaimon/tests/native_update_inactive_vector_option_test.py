@@ -19,7 +19,7 @@
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -32,8 +32,8 @@ from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.execution.native.write.native_update import _native_update_formats_supported
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 rest_catalog = native_plan_rest_test.rest_catalog
@@ -80,18 +80,19 @@ def _read(table):
     return builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist()
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                              (TableUpsertByKey, '_upsert_partition'),
-                              (TableUpsertByKey, '_upsert_row_partition'),
-                              (TableUpdate, '_build_predicate_update_table'),
-                              (PythonTableDeleteByRowId, '_scan_anchor_ranges')]:
-            stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python mutation fallback')))
-        stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
-                                  side_effect=AssertionError('Python MERGE fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                  (PythonTableUpsert, '_upsert_partition'),
+                                  (PythonTableUpsert, '_upsert_row_partition'),
+                                  (PythonTableUpdate, '_build_predicate_update_table'),
+                                  (PythonTableDeleteByRowId, '_scan_anchor_ranges')]:
+                stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python mutation fallback')))
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
+                                      side_effect=AssertionError('Python MERGE fallback')))
+        yield
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])

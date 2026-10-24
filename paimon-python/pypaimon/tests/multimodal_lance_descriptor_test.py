@@ -119,9 +119,10 @@ def test_export_lance_rejects_video_frame_in_ordinary_descriptor_field(conn, tmp
     video = tmp_path / "video.bin"
     video.write_bytes(b"encoded-video")
     descriptor = VideoFrameDescriptor(str(video), 0, video.stat().st_size, 2, -1, 0)
+    # Seed the invalid legacy value through Python; Native rejects it before export.
     table = lance_tests._table(conn, "frame_reference", {"id": pa.int32(), "payload": pa.large_binary()}, [
         {"id": 1, "payload": descriptor},
-    ], options={"blob-descriptor-field": "payload"})
+    ], options={"blob-descriptor-field": "payload", "write.native.enabled": "false"})
     path = tmp_path / "frame_reference.lance"
     if mode == "overwrite":
         lance.write_dataset(pa.table({"id": [99]}), str(path))

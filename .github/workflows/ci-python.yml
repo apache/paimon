@@ -239,6 +239,7 @@ jobs:
       - name: Run Python tests with native planning, reading, writing, updating and committing
         shell: bash
         env:
+          DAFT_RUNNER: 'native'
           PYTEST_ADDOPTS: '--durations=20'
           PYPAIMON_TEST_NATIVE_PLAN: '1'
           PYPAIMON_TEST_NATIVE_READ: '1'

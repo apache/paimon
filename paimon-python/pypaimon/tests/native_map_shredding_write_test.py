@@ -278,8 +278,8 @@ def test_map_row_id_update_keeps_physical_layout(tmp_path, native_update):
 def test_native_map_predicate_update_and_upsert(tmp_path, stream, operation):
     from contextlib import ExitStack
     from pypaimon.common.predicate_builder import PredicateBuilder
-    from pypaimon.write.table_update import TableUpdate
-    from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+    from pypaimon.execution.python.write.table_update import PythonTableUpdate
+    from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
     table, schema = _table(tmp_path, 'evolution')
     _write(table, schema, [
@@ -291,8 +291,8 @@ def test_native_map_predicate_update_and_upsert(tmp_path, stream, operation):
     replacement = [('new', 7), ('a', None)]
     with ExitStack() as stack:
         for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                            (TableUpdate, '_build_predicate_update_table'),
-                            (TableUpsertByKey, '_upsert_partition')]:
+                            (PythonTableUpdate, '_build_predicate_update_table'),
+                            (PythonTableUpsert, '_upsert_partition')]:
             stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
         if operation == 'upsert':
             data = pa.Table.from_pylist([

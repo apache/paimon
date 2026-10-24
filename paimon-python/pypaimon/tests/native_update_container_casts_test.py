@@ -18,7 +18,7 @@
 """Equivalent Arrow container inputs must work on the existing update APIs."""
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -28,8 +28,8 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.table.data_evolution_merge_into import WhenMatched, source_col
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 pytestmark = pytest.mark.native_plan
@@ -92,16 +92,17 @@ def _table(tmp_path, value_type, native):
     return table
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                            (TableUpdate, '_build_predicate_update_table'),
-                            (TableUpsertByKey, '_upsert_partition')]:
-            stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
-        stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
-                                  side_effect=AssertionError('Python MERGE fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                (PythonTableUpdate, '_build_predicate_update_table'),
+                                (PythonTableUpsert, '_upsert_partition')]:
+                stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
+                                      side_effect=AssertionError('Python MERGE fallback')))
+        yield
 
 
 def _apply(table, source, native, stream, operation):

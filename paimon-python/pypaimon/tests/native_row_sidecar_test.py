@@ -203,7 +203,7 @@ def test_sidecars_keep_updates_native_and_apply_deletion_vectors(tmp_path, strea
     data = pa.table({'_ROW_ID': [5, 7], 'value': ['changed-5', 'changed-7']})
     if incremental:
         updater = update.new_update_by_row_id(1) if stream else update.new_update_by_row_id()
-        assert isinstance(updater, NativeTableUpdateByRowId)
+        assert isinstance(updater._execution, NativeTableUpdateByRowId)
         messages = updater.update_columns(data, ['value'])
     else:
         with patch.object(TableUpdateByRowId, 'update_columns',

@@ -267,7 +267,10 @@ def test_native_merge_does_not_construct_python_writer_or_file_index(tmp_path):
     table = _data_evolution_table(tmp_path)
     native_table, builder = _core_builder()
     expected = [_message()]
+    encoded_clause = object()
     with patch('pypaimon.execution.native.write.native_merge_into._native_row_id_table', return_value=native_table), \
+            patch('pypaimon.execution.native.write.native_merge_into.encode_merge_clause',
+                  return_value=encoded_clause), \
             patch('pypaimon.execution.native.write.native_merge_into.from_native_commit_messages',
                   return_value=expected), \
             patch('pypaimon.execution.python.write.table_write.PythonTableWrite.__init__',
@@ -279,6 +282,7 @@ def test_native_merge_does_not_construct_python_writer_or_file_index(tmp_path):
             when_matched=[WhenMatched.update({'value': source_col('value')})])
         assert result is expected
     builder.new_update.return_value.merge_into.assert_called_once()
+    assert builder.new_update.return_value.merge_into.call_args[1]['when_matched'] == [encoded_clause]
 
 
 def test_failed_python_construction_closes_snapshot_and_preserves_original_error():

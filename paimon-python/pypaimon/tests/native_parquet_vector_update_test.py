@@ -18,7 +18,7 @@
 """Parquet vector sidecars must not force row-level updates back to Python."""
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -29,8 +29,8 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.execution.native.read.table_read import (native_read as read_native_splits)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 pytestmark = pytest.mark.native_plan
@@ -73,16 +73,17 @@ def _rows(table):
         yield sorted(rows, key=lambda row: row['id'])
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                              (TableUpsertByKey, '_upsert_partition'),
-                              (TableUpdate, '_build_predicate_update_table')]:
-            stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
-        stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
-                                  side_effect=AssertionError('Python merge fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                  (PythonTableUpsert, '_upsert_partition'),
+                                  (PythonTableUpdate, '_build_predicate_update_table')]:
+                stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
+                                      side_effect=AssertionError('Python merge fallback')))
+        yield
 
 
 def _commit(builder, messages, stream):
