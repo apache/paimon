@@ -203,6 +203,139 @@ public abstract class ConflictDetection {
         return false;
     }
 
+    /**
+     * Validate bucket DV replacements and their references after applying the data-file changes.
+     */
+    private Optional<RuntimeException> checkBucketedDeletionVectorConflicts(
+            Snapshot latestSnapshot,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries,
+            Collection<SimpleFileEntry> mergedEntries) {
+        if (!deletionVectorsEnabled || bucketMode != BucketMode.HASH_FIXED) {
+            return Optional.empty();
+        }
+
+        Set<Pair<BinaryRow, Integer>> buckets = new HashSet<>();
+        for (SimpleFileEntry entry : deltaEntries) {
+            // A rewrite may have no DV increment but still invalidate a concurrently added DV.
+            if (entry.kind() == FileKind.DELETE) {
+                buckets.add(Pair.of(entry.partition(), entry.bucket()));
+            }
+        }
+        Map<Pair<BinaryRow, Integer>, IndexFileMeta> deletedDvs = new HashMap<>();
+        Map<Pair<BinaryRow, Integer>, IndexFileMeta> addedDvs = new HashMap<>();
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+                buckets.add(bucket);
+                Map<Pair<BinaryRow, Integer>, IndexFileMeta> changes =
+                        entry.kind() == FileKind.DELETE ? deletedDvs : addedDvs;
+                if (changes.putIfAbsent(bucket, entry.indexFile()) != null) {
+                    return bucketedDvConflict(
+                            latestSnapshot,
+                            bucket,
+                            "Multiple " + entry.kind() + " DV entries for the same bucket");
+                }
+            }
+        }
+        if (buckets.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> bucketDvs =
+                indexFileHandler.scanBuckets(latestSnapshot, DELETION_VECTORS_INDEX, buckets);
+        Map<Pair<BinaryRow, Integer>, Set<String>> pendingRefDataFiles = new HashMap<>();
+        for (Pair<BinaryRow, Integer> bucket : buckets) {
+            List<IndexFileMeta> files = bucketDvs.getOrDefault(bucket, Collections.emptyList());
+            if (files.size() > 1) {
+                return bucketedDvConflict(
+                        latestSnapshot, bucket, "Expected at most one DV index per bucket");
+            }
+            IndexFileMeta current = files.isEmpty() ? null : files.get(0);
+            IndexFileMeta deleted = deletedDvs.get(bucket);
+            IndexFileMeta added = addedDvs.get(bucket);
+            if (deleted != null || added != null) {
+                // An ADD without a DELETE depends on the absence of a previous bucket index.
+                String expected = deleted == null ? null : deleted.fileName();
+                String actual = current == null ? null : current.fileName();
+                if (!Objects.equals(expected, actual)) {
+                    return bucketedDvConflict(
+                            latestSnapshot,
+                            bucket,
+                            String.format(
+                                    "expected DV file %s, current DV file %s", expected, actual));
+                }
+            }
+
+            // Match BucketedCombiner: DELETE removes the old index, then ADD installs the new one.
+            // With no index increment, validate the retained DV too, since data may be rewritten.
+            IndexFileMeta result = current;
+            if (deleted != null) {
+                result = null;
+            }
+            if (added != null) {
+                result = added;
+            }
+            if (result == null) {
+                continue;
+            }
+            if (result.dvRanges() == null) {
+                return bucketedDvConflict(
+                        latestSnapshot,
+                        bucket,
+                        "Missing data-file references for DV file " + result.fileName());
+            }
+            Set<String> references = new HashSet<>(result.dvRanges().keySet());
+            if (!references.isEmpty()) {
+                pendingRefDataFiles.put(bucket, references);
+            }
+        }
+        if (pendingRefDataFiles.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Track only DV references, and stop once all are found in the resulting data files.
+        for (SimpleFileEntry entry : mergedEntries) {
+            if (entry.kind() != FileKind.ADD) {
+                continue;
+            }
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            Set<String> references = pendingRefDataFiles.get(bucket);
+            if (references != null) {
+                references.remove(entry.fileName());
+                if (references.isEmpty()) {
+                    pendingRefDataFiles.remove(bucket);
+                    if (pendingRefDataFiles.isEmpty()) {
+                        return Optional.empty();
+                    }
+                }
+            }
+        }
+        Map.Entry<Pair<BinaryRow, Integer>, Set<String>> missing =
+                pendingRefDataFiles.entrySet().iterator().next();
+        return bucketedDvConflict(
+                latestSnapshot,
+                missing.getKey(),
+                String.format(
+                        "DV references data file %s which is not present after applying changes",
+                        missing.getValue().iterator().next()));
+    }
+
+    private Optional<RuntimeException> bucketedDvConflict(
+            Snapshot latestSnapshot, Pair<BinaryRow, Integer> bucket, String detail) {
+        return Optional.of(
+                new IllegalStateException(
+                        String.format(
+                                "Deletion vector conflict for table %s, partition %s, bucket %s "
+                                        + "at snapshot %s: %s. Reload the latest state and recompute "
+                                        + "compaction or the DML operation; do not retry the stale result.",
+                                tableName,
+                                pathFactory.getPartitionString(bucket.getLeft()),
+                                bucket.getRight(),
+                                latestSnapshot.id(),
+                                detail)));
+    }
+
     public final Optional<RuntimeException> checkConflicts(
             Snapshot latestSnapshot,
             List<SimpleFileEntry> baseEntries,
@@ -264,6 +397,12 @@ public abstract class ConflictDetection {
         }
 
         exception = checkDeleteInEntries(mergedEntries, conflictException);
+        if (exception.isPresent()) {
+            return exception;
+        }
+        exception =
+                checkBucketedDeletionVectorConflicts(
+                        latestSnapshot, deltaEntries, deltaIndexEntries, mergedEntries);
         if (exception.isPresent()) {
             return exception;
         }

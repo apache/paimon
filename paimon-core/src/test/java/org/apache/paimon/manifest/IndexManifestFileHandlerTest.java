@@ -41,6 +41,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,6 +55,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class IndexManifestFileHandlerTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    /** A DV replacement is independent of entry order; a later commit can remove it without ADD. */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testBucketedDvReplacementAndRemoval(boolean addBeforeDelete) {
+        IndexManifestEntry old =
+                new IndexManifestEntry(
+                        FileKind.ADD, BinaryRow.EMPTY_ROW, 0, randomDeletionVectorIndexFile());
+        IndexManifestEntry next =
+                new IndexManifestEntry(
+                        FileKind.ADD, BinaryRow.EMPTY_ROW, 0, randomDeletionVectorIndexFile());
+        IndexManifestFileHandler.BucketedCombiner combiner =
+                new IndexManifestFileHandler.BucketedCombiner();
+        List<IndexManifestEntry> replaced =
+                combiner.combine(
+                        Collections.singletonList(old),
+                        addBeforeDelete
+                                ? Arrays.asList(next, old.toDeleteEntry())
+                                : Arrays.asList(old.toDeleteEntry(), next));
+        assertThat(replaced).containsExactly(next);
+        assertThat(combiner.combine(replaced, Collections.singletonList(next.toDeleteEntry())))
+                .isEmpty();
+    }
 
     @Test
     public void testUnawareMode() throws Exception {

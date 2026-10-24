@@ -977,7 +977,7 @@ public class TableCommitTest {
                 BucketedDvMaintainer.factory(indexFileHandler)
                         .create(partition, 0, Collections.emptyList());
         dvMaintainer.notifyNewDeletion(dataFileName, 0);
-        IndexFileMeta dvIndex = dvMaintainer.writeDeletionVectorsIndex().get();
+        IndexFileMeta dvIndex = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
         try (TableCommitImpl commit = table.newCommit(user)) {
             commit.commit(
                     commitId,

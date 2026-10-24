@@ -101,6 +101,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -115,6 +116,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
@@ -2551,6 +2553,128 @@ public class FileStoreCommitTest {
         assertThat(latestSnapshot.commitUser()).isEqualTo(commitUser);
         assertThat(latestSnapshot.commitIdentifier()).isEqualTo(identifier);
         assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testBucketedDvConflictOnCommitRetry(boolean uncertainSuccess) throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        BinaryRow partition = gen.getPartition(gen.next());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(bucketedDvCommittable(partition, 0, 0, null, "base-dv"), false);
+        }
+        AtomicInteger attempts = new AtomicInteger();
+        SnapshotCommit delegate = new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty());
+        SnapshotCommit publisher =
+                new SnapshotCommit(Lock.empty()) {
+                    @Override
+                    protected boolean commitImpl(
+                            @Nullable String baseSnapshotUuid,
+                            Snapshot snapshot,
+                            String branch,
+                            List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                            throws Exception {
+                        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+                        assertThat(attempts.incrementAndGet()).isEqualTo(1);
+                        if (uncertainSuccess) {
+                            assertThat(
+                                            delegate.commit(
+                                                    baseSnapshotUuid, snapshot, branch, statistics))
+                                    .isTrue();
+                        } else {
+                            // Publish another DV after the first conflict check, forcing a CAS
+                            // retry.
+                            try (FileStoreCommit concurrent = store.newCommit("concurrent", null)) {
+                                concurrent.commit(
+                                        bucketedDvCommittable(
+                                                partition, 0, 1, "base-dv", "concurrent-dv"),
+                                        false);
+                            }
+                        }
+                        return false;
+                    }
+
+                    @Override
+                    protected void closeImpl() throws Exception {
+                        delegate.close();
+                    }
+                };
+        try (FileStoreCommitImpl commit = newCommitWithSnapshotCommit(store, "writer", publisher)) {
+            ManifestCommittable pending =
+                    bucketedDvCommittable(partition, 0, 1, "base-dv", "writer-dv");
+            if (uncertainSuccess) {
+                commit.commit(pending, false);
+            } else {
+                assertThatThrownBy(() -> commit.commit(pending, false))
+                        .hasMessageContaining("Deletion vector conflict");
+            }
+        }
+        assertThat(attempts.get()).isEqualTo(1);
+        assertThat(bucketDvNames(store, partition, 0))
+                .containsExactly(uncertainSuccess ? "writer-dv" : "concurrent-dv");
+    }
+
+    /** Clearing and recreating bucket 0 must leave bucket 1's DV dependency valid. */
+    @Test
+    public void testBucketedDvClearAndRecreateAcrossBuckets() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        2,
+                        CoreOptions.ChangelogProducer.NONE,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        BinaryRow partition = gen.getPartition(gen.next());
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(bucketedDvCommittable(partition, 0, 0, null, "dv-0"), false);
+            commit.commit(bucketedDvCommittable(partition, 1, 1, null, "dv-1"), false);
+            commit.commit(bucketedDvCommittable(partition, 0, 2, "dv-0", null), false);
+            assertThat(bucketDvNames(store, partition, 0)).isEmpty();
+            commit.commit(bucketedDvCommittable(partition, 1, 3, "dv-1", "dv-1-next"), false);
+            commit.commit(bucketedDvCommittable(partition, 0, 4, null, "dv-0-next"), false);
+        }
+        assertThat(bucketDvNames(store, partition, 0)).containsExactly("dv-0-next");
+        assertThat(bucketDvNames(store, partition, 1)).containsExactly("dv-1-next");
+    }
+
+    private List<String> bucketDvNames(TestFileStore store, BinaryRow partition, int bucket) {
+        return store.newIndexFileHandler()
+                .scan(
+                        store.snapshotManager().latestSnapshot(),
+                        DELETION_VECTORS_INDEX,
+                        partition,
+                        bucket)
+                .stream()
+                .map(IndexFileMeta::fileName)
+                .collect(Collectors.toList());
+    }
+
+    private ManifestCommittable bucketedDvCommittable(
+            BinaryRow partition,
+            int bucket,
+            long identifier,
+            @Nullable String expected,
+            @Nullable String added) {
+        CompactIncrement increment = CompactIncrement.emptyIncrement();
+        if (expected != null) {
+            increment.deletedIndexFiles().add(emptyBucketedDv(expected));
+        }
+        if (added != null) {
+            increment.newIndexFiles().add(emptyBucketedDv(added));
+        }
+        ManifestCommittable committable = new ManifestCommittable(identifier);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition, bucket, 2, DataIncrement.emptyIncrement(), increment));
+        return committable;
+    }
+
+    private IndexFileMeta emptyBucketedDv(String name) {
+        return new IndexFileMeta(DELETION_VECTORS_INDEX, name, 1L, 0L, new LinkedHashMap<>(), null);
     }
 
     @ParameterizedTest

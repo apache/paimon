@@ -143,7 +143,11 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
         List<IndexFileMeta> indexFiles =
                 fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
-        return factory.create(partition, bucket, indexFiles);
+        // This unaware-bucket test helper reads multiple indexes, not a single bucket replacement.
+        return factory.create(
+                partition,
+                bucket,
+                fileHandler.readAllDeletionVectors(partition, bucket, indexFiles));
     }
 
     public CommitMessageImpl writeDataFiles(
@@ -187,7 +191,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
             }
         }
         List<IndexFileMeta> indexFiles = new ArrayList<>();
-        dvMaintainer.writeDeletionVectorsIndex().ifPresent(indexFiles::add);
+        dvMaintainer.writeDeletionVectorsIndex().newFile().ifPresent(indexFiles::add);
         return new CommitMessageImpl(
                 partition,
                 bucket,

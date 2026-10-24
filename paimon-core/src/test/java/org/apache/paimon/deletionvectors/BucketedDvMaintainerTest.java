@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer.DeletionVectorUpdate;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -38,6 +39,7 @@ import org.apache.paimon.utils.FileIOUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
@@ -60,6 +62,94 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
     private IndexFileHandler fileHandler;
     private final BinaryRow partition = BinaryRow.singleColumn(1);
+
+    /**
+     * Published baselines survive intermediate cleanup; clear/replacement advances prepare state.
+     */
+    @ParameterizedTest(name = "lazy={0}, existingDv={1}, clear={2}, replace={3}")
+    @CsvSource({
+        "false,false,true,false", "true,false,true,false",
+        "false,true,true,false", "true,true,true,false",
+        "false,true,true,true", "true,true,true,true",
+        "false,true,false,true", "true,true,false,true"
+    })
+    public void testPrepareDvTransitions(
+            boolean lazy, boolean existingDv, boolean clear, boolean replace) {
+        initIndexHandler(false);
+        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
+        BucketedDvMaintainer initial = factory.create(partition, 0, emptyList());
+        initial.notifyNewDeletion("f1", 0);
+        List<IndexFileMeta> baseline =
+                existingDv
+                        ? Collections.singletonList(
+                                initial.writeDeletionVectorsIndex().newFile().get())
+                        : emptyList();
+        BucketedDvMaintainer maintainer = factory.create(partition, 0, baseline);
+        assertThat(prepareCommit(maintainer, maintainer.writeDeletionVectorsIndex()).isEmpty())
+                .isTrue();
+        maintainer.notifyNewDeletion("f1", 1);
+        CompactDeletionFile first = compactDeletionFile(maintainer, lazy);
+        if (clear) {
+            maintainer.removeDeletionVectorOf("f1");
+        }
+        CompactDeletionFile second = compactDeletionFile(maintainer, lazy).mergeOldFile(first);
+        if (replace) {
+            maintainer.notifyNewDeletion("f2", 2);
+        }
+        DeletionVectorUpdate update =
+                compactDeletionFile(maintainer, lazy).mergeOldFile(second).getOrCompute();
+        CompactIncrement prepared = prepareCommit(maintainer, update);
+        assertThat(prepared.deletedIndexFiles()).isEqualTo(baseline);
+        assertThat(prepared.newIndexFiles()).hasSize(replace ? 1 : 0);
+        Map<String, DeletionVector> vectors =
+                fileHandler.readAllDeletionVectors(partition, 0, prepared.newIndexFiles());
+        assertThat(vectors.keySet())
+                .containsExactlyInAnyOrderElementsOf(
+                        !clear
+                                ? Arrays.asList("f1", "f2")
+                                : replace ? Collections.singletonList("f2") : emptyList());
+        if (replace) {
+            assertThat(vectors.get("f2").isDeleted(2)).isTrue();
+        }
+        if (!clear) {
+            assertThat(vectors.get("f1").isDeleted(0)).isTrue();
+            assertThat(vectors.get("f1").isDeleted(1)).isTrue();
+        }
+        List<String> retained = new ArrayList<>();
+        for (IndexFileMeta file : baseline) {
+            retained.add(file.fileName());
+            assertThat(
+                            fileHandler
+                                    .readAllDeletionVectors(partition, 0, baseline)
+                                    .get("f1")
+                                    .isDeleted(1))
+                    .isFalse();
+        }
+        prepared.newIndexFiles().forEach(file -> retained.add(file.fileName()));
+        String[] files = new File(tempPath.toFile(), "/default.db/T/index").list();
+        assertThat(files == null ? new String[0] : files)
+                .containsExactlyInAnyOrderElementsOf(retained);
+        assertThat(prepareCommit(maintainer, maintainer.writeDeletionVectorsIndex()).isEmpty())
+                .isTrue();
+        maintainer.notifyNewDeletion("f3", 3);
+        CompactIncrement next = prepareCommit(maintainer, maintainer.writeDeletionVectorsIndex());
+        assertThat(next.newIndexFiles()).hasSize(1);
+        assertThat(next.deletedIndexFiles()).isEqualTo(prepared.newIndexFiles());
+        assertThat(prepared.deletedIndexFiles()).isEqualTo(baseline);
+    }
+
+    private CompactDeletionFile compactDeletionFile(BucketedDvMaintainer maintainer, boolean lazy) {
+        return lazy
+                ? CompactDeletionFile.lazyGeneration(maintainer)
+                : CompactDeletionFile.generateFiles(maintainer);
+    }
+
+    private CompactIncrement prepareCommit(
+            BucketedDvMaintainer maintainer, DeletionVectorUpdate update) {
+        CompactIncrement increment = CompactIncrement.emptyIncrement();
+        maintainer.prepareCommit(increment.newIndexFiles(), increment.deletedIndexFiles(), update);
+        return increment;
+    }
 
     @BeforeEach
     public void setUp() throws Exception {
@@ -86,7 +176,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
 
         assertThat(dvMaintainer.deletionVectorOf("f1")).isPresent();
         assertThat(dvMaintainer.deletionVectorOf("f3")).isEmpty();
-        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
 
         Map<String, DeletionVector> deletionVectors =
                 fileHandler.readAllDeletionVectors(partition, 0, Collections.singletonList(file));
@@ -112,7 +202,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         dvMaintainer.notifyNewDeletion("f1", deletionVector1);
         assertThat(dvMaintainer.bitmap64()).isEqualTo(bitmap64);
 
-        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
         CommitMessage commitMessage =
                 new CommitMessageImpl(
                         partition,
@@ -139,7 +229,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         deletionVector2.delete(2);
         dvMaintainer.notifyNewDeletion("f1", deletionVector2);
 
-        file = dvMaintainer.writeDeletionVectorsIndex().get();
+        file = dvMaintainer.writeDeletionVectorsIndex().newFile().get();
         commitMessage =
                 new CommitMessageImpl(
                         partition,
@@ -217,7 +307,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         dvMaintainer1.notifyNewDeletion("f2", 3);
         assertThat(dvMaintainer1.bitmap64()).isEqualTo(bitmap64);
 
-        IndexFileMeta file = dvMaintainer1.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer1.writeDeletionVectorsIndex().newFile().get();
         CommitMessage commitMessage1 =
                 new CommitMessageImpl(
                         partition,
@@ -254,7 +344,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvs.get("f3"))
                 .isInstanceOf(bitmap64 ? BitmapDeletionVector.class : Bitmap64DeletionVector.class);
 
-        file = dvMaintainer2.writeDeletionVectorsIndex().get();
+        file = dvMaintainer2.writeDeletionVectorsIndex().newFile().get();
         CommitMessage commitMessage2 =
                 new CommitMessageImpl(
                         partition,
