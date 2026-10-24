@@ -261,9 +261,9 @@ Each open decoder uses memory and a file handle, so usage grows with cameras and
 `read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
 Dataset worker (default: 16). Set it to 1 for serial decoding. Parallel decoding
 applies to video windows without `image_transforms` and uses more CPU and memory.
-`read.video.codec-threads` controls FFmpeg threads per PyAV decoder (default: 0,
-automatic). Set it to 1 to avoid nested codec parallelism with multiple workers
-and concurrent videos. It does not affect TorchCodec.
+`read.video.codec-threads` controls FFmpeg threads per PyAV decoder (default: 1),
+avoiding nested codec parallelism with multiple workers and concurrent videos.
+Set it to 0 for automatic selection. It does not affect TorchCodec.
 
 `read.video.decoders-per-payload` (default: 4) also splits single-video windows across
 independent cached decoders, within those limits. Set it to 1 to disable this splitting;

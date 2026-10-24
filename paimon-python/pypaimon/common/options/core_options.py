@@ -1183,7 +1183,7 @@ class CoreOptions:
     READ_VIDEO_CODEC_THREADS: ConfigOption[int] = (
         ConfigOptions.key("read.video.codec-threads")
         .int_type()
-        .default_value(0)
+        .default_value(1)
         .with_description(
             "FFmpeg threads per PyAV video decoder in a LeRobot worker. "
             "0 keeps automatic selection; 1 avoids nested codec parallelism.")

@@ -746,7 +746,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 try:
                     self.assertEqual([expected, expected], [
                         c.max_open_videos for c in dataset.reader._video_collators])
-                    self.assertEqual([0 if configured is None else 2] * 2, [
+                    self.assertEqual([1 if configured is None else 2] * 2, [
                         c.decoder_factory.keywords["codec_threads"]
                         for c in dataset.reader._video_collators])
                 finally:

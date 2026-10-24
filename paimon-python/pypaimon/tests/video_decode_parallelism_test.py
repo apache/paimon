@@ -435,7 +435,7 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             collator.close()
 
     def test_codec_thread_option(self):
-        self.assertEqual(0, CoreOptions(Options({})).read_video_codec_threads())
+        self.assertEqual(1, CoreOptions(Options({})).read_video_codec_threads())
         for value in (0, 1, 4, "1"):
             self.assertEqual(int(value), CoreOptions(Options({
                 "read.video.codec-threads": value})).read_video_codec_threads())
