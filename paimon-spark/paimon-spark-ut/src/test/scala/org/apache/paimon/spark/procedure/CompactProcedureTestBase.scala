@@ -1803,6 +1803,49 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: compact partitions keep leading zeros of string values") {
+    def checkCompactedPartition(
+        hhType: String,
+        hhValues: Seq[String],
+        partitions: String,
+        expectedFileCounts: Seq[Row]): Unit = {
+      withTable("T") {
+        spark.sql(s"""
+                     |CREATE TABLE T (id INT, hh $hhType)
+                     |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                     |PARTITIONED BY (hh)
+                     |""".stripMargin)
+        hhValues.foreach {
+          hh =>
+            spark.sql(s"INSERT INTO T VALUES (1, $hh)")
+            spark.sql(s"INSERT INTO T VALUES (2, $hh)")
+        }
+        checkAnswer(
+          spark.sql(
+            s"CALL sys.compact(table => 'T', partitions => '$partitions', options => 'compaction.min.file-num=2')"),
+          Row(true) :: Nil)
+        checkAnswer(
+          spark.sql("SELECT partition, count(*) FROM `T$files` GROUP BY partition"),
+          expectedFileCounts)
+      }
+    }
+
+    // an unquoted value of a string partition is kept as written
+    checkCompactedPartition(
+      "STRING",
+      Seq("'08'", "'8'"),
+      "hh=08",
+      Row("{08}", 1L) :: Row("{8}", 2L) :: Nil)
+    // a quoted value of a string partition is still unquoted
+    checkCompactedPartition(
+      "STRING",
+      Seq("'08'", "'8'"),
+      "hh=\"08\"",
+      Row("{08}", 1L) :: Row("{8}", 2L) :: Nil)
+    // a numeric partition still matches by value
+    checkCompactedPartition("INT", Seq("8", "9"), "hh=08", Row("{8}", 1L) :: Row("{9}", 2L) :: Nil)
+  }
+
   test("Paimon Procedure: compact with invalid partition key") {
     withTable("T") {
       spark.sql(s"""
