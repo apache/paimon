@@ -1805,6 +1805,19 @@ public class CoreOptions implements Serializable {
                                     + MAX_DYNAMIC_BUCKETS
                                     + " (fixed upper bound).");
 
+    public static final ConfigOption<Boolean> DYNAMIC_BUCKET_REUSE_DELETED_SLOTS =
+            key("dynamic-bucket.reuse-deleted-slots")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether the dynamic bucket assigner reuses the slots freed by deleted "
+                                    + "keys instead of opening new buckets. A delete frees one slot "
+                                    + "in the bucket of its key, so a full bucket accepts new keys "
+                                    + "again. It relies on a property of dynamic bucket: only one "
+                                    + "job may write to a given partition. It requires "
+                                    + "merge-engine = deduplicate, ignore-delete = false and no "
+                                    + "sequence field, so that every delete is applied to the row.");
+
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
                     .intType()
@@ -4223,6 +4236,10 @@ public class CoreOptions implements Serializable {
 
     public Integer dynamicBucketMaxBuckets() {
         return options.get(DYNAMIC_BUCKET_MAX_BUCKETS);
+    }
+
+    public boolean dynamicBucketReuseDeletedSlots() {
+        return options.get(DYNAMIC_BUCKET_REUSE_DELETED_SLOTS);
     }
 
     public Integer dynamicBucketAssignerParallelism() {

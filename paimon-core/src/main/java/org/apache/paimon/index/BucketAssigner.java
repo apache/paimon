@@ -25,6 +25,9 @@ public interface BucketAssigner {
 
     int assign(BinaryRow partition, int hash);
 
+    /** A key was deleted: its slot can be reused. Assigners that do not track this ignore it. */
+    default void delete(BinaryRow partition, int hash) {}
+
     void prepareCommit(long commitIdentifier);
 
     static boolean isMyBucket(int bucket, int numAssigners, int assignId) {

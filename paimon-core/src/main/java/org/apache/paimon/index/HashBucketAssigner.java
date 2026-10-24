@@ -81,18 +81,29 @@ public class HashBucketAssigner implements BucketAssigner {
                 recordAssignId,
                 assignId);
 
-        PartitionIndex index = this.partitionIndex.get(partition);
-        if (index == null) {
-            partition = partition.copy();
-            index = loadIndex(partition, partitionHash);
-            this.partitionIndex.put(partition, index);
-        }
+        PartitionIndex index = getOrLoadIndex(partition, partitionHash);
 
         int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Assign {} to the partition {} key hash {}", assigned, partition, hash);
         }
         return assigned;
+    }
+
+    /** Free the slot of a deleted key so its bucket can be reused. */
+    @Override
+    public void delete(BinaryRow partition, int hash) {
+        getOrLoadIndex(partition, partition.hashCode()).delete(hash);
+    }
+
+    private PartitionIndex getOrLoadIndex(BinaryRow partition, int partitionHash) {
+        PartitionIndex index = this.partitionIndex.get(partition);
+        if (index == null) {
+            partition = partition.copy();
+            index = loadIndex(partition, partitionHash);
+            this.partitionIndex.put(partition, index);
+        }
+        return index;
     }
 
     /** Prepare commit to clear outdated partition index. */

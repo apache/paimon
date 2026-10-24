@@ -26,4 +26,12 @@ public interface PartitionKeyExtractor<T> {
     BinaryRow partition(T record);
 
     BinaryRow trimmedPrimaryKey(T record);
+
+    /**
+     * Whether the record deletes its key. Extractors that cannot tell, such as the CDC ones, keep
+     * the default and are treated as never deleting, which leaves the bucket assignment as before.
+     */
+    default boolean isDelete(T record) {
+        return false;
+    }
 }

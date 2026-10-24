@@ -42,6 +42,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
+import static org.apache.paimon.CoreOptions.DYNAMIC_BUCKET_REUSE_DELETED_SLOTS;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
@@ -137,6 +138,87 @@ class SchemaValidationTest {
                         options,
                         "");
         assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testReuseDeletedSlotsRequiresEveryDeleteToBeApplied() {
+        Map<String, String> options = new HashMap<>();
+        options.put(DYNAMIC_BUCKET_REUSE_DELETED_SLOTS.key(), "true");
+        // the supported combination: deduplicate, deletes applied, no sequence field
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        // a merge engine which may keep the row on a delete
+        Map<String, String> otherEngine = new HashMap<>(options);
+        otherEngine.put("merge-engine", "first-row");
+        assertThatThrownBy(() -> validateTableSchemaExec(otherEngine))
+                .hasMessageContaining("requires merge-engine = deduplicate");
+
+        // deletes are dropped
+        Map<String, String> ignoreDelete = new HashMap<>(options);
+        ignoreDelete.put("ignore-delete", "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(ignoreDelete))
+                .hasMessageContaining("requires ignore-delete = false");
+
+        // a delete older than the current row may be discarded
+        // (no partition keys: with them sequence.field is rejected earlier, for cross-partition
+        // updates)
+        Map<String, String> sequenceField = new HashMap<>(options);
+        sequenceField.put("sequence.field", "f2");
+        sequenceField.put(BUCKET.key(), "-1");
+        TableSchema sequenceFieldSchema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "f1", DataTypes.INT()),
+                                new DataField(1, "f2", DataTypes.INT())),
+                        10,
+                        emptyList(),
+                        singletonList("f1"),
+                        sequenceField,
+                        "");
+        assertThatThrownBy(() -> validateTableSchema(sequenceFieldSchema))
+                .hasMessageContaining("does not support a sequence field");
+    }
+
+    @Test
+    void testReuseDeletedSlotsRequiresDynamicBucketPrimaryKeyTable() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+
+        // fixed bucket
+        Map<String, String> fixedBucket = new HashMap<>();
+        fixedBucket.put(DYNAMIC_BUCKET_REUSE_DELETED_SLOTS.key(), "true");
+        fixedBucket.put(BUCKET.key(), "4");
+        TableSchema fixedBucketSchema =
+                new TableSchema(
+                        1,
+                        fields,
+                        10,
+                        emptyList(),
+                        singletonList("f1"),
+                        fixedBucket,
+                        "");
+        assertThatThrownBy(() -> validateTableSchema(fixedBucketSchema))
+                .hasMessageContaining("requires a primary-key table with dynamic bucket");
+
+        // append table
+        Map<String, String> append = new HashMap<>();
+        append.put(DYNAMIC_BUCKET_REUSE_DELETED_SLOTS.key(), "true");
+        append.put(BUCKET.key(), "-1");
+        TableSchema appendSchema =
+                new TableSchema(1, fields, 10, emptyList(), emptyList(), append, "");
+        assertThatThrownBy(() -> validateTableSchema(appendSchema))
+                .hasMessageContaining("requires a primary-key table with dynamic bucket");
+    }
+
+    @Test
+    void testReuseDeletedSlotsIsOffByDefault() {
+        // none of the restrictions applies while the option is off
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "first-row");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 
     private void validateTableSchemaExec(Map<String, String> options) {

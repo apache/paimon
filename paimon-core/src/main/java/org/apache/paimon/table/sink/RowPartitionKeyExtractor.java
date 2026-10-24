@@ -23,6 +23,7 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.RowKind;
 
 /** A {@link PartitionKeyExtractor} to {@link InternalRow}. */
 public class RowPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
@@ -47,5 +48,11 @@ public class RowPartitionKeyExtractor implements PartitionKeyExtractor<InternalR
     @Override
     public BinaryRow trimmedPrimaryKey(InternalRow record) {
         return trimmedPrimaryKeyProjection.apply(record);
+    }
+
+    /** Only {@link RowKind#DELETE} deletes a key: {@code -U} is the first half of an update. */
+    @Override
+    public boolean isDelete(InternalRow record) {
+        return record.getRowKind() == RowKind.DELETE;
     }
 }

@@ -181,7 +181,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             String commitUser, CoreOptions writeOptions) {
         DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
-            indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
+            indexFactory =
+                    new DynamicBucketIndexMaintainer.Factory(
+                            newIndexFileHandler(), writeOptions.dynamicBucketReuseDeletedSlots());
         }
         BucketedDvMaintainer.Factory dvMaintainerFactory = null;
         if (writeOptions.deletionVectorsEnabled()) {
