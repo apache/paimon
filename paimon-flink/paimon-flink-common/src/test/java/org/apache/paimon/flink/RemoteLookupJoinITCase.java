@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -45,12 +46,13 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 
@@ -72,10 +74,12 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void testQueryServiceLookup(boolean isNamedArgument) throws Exception {
+    @CsvSource({"true, PARTIAL", "false, PARTIAL", "true, FULL", "false, FULL"})
+    public void testQueryServiceLookup(boolean isNamedArgument, String cacheMode) throws Exception {
         sql(
-                "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
+                "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms', 'query-service.cache' = '"
+                        + cacheMode
+                        + "')");
         CloseableIterator<Row> service =
                 isNamedArgument
                         ? streamSqlIter(
@@ -222,6 +226,61 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
         query.close();
         proxy.close();
+    }
+
+    @Test
+    public void testFullCacheServicePartitionedSqlLookup() throws Exception {
+        sql(
+                "CREATE TABLE DIM (k STRING, pt INT, v INT, PRIMARY KEY (k, pt) NOT ENFORCED) "
+                        + "PARTITIONED BY (pt) WITH ('bucket' = '1', 'query-service.cache' = 'FULL', "
+                        + "'changelog-producer' = 'input', 'continuous.discovery-interval' = '20ms')");
+        sql("INSERT INTO DIM VALUES ('1', 1, 11), ('2', 2, 22), ('1', 2, 99)");
+        FileStoreTable table = paimonTable("DIM");
+        try (CloseableIterator<Row> service =
+                        streamSqlIter("CALL sys.query_service('default.DIM', 2)");
+                RemoteTableQuery query = new RemoteTableQuery(table)) {
+            CommonTestUtils.waitUtil(
+                    () -> RemoteTableQuery.isRemoteServiceAvailable(table),
+                    Duration.ofSeconds(30),
+                    Duration.ofMillis(20));
+            // Registration happens after every shard has bootstrapped. This checks the trimmed
+            // STRING wire key against an INT partition and the unchanged RPC projection protocol.
+            query.withValueProjection(new int[] {2});
+            assertThat(
+                            query.lookup(row(1), 0, GenericRow.of(BinaryString.fromString("1")))
+                                    .getInt(0))
+                    .isEqualTo(11);
+
+            String sqlQuery =
+                    "SELECT T.i, D.v FROM T LEFT JOIN DIM "
+                            + "FOR SYSTEM_TIME AS OF T.proctime AS D "
+                            + "ON CAST(T.i AS STRING) = D.k AND T.i = D.pt";
+            try (BlockingIterator<Row, Row> results =
+                    BlockingIterator.of(sEnv.executeSql(sqlQuery).collect())) {
+                sql("INSERT INTO T VALUES (1), (2), (3)");
+                assertThat(results.collect(3))
+                        .containsExactlyInAnyOrder(Row.of(1, 11), Row.of(2, 22), Row.of(3, null));
+
+                sql("INSERT INTO DIM VALUES ('2', 2, 44)");
+                CommonTestUtils.waitUtil(
+                        () -> {
+                            try {
+                                return query.lookup(
+                                                        row(2),
+                                                        0,
+                                                        GenericRow.of(BinaryString.fromString("2")))
+                                                .getInt(0)
+                                        == 44;
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        },
+                        Duration.ofSeconds(30),
+                        Duration.ofMillis(20));
+                sql("INSERT INTO T VALUES (2)");
+                assertThat(results.collect(1)).containsExactly(Row.of(2, 44));
+            }
+        }
     }
 
     private JobClient queryService(FileStoreTable table) throws Exception {
