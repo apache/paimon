@@ -140,7 +140,8 @@ def test_missing_native_runtime_keeps_cached_python_lookup(frames):
 
 @pytest.mark.skipif(not native_runtime_available(), reason="native reader required")
 def test_native_plan_failure_reuses_scanner_and_keeps_predicate(frames):
-    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+        DataEvolutionGlobalIndexScanner)
     frames.add(pa.table({"index": [40, 50], "value": [4, 5]}))
     current = reader(frames, **{
         "scan.native-plan.enabled": "true", "read.native.enabled": "false",
@@ -199,7 +200,8 @@ def test_auto_native_uses_private_table_copy(frames, available):
 
 
 def test_unsupported_native_plan_reuses_python_index_scanner(frames):
-    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+        DataEvolutionGlobalIndexScanner)
     frames.add(pa.table({"index": [40], "value": [4]}))
     with patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True):
         current = reader(frames)
@@ -260,7 +262,8 @@ def test_native_lookup_preserves_query_authorization(frames, denied):
 
 @pytest.mark.parametrize("option", ["scan.native-plan.enabled", "read.native.enabled"])
 def test_pickled_native_locator_rebuilds_pinned_fallback_once(frames, option):
-    from pypaimon.globalindex import DataEvolutionGlobalIndexScanner
+    from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
+        DataEvolutionGlobalIndexScanner)
     frames.add(pa.table({"index": [40], "value": [4]}))
     current = reader(frames, **{
         "scan.native-plan.enabled": "false", "read.native.enabled": "false",

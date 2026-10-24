@@ -135,6 +135,7 @@ def test_python_ivfpq_search_keeps_live_null_vectors_out_of_results(tmp_path, ba
              else raw_table.new_vector_search_builder().with_query_vector([1., 1.]))
     query.with_vector_column('embedding').with_limit(64).with_option('ivf.nprobe', '1')
     results = query.execute_batch_local() if batch else [query.execute_local()]
+    assert len(results) == (2 if batch else 1)
     for result in results:
         assert sorted(result.results()) == [1, 4]
 

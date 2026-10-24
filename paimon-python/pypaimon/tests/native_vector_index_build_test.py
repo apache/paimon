@@ -137,7 +137,7 @@ def test_native_search_filters_live_null_vectors_with_deletion_vectors(rest_cata
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
               .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute())
     assert sorted(result.row_ids()) == [1, 4]
-    # Python search must also allow fewer hits than the live-row filter's size.
+    # Python table-level reads use the batch ABI for short filtered results.
     _assert_ids(table, [1, 4], kind)
 
 

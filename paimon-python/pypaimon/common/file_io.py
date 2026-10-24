@@ -619,9 +619,6 @@ class FileIO(ABC):
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         raise NotImplementedError("write_avro must be implemented by FileIO subclasses")
 
-    def write_lance(self, path: str, data, **kwargs):
-        raise NotImplementedError("write_lance must be implemented by FileIO subclasses")
-
     def write_blob(self, path: str, data, **kwargs):
         """Write Blob format file."""
         raise NotImplementedError("write_blob must be implemented by FileIO subclasses")

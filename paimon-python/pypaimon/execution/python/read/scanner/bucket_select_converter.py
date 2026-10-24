@@ -30,7 +30,7 @@ allowed; false-negative (drop a bucket that has matching rows) MUST never
 happen — that would be silent data loss.
 
 The hashing routine reuses ``_hash_bytes_by_words`` /
-``_bucket_from_hash`` from ``pypaimon.write.input_routing`` — the same
+``_bucket_from_hash`` from ``pypaimon.execution.python.write.input_routing`` — the same
 code path the writer uses to assign rows to buckets. Reusing it (rather
 than copying) is what guarantees read/write hash agreement in the face of
 future routine changes.
@@ -70,7 +70,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.internal_row import InternalRow, RowKind
-from pypaimon.write.input_routing import (
+from pypaimon.execution.python.write.input_routing import (
     _bucket_from_hash,
     _hash_bytes_by_words,
 )

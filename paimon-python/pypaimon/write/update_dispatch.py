@@ -30,6 +30,7 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import row_to_named_values
+from pypaimon.write.row_input import RowIdInput, normalize_row_ids
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 from pypaimon.write.update_validation import _authorize_update
@@ -155,11 +156,10 @@ class TableUpdateOperations:
             operation = create_python_update_operation(context, commit_identifier, predicate)
         return operation.delete()
 
-    def _delete_by_row_id(self, row_ids: Sequence[int], commit_identifier: int) -> List[CommitMessage]:
+    def _delete_by_row_id(self, row_ids: RowIdInput, commit_identifier: int) -> List[CommitMessage]:
         context = self._context
-        operation = None
-        if len(row_ids):
-            operation = prepare_native_write_operation('delete', context.table, context.commit_user)
+        row_ids = normalize_row_ids(row_ids)
+        operation = prepare_native_write_operation('delete', context.table, context.commit_user)
         if operation is None:
             operation = create_python_update_operation(context, commit_identifier)
         return operation.delete_by_row_id(row_ids)

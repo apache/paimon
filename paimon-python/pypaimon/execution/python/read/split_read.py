@@ -72,7 +72,6 @@ from pypaimon.execution.python.read.reader.filter_record_batch_reader import Fil
 from pypaimon.execution.python.read.reader.limited_record_reader import LimitedRecordBatchReader, LimitedRecordReader
 from pypaimon.execution.python.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.execution.python.read.reader.format_blob_reader import FormatBlobReader
-from pypaimon.execution.python.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.execution.python.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.execution.python.read.reader.format_row_reader import FormatRowReader
 from pypaimon.execution.python.read.reader.format_mosaic_reader import FormatMosaicReader
@@ -329,7 +328,6 @@ class SplitRead(ABC):
             row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
                                  CoreOptions.FILE_FORMAT_VIDEO,
                                  CoreOptions.FILE_FORMAT_VORTEX,
-                                 CoreOptions.FILE_FORMAT_LANCE,
                                  CoreOptions.FILE_FORMAT_ROW)
             if file_format in row_index_formats:
                 row_indices = [
@@ -408,15 +406,6 @@ class SplitRead(ABC):
                                              blob_parallelism=blob_parallelism,
                                              file_size=file.file_size,
                                              index_cache=self.table.catalog_environment.blob_index_cache())
-        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
-            if has_nested:
-                raise NotImplementedError(
-                    "Nested-field projection is not supported on Lance files")
-            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
-            format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
-                                              read_arrow_predicate, batch_size=batch_size,
-                                              row_indices=row_indices,
-                                              shard_range=shard_range)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             if has_nested:
                 raise NotImplementedError(
@@ -482,7 +471,7 @@ class SplitRead(ABC):
         elif file_format in ('json', 'csv'):
             raise NotImplementedError(
                 f"Reading '{file_format}' format is not yet supported in Python SDK. "
-                f"Supported formats: parquet, orc, avro, lance, vortex, mosaic, blob, row.")
+                f"Supported formats: parquet, orc, avro, vortex, mosaic, blob, row.")
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -508,8 +497,7 @@ class SplitRead(ABC):
         # starting from shard_range[0], so _ROW_ID must be offset accordingly.
         effective_first_row_id = file.first_row_id
         if (shard_range is not None and file.first_row_id is not None
-                and file_format in (
-                    CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
+                and file_format == CoreOptions.FILE_FORMAT_VORTEX):
             effective_first_row_id = file.first_row_id + shard_range[0]
 
         if for_merge_read:
@@ -559,8 +547,7 @@ class SplitRead(ABC):
                 reader, row_range_base, effective_row_ranges)
 
         # For formats without native shard support, wrap with ShardBatchReader
-        if shard_range is not None and file_format not in (
-                CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
+        if shard_range is not None and file_format != CoreOptions.FILE_FORMAT_VORTEX:
             reader = ShardBatchReader(reader, shard_range[0], shard_range[1])
 
         return reader

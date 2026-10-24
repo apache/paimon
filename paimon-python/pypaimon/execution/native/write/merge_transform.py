@@ -38,13 +38,14 @@ def _callable_assignment(function, on_pairs, callable_input_columns=None, hidden
 
 
 def encode_merge_clause(clause, on_pairs=(), on_map=None, input_schema=None,
-                        callable_input_columns=None, hidden_columns=()):
-    """Encode the existing clause contract without evaluating user callbacks."""
+                        callable_input_columns=None, hidden_columns=(), not_matched=False):
+    """Adapt a normalized PyPaimon clause to the typed SDK without running callbacks."""
+    from pypaimon_rust.datafusion import MergeAssignment, WhenMatched, WhenNotMatched
     from pypaimon.write.merge_types import SourceColumnRef, TargetColumnRef, LiteralValue
     from pypaimon.write.merge_condition import remap_source_on_keys, rewrite_condition
 
     available = None if input_schema is None else set(input_schema.names)
-    values = []
+    values = {}
     for name, value in clause.spec.items():
         if isinstance(value, SourceColumnRef):
             kind, column = 'source', value.column
@@ -52,20 +53,21 @@ def encode_merge_clause(clause, on_pairs=(), on_map=None, input_schema=None,
                 target = next((target for source, target in on_pairs
                                if source == column and 't.' + target in available), None)
                 if target is None:
-                    values.append((name, 'literal', None))
+                    values[name] = MergeAssignment.literal(None)
                     continue
                 kind, column = 'target', target
-            values.append((name, kind, column))
+            values[name] = (MergeAssignment.source_column(column) if kind == 'source' else
+                            MergeAssignment.target_column(column))
         elif isinstance(value, TargetColumnRef):
             if available is not None and 't.' + value.column not in available:
-                values.append((name, 'literal', None))
+                values[name] = MergeAssignment.literal(None)
             else:
-                values.append((name, 'target', value.column))
+                values[name] = MergeAssignment.target_column(value.column)
         elif isinstance(value, LiteralValue):
-            values.append((name, 'literal', value.value))
+            values[name] = MergeAssignment.literal(value.value)
         elif callable(value) and not isinstance(value, type):
-            values.append((name, 'callable', _callable_assignment(
-                value, on_pairs, callable_input_columns, hidden_columns)))
+            values[name] = MergeAssignment.function(_callable_assignment(
+                value, on_pairs, callable_input_columns, hidden_columns))
         else:
             return None
     condition = None
@@ -73,8 +75,12 @@ def encode_merge_clause(clause, on_pairs=(), on_map=None, input_schema=None,
         rewritten = rewrite_condition(clause.condition)
         if on_map:
             rewritten = remap_source_on_keys(rewritten, on_map)
-        condition = dict(sql=rewritten)
-    return dict(assignments=values, condition=condition, delete=clause.delete)
+        condition = rewritten
+    if not_matched:
+        return WhenNotMatched(values, condition)
+    if clause.delete:
+        return WhenMatched.delete(condition)
+    return WhenMatched.update(values, condition)
 
 
 class _NativeMergeTransform:
@@ -82,7 +88,9 @@ class _NativeMergeTransform:
                  callable_input_columns=None, row_id_name='_ROW_ID'):
         # Require this release's protocol before consuming input. An installed
         # incompatible SDK must not silently select another executor.
-        from pypaimon_rust.datafusion import MergeBatchExecution  # noqa: F401
+        from pypaimon_rust.datafusion import (  # noqa: F401
+            MergeAssignment, MergeBatchExecution, WhenMatched, WhenNotMatched,
+        )
 
         self.clauses = clauses
         self.output_schema = output_schema
@@ -114,15 +122,19 @@ class _NativeMergeTransform:
 
             clauses = [encode_merge_clause(
                 clause, self.on_pairs, self.on_map, batch.schema,
-                self.callable_input_columns, hidden_columns,
+                self.callable_input_columns, hidden_columns, not_matched=self.mode == 'insert',
             ) for clause in self.clauses]
             if any(clause is None for clause in clauses):
                 raise TypeError('Unsupported normalized MERGE assignment')
-            self._execution = MergeBatchExecution(
-                batch.schema, output_schema, clauses, self.mode,
-            )
+            if self.mode == 'update':
+                self._execution = MergeBatchExecution.for_updates(batch.schema, output_schema, clauses)
+            elif self.mode == 'delete':
+                self._execution = MergeBatchExecution.for_deletes(batch.schema, clauses)
+            else:
+                self._execution = MergeBatchExecution.for_inserts(batch.schema, output_schema, clauses)
         result = self._execution.execute(batch)
-        if hidden_columns:
+        if hidden_columns or (self.mode == 'delete' and not result.schema.equals(
+                self.output_schema, check_metadata=True)):
             import pyarrow as pa
             result = pa.Table.from_arrays(result.columns, schema=self.output_schema)
         return result

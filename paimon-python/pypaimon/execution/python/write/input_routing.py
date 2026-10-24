@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Python hashing and routing for distributed bucket execution."""
+
 import math
 import struct
 from typing import Any, Dict, List, Tuple
@@ -22,6 +24,8 @@ from typing import Any, Dict, List, Tuple
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketAssigner, compute_assigner
+from pypaimon.index.dynamic_bucket import resolve_bucket_snapshot, to_signed_int32
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
@@ -167,6 +171,10 @@ class PostponeFixedBucketInputRouter(PartitionKeyExtractor):
     def num_buckets(self, partition: Tuple) -> int:
         return self._bucket_plan.num_buckets(partition)
 
+    def route(self, data) -> pa.Int32Array:
+        """Return bucket IDs in input order, as the Native router does."""
+        return pa.array(self.extract_partition_bucket_batch(data)[1], type=pa.int32())
+
     def extract_partition_bucket_batch(
         self, data: pa.RecordBatch
     ) -> Tuple[List[Tuple], List[int]]:
@@ -228,6 +236,10 @@ class FixedBucketInputRouter(PartitionKeyExtractor):
                     'bucket key type must be INT or BIGINT in mod bucket function, but got %s' % key_type)
         elif self.bucket_function not in ('default', 'hive'):
             raise ValueError('Unsupported bucket function type: %s' % self.bucket_function)
+
+    def route(self, data) -> pa.Int32Array:
+        """Return bucket IDs in input order, as the Native router does."""
+        return pa.array(self.extract_partition_bucket_batch(data)[1], type=pa.int32())
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         self._check_automatic_bucket_function()
@@ -324,8 +336,6 @@ class DynamicBucketInputRouter(PartitionKeyExtractor):
     def extract_assigners_batch(
         self, data: pa.RecordBatch, num_channels: int, num_assigners: int
     ) -> List[int]:
-        from pypaimon.index.dynamic_bucket import compute_assigner
-
         _, partition_hashes, key_hashes = self.extract_hashes_batch(data)
         return [
             compute_assigner(
@@ -333,3 +343,51 @@ class DynamicBucketInputRouter(PartitionKeyExtractor):
             )
             for partition_hash, key_hash in zip(partition_hashes, key_hashes)
         ]
+
+
+class PythonDynamicBucketAssignerRouter:
+    """Route input rows to dynamic bucket assigners and carry their key hashes."""
+
+    def __init__(self, table, num_channels, num_assigners):
+        if num_channels <= 0 or num_assigners <= 0:
+            raise ValueError('num_channels and num_assigners must be positive')
+        self._router = DynamicBucketInputRouter(table.table_schema)
+        self._num_channels = num_channels
+        self._num_assigners = num_assigners
+
+    def route(self, data) -> pa.RecordBatch:
+        _, partition_hashes, key_hashes = self._router.extract_hashes_batch(data)
+        return pa.RecordBatch.from_arrays([
+            pa.array([compute_assigner(partition_hash, key_hash, self._num_channels, self._num_assigners)
+                      for partition_hash, key_hash in zip(partition_hashes, key_hashes)], type=pa.int32()),
+            pa.array([to_signed_int32(key_hash) for key_hash in key_hashes], type=pa.int32()),
+        ], names=['assigner', 'key_hash'])
+
+
+class PythonDynamicBucketAssigner:
+
+    def __init__(self, table, num_channels, num_assigners, assign_id,
+                 ignore_existing=False, base_snapshot_id=None):
+        self._router = DynamicBucketInputRouter(table.table_schema)
+        snapshot = None if ignore_existing else resolve_bucket_snapshot(table, base_snapshot_id)
+        self.restore_snapshot_id = snapshot.id if snapshot is not None else 0
+        self._assigner = DynamicBucketAssigner(
+            table, num_channels=num_channels, num_assigners=num_assigners, assign_id=assign_id,
+            target_bucket_row_number=table.options.dynamic_bucket_target_row_num(),
+            max_buckets_num=table.options.dynamic_bucket_max_buckets(),
+            ignore_existing=ignore_existing, snapshot=snapshot)
+
+    def assign(self, data, key_hashes=None) -> pa.Int32Array:
+        if key_hashes is None:
+            partitions, partition_hashes, hashes = self._router.extract_hashes_batch(data)
+        else:
+            if isinstance(key_hashes, pa.ChunkedArray):
+                key_hashes = key_hashes.combine_chunks()
+            if not isinstance(key_hashes, pa.Int32Array):
+                raise TypeError('Dynamic bucket key hashes must be an Int32Array')
+            if len(key_hashes) != data.num_rows or key_hashes.null_count:
+                raise ValueError('Dynamic bucket key hashes must be non-null and match the input row count')
+            partitions, partition_hashes = self._router.extract_partition_hashes_batch(data)
+            hashes = key_hashes.to_pylist()
+        return pa.array([bucket for bucket, _ in self._assigner.assign_batch(
+            partitions, partition_hashes, hashes)], type=pa.int32())

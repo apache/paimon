@@ -51,6 +51,32 @@ def _rows(paths):
         for row in pq.ParquetFile(path).read().to_pylist())
 
 
+@pytest.mark.parametrize('format_option', ['file.format', 'vector.file.format'])
+def test_removed_lance_format_cannot_publish_data(tmp_path, format_option):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
+    catalog.create_database('default', True)
+    schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32(), 2))])
+    options = {
+        'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+        format_option: 'lance',
+    }
+    table = None
+    writer = None
+    try:
+        with pytest.raises(ValueError, match='[Uu]nsupported.*lance'):
+            catalog.create_table('default.removed', Schema.from_pyarrow_schema(schema, options=options), False)
+            table = catalog.get_table('default.removed')
+            writer = table.new_batch_write_builder().new_write()
+            writer.write_arrow(pa.Table.from_pylist([{'id': 1, 'embedding': [1.0, 2.0]}], schema=schema))
+            writer.prepare_commit()
+    finally:
+        if writer is not None:
+            writer.abort()
+            writer.close()
+    if table is not None:
+        assert table.snapshot_manager().get_latest_snapshot() is None
+
+
 def test_public_format_import_does_not_import_python_execution():
     code = """
 import sys

@@ -18,7 +18,7 @@
 """Equivalent Arrow layouts must not send upsert matching back to Python."""
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -26,8 +26,8 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 pytestmark = pytest.mark.native_plan
@@ -76,14 +76,15 @@ def _seed(table, schema, keys, values):
         writer.close()
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for owner, method in [(TableUpsertByKey, '_upsert_partition'),
-                              (PythonTableUpdateByRowId, '_load_existing_files_info'),
-                              (TableUpdate, '_build_predicate_update_table')]:
-            stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for owner, method in [(PythonTableUpsert, '_upsert_partition'),
+                                  (PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                  (PythonTableUpdate, '_build_predicate_update_table')]:
+                stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
+        yield
 
 
 def _check(table, values, key, new_key='new'):

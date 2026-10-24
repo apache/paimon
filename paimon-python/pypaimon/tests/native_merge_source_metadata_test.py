@@ -19,6 +19,7 @@
 
 from contextlib import ExitStack
 import importlib.util
+import sys
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -27,6 +28,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.tests.merge_sdk_test_support import merge_sdk_module
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 
 
@@ -128,7 +130,8 @@ def test_table_source_metadata_conditions_keep_selected_view_and_callable_rows(
 
 
 @pytest.mark.parametrize('table_source', [False, True], ids=['arrow-source', 'table-source'])
-def test_native_condition_transport_does_not_load_python_datafusion(native_rest_catalog, table_source):
+def test_native_condition_transport_does_not_load_python_datafusion(native_rest_catalog, monkeypatch, table_source):
+    monkeypatch.setitem(sys.modules, 'pypaimon_rust.datafusion', merge_sdk_module())
     target = _new_table(native_rest_catalog, 'default.no_python_engine').copy({'write.native.enabled': 'true'})
     source = (_new_table(native_rest_catalog, 'default.metadata_source') if table_source else
               pa.table({'key': [0], 'value': [91]}, schema=_SCHEMA))
@@ -150,7 +153,7 @@ def test_native_condition_transport_does_not_load_python_datafusion(native_rest_
     core.merge_into.assert_called_once()
     args, kwargs = core.merge_into.call_args
     assert args[0] is (native_source if table_source else source)
-    assert kwargs['when_matched'][0]['condition'] == {'sql': '"s.{}" = 0'.format(source_key)}
+    assert kwargs['when_matched'][0].condition == '"s.{}" = 0'.format(source_key)
 
 
 def test_python_merge_conditions_still_require_the_python_execution_engine(native_rest_catalog):

@@ -88,9 +88,7 @@ class VectorWriter(AppendOnlyDataWriter):
         is_external_path = self.external_path_provider is not None
         external_path_str = file_path if is_external_path else None
 
-        if self.vector_file_format == CoreOptions.FILE_FORMAT_LANCE:
-            self.file_io.write_lance(file_path, data)
-        elif self.vector_file_format == CoreOptions.FILE_FORMAT_PARQUET:
+        if self.vector_file_format == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(file_path, data,
                                        compression=self.compression,
                                        zstd_level=self.zstd_level,

@@ -37,7 +37,7 @@ class DataVectorWriter(CompositeDataWriter):
     Metadata organization:
     committed_files = [
         normal_file_meta,       # data.parquet (id, label columns)
-        vector_file_meta,       # data.vector.lance (all vector columns)
+        vector_file_meta,       # data.vector.parquet (all vector columns)
         ...
     ]
     """

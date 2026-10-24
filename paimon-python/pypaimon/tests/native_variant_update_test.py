@@ -19,7 +19,7 @@
 
 from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 import json
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -32,8 +32,8 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
 from pypaimon.write.write_dispatch import NativeTableWrite
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 pytestmark = pytest.mark.native_plan
 
@@ -104,13 +104,14 @@ def _read(table, native, projection=None):
     return rows
 
 
+@contextmanager
 def _native_only():
-    stack = ExitStack()
-    for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
-                        (TableUpdate, '_build_predicate_update_table'),
-                        (TableUpsertByKey, '_upsert_partition')]:
-        stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
-    return stack
+    with ExitStack() as stack:
+        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                            (PythonTableUpdate, '_build_predicate_update_table'),
+                            (PythonTableUpsert, '_upsert_partition')]:
+            stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
+        yield
 
 
 def test_python_configured_variant_schema_uses_java_semantics(tmp_path):
@@ -145,7 +146,7 @@ def test_native_variant_partial_updates(tmp_path, stream, key, enabled, operatio
                         else update.update_by_arrow_with_row_id(data))
         elif operation == 'incremental':
             updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
-            assert isinstance(updater, NativeTableUpdateByRowId)
+            assert isinstance(updater._execution, NativeTableUpdateByRowId)
             updater.update_columns(data.slice(0, 1), ['payload'])
             updater.update_columns(data.slice(1), ['payload'])
             messages = updater.commit_messages

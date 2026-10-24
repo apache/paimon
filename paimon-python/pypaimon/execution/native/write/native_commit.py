@@ -204,7 +204,10 @@ def from_native_commit_messages(table, messages):
 
 def native_commit_error(error):
     """Keep retry classification structured; never infer it from error text."""
-    from pypaimon_rust import RowIdExistenceConflict as NativeRowIdConflict
+    try:
+        from pypaimon_rust import RowIdExistenceConflict as NativeRowIdConflict
+    except ImportError:
+        return error
     from pypaimon.write.row_id_conflict import RowIdExistenceConflict
 
     if not isinstance(error, NativeRowIdConflict):

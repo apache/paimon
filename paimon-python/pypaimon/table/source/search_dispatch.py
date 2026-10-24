@@ -21,6 +21,28 @@ The selected backend consumes ordinary snapshot-and-split plans, including
 transported plans. An execution error never triggers another search.
 """
 
+from functools import partial
+
+
+def _python_vector_scan(execution):
+    from pypaimon.execution.python.read.search.factories import new_vector_scan
+    return new_vector_scan(execution)
+
+
+def _python_vector_read(builder, batch):
+    from pypaimon.execution.python.read.search.factories import new_batch_vector_read, new_vector_read
+    return new_batch_vector_read(builder) if batch else new_vector_read(builder)
+
+
+def _python_full_text_scan(execution):
+    from pypaimon.execution.python.read.search.factories import new_full_text_scan
+    return new_full_text_scan(execution)
+
+
+def _python_full_text_read(execution):
+    from pypaimon.execution.python.read.search.factories import new_full_text_read
+    return new_full_text_read(execution)
+
 
 class _SearchScan:
     def __init__(self, native, python_factory):
@@ -72,11 +94,13 @@ def python_search_reader(reader):
 
 
 def _native_requested(builder):
-    enabled = getattr(getattr(builder._table, 'options', None), 'native_read_enabled', None)
+    table = getattr(builder, '_table', None)
+    enabled = getattr(getattr(table, 'options', None), 'native_read_enabled', None)
     return callable(enabled) and enabled()
 
 
-def create_vector_scan(builder, python_factory, batch=False):
+def create_vector_scan(builder, execution, batch=False):
+    python_factory = partial(_python_vector_scan, execution)
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_scan
@@ -84,7 +108,8 @@ def create_vector_scan(builder, python_factory, batch=False):
     return python_factory() if native is None else _SearchScan(native, python_factory)
 
 
-def create_vector_read(builder, python_factory, batch=False):
+def create_vector_read(builder, batch=False):
+    python_factory = partial(_python_vector_read, builder, batch)
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_vector_read
@@ -95,7 +120,8 @@ def create_vector_read(builder, python_factory, batch=False):
     return reader_type(native, python_factory)
 
 
-def create_full_text_scan(builder, python_factory):
+def create_full_text_scan(builder, execution):
+    python_factory = partial(_python_full_text_scan, execution)
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_full_text_scan
@@ -103,7 +129,8 @@ def create_full_text_scan(builder, python_factory):
     return python_factory() if native is None else _SearchScan(native, python_factory)
 
 
-def create_full_text_read(builder, python_factory):
+def create_full_text_read(builder, execution):
+    python_factory = partial(_python_full_text_read, execution)
     if not _native_requested(builder):
         return python_factory()
     from pypaimon.execution.native.read.native_search_plan import native_full_text_read
@@ -133,7 +160,10 @@ def execute_full_text_search(builder):
 
 
 def execute_hybrid_search(builder, executor=None):
-    if _native_requested(builder):
+    from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
+    # Custom implementations execute through their public route/rank hooks;
+    # only the default implementation owns the native configuration protocol.
+    if isinstance(builder, HybridSearchBuilderImpl) and _native_requested(builder):
         from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_search
         result = (try_native_hybrid_search(builder) if executor is None else
                   try_native_hybrid_search(builder, executor=executor))
@@ -141,3 +171,28 @@ def execute_hybrid_search(builder, executor=None):
             return result
     from pypaimon.execution.python.read.search.hybrid_search import execute
     return execute(builder, executor)
+
+
+def hybrid_route_builders(builder):
+    from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
+    # Authorization precedes runtime discovery and snapshot resolution, as in
+    # Java's routeBuilders(). Selecting a backend must not hide a rejection.
+    reject_search_under_query_auth(builder._table)
+    if _native_requested(builder):
+        from pypaimon.execution.native.read.native_hybrid_search import try_native_hybrid_routes
+        routes = try_native_hybrid_routes(builder)
+        if routes is not None:
+            return routes
+    from pypaimon.execution.python.read.search.hybrid_search import route_builders
+    return route_builders(builder)
+
+
+def rank_hybrid_results(builder, route_results):
+    builder._validate_search()
+    if _native_requested(builder):
+        from pypaimon.execution.native.runtime import native_runtime_available
+        if native_runtime_available():
+            from pypaimon.execution.native.read.native_hybrid_search import rank_hybrid_results as rank
+            return rank(builder, route_results)
+    from pypaimon.execution.python.read.search.hybrid_search import rank
+    return rank(builder, route_results)

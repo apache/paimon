@@ -17,6 +17,7 @@
 
 """Read entry points load only the selected execution backend."""
 
+import importlib
 import subprocess
 import sys
 import textwrap
@@ -259,7 +260,8 @@ def test_native_row_conversion_keeps_its_failure_when_closing_batches_also_fails
     read.output_projection = None
     read._output_arrow_schema = lambda splits: pa.schema([('id', pa.int32())])
     read._try_native_batches = Mock(return_value=source)
-    with patch('pypaimon.execution.native.read.row_iterator.native_rows', side_effect=primary), \
+    row_iterator = importlib.import_module('pypaimon.execution.native.read.row_iterator')
+    with patch.object(row_iterator, 'native_rows', side_effect=primary), \
             patch.dict(sys.modules, {'pypaimon.execution.python.read.table_read': None}):
         rows = read._try_native_rows([])
         with pytest.raises(ValueError) as caught:
@@ -272,6 +274,7 @@ def _python_read_source(primary=None, cleanup=None):
     from types import SimpleNamespace
     import pyarrow as pa
     from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+    from pypaimon.read.read_support import _try_to_pad_batch_by_schema
     from pypaimon.schema.data_types import AtomicType, DataField
     from pypaimon.table.row.offset_row import OffsetRow
 
@@ -310,6 +313,7 @@ def _python_read_source(primary=None, cleanup=None):
         _blob_as_descriptor=False,
         _blob_view_output_indices=(),
         _project_batch_to_output=lambda batch: batch,
+        _try_to_pad_batch_by_schema=_try_to_pad_batch_by_schema,
         output_projection=None,
         _adapter_read_type=[DataField(0, 'id', AtomicType('INT'))],
         include_row_kind=False,

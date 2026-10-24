@@ -59,9 +59,8 @@ class PythonVindexVectorGlobalIndexReader(VindexReaderResources, GlobalIndexRead
         params = _search_params(self._search_params_type, options, effective_k)
         filter_bytes = _filter_bytes(include_row_ids)
 
-        # The batch API pads missing hits with -1, including for one query.
-        # The scalar FFI rejects short IVF-PQ results from sparse filters.
         if hasattr(self._reader, "search_batch"):
+            # The batch ABI pads short results; the scalar ABI requires exactly K.
             batch_result = self._reader.search_batch(
                 np.ascontiguousarray(queries),
                 params,

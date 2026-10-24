@@ -20,6 +20,7 @@
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -102,6 +103,26 @@ def _native_table(table):
     return native
 
 
+@pytest.fixture(autouse=True)
+def native_input_sdk(monkeypatch):
+    """These boundary tests supply SDK results without a native installation."""
+    def planner(_schema, known):
+        core = Mock()
+        core.current_plan.return_value = known
+        core.plan.return_value = known
+        return core
+
+    def router(_schema):
+        core = Mock()
+        core.with_bucket_plan.return_value = core
+        core.route.side_effect = lambda batch: pa.array([0] * batch.num_rows, type=pa.int32())
+        return core
+
+    sdk = SimpleNamespace(PostponeBucketPlanner=Mock(side_effect=planner), BucketRouter=Mock(side_effect=router))
+    monkeypatch.setitem(sys.modules, 'pypaimon_rust.datafusion', sdk)
+    return sdk
+
+
 @pytest.fixture
 def forbid_python_execution():
     with patch('pypaimon.execution.python.write.postpone_bucket.PythonPostponeBucketPlanner.__init__',
@@ -116,32 +137,37 @@ def forbid_python_execution():
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_native_ray_planning_uses_native_metadata_and_shared_input_routing(
+def test_native_ray_planning_uses_native_metadata_and_input_routing(
         tmp_path, forbid_python_execution, overwrite):
     pytest.importorskip('ray')
     table = _table(tmp_path)
     core = Mock()
     writer = NativePostponeFixedBucketTableWrite(table, 'user', None, None, core)
     dataset = Mock()
+    expected = {('existing',): 1 if overwrite else 3, ('new',): 8, ('pending',): 1}
+    native_table = _native_table(table)
     with patch('pypaimon.execution.native.write.postpone_bucket.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.postpone_bucket.create_native_write_table',
-                  return_value=_native_table(table)) as plan, \
+                  return_value=native_table), \
+            patch('pypaimon.execution.native.write.input_routing.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.input_routing.create_native_write_table',
+                  return_value=native_table), \
+            patch('pypaimon.execution.native.write.postpone_bucket.NativePostponeBucketPlanner.plan',
+                  return_value=PostponeBucketPlan(expected)), \
             patch('pypaimon.write.ray_datasink._collect_partition_stats', return_value=(
                 dataset, {('existing',): (2, 0), ('new',): (9, 0), ('pending',): (1, 0)})), \
             patch('pypaimon.write.ray_datasink._write_primary_key_groups') as write:
         writer.write_ray(dataset, overwrite=overwrite)
         args = write.call_args[1]
-        expected = {('existing',): 1 if overwrite else 3, ('new',): 8, ('pending',): 1}
         assert args['postpone_bucket_plan'].as_dict() == expected
         batch = pa.record_batch([[1, 2], ['existing', 'new'], [10, 20]], names=['id', 'p', 'value'])
-        partitions, buckets = args['bucket_extractor'].extract_partition_bucket_batch(batch)
-        assert partitions == [('existing',), ('new',)]
+        buckets = args['bucket_router'].route(batch).to_pylist()
         assert 0 <= buckets[0] < expected[('existing',)]
         assert 0 <= buckets[1] < 8
         if overwrite:
-            plan.assert_not_called()
+            native_table.new_postpone_fixed_bucket_write_builder.assert_not_called()
         else:
-            plan.assert_called_once_with(table)
+            native_table.new_postpone_fixed_bucket_write_builder.return_value.resolve_bucket_plan.assert_called_once()
         assert writer._python_writer is None
         core.write_arrow.assert_not_called()
     writer.close()
@@ -153,13 +179,15 @@ def test_native_ray_explicit_plan_does_not_load_metadata(tmp_path, forbid_python
     explicit = PostponeBucketPlan({('existing',): 7})
     writer = NativePostponeFixedBucketTableWrite(table, 'user', None, explicit, Mock())
     dataset = Mock()
+    native_table = _native_table(table)
     with patch('pypaimon.execution.native.write.postpone_bucket.native_runtime_available', return_value=True), \
             patch('pypaimon.execution.native.write.postpone_bucket.create_native_write_table',
-                  side_effect=AssertionError('explicit bucket plan must not read metadata')), \
+                  return_value=native_table), \
             patch('pypaimon.write.ray_datasink._collect_partition_stats', return_value=(dataset, {})), \
             patch('pypaimon.write.ray_datasink._write_primary_key_groups') as write:
         writer.write_ray(dataset)
         assert write.call_args[1]['postpone_bucket_plan'].as_dict() == explicit.as_dict()
+        native_table.new_postpone_fixed_bucket_write_builder.assert_not_called()
     writer.close()
 
 

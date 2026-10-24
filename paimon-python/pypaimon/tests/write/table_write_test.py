@@ -38,6 +38,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.write.table_write import TableWrite
 from pypaimon.execution.python.write.table_write import PythonTableWrite
+from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
@@ -363,7 +364,7 @@ class TableWriteTest(unittest.TestCase):
             self.pa_schema, partition_keys=partition_keys,
             options={'bucket': '-1'})
         self.catalog.create_table(name, schema, False)
-        return self.catalog.get_table(name).create_row_key_extractor()
+        return create_row_key_extractor(self.catalog.get_table(name))
 
     def test_extract_partition_bucket_groups_multi_partition(self):
         ex = self._unaware_partitioned_extractor(

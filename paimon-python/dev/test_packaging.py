@@ -121,6 +121,8 @@ class PackagingTest(unittest.TestCase):
         self.assertFalse(any(name.endswith((".so", ".pyd", ".jar")) for name in names))
         self.assertIn("pypaimon/_version.py", names)
         execution_files = (
+            "pypaimon/common/transform_schema.py",
+            "pypaimon/filesystem/format_dispatch.py",
             "pypaimon/table/source/search_execution.py",
             "pypaimon/ray/search_execution.py",
             "pypaimon/execution/native/read/search_execution.py",
@@ -128,14 +130,14 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/execution/python/read/search/distributed_vector_search.py",
             "pypaimon/execution/python/read/search/distributed_full_text_search.py",
             "pypaimon/execution/python/map_blob_key_serializer.py",
-            "pypaimon/execution/python/write/external_path_provider.py",
-            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/execution/python/globalindex/ray_index_build.py",
+            "pypaimon/common/external_path_provider.py",
+            "pypaimon/common/arrow_predicate.py",
             "pypaimon/execution/python/read/blob_view_lookup.py",
             "pypaimon/execution/python/read/interval_partition.py",
             "pypaimon/execution/python/read/map_shared_shredding.py",
             "pypaimon/execution/python/read/variant_shredding.py",
             "pypaimon/execution/python/write/dynamic_bucket.py",
-            "pypaimon/execution/python/write/merge_condition.py",
             "pypaimon/execution/python/write/merge_transform.py",
             "pypaimon/schema/data_type_casts.py",
             "pypaimon/utils/numeric_utils.py",
@@ -143,7 +145,6 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/utils/temporal_string.py",
             "pypaimon/utils/row_to_string.py",
             "pypaimon/execution/python/casting/__init__.py",
-            "pypaimon/execution/python/casting/data_type_casts.py",
             "pypaimon/execution/python/casting/schema_evolution.py",
             "pypaimon/execution/python/casting/decimal_cast.py",
             "pypaimon/execution/python/casting/temporal_cast.py",
@@ -211,7 +212,7 @@ class PackagingTest(unittest.TestCase):
             "pypaimon/globalindex/vindex_reader.py",
             "pypaimon/write/bucket_planning.py",
             "pypaimon/write/commit_options.py",
-            "pypaimon/write/input_routing.py",
+            "pypaimon/execution/python/write/input_routing.py",
         )
         for name in execution_files:
             self.assertIn(name, names)
@@ -219,7 +220,9 @@ class PackagingTest(unittest.TestCase):
             if name.startswith("pypaimon/execution/") and name.endswith(".py"):
                 self.assertIn(name.split("/")[2], ("python", "native", "__init__.py"))
         internal_aliases = (
-            "pypaimon/common/external_path_provider.py",
+            "pypaimon/execution/python/write/external_path_provider.py",
+            "pypaimon/execution/python/read/predicate_json_parser.py",
+            "pypaimon/execution/python/write/merge_condition.py",
             "pypaimon/common/map_blob_key_serializer.py",
             "pypaimon/utils/blob_view_lookup.py",
             "pypaimon/read/interval_partition.py",

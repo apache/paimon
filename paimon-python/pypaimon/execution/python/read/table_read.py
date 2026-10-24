@@ -196,7 +196,10 @@ class PythonTableRead:
                         if read.include_row_kind:
                             if "_row_kind" not in batch.schema.names:
                                 batch = read._add_row_kind_column_to_batch(batch, "+I")
-                        yield batch
+                        # Auth masks may change types. Align Python results
+                        # before Arrow exposes them through its fixed schema.
+                        yield read._try_to_pad_batch_by_schema(
+                            batch, schema, allow_type_cast=True)
                         if remaining is not None:
                             remaining -= batch.num_rows
                             if remaining <= 0:
@@ -437,7 +440,8 @@ class PythonTableRead:
             defer_blob_resolution,
         )
         sr._blob_parallelism = blob_parallelism
-        sr._parquet_row_group_cache = read._parquet_row_group_cache
+        from pypaimon.read.read_dispatch import python_row_group_cache
+        sr._parquet_row_group_cache = python_row_group_cache(read._parquet_row_group_cache)
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,

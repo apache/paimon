@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Execute REST row filters and column-mask transforms on Python Arrow batches."""
+"""Compile REST predicates and column transforms for standalone Arrow batches."""
 
 import json
 import re
@@ -24,6 +24,8 @@ from typing import Callable
 
 import pyarrow as pa
 import pyarrow.compute as pc
+
+from pypaimon.common.transform_schema import _paimon_type_to_arrow
 
 # utf8_slice_codeunits needs an explicit integer stop on pyarrow 6
 _MAX_STOP = 2 ** 31 - 1
@@ -870,80 +872,3 @@ def _convert_literal(literal, target_type: pa.DataType):
         import decimal
         return pa.scalar(decimal.Decimal(str(literal)), type=target_type)
     return literal
-
-
-def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
-    type_str = paimon_type.strip().upper()
-
-    ltz_match = re.match(
-        r"^TIMESTAMP\s*\((\d+)\)\s+WITH\s+LOCAL\s+TIME\s+ZONE", type_str)
-    if ltz_match:
-        precision = int(ltz_match.group(1))
-        return pa.timestamp(_timestamp_precision_to_unit(precision), tz="UTC")
-
-    m = re.match(r"^([A-Z_ ]+?)(?:\((.+)\))?(?:\s+NOT\s+NULL)?$", type_str)
-    if not m:
-        raise ValueError(f"Cannot parse Paimon type: '{paimon_type}'")
-    base_type = m.group(1).strip()
-    params = m.group(2)
-
-    simple_mapping = {
-        "INT": pa.int32(),
-        "BIGINT": pa.int64(),
-        "SMALLINT": pa.int16(),
-        "TINYINT": pa.int8(),
-        "FLOAT": pa.float32(),
-        "DOUBLE": pa.float64(),
-        "STRING": pa.string(),
-        "BOOLEAN": pa.bool_(),
-        "BYTES": pa.binary(),
-        "DATE": pa.date32(),
-    }
-    if base_type in simple_mapping:
-        return simple_mapping[base_type]
-
-    if base_type in ("VARCHAR", "CHAR"):
-        return pa.string()
-
-    if base_type in ("VARBINARY", "BINARY"):
-        return pa.binary()
-
-    if base_type == "TIMESTAMP":
-        precision = int(params) if params else 6
-        unit = _timestamp_precision_to_unit(precision)
-        return pa.timestamp(unit)
-
-    if base_type in ("TIMESTAMP WITH LOCAL TIME ZONE", "TIMESTAMP_WITH_LOCAL_TIME_ZONE", "TIMESTAMP_LTZ"):
-        precision = int(params) if params else 6
-        unit = _timestamp_precision_to_unit(precision)
-        return pa.timestamp(unit, tz="UTC")
-
-    if base_type == "TIME":
-        precision = int(params) if params else 6
-        unit = _timestamp_precision_to_unit(precision)
-        return pa.time64(unit) if unit in ("us", "ns") else pa.time32(unit)
-
-    if base_type == "DECIMAL":
-        if params:
-            parts = [x.strip() for x in params.split(",")]
-            if len(parts) == 2:
-                return pa.decimal128(int(parts[0]), int(parts[1]))
-        raise ValueError(f"DECIMAL type requires (precision, scale): '{paimon_type}'")
-
-    raise ValueError(
-        f"Unsupported Paimon type for PyArrow conversion: '{paimon_type}'. "
-        f"Supported: INT, BIGINT, SMALLINT, TINYINT, FLOAT, DOUBLE, STRING, VARCHAR, CHAR, "
-        f"BOOLEAN, BYTES, VARBINARY, DATE, TIME(p), TIMESTAMP(p), "
-        f"TIMESTAMP WITH LOCAL TIME ZONE(p), DECIMAL(p,s)."
-    )
-
-
-def _timestamp_precision_to_unit(precision: int) -> str:
-    if precision == 0:
-        return "s"
-    elif precision <= 3:
-        return "ms"
-    elif precision <= 6:
-        return "us"
-    else:
-        return "ns"

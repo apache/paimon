@@ -24,14 +24,11 @@ import numpy as np
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.index.dynamic_bucket import (
-    MAX_DYNAMIC_BUCKETS,
-    is_my_bucket,
-    validate_max_buckets,
-)
+from pypaimon.index.dynamic_bucket import MAX_DYNAMIC_BUCKETS, validate_max_buckets
+from pypaimon.execution.python.write.dynamic_bucket import is_my_bucket
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.write.input_routing import (
+from pypaimon.execution.python.write.input_routing import (
     DynamicBucketInputRouter, FixedBucketInputRouter, PartitionKeyExtractor, PostponeFixedBucketInputRouter,
     _bucket_from_hash as _shared_bucket_from_hash, _hash_bytes_by_words as _shared_hash_bytes_by_words,
 )
@@ -281,7 +278,7 @@ class _SimplePartitionIndex:
         )
 
 
-class SimpleHashBucketAssigner:
+class SimpleDynamicBucketAssigner:
     def __init__(self, num_assigners, assign_id, target_bucket_row_number, max_buckets_num):
         validate_max_buckets(max_buckets_num)
         self.num_assigners = num_assigners
@@ -330,7 +327,7 @@ class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
         max_buckets_num = opts.dynamic_bucket_max_buckets()
 
         if table is None:
-            self._assigner = SimpleHashBucketAssigner(
+            self._assigner = SimpleDynamicBucketAssigner(
                 num_assigners=num_assigners,
                 assign_id=assign_id,
                 target_bucket_row_number=target_bucket_row_number,
@@ -338,13 +335,14 @@ class DynamicBucketRowKeyExtractor(DynamicBucketInputRouter, RowKeyExtractor):
             )
             self._index_maintainer = None
         else:
-            from pypaimon.execution.python.write.dynamic_bucket import DynamicBucketIndexMaintainer
-            from pypaimon.index.dynamic_bucket import HashBucketAssigner
+            from pypaimon.execution.python.write.dynamic_bucket import (
+                DynamicBucketAssigner, DynamicBucketIndexMaintainer,
+            )
 
             from pypaimon.index.dynamic_bucket import resolve_bucket_snapshot
             snapshot = resolve_bucket_snapshot(table, base_snapshot_id)
             self.base_snapshot_id = snapshot.id if snapshot is not None else 0
-            self._assigner = HashBucketAssigner(
+            self._assigner = DynamicBucketAssigner(
                 table=table,
                 num_channels=num_channels,
                 num_assigners=num_assigners,
@@ -522,3 +520,23 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
 class PostponeFixedBucketRowKeyExtractor(PostponeFixedBucketInputRouter, RowKeyExtractor):
     """Route Python file writes with the shared distributed input router."""
+
+
+def create_row_key_extractor(table, ignore_existing=False):
+    """Construct a per-row extractor for Python file writing."""
+    bucket_mode = table.bucket_mode()
+    if bucket_mode == BucketMode.HASH_FIXED:
+        return FixedBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.BUCKET_UNAWARE:
+        return UnawareBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.POSTPONE_MODE:
+        return PostponeBucketRowKeyExtractor(table.table_schema)
+    elif bucket_mode == BucketMode.HASH_DYNAMIC:
+        return DynamicBucketRowKeyExtractor(
+            table.table_schema, table=table, ignore_existing=ignore_existing)
+    elif bucket_mode == BucketMode.CROSS_PARTITION:
+        raise ValueError(
+            "CROSS_PARTITION primary-key writes require a persistent "
+            "global primary-key index, which PyPaimon does not yet support"
+        )
+    raise ValueError(f"Unsupported bucket mode: {bucket_mode}")

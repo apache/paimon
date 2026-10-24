@@ -204,6 +204,53 @@ def create_postpone_bucket_planner(table, known_num_buckets=None):
     return PythonPostponeBucketPlanner(table, known_num_buckets=known_num_buckets)
 
 
+def create_input_router(table, bucket_plan=None):
+    """Select bucket routing before a distributed task receives input rows."""
+    if table.options.native_write_enabled():
+        def prepare():
+            from pypaimon.execution.native.write.input_routing import create_native_input_router
+            return create_native_input_router(table, bucket_plan)
+        native = try_prepare_native(prepare)
+        if native is not None:
+            return native
+    if bucket_plan is not None:
+        from pypaimon.execution.python.write.input_routing import PostponeFixedBucketInputRouter
+        return PostponeFixedBucketInputRouter(table, bucket_plan)
+    from pypaimon.execution.python.write.input_routing import FixedBucketInputRouter
+    return FixedBucketInputRouter(table.table_schema)
+
+
+def create_dynamic_bucket_assigner_router(table, num_channels, num_assigners):
+    """Select routing to dynamic bucket assigners before a task receives rows."""
+    if table.options.native_write_enabled():
+        from pypaimon.execution.native.write.input_routing import create_native_dynamic_bucket_assigner_router
+        try:
+            native = create_native_dynamic_bucket_assigner_router(table, num_channels, num_assigners)
+        except NotImplementedError:
+            native = None
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.input_routing import PythonDynamicBucketAssignerRouter
+    return PythonDynamicBucketAssignerRouter(table, num_channels, num_assigners)
+
+
+def create_dynamic_bucket_assigner(table, num_channels, num_assigners, assign_id,
+                                   ignore_existing=False, base_snapshot_id=None):
+    """Select restoration before assignment; authorization failures are terminal."""
+    if table.options.native_write_enabled():
+        from pypaimon.execution.native.write.input_routing import create_native_dynamic_bucket_assigner
+        # Resolving the writer snapshot can authorize and read HASH metadata.
+        # Only an explicitly unsupported environment returns None; never turn
+        # an authorization/restoration exception into another backend attempt.
+        native = create_native_dynamic_bucket_assigner(
+            table, num_channels, num_assigners, assign_id, ignore_existing, base_snapshot_id)
+        if native is not None:
+            return native
+    from pypaimon.execution.python.write.input_routing import PythonDynamicBucketAssigner
+    return PythonDynamicBucketAssigner(
+        table, num_channels, num_assigners, assign_id, ignore_existing, base_snapshot_id)
+
+
 def load_postpone_bucket_metadata(table):
     """Select metadata planning before public bucket arithmetic consumes input."""
     if table.options.native_write_enabled():
@@ -348,6 +395,16 @@ def create_shard_update_execution(owner, table, projection, columns, commit_user
     return create_python_shard_updator(owner, table, projection, columns, commit_user, shard, shard_count)
 
 
+def create_row_id_plan_execution(table, plan):
+    """Select pure routing once; execution errors never replay another backend."""
+    from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
+    native = create_native_row_id_plan(table, plan)
+    if native is not None:
+        return NativeRowIdPlan(table, plan, native=native)
+    from pypaimon.execution.python.write.row_id_plan import PythonRowIdPlan
+    return PythonRowIdPlan(plan)
+
+
 def create_row_id_update_execution(table, commit_user, commit_identifier, precomputed=None):
     """Select one incremental updater before capturing target files."""
     from pypaimon.write.update_validation import _authorize_update
@@ -400,6 +457,15 @@ def native_row_id_update_selected(worker):
     from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
     execution = vars(worker).get('_execution', worker)
     return isinstance(execution, NativeTableUpdateByRowId)
+
+
+def validate_row_id_update_rows(worker, captured_plan, first_row_id, row_ids):
+    """Validate liveness in the selected executor before positional rewriting."""
+    if native_row_id_update_selected(worker):
+        # Core validates the captured anchor's DV before staging any output.
+        return
+    from pypaimon.execution.python.write.row_id_plan import validate_live_row_ids
+    validate_live_row_ids(worker.table, captured_plan, first_row_id, row_ids)
 
 
 def python_commit(owner):
@@ -497,3 +563,28 @@ def close_table_commit(owner):
                     callback.close()
                 except Exception:
                     pass
+
+
+def execute_row_id_conflict_check(table, messages, latest_snapshot_id, check_from_snapshot):
+    if table.options.native_commit_enabled():
+        from pypaimon.execution.native.write.native_commit import prepare_native_row_id_conflict_check
+        # Unsupported configurations return None explicitly. Permission or
+        # transport failures must never restart the check in another backend.
+        native = prepare_native_row_id_conflict_check(table, messages)
+        if native is not None:
+            commit, native_messages = native
+            failure = None
+            try:
+                commit.check_row_id_conflicts(native_messages, latest_snapshot_id, check_from_snapshot)
+            except BaseException as error:
+                failure = error
+                raise
+            finally:
+                try:
+                    commit.close()
+                except BaseException:
+                    if failure is None:
+                        raise
+            return
+    from pypaimon.execution.python.write.commit.row_id_conflict import check_row_id_conflicts as check
+    check(table, messages, latest_snapshot_id, check_from_snapshot)

@@ -18,13 +18,13 @@
 import unittest
 from unittest.mock import patch
 
-from pypaimon.execution.python.write.row_key_extractor import SimpleHashBucketAssigner
+from pypaimon.execution.python.write.row_key_extractor import SimpleDynamicBucketAssigner
 
 
-class SimpleHashBucketAssignerTest(unittest.TestCase):
+class SimpleDynamicBucketAssignerTest(unittest.TestCase):
 
     def test_assign(self):
-        assigner = SimpleHashBucketAssigner(2, 0, 100, -1)
+        assigner = SimpleDynamicBucketAssigner(2, 0, 100, -1)
         partition = ()
         buckets = [assigner.assign(partition, h) for h in range(301)]
         for b in buckets[:100]:
@@ -34,7 +34,7 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
         self.assertEqual(buckets[200], 4)
 
     def test_assign_with_upper_bound(self):
-        assigner = SimpleHashBucketAssigner(1, 0, 100, 3)
+        assigner = SimpleDynamicBucketAssigner(1, 0, 100, 3)
         partition = ()
         buckets = [assigner.assign(partition, h) for h in range(400)]
         for b in buckets[:100]:
@@ -49,7 +49,7 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
     def test_assign_with_same_hash(self):
         for max_buckets in [-1, 1, 2]:
             with self.subTest(max_buckets=max_buckets):
-                assigner = SimpleHashBucketAssigner(1, 0, 100, max_buckets)
+                assigner = SimpleDynamicBucketAssigner(1, 0, 100, max_buckets)
                 partition = ()
                 hashes = list(range(100)) + list(range(100))
                 buckets = [assigner.assign(partition, h) for h in hashes]
@@ -59,7 +59,7 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
     def test_maximum_bucket_id(self):
         for max_buckets in [-1, 32768]:
             with self.subTest(max_buckets=max_buckets):
-                assigner = SimpleHashBucketAssigner(
+                assigner = SimpleDynamicBucketAssigner(
                     32768, 32767, 1, max_buckets)
                 self.assertEqual(assigner.assign((), 1), 32767)
                 self.assertEqual(assigner.assign((), 1), 32767)
@@ -69,7 +69,7 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
             ValueError,
             "'dynamic-bucket.max-buckets' must be -1 or between 1 and 32768",
         ):
-            SimpleHashBucketAssigner(1, 0, 100, 40000)
+            SimpleDynamicBucketAssigner(1, 0, 100, 40000)
 
     def test_register_each_bucket_once(self):
         for num_assigners, assign_id, max_buckets, expected in [
@@ -80,14 +80,14 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
         ]:
             with self.subTest(num_assigners=num_assigners, assign_id=assign_id,
                               max_buckets=max_buckets):
-                assigner = SimpleHashBucketAssigner(num_assigners, assign_id, 2, max_buckets)
+                assigner = SimpleDynamicBucketAssigner(num_assigners, assign_id, 2, max_buckets)
                 for h, expected_bucket in enumerate(expected):
                     self.assertEqual(assigner.assign((), h), expected_bucket)
                     index = assigner._partition_index[()]
                     self.assertCountEqual(index.bucket_list, index.bucket_information)
 
     def test_overflow_uses_all_registered_buckets(self):
-        assigner = SimpleHashBucketAssigner(1, 0, 2, 3)
+        assigner = SimpleDynamicBucketAssigner(1, 0, 2, 3)
         initial = [assigner.assign((), h) for h in range(6)]
         self.assertEqual(initial, [0, 0, 1, 1, 2, 2])
         index = assigner._partition_index[()]

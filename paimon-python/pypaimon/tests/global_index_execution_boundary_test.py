@@ -17,9 +17,7 @@
 
 """Shared index contracts and Native builds do not load Python index executors."""
 
-import importlib
 from pathlib import Path
-import pickle
 import subprocess
 import sys
 import textwrap
@@ -208,17 +206,36 @@ assert not any(name == 'ray' or name.startswith('pypaimon.ray') for name in sys.
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize('public_module,new_module,name', [
-    ('globalindex',
-     'execution.python.globalindex.global_index_evaluator', 'GlobalIndexEvaluator'),
-    ('globalindex',
-     'execution.python.globalindex.data_evolution_global_index_scanner', 'DataEvolutionGlobalIndexScanner'),
-    ('globalindex', 'execution.python.globalindex.key_serializer', 'KeySerializer'),
-    ('globalindex', 'execution.python.globalindex.memory_slice_input', 'MemorySliceInput'),
-])
-def test_public_index_exports_resolve_to_canonical_class(public_module, new_module, name):
-    public_module, new_module = 'pypaimon.' + public_module, 'pypaimon.' + new_module
-    canonical = getattr(importlib.import_module(new_module), name)
-    assert getattr(importlib.import_module(public_module), name) is canonical
-    public_pickle = ('c%s\n%s\n.' % (public_module, name)).encode('ascii')
-    assert pickle.loads(public_pickle) is canonical
+@pytest.mark.skipif(sys.version_info < (3, 7), reason='Python 3.6 retains eager package exports')
+def test_public_index_exports_are_backend_independent_contracts():
+    script = r"""
+import importlib.abc
+import pickle
+import sys
+
+class RejectExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'pypaimon.execution' or fullname.startswith('pypaimon.execution.'):
+            raise AssertionError('Public index export imported execution: ' + fullname)
+
+sys.meta_path.insert(0, RejectExecution())
+import pypaimon.globalindex as indexes
+
+for name in indexes.__all__:
+    exported = getattr(indexes, name)
+    # Existing public import paths still resolve in transported references.
+    reference = ('cpypaimon.globalindex\n%s\n.' % name).encode('ascii')
+    assert pickle.loads(reference) is exported
+for name in ('GlobalIndexEvaluator', 'DataEvolutionGlobalIndexScanner',
+             'KeySerializer', 'MemorySliceInput', 'OffsetGlobalIndexReader',
+             'SortedFileGlobalIndexReader', 'SortedFileMetaSelector'):
+    assert name not in indexes.__all__ and not hasattr(indexes, name), name
+assert not any(name == 'pypaimon.execution' or name.startswith('pypaimon.execution.')
+               for name in sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, '-c', textwrap.dedent(script)],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

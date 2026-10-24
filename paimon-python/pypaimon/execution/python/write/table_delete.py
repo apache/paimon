@@ -20,6 +20,8 @@ from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+import pyarrow as pa
+
 from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
@@ -114,6 +116,11 @@ class PythonTableDeleteByRowId:
 
     @staticmethod
     def _deduplicate_row_ids(row_ids: Sequence[int]) -> List[int]:
+        if isinstance(row_ids, (pa.Array, pa.ChunkedArray)):
+            from pypaimon.write.row_input import normalize_row_ids
+            # Python's bitmap writer needs Python integers. Native retains
+            # the Arrow buffers through the SDK and never enters this path.
+            row_ids = normalize_row_ids(row_ids).to_pylist()
         result = []
         seen = set()
         for row_id in row_ids:

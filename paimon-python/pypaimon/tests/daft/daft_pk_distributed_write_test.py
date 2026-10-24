@@ -289,7 +289,7 @@ def test_hash_dynamic_pk_restores_bucket_mapping_across_commits(catalog):
     _write_table(
         daft.from_pydict(
             {
-                # A fresh task-local SimpleHashBucketAssigner puts id=2 in
+                # A fresh task-local SimpleDynamicBucketAssigner puts id=2 in
                 # bucket 0 and incorrectly moves the existing id=1 to bucket 1.
                 "id": [2, 1],
                 "value": ["other", "new"],

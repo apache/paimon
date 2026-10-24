@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Set, TYPE_CHECKING
+from typing import List, Optional, Set
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.file_io import FileIO
@@ -29,9 +29,6 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
-
-if TYPE_CHECKING:
-    from pypaimon.execution.python.write.row_key_extractor import RowKeyExtractor
 
 
 class FileStoreTable(Table):
@@ -485,34 +482,6 @@ class FileStoreTable(Table):
             partitions=partitions,
             dry_run=dry_run,
         )
-
-    def create_row_key_extractor(
-        self, ignore_existing: bool = False
-    ) -> 'RowKeyExtractor':
-        from pypaimon.execution.python.write.row_key_extractor import (
-            DynamicBucketRowKeyExtractor, FixedBucketRowKeyExtractor,
-            PostponeBucketRowKeyExtractor, UnawareBucketRowKeyExtractor)
-
-        bucket_mode = self.bucket_mode()
-        if bucket_mode == BucketMode.HASH_FIXED:
-            return FixedBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.BUCKET_UNAWARE:
-            return UnawareBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.POSTPONE_MODE:
-            return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC:
-            return DynamicBucketRowKeyExtractor(
-                self.table_schema,
-                table=self,
-                ignore_existing=ignore_existing,
-            )
-        elif bucket_mode == BucketMode.CROSS_PARTITION:
-            raise ValueError(
-                "CROSS_PARTITION primary-key writes require a persistent "
-                "global primary-key index, which PyPaimon does not yet support"
-            )
-        else:
-            raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
     def copy(self, options: dict) -> 'FileStoreTable':
         return self._copy(options, resolve_time_travel=True)

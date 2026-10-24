@@ -175,7 +175,7 @@ def test_unavailable_vector_format_falls_back_before_accepting_data(native_rest_
     schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32(), 2))])
     native_rest_catalog.create_table('default.vectors', Schema.from_pyarrow_schema(schema, options={
         'write.native.enabled': 'true', 'row-tracking.enabled': 'true',
-        'data-evolution.enabled': 'true', 'vector.file.format': 'lance',
+        'data-evolution.enabled': 'true', 'vector.file.format': 'vortex',
     }), False)
     table = native_rest_catalog.get_table('default.vectors')
     builder = table.new_stream_write_builder() if streaming else table.new_batch_write_builder()
@@ -528,7 +528,7 @@ def test_uri_reader_factory_none_keeps_native_and_rejects_late_change(tmp_path):
     native.write_arrow_batch(_batch([2], ['a']))
     with pytest.raises(RuntimeError, match='before any write'):
         native.with_blob_uri_reader_factory(None)
-    with pytest.raises(ValueError, match='before any data is written'):
+    with pytest.raises(RuntimeError, match='before any write'):
         native.with_write_type(['id'])
     native.abort()
 

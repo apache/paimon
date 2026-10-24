@@ -26,13 +26,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.index.dynamic_bucket import (
-    HashBucketAssigner,
-    _PartitionIndex,
-    _iter_hashes,
-    compute_assigner,
-    to_signed_int32,
-    validate_bucket_id,
+from pypaimon.index.dynamic_bucket import to_signed_int32, validate_bucket_id
+from pypaimon.execution.python.write.dynamic_bucket import (
+    DynamicBucketAssigner, _PartitionIndex, _iter_hashes, compute_assigner,
 )
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -122,6 +118,28 @@ class DynamicBucketTest(unittest.TestCase):
         min_int = -(2 ** 31)
         self.assertEqual(compute_assigner(min_int, 0, 5, 5), 3)
         self.assertEqual(compute_assigner(2, min_int, 5, 5), 0)
+        # Java int addition wraps before the final remainder.
+        self.assertEqual(compute_assigner(max_int - 1, max_int - 1, max_int, max_int), -4)
+
+    def test_global_maximum_does_not_hide_an_unused_partition_bucket(self):
+        index = _PartitionIndex({10: 0}, {0: 1}, 1)
+        # A different partition already restored the global maximum bucket.
+        # Java PartitionIndex still allocates the unused local bucket 1.
+        self.assertEqual(index.assign(20, lambda _: True, 2, 1), 1)
+        self.assertEqual(index.assign(20, lambda _: True, 2, 1), 1)
+
+    def test_reached_partition_bucket_limit_is_cached_and_hash_assignments_stay_stable(self):
+        index = _PartitionIndex({10: 1}, {1: 1}, 1)
+        owns_odd = Mock(side_effect=lambda bucket: bucket % 2 == 1)
+        self.assertEqual(index.assign(20, owns_odd, 4, 3), 3)
+        first_overflow = index.assign(30, owns_odd, 4, 3)
+        self.assertIn(first_overflow, (1, 3))
+        owns_odd.reset_mock()
+        for key in range(31, 50):
+            bucket = index.assign(key, owns_odd, 4, 3)
+            self.assertIn(bucket, (1, 3))
+            self.assertEqual(index.assign(key, owns_odd, 4, 3), bucket)
+        owns_odd.assert_not_called()
 
     def test_binary_row_hash_matches_java_for_bucket_key_types(self):
         # Generated with Java InternalRowSerializer.toBinaryRow(...).hashCode().
@@ -226,7 +244,7 @@ class DynamicBucketTest(unittest.TestCase):
             validate_bucket_id(32768)
 
     def test_restore_rejects_bucket_id_above_java_short_range(self):
-        assigner = HashBucketAssigner(
+        assigner = DynamicBucketAssigner(
             table=Mock(),
             num_channels=1,
             num_assigners=1,
@@ -239,7 +257,7 @@ class DynamicBucketTest(unittest.TestCase):
         entry.bucket = 32768
 
         with patch(
-            'pypaimon.index.dynamic_bucket.IndexFileHandler'
+            'pypaimon.execution.python.write.dynamic_bucket.IndexFileHandler'
         ) as handler:
             handler.return_value.scan.return_value = [entry]
             with patch.object(
@@ -260,7 +278,7 @@ class DynamicBucketTest(unittest.TestCase):
     def test_assigner_rejects_record_owned_by_another_writer(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'wrong_assigner')
-            assigner = HashBucketAssigner(
+            assigner = DynamicBucketAssigner(
                 table=table,
                 num_channels=2,
                 num_assigners=2,

@@ -91,7 +91,8 @@ def test_native_commit_translates_only_typed_row_id_conflicts(batch):
 
 
 @pytest.mark.parametrize('opaque_message', ['unknown commit result', 'Row ID existence conflict: not a typed error'])
-def test_native_unknown_outcome_is_not_a_rewrite_signal(opaque_message):
+@pytest.mark.parametrize('native_available', [False, True])
+def test_native_unknown_outcome_is_not_a_rewrite_signal(opaque_message, native_available):
     from pypaimon.execution.native.write.commit import NativeTableCommit
     from pypaimon.ray.row_id_conflict_rewriter import _find_row_id_conflict
 
@@ -100,7 +101,7 @@ def test_native_unknown_outcome_is_not_a_rewrite_signal(opaque_message):
     failure.__cause__ = _native_conflict(module)
     core = Mock()
     core.commit.side_effect = failure
-    with patch.dict(sys.modules, {'pypaimon_rust': module}):
+    with patch.dict(sys.modules, {'pypaimon_rust': module if native_available else None}):
         with pytest.raises(ValueError) as raised:
             NativeTableCommit(core, is_batch=True).commit([], 7)
     assert raised.value is failure
