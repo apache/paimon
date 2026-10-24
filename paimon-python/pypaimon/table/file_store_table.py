@@ -557,9 +557,9 @@ class FileStoreTable(Table):
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
-            from pypaimon.execution.native.table import (_NativeRestTableCache)
-            new_table._native_pinned_table_cache = vars(self).setdefault(
-                '_native_pinned_table_cache', _NativeRestTableCache())
+            # Copies of one pinned view share lazily allocated backend
+            # resources. Copying a Python table must not initialize a backend.
+            new_table._pinned_read_resources = vars(self).setdefault('_pinned_read_resources', {})
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:

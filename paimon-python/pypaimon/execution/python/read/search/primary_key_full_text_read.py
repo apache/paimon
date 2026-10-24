@@ -97,7 +97,9 @@ class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
     def _raw_candidates(self, plan):
         result = []
         column = self._text_columns[0]
-        reader = self._table.new_read_builder().with_projection(
+        read_table = self._table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+        reader = read_table.new_read_builder().with_projection(
             [column.name]).new_read()
         for split in plan.splits():
             uncovered = set(split.uncovered_data_files)

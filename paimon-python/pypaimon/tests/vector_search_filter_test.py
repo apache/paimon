@@ -423,7 +423,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
             file_io = object()
 
             def copy_without_time_travel(self_inner, options):
-                calls["copy_options"] = options
+                calls.setdefault("copy_options", {}).update(options)
                 return self_inner
 
             def new_read_builder(self_inner):
@@ -500,6 +500,9 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
             _copy_with_snapshot = FileStoreTable._copy_with_snapshot
             options = _Options()
             file_io = object()
+
+            def copy_without_time_travel(self_inner, options):
+                return self_inner
 
             def new_read_builder(self_inner):
                 return _Builder()
@@ -3140,7 +3143,9 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         planned_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
         _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
-        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+        table.copy_without_time_travel = mock.Mock(side_effect=lambda options: (
+            planned_table if CoreOptions.SCAN_SNAPSHOT_ID.key() in options
+            else _StubTable.copy_without_time_travel(table, options)))
         split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
         reader = DataEvolutionVectorRead(
             table,
@@ -3153,7 +3158,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         table.copy_without_time_travel.reset_mock()
         result = reader.read([split])
 
-        table.copy_without_time_travel.assert_not_called()
+        table.copy_without_time_travel.assert_called_once_with({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         self.assertEqual([1], sorted(list(result.results())))
 
     def test_read_batch_does_not_reuse_snapshot_from_previous_plan(self):
@@ -3167,7 +3173,9 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         planned_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
         _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
-        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+        table.copy_without_time_travel = mock.Mock(side_effect=lambda options: (
+            planned_table if CoreOptions.SCAN_SNAPSHOT_ID.key() in options
+            else _StubTable.copy_without_time_travel(table, options)))
         split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
         reader = BatchVectorSearchReadImpl(
             table,
@@ -3180,7 +3188,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         table.copy_without_time_travel.reset_mock()
         results = reader.read_batch([split])
 
-        table.copy_without_time_travel.assert_not_called()
+        table.copy_without_time_travel.assert_called_once_with({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         self.assertEqual([1], sorted(list(results[0].results())))
 
     def test_read_plan_clears_conflicting_time_travel_options(self):

@@ -54,6 +54,8 @@ def matching_rows(table, predicate, candidates, partition_filter=None, snapshot=
     if candidates.is_empty():
         return matched
     table = table_at_snapshot(table, snapshot)
+    table = table.copy_without_time_travel({
+        'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
     builder = (table.new_read_builder().with_filter(predicate)
                .with_projection([SpecialFields.ROW_ID.name]))
     if partition_filter is not None:

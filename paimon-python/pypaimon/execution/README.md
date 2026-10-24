@@ -121,6 +121,9 @@ routing and rewrite algorithms
 call their executor's helpers; public method overrides and user callbacks remain
 public hooks. Broadcast file indexes retain their captured snapshot and are
 consumed by the explicitly selected Python workers without per-worker rescans.
+Python Blob View and search readers keep their internal source reads and scans
+in Python, including captured snapshot views. Public table copies only share
+resource containers; backend caches are allocated by the backend that uses them.
 
 Postpone bucket metadata is writer state. Native obtains it from the Core write
 builder, preserving per-file layout validation and write authorization without

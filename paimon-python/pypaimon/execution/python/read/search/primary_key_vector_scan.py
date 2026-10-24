@@ -55,6 +55,8 @@ class PrimaryKeyVectorScan(VectorSearchScan):
             return PrimaryKeyVectorScanPlan(0, [])
 
         scan_table = table_at_snapshot(self._table, snapshot)
+        scan_table = scan_table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         builder = scan_table.new_read_builder()
         if self._partition_filter is not None:
             builder = builder.with_partition_filter(self._partition_filter)
@@ -179,7 +181,9 @@ def _residual_row_ranges(table, predicate, split, candidate_ranges):
     field_names = predicate_field_names(predicate)
     fields = [field for field in table.fields if field.name in field_names]
     residual = rewrite_predicate_indices(predicate, fields)
-    reader = table.new_read_builder().with_projection(
+    read_table = table.copy_without_time_travel({
+        'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+    reader = read_table.new_read_builder().with_projection(
         [field.name for field in fields]).new_read()
     result = {}
     deletions = split.data_deletion_files or []

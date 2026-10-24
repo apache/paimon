@@ -282,7 +282,9 @@ class DataEvolutionFullTextRead(FullTextRead):
         ).top_k(self._limit)
 
     def _read_raw_rows(self, raw_row_ranges):
-        read_builder = self._table.new_read_builder()
+        read_table = self._table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+        read_builder = read_table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(self._partition_filter)
 

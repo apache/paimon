@@ -200,7 +200,9 @@ class BlobViewLookup:
 
         projection_field_names: List[str] = [f.name for f in read_fields]
 
-        descriptor_table = upstream_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
+        descriptor_table = upstream_table.copy_without_time_travel({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         read_builder = descriptor_table.new_read_builder().with_projection(projection_field_names)
 
         if SpecialFields.ROW_ID.name not in [

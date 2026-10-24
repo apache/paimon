@@ -276,7 +276,8 @@ def _native_table(table):
             and _catalog_metastore(table.catalog_environment.catalog_loader) == 'rest'):
         from pypaimon.common.json_util import JSON
         environment = table.catalog_environment
-        cache = vars(table).setdefault('_native_pinned_table_cache', _NativeRestTableCache())
+        resources = vars(table).setdefault('_pinned_read_resources', {})
+        cache = resources.setdefault('native_table', _NativeRestTableCache())
         key = (table.table_path, table.identifier.get_full_name(), table.file_io,
                environment.uuid, environment.rest_table_response,
                tuple(sorted(_catalog_options(table).items())),

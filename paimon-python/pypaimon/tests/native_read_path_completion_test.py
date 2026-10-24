@@ -204,7 +204,7 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     assert module.PaimonCatalog.call_args[0][0]['fuse.enabled'] == 'true'
 
 
-@pytest.mark.parametrize('transport', ['same-view', 'copy', 'pickle'])
+@pytest.mark.parametrize('transport', ['same-view', 'copy-before', 'copy', 'pickle'])
 def test_pinned_rest_view_reuses_core_snapshot_validation(guarded_table, transport):
     import pickle
     from pypaimon.execution.native.table import _native_table
@@ -217,7 +217,8 @@ def test_pinned_rest_view_reuses_core_snapshot_validation(guarded_table, transpo
                   side_effect=lambda table, native: native), \
             patch('pypaimon.execution.native.table._with_native_read_snapshot',
                   side_effect=lambda table, native: native):
-        native = _native_table(fixed)
+        first_view = fixed.copy({'read.batch-size': '64'}) if transport == 'copy-before' else fixed
+        native = _native_table(first_view)
         if transport == 'copy':
             fixed = fixed.copy({'read.batch-size': '64'})
         elif transport == 'pickle':

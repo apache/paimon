@@ -419,6 +419,8 @@ class AbstractVectorSearchReadImpl:
     def _plan_raw_read(self, raw_row_ranges, include_filter, snapshot=None):
         read_table = global_index_live_row_filter.table_at_snapshot(
             self._table, snapshot)
+        read_table = read_table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         read_builder = read_table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(
