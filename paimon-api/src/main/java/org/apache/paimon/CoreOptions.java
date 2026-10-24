@@ -1014,6 +1014,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Timeout duration of retry when commit failed.");
 
+    public static final ConfigOption<Boolean> COMMIT_AUTO_ROLLBACK_ENABLED =
+            key("commit.auto-rollback.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Allow Java writers to roll back compaction on write conflicts. "
+                                    + "May delete snapshots and tags. Does not affect explicit rollback "
+                                    + "or Python writers.");
+
     public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
             key("commit.max-retries")
                     .intType()

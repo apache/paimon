@@ -1240,7 +1240,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             rowIdConflictChecker,
                             commitKind);
             if (exception.isPresent()) {
-                if (allowRollback && rollback != null) {
+                if (allowRollback
+                        && rollback != null
+                        && options.toConfiguration()
+                                .get(CoreOptions.COMMIT_AUTO_ROLLBACK_ENABLED)) {
                     snapshotCommit.ensureValid();
                     if (rollback.tryToRollback(latestSnapshot)) {
                         return RetryCommitResult.forRollback(exception.get());

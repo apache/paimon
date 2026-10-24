@@ -6203,7 +6203,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Lists.newArrayList(new DataField(0, "col1", DataTypes.INT())),
                         emptyList(),
                         emptyList(),
-                        new HashMap<>(),
+                        Collections.singletonMap("commit.auto-rollback.enabled", "true"),
                         ""),
                 true);
         Table table = catalog.getTable(identifier);

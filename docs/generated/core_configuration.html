@@ -297,6 +297,12 @@ under the License.
             <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
         </tr>
         <tr>
+            <td><h5>commit.auto-rollback.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Allow Java writers to roll back compaction on write conflicts. May delete snapshots and tags. Does not affect explicit rollback or Python writers.</td>
+        </tr>
+        <tr>
             <td><h5>commit.callback.#.param</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
