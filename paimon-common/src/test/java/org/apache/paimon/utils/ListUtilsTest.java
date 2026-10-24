@@ -54,6 +54,43 @@ public class ListUtilsTest {
     }
 
     @Test
+    public void testTryReplaceOnlyFirstOccurrence() {
+        assertThat(
+                        ListUtils.tryReplace(
+                                Arrays.asList("a", "b", "a", "b", "c"),
+                                Arrays.asList("a", "b"),
+                                Collections.singletonList("n")))
+                .containsExactly("n", "a", "b", "c");
+    }
+
+    @Test
+    public void testTryReplaceWithNullElements() {
+        assertThat(
+                        ListUtils.tryReplace(
+                                Arrays.asList("a", null, "b", null),
+                                Arrays.asList(null, "b"),
+                                Collections.singletonList("n")))
+                .containsExactly("a", "n", null);
+    }
+
+    @Test
+    public void testTryReplaceWithShorterSourceList() {
+        assertThat(
+                        ListUtils.tryReplace(
+                                Collections.emptyList(),
+                                Collections.singletonList("a"),
+                                Collections.singletonList("n")))
+                .isNull();
+
+        assertThat(
+                        ListUtils.tryReplace(
+                                Collections.singletonList("a"),
+                                Arrays.asList("a", "b"),
+                                Collections.singletonList("n")))
+                .isNull();
+    }
+
+    @Test
     public void testTryReplaceRequiresContinuousMatch() {
         assertThat(
                         ListUtils.tryReplace(
