@@ -28,67 +28,35 @@ import numpy as np
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult, ScoredGlobalIndexResult
 from pypaimon.table.source.hybrid_search_builder import (
-    HybridSearchBuilderImpl, HybridSearchRouteBuilder, HybridSearchRouteResult,
+    HybridSearchRouteBuilder, HybridSearchRouteResult,
     WEIGHTED_SCORE_RANKER, MRR_RANKER,
 )
+from pypaimon.table.source.search_dispatch import _python_search_execution
 
 
 _MAX_ROUTE_WORKERS = 4
 _RRF_K = np.float32(60.0)
 
 
-def _default_hook(builder, name):
-    if name in vars(builder):
-        return False
-    hook = getattr(builder, name)
-    return getattr(hook, '__func__', hook) is getattr(HybridSearchBuilderImpl, name)
-
-
-def _execution_routes(builder):
-    # Default phases stay in the selected Python operation. Custom hooks retain
-    # their original owner and can still supply their own routes and results.
-    return (route_builders(builder, python_only=True) if _default_hook(builder, 'route_builders')
-            else builder.route_builders())
-
-
-def _execution_rank(builder, results):
-    return rank(builder, results) if _default_hook(builder, 'rank') else builder.rank(results)
-
-
-def _python_search_builder(builder):
-    from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
-    from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
-    if type(builder) in (VectorSearchBuilderImpl, FullTextSearchBuilderImpl) and not any(
-            name in vars(builder) for name in (
-                'execute_local', 'new_vector_search_scan', 'new_vector_search_read',
-                'new_full_text_scan', 'new_full_text_read')):
-        builder = copy(builder)
-        builder._table = builder._table.copy_without_time_travel({
-            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
-    return builder
-
-
+@_python_search_execution()
 def _execute_route(route):
-    hook = route.execute_local
-    if ('execute_local' not in vars(route)
-            and getattr(hook, '__func__', None) is HybridSearchRouteBuilder.execute_local):
-        builder = _python_search_builder(route.search_builder)
-        return builder.execute_local()
-    return hook()
+    return route.execute_local()
 
 
+@_python_search_execution()
 def execute(self, executor=None):
     if executor is None:
         return execute_local(self)
     executor = executor.with_concurrency(executor.concurrency)
     # Pin once before route planning moves onto separate driver threads.
-    routes = _execution_routes(self)
+    routes = self.route_builders()
     workers = min(executor.concurrency, len(routes))
     route_concurrency = executor.concurrency // max(1, workers)
 
+    @_python_search_execution()
     def execute_route(route):
         child = executor.with_concurrency(route_concurrency)
-        builder = _python_search_builder(route.search_builder)
+        builder = route.search_builder
         if route.route.is_vector():
             plan = builder.new_vector_search_scan().scan()
             return builder.new_vector_search_read().read_plan(plan, executor=child)
@@ -96,7 +64,7 @@ def execute(self, executor=None):
         return builder.new_full_text_read().read_plan(plan, executor=child)
 
     if workers <= 1:
-        return _execution_rank(self, [self.to_route_result(route, execute_route(route)) for route in routes])
+        return self.rank([self.to_route_result(route, execute_route(route)) for route in routes])
 
     cancelled = Event()
 
@@ -117,14 +85,15 @@ def execute(self, executor=None):
             cancelled.set()
             for future in futures:
                 future.cancel()
-    return _execution_rank(self, results)
+    return self.rank(results)
 
 
+@_python_search_execution()
 def execute_local(self) -> ScoredGlobalIndexResult:
     """Execute hybrid index search locally."""
-    routes = _execution_routes(self)
+    routes = self.route_builders()
     if len(routes) <= 1:
-        return _execution_rank(self, [
+        return self.rank([
             self.to_route_result(
                 route_builder, _execute_route(route_builder))
             for route_builder in routes
@@ -153,18 +122,15 @@ def execute_local(self) -> ScoredGlobalIndexResult:
             self.to_route_result(route_builder, future.result())
             for route_builder, future in zip(routes, futures)
         ]
-    return _execution_rank(self, route_results)
+    return self.rank(route_results)
 
 
-def route_builders(self, python_only=False) -> List[HybridSearchRouteBuilder]:
+def route_builders(self) -> List[HybridSearchRouteBuilder]:
     reject_search_under_query_auth(self._table)
     self._validate_search()
     from pypaimon.snapshot.time_travel_util import TimeTravelUtil
     execution = copy(self)
     execution._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
-    if python_only:
-        execution._table = execution._table.copy_without_time_travel({
-            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
     builders = []
     for route in self._routes:
         if route.is_vector():

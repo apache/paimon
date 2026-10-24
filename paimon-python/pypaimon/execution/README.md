@@ -127,7 +127,9 @@ resource containers; backend caches are allocated by the backend that uses them.
 Hybrid queries that select Python keep their default route planning, child
 execution and rank fusion in Python. Explicit subclass and instance hooks retain
 their original owners; standalone public route and rank calls still select their
-own backend. Scan selection, including LeRobot's indexed-read preference, belongs
+own backend. This also applies when hooks call `super()` or saved public methods;
+the query and its route workers retain Python selection until each call exits.
+Scan selection, including LeRobot's indexed-read preference, belongs
 to `read_dispatch`; public scans do not mirror private Native capability methods.
 Each scan retains its selected executor until its configuration changes. The
 Python executor owns its private file scanner and applies public file-level
@@ -137,6 +139,10 @@ before any Native capability probe and run after authorization.
 The Python executor also compares captured requests before reusing its scanner,
 so in-place changes to range containers refresh planning without selecting a
 different backend or retaining an earlier authorization scope.
+Scanner hooks delegate base calls to the current Python scanner, preserving its
+snapshot and statistics when nested hooks change configuration. Unchanged query
+scopes reuse their grant and wrap the plan once. Adding protected filter fields
+requires a new grant; explicit raw-file calls still require whole-table permission.
 
 Postpone bucket metadata is writer state. Native obtains it from the Core write
 builder, preserving per-file layout validation and write authorization without

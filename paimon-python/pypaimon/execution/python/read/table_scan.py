@@ -18,9 +18,12 @@
 """Python file scanner construction for the public TableScan."""
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.execution.python.read.auth_support import prune_scanner_by_auth
 from pypaimon.read.query_auth_split import wrap_plan_with_auth
+from pypaimon.read.auth_support import authorization_columns
+from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.scan_config import validate_scan_options
 from pypaimon.execution.python.read.scanner.file_scanner import FileScanner
 from pypaimon.utils.range import Range
@@ -164,21 +167,28 @@ class PythonTableScan:
         # while retaining Python selection and applying authorization afterward.
         if scanner is None or self._configuration != request:
             scanner = self._create_file_scanner()
-            if request.idx_of_this_subtask is not None:
-                scanner.with_shard(request.idx_of_this_subtask, request.number_of_para_subtasks)
-            if request.start_pos_of_this_subtask is not None:
-                scanner.with_slice(request.start_pos_of_this_subtask, request.end_pos_of_this_subtask)
-            if request.global_index_result is not None:
-                scanner.with_global_index_result(request.global_index_result)
-            if request.row_ranges is not None:
-                scanner.with_row_ranges([Range(start, end) for start, end in request.row_ranges])
-            if request.chunk_shuffle is not None:
-                scanner.with_chunk_shuffle(*request.chunk_shuffle)
-            if public_scanner is not None:
-                self._configure_file_scanner(scanner, public_scanner)
+            self._apply_file_scanner_request(scanner, request, public_scanner)
             self._file_scanner_cache = scanner
             self._configuration = request
         return scanner
+
+    @staticmethod
+    def _apply_file_scanner_request(scanner, request, configuration):
+        scanner.idx_of_this_subtask = scanner.number_of_para_subtasks = None
+        scanner.start_pos_of_this_subtask = scanner.end_pos_of_this_subtask = None
+        scanner._global_index_result = scanner._row_ranges = scanner.chunk_shuffle = None
+        if request.idx_of_this_subtask is not None:
+            scanner.with_shard(request.idx_of_this_subtask, request.number_of_para_subtasks)
+        if request.start_pos_of_this_subtask is not None:
+            scanner.with_slice(request.start_pos_of_this_subtask, request.end_pos_of_this_subtask)
+        if request.global_index_result is not None:
+            scanner.with_global_index_result(request.global_index_result)
+        if request.row_ranges is not None:
+            scanner.with_row_ranges([Range(start, end) for start, end in request.row_ranges])
+        if request.chunk_shuffle is not None:
+            scanner.with_chunk_shuffle(*request.chunk_shuffle)
+        if configuration is not None:
+            PythonTableScan._configure_file_scanner(scanner, configuration)
 
     @staticmethod
     def _configure_file_scanner(scanner, configuration):
@@ -193,7 +203,19 @@ class PythonTableScan:
         for name in ('scan', 'scan_with_stats', 'plan_files'):
             if (name in vars(configuration)
                     or getattr(type(configuration), name) is not getattr(PublicFileScanner, name)):
-                setattr(scanner, name, getattr(configuration, name))
+                setattr(scanner, name, PythonTableScan._file_scanner_hook(configuration, name))
+            else:
+                vars(scanner).pop(name, None)
+
+    @staticmethod
+    def _file_scanner_hook(configuration, name):
+        from pypaimon.read.read_dispatch import file_scanner_hook
+        hook = getattr(configuration, name)
+
+        def call():
+            with file_scanner_hook(configuration, name):
+                return hook()
+        return call
 
     def _scanner(self, auth_result):
         scan = self._scan
@@ -202,19 +224,69 @@ class PythonTableScan:
             prune_scanner_by_auth(scan.table, scanner, auth_result)
         return scanner
 
+    def _run_file_scan(self, method, auth_result, *, base=False, all_files=False):
+        from pypaimon.read.read_dispatch import file_scanner_execution
+        scan = self._scan
+        scanner = self._scanner(auth_result)
+        configuration = scan._file_scanner
+        from pypaimon.read.file_scanner import FileScanner as PublicFileScanner
+        captured_configuration = configuration is None or isinstance(configuration, PublicFileScanner)
+        unrestricted = all_files or method == 'plan_files'
+
+        def auth_scope(request):
+            if scan._query_auth_fn is None or unrestricted or not captured_configuration:
+                return None
+            columns = authorization_columns(scan.table, request.read_type,
+                                            request.read_predicate, request.partition_filter)
+            return (tuple(columns) if columns is not None else None,
+                    frozenset(predicate_field_names(request.partition_filter))
+                    if request.partition_filter is not None else None)
+
+        authorized_scope = auth_scope(scan._scan_request() if captured_configuration else None)
+
+        def run(method, base=False):
+            nonlocal auth_result, authorized_scope
+            request = scan._scan_request() if captured_configuration else None
+            scope = auth_scope(request)
+            if scope != authorized_scope:
+                auth_result = scan._TableScan__auth_query(all_columns=unrestricted)
+                authorized_scope = scope
+                if unrestricted and auth_result is not None:
+                    raise TableNoPermissionException(scan.table.identifier)
+            if captured_configuration and configuration is not None and self._configuration != request:
+                # Nested hooks share the scanner already executing scan()/stats;
+                # replacing it would lose its snapshot and active counters.
+                self._apply_file_scanner_request(scanner, request, configuration)
+                self._configuration = request
+            if scan._query_auth_fn is not None:
+                prune_scanner_by_auth(scan.table, scanner, auth_result)
+            skip_level0 = scanner.skip_level0 if all_files else None
+            try:
+                if all_files:
+                    scanner.skip_level0 = False
+                with file_scanner_execution(configuration, lambda method: run(method, base=True)):
+                    result = (getattr(FileScanner, method)(scanner) if base else getattr(scanner, method)())
+                if configuration is not None and method == 'plan_files':
+                    configuration._scanned_snapshot = scanner._scanned_snapshot
+                    configuration._scanned_snapshot_id = scanner._scanned_snapshot_id
+                return result
+            finally:
+                if all_files:
+                    scanner.skip_level0 = skip_level0
+
+        result = run(method, base)
+        if method == 'scan':
+            return wrap_plan_with_auth(auth_result, result)
+        if method == 'scan_with_stats':
+            plan, stats = result
+            return wrap_plan_with_auth(auth_result, plan), stats
+        return result
+
     def plan(self, auth_result=None):
-        return wrap_plan_with_auth(auth_result, self._scanner(auth_result).scan())
+        return self._run_file_scan('scan', auth_result)
 
     def plan_all(self):
-        scanner = self._scanner(None)
-        # Writer restore/overwrite must see L0 even when batch reads hide it.
-        skip_level0 = scanner.skip_level0
-        try:
-            scanner.skip_level0 = False
-            return scanner.scan()
-        finally:
-            scanner.skip_level0 = skip_level0
+        return self._run_file_scan('scan', None, all_files=True)
 
     def scan_with_stats(self, auth_result=None):
-        plan, stats = self._scanner(auth_result).scan_with_stats()
-        return wrap_plan_with_auth(auth_result, plan), stats
+        return self._run_file_scan('scan_with_stats', auth_result)

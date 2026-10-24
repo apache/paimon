@@ -21,27 +21,53 @@ The selected backend consumes ordinary snapshot-and-split plans, including
 transported plans. An execution error never triggers another search.
 """
 
+from contextlib import contextmanager
+from copy import copy
 from functools import partial
+from threading import local
+
+
+_search_execution = local()
+
+
+@contextmanager
+def _python_search_execution():
+    """Retain Python selection through hooks delegating to public methods."""
+    previous = getattr(_search_execution, 'python', False)
+    _search_execution.python = True
+    try:
+        yield
+    finally:
+        _search_execution.python = previous
+
+
+def _python_search_request(request):
+    if getattr(_search_execution, 'python', False):
+        request = copy(request)
+        request._table = request._table.copy_without_time_travel({
+            'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+    return request
 
 
 def _python_vector_scan(execution):
     from pypaimon.execution.python.read.search.factories import new_vector_scan
-    return new_vector_scan(execution)
+    return new_vector_scan(_python_search_request(execution))
 
 
 def _python_vector_read(builder, batch):
     from pypaimon.execution.python.read.search.factories import new_batch_vector_read, new_vector_read
+    builder = _python_search_request(builder)
     return new_batch_vector_read(builder) if batch else new_vector_read(builder)
 
 
 def _python_full_text_scan(execution):
     from pypaimon.execution.python.read.search.factories import new_full_text_scan
-    return new_full_text_scan(execution)
+    return new_full_text_scan(_python_search_request(execution))
 
 
 def _python_full_text_read(execution):
     from pypaimon.execution.python.read.search.factories import new_full_text_read
-    return new_full_text_read(execution)
+    return new_full_text_read(_python_search_request(execution))
 
 
 class _SearchScan:
@@ -94,6 +120,8 @@ def python_search_reader(reader):
 
 
 def _native_requested(builder):
+    if getattr(_search_execution, 'python', False):
+        return False
     table = getattr(builder, '_table', None)
     enabled = getattr(getattr(table, 'options', None), 'native_read_enabled', None)
     return callable(enabled) and enabled()

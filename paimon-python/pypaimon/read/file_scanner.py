@@ -104,18 +104,18 @@ class FileScanner:
         return self._scan._scan_request()
 
     def scan(self):
-        from pypaimon.read.read_dispatch import plan_scan
-        return plan_scan(self._scan)
+        from pypaimon.read.read_dispatch import file_scanner_call
+        return file_scanner_call(self, 'scan')
 
     def scan_with_stats(self):
-        from pypaimon.read.read_dispatch import scan_with_stats
-        plan, stats = scan_with_stats(self._scan)
+        from pypaimon.read.read_dispatch import file_scanner_call
+        plan, stats = file_scanner_call(self, 'scan_with_stats')
         self.scan_stats = stats
         return plan, stats
 
     def plan_files(self):
-        from pypaimon.read.read_dispatch import plan_files
-        return plan_files(self)
+        from pypaimon.read.read_dispatch import file_scanner_call
+        return file_scanner_call(self, 'plan_files')
 
     def with_all_buckets(self):
         self.only_read_real_buckets = False
