@@ -65,6 +65,7 @@ class PythonTableScan:
     def __init__(self, scan):
         self._scan = scan
         self._file_scanner_cache = None
+        self._configuration = None
 
     def _create_file_scanner(self) -> FileScanner:
         scan = self._scan
@@ -151,15 +152,18 @@ class PythonTableScan:
     def _file_scanner(self):
         """Return the private Python scanner without entering public dispatch."""
         scan = self._scan
+        public_scanner = getattr(scan, '_file_scanner', None)
+        from pypaimon.read.file_scanner import FileScanner as PublicFileScanner
+        if public_scanner is not None and not isinstance(public_scanner, PublicFileScanner):
+            self._file_scanner_cache = public_scanner
+            return public_scanner
+        request = scan._scan_request()
         scanner = self._file_scanner_cache
-        if scanner is None:
-            public_scanner = getattr(scan, '_file_scanner', None)
-            from pypaimon.read.file_scanner import FileScanner as PublicFileScanner
-            if public_scanner is not None and not isinstance(public_scanner, PublicFileScanner):
-                self._file_scanner_cache = public_scanner
-                return public_scanner
+        # Mutable public range/configuration containers can change without a
+        # facade setter. Refresh this backend's scanner from the captured values
+        # while retaining Python selection and applying authorization afterward.
+        if scanner is None or self._configuration != request:
             scanner = self._create_file_scanner()
-            request = scan._scan_request()
             if request.idx_of_this_subtask is not None:
                 scanner.with_shard(request.idx_of_this_subtask, request.number_of_para_subtasks)
             if request.start_pos_of_this_subtask is not None:
@@ -173,6 +177,7 @@ class PythonTableScan:
             if public_scanner is not None:
                 self._configure_file_scanner(scanner, public_scanner)
             self._file_scanner_cache = scanner
+            self._configuration = request
         return scanner
 
     @staticmethod

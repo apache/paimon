@@ -134,6 +134,9 @@ Python executor owns its private file scanner and applies public file-level
 configuration. Installing, replacing or removing scanner execution hooks
 invalidates that executor; explicit instance and subclass hooks select Python
 before any Native capability probe and run after authorization.
+The Python executor also compares captured requests before reusing its scanner,
+so in-place changes to range containers refresh planning without selecting a
+different backend or retaining an earlier authorization scope.
 
 Postpone bucket metadata is writer state. Native obtains it from the Core write
 builder, preserving per-file layout validation and write authorization without

@@ -314,3 +314,39 @@ def test_scanner_hook_never_bypasses_authorization(search_table, method):
         else:
             getattr(scan, method)()
     hook.assert_not_called()
+
+
+@pytest.mark.parametrize('method', ['plan', 'plan_all', 'scan_with_stats'])
+@pytest.mark.parametrize('mutation', ['endpoint', 'append', 'clear'])
+def test_python_plan_refreshes_mutable_ranges_without_selecting_native(search_table, method, mutation):
+    from pypaimon.utils.range import Range
+
+    table = search_table.copy_without_time_travel({'read.native.enabled': 'false'})
+    builder = table.new_read_builder().with_projection(['id'])
+    scan = builder.new_scan().with_row_ranges([Range(0, 0 if mutation == 'append' else 1)])
+
+    def plan():
+        result = getattr(scan, method)()
+        return result[0] if method == 'scan_with_stats' else result
+
+    with patch('pypaimon.execution.native.read.plan.NativeTableScan._native_plan_supported', return_value=False):
+        before = plan()
+    assert builder.new_read().to_arrow(before.splits())['id'].to_pylist() == (
+        [1] if mutation == 'append' else [1, 2])
+    execution = scan._execution
+    ranges = scan.file_scanner._row_ranges
+    if mutation == 'endpoint':
+        ranges[0].to = 0
+        expected = [1]
+    elif mutation == 'append':
+        ranges.append(Range(1, 1))
+        expected = [1, 2]
+    else:
+        ranges.clear()
+        expected = []
+    with _forbid_native():
+        after = plan()
+        actual = builder.new_read().to_arrow(after.splits())
+    assert actual['id'].to_pylist() == expected
+    assert scan._execution is execution
+    assert after.snapshot_id == before.snapshot_id
