@@ -1656,35 +1656,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
-    public void testReassignAbortsAfterConcurrentManifestCompaction() throws Exception {
-        FileStoreTable table = createTableWithInterleavedPartitions();
-        Snapshot before = table.snapshotManager().latestSnapshot();
-
-        AtomicBoolean compacted = new AtomicBoolean();
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionRowIdReassigner(
-                                                table,
-                                                null,
-                                                () -> {
-                                                    if (compacted.compareAndSet(false, true)) {
-                                                        try {
-                                                            compactManifests(table);
-                                                        } catch (Exception e) {
-                                                            throw new RuntimeException(e);
-                                                        }
-                                                    }
-                                                })
-                                        .reassign("test-reassign-compact-conflict"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("COMPACT snapshot");
-
-        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 1);
-        assertThat(table.snapshotManager().latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.COMPACT);
-    }
-
-    @Test
     public void testReassignContinuesAfterConcurrentAnalyze() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         Snapshot before = table.snapshotManager().latestSnapshot();

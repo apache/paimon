@@ -43,6 +43,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
@@ -53,6 +54,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
+import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -63,6 +66,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -155,11 +159,11 @@ public class DataEvolutionRowIdReassigner {
                     latest.id(), nextRowId, "no partition requires row-id reassignment");
         }
 
-        CommittedAssignment committed =
-                commitAssignmentWithRetry(
-                        optionalPlan.get(), latest, manifestFile, manifestList, commitUser);
-        Assignment assignment = committed.assignment;
-        CommitAssignmentResult commitResult = committed.commitResult;
+        return commitAssignmentWithRetry(
+                optionalPlan.get(), latest, manifestFile, manifestList, commitUser);
+    }
+
+    private Result assignmentResult(Assignment assignment, CommitAssignmentResult commitResult) {
         LOG.info(
                 "Reassigned row IDs for table {} from {} to {}, partitions={}, files={}, rows={}.",
                 table.name(),
@@ -180,17 +184,22 @@ public class DataEvolutionRowIdReassigner {
     }
 
     private Optional<AssignmentPlan> planAssignment(List<ManifestFileMeta> manifestMetas) {
+        return planAssignment(manifestMetas, partitionPredicate);
+    }
+
+    private Optional<AssignmentPlan> planAssignment(
+            List<ManifestFileMeta> manifestMetas, @Nullable PartitionPredicate planningPredicate) {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         List<List<ManifestFileMeta>> includedGroups = new ArrayList<>();
         for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
-            if (!skipManifestGroupByPartitionFilter(manifestGroup)) {
+            if (!skipManifestGroupByPartitionFilter(manifestGroup, planningPredicate)) {
                 includedGroups.add(manifestGroup);
             }
         }
 
         DataEvolutionRowIdAssignmentPlanner planner =
                 new DataEvolutionRowIdAssignmentPlanner(
-                        table, partitionPredicate, new ArrayList<>(manifestMetas));
+                        table, planningPredicate, new ArrayList<>(manifestMetas));
         DataEvolutionRowIdAssignmentPlanner.Result compactPlan = planner.plan(includedGroups);
         if (compactPlan.isEmpty()) {
             return Optional.empty();
@@ -310,8 +319,9 @@ public class DataEvolutionRowIdReassigner {
         return groups;
     }
 
-    private boolean skipManifestGroupByPartitionFilter(List<ManifestFileMeta> manifestGroup) {
-        if (!partitionFilterEnabled()) {
+    private boolean skipManifestGroupByPartitionFilter(
+            List<ManifestFileMeta> manifestGroup, @Nullable PartitionPredicate planningPredicate) {
+        if (planningPredicate == null) {
             return false;
         }
 
@@ -322,7 +332,7 @@ public class DataEvolutionRowIdReassigner {
             }
 
             SimpleStats partitionStats = manifestMeta.partitionStats();
-            if (partitionPredicate.test(
+            if (planningPredicate.test(
                     manifestMeta.numAddedFiles() + manifestMeta.numDeletedFiles(),
                     partitionStats.minValues(),
                     partitionStats.maxValues(),
@@ -350,11 +360,7 @@ public class DataEvolutionRowIdReassigner {
         return false;
     }
 
-    private boolean partitionFilterEnabled() {
-        return partitionPredicate != null;
-    }
-
-    private CommittedAssignment commitAssignmentWithRetry(
+    private Result commitAssignmentWithRetry(
             AssignmentPlan initialAssignmentPlan,
             Snapshot initialSnapshot,
             ManifestFile manifestFile,
@@ -374,17 +380,42 @@ public class DataEvolutionRowIdReassigner {
                     observedLatest != null,
                     "Latest snapshot disappeared while reassigning row IDs.");
             if (observedLatest.id() > latest.id()) {
-                assignmentPlan =
+                Optional<AssignmentPlan> advanced =
                         advanceAssignmentPlan(
                                 assignmentPlan, latest, observedLatest, manifestFile, manifestList);
+                if (!advanced.isPresent()) {
+                    return Result.skipped(
+                            observedLatest.id(),
+                            observedLatest.nextRowId(),
+                            "no partition requires row-id reassignment after concurrent compaction");
+                }
+                assignmentPlan = advanced.get();
                 latest = observedLatest;
             }
 
             Assignment assignment = assignmentPlan.createAssignment(latest);
-            CommitAssignmentResult commitResult =
-                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
+            CommitAssignmentResult commitResult;
+            try {
+                commitResult = commitAssignment(assignment, manifestFile, manifestList, commitUser);
+            } catch (RuntimeException e) {
+                if (!isMissingFile(e)) {
+                    throw e;
+                }
+                Snapshot newLatest = table.snapshotManager().latestSnapshot();
+                if (newLatest == null || newLatest.id() <= latest.id()) {
+                    throw e;
+                }
+                // Compaction and expiration can remove input metadata during a rewrite.
+                // Advance through the normal history checks before trying the latest state.
+                LOG.info(
+                        "Metadata for snapshot {} is no longer available while reassigning row IDs for table {}. Snapshot {} has been committed.",
+                        latest.id(),
+                        table.name(),
+                        newLatest.id());
+                commitResult = new CommitAssignmentResult(false, 0, 0);
+            }
             if (commitResult.success) {
-                return new CommittedAssignment(assignment, commitResult);
+                return assignmentResult(assignment, commitResult);
             }
 
             if (System.currentTimeMillis() - startMillis > options.commitTimeout()
@@ -397,11 +428,8 @@ public class DataEvolutionRowIdReassigner {
 
             Snapshot newLatest = table.snapshotManager().latestSnapshot();
             checkState(newLatest != null, "Latest snapshot disappeared while reassigning row IDs.");
-            assignmentPlan =
-                    advanceAssignmentPlan(
-                            assignmentPlan, latest, newLatest, manifestFile, manifestList);
             LOG.info(
-                    "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{} with the updated assignment plan.",
+                    "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{}.",
                     table.name(),
                     latest.id(),
                     newLatest.id(),
@@ -409,8 +437,16 @@ public class DataEvolutionRowIdReassigner {
                     options.commitMaxRetries());
             retryWaiter.retryWait(retryCount);
             retryCount++;
-            latest = newLatest;
         }
+    }
+
+    private static boolean isMissingFile(Throwable failure) {
+        return ExceptionUtils.findThrowable(
+                        failure,
+                        cause ->
+                                cause instanceof FileNotFoundException
+                                        || cause instanceof NoSuchFileException)
+                .isPresent();
     }
 
     private CommitAssignmentResult commitAssignment(
@@ -454,7 +490,7 @@ public class DataEvolutionRowIdReassigner {
                 success, rewrittenDataManifests.fileCount, rewrittenIndexManifest.indexFileCount);
     }
 
-    private AssignmentPlan advanceAssignmentPlan(
+    private Optional<AssignmentPlan> advanceAssignmentPlan(
             AssignmentPlan assignmentPlan,
             Snapshot previous,
             Snapshot latest,
@@ -466,15 +502,8 @@ public class DataEvolutionRowIdReassigner {
                 previous.id(),
                 latest.id());
 
-        Set<String> previousManifestFiles = new HashSet<>();
-        for (ManifestFileMeta manifestMeta : manifestList.readDataManifests(previous)) {
-            previousManifestFiles.add(manifestMeta.fileName());
-        }
-        Map<String, ManifestFileMeta> manifestMetasToRewrite = new LinkedHashMap<>();
-        for (ManifestFileMeta manifestMeta : assignmentPlan.manifestMetasToRewrite) {
-            manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
-        }
-        Map<String, Boolean> newManifestNeedsReassign = new HashMap<>();
+        List<Snapshot> concurrentSnapshots = new ArrayList<>();
+        boolean hasCompaction = false;
         for (long id = previous.id() + 1; id <= latest.id(); id++) {
             Snapshot snapshot;
             try {
@@ -487,28 +516,78 @@ public class DataEvolutionRowIdReassigner {
                         e);
             }
 
-            if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT
-                    || snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+            checkState(
+                    snapshot != null,
+                    "Abort row-id reassignment because snapshot %s cannot be read.",
+                    id);
+            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
                 throw new RuntimeException(
                         String.format(
                                 "Abort row-id reassignment because %s snapshot %s was committed after snapshot %s.",
                                 snapshot.commitKind(), snapshot.id(), previous.id()));
             }
-            if (snapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
-                continue;
-            }
             checkState(
-                    snapshot.commitKind() == Snapshot.CommitKind.APPEND,
+                    snapshot.commitKind() == Snapshot.CommitKind.APPEND
+                            || snapshot.commitKind() == Snapshot.CommitKind.COMPACT
+                            || snapshot.commitKind() == Snapshot.CommitKind.ANALYZE,
                     "Unsupported snapshot kind %s while advancing row-id assignment.",
                     snapshot.commitKind());
 
+            concurrentSnapshots.add(snapshot);
+            hasCompaction |= snapshot.commitKind() == Snapshot.CommitKind.COMPACT;
+        }
+
+        Set<String> previousManifestFiles = new HashSet<>();
+        try {
+            for (ManifestFileMeta manifestMeta : manifestList.readDataManifests(previous)) {
+                previousManifestFiles.add(manifestMeta.fileName());
+            }
+        } catch (RuntimeException e) {
+            if (!isMissingFile(e)) {
+                throw e;
+            }
+            // The planning snapshot may expire while later snapshots remain readable.
+            // Without this optimization, inspect all latest manifests for planned ranges.
+            previousManifestFiles.clear();
+            LOG.info(
+                    "Manifest lists of planning snapshot {} are no longer available for table {}. "
+                            + "Inspecting the latest manifests while advancing row-id reassignment.",
+                    previous.id(),
+                    table.name());
+        }
+        Map<String, ManifestFileMeta> manifestMetasToRewrite = new LinkedHashMap<>();
+        for (ManifestFileMeta manifestMeta : assignmentPlan.manifestMetasToRewrite) {
+            manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
+        }
+        Map<String, Boolean> newManifestNeedsReassign = new HashMap<>();
+        for (Snapshot snapshot : concurrentSnapshots) {
+            if (snapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
+                continue;
+            }
+            Map<BinaryRow, CompactionRowRanges> compactionRanges = new HashMap<>();
             for (ManifestFileMeta manifestMeta : manifestList.readDeltaManifests(snapshot)) {
-                boolean needsReassign =
-                        appendedManifestNeedsReassign(
-                                assignmentPlan, manifestFile, manifestMeta, snapshot.id());
-                newManifestNeedsReassign.put(manifestMeta.fileName(), needsReassign);
-                if (needsReassign) {
+                DeltaManifestStatus status =
+                        deltaManifestStatus(
+                                assignmentPlan,
+                                manifestFile,
+                                manifestMeta,
+                                snapshot,
+                                hasCompaction,
+                                compactionRanges);
+                if (status == DeltaManifestStatus.REPLAN) {
+                    return replanAssignment(assignmentPlan, latest, manifestList);
+                }
+                newManifestNeedsReassign.put(
+                        manifestMeta.fileName(), status == DeltaManifestStatus.REWRITE);
+                if (status == DeltaManifestStatus.REWRITE) {
                     manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
+                }
+            }
+            for (CompactionRowRanges ranges : compactionRanges.values()) {
+                if (!ranges.preservesAssignment()) {
+                    // Materializing deletion vectors is also a COMPACT commit, but can
+                    // delete logical rows and allocate different row IDs for the survivors.
+                    return replanAssignment(assignmentPlan, latest, manifestList);
                 }
             }
         }
@@ -530,12 +609,37 @@ public class DataEvolutionRowIdReassigner {
                 reboundManifestMetasToRewrite.put(manifestFileName, manifestMeta);
             }
         }
+        if (hasCompaction && reboundManifestMetasToRewrite.isEmpty()) {
+            return replanAssignment(assignmentPlan, latest, manifestList);
+        }
         checkState(
                 !reboundManifestMetasToRewrite.isEmpty(),
                 "Cannot advance row-id assignment because no current manifest contains the planned row-id ranges.");
-        return new AssignmentPlan(
-                new ArrayList<>(reboundManifestMetasToRewrite.values()),
-                assignmentPlan.relativeRowIdMappings);
+        return Optional.of(
+                new AssignmentPlan(
+                        new ArrayList<>(reboundManifestMetasToRewrite.values()),
+                        assignmentPlan.relativeRowIdMappings,
+                        assignmentPlan.targetPartitions));
+    }
+
+    private Optional<AssignmentPlan> replanAssignment(
+            AssignmentPlan previousPlan, Snapshot latest, ManifestList manifestList) {
+        LOG.info(
+                "Replan row-id reassignment for table {} at snapshot {} because concurrent compaction changed the planned row-id ranges.",
+                table.name(),
+                latest.id());
+        // Revisit only the partitions selected by the original plan. Other partitions may
+        // have become fragmented due to concurrent appends and are outside this operation.
+        PartitionPredicate selectedPartitions =
+                PartitionPredicate.fromMultiple(
+                        table.schema().logicalPartitionType(), previousPlan.targetPartitions);
+        return planAssignment(manifestList.readDataManifests(latest), selectedPartitions)
+                .map(
+                        replanned ->
+                                new AssignmentPlan(
+                                        replanned.manifestMetasToRewrite,
+                                        replanned.relativeRowIdMappings,
+                                        previousPlan.targetPartitions));
     }
 
     private boolean manifestContainsMappedEntry(
@@ -562,12 +666,15 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
-    private boolean appendedManifestNeedsReassign(
+    private DeltaManifestStatus deltaManifestStatus(
             AssignmentPlan assignmentPlan,
             ManifestFile manifestFile,
             ManifestFileMeta manifestMeta,
-            long appendSnapshotId) {
+            Snapshot snapshot,
+            boolean allowReplanning,
+            Map<BinaryRow, CompactionRowRanges> compactionRanges) {
         boolean needsReassign = false;
+        boolean needsReplan = false;
         try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
                         manifestMeta.fileName(), ProjectedManifestEntry.ROW_RANGE_PROJECTION)) {
@@ -577,42 +684,43 @@ public class DataEvolutionRowIdReassigner {
                     continue;
                 }
                 checkState(
-                        entry.isAdd(),
+                        snapshot.commitKind() != Snapshot.CommitKind.APPEND || entry.isAdd(),
                         "APPEND snapshot %s contains a non-ADD entry in manifest %s.",
-                        appendSnapshotId,
+                        snapshot.id(),
                         manifestMeta.fileName());
-                if (appendedEntryNeedsReassign(assignmentPlan, entry)) {
+                RowRangeMappingIndex mapping =
+                        assignmentPlan.relativeRowIdMappings.mappings.get(entry.partition());
+                if (mapping == null) {
+                    continue;
+                }
+                Range range = entry.file().nonNullRowIdRange();
+                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                    compactionRanges
+                            .computeIfAbsent(entry.partition(), key -> new CompactionRowRanges())
+                            .add(entry.kind(), range, mapping.overlaps(range));
+                }
+                if (mapping.map(range).isPresent()) {
+                    // Keep historical ADD/DELETE pairs consistent after compaction.
                     needsReassign = true;
+                } else if (mapping.overlaps(range)) {
+                    checkState(
+                            allowReplanning,
+                            "Cannot advance row-id assignment because row-id range %s partially overlaps planned ranges in partition %s.",
+                            range,
+                            entry.partition());
+                    // A file cannot be partly reassigned by changing firstRowId alone.
+                    needsReplan = true;
                 }
             }
-            return needsReassign;
+            return needsReplan
+                    ? DeltaManifestStatus.REPLAN
+                    : needsReassign ? DeltaManifestStatus.REWRITE : DeltaManifestStatus.UNCHANGED;
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to scan manifest file " + manifestMeta.fileName(), e);
         }
-    }
-
-    private boolean appendedEntryNeedsReassign(
-            AssignmentPlan assignmentPlan, ManifestEntry appendedEntry) {
-        RowRangeMappingIndex mapping =
-                assignmentPlan.relativeRowIdMappings.mappings.get(appendedEntry.partition());
-        if (mapping == null) {
-            return false;
-        }
-
-        Range appendedRange = appendedEntry.file().nonNullRowIdRange();
-        if (mapping.map(appendedRange).isPresent()) {
-            return true;
-        }
-
-        checkState(
-                !mapping.overlaps(appendedRange),
-                "Cannot advance row-id assignment because appended row-id range %s partially overlaps planned ranges in partition %s.",
-                appendedRange,
-                appendedEntry.partition());
-        return false;
     }
 
     private Pair<String, Long> writeBaseManifestList(
@@ -914,12 +1022,24 @@ public class DataEvolutionRowIdReassigner {
     private static class AssignmentPlan {
         private final List<ManifestFileMeta> manifestMetasToRewrite;
         private final RelativeRowIdMappings relativeRowIdMappings;
+        private final Set<BinaryRow> targetPartitions;
 
         private AssignmentPlan(
                 List<ManifestFileMeta> manifestMetasToRewrite,
                 RelativeRowIdMappings relativeRowIdMappings) {
+            this(
+                    manifestMetasToRewrite,
+                    relativeRowIdMappings,
+                    relativeRowIdMappings.mappings.keySet());
+        }
+
+        private AssignmentPlan(
+                List<ManifestFileMeta> manifestMetasToRewrite,
+                RelativeRowIdMappings relativeRowIdMappings,
+                Set<BinaryRow> targetPartitions) {
             this.manifestMetasToRewrite = new ArrayList<>(manifestMetasToRewrite);
             this.relativeRowIdMappings = relativeRowIdMappings;
+            this.targetPartitions = targetPartitions;
         }
 
         private Assignment createAssignment(Snapshot snapshot) {
@@ -995,14 +1115,44 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
-    private static class CommittedAssignment {
-        private final Assignment assignment;
-        private final CommitAssignmentResult commitResult;
+    private static class CompactionRowRanges {
+        private final TreeMap<Long, Long> removed = new TreeMap<>();
+        private final TreeMap<Long, Long> added = new TreeMap<>();
+        private boolean affectsAssignment;
 
-        private CommittedAssignment(Assignment assignment, CommitAssignmentResult commitResult) {
-            this.assignment = assignment;
-            this.commitResult = commitResult;
+        private void add(FileKind kind, Range range, boolean overlapsAssignment) {
+            affectsAssignment |= overlapsAssignment;
+            TreeMap<Long, Long> ranges = kind == FileKind.ADD ? added : removed;
+            long from = range.from;
+            long to = range.to;
+            Map.Entry<Long, Long> previous = ranges.floorEntry(from);
+            if (previous != null && connected(previous.getValue(), from)) {
+                from = previous.getKey();
+                to = Math.max(to, previous.getValue());
+                ranges.remove(previous.getKey());
+            }
+            Map.Entry<Long, Long> next = ranges.ceilingEntry(from);
+            while (next != null && connected(to, next.getKey())) {
+                to = Math.max(to, next.getValue());
+                ranges.remove(next.getKey());
+                next = ranges.ceilingEntry(from);
+            }
+            ranges.put(from, to);
         }
+
+        private boolean preservesAssignment() {
+            return !affectsAssignment || removed.equals(added);
+        }
+
+        private static boolean connected(long end, long start) {
+            return start <= end || (end != Long.MAX_VALUE && start == end + 1);
+        }
+    }
+
+    private enum DeltaManifestStatus {
+        UNCHANGED,
+        REWRITE,
+        REPLAN
     }
 
     private static class CommitAssignmentResult {
