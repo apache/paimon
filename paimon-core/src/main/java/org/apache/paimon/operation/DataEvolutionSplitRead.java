@@ -83,6 +83,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -543,7 +544,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FieldBunch bunch = fieldsFiles.get(i);
             DataFileMeta firstFile = bunch.files().get(0);
             FileReadTarget readTarget =
-                    readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
+                    readTarget(
+                            firstFile,
+                            dataFilePathFactory,
+                            rowRanges,
+                            groupSelection,
+                            deletionVector);
             String formatIdentifier = readTarget.formatIdentifier;
             Builder targetFormatBuilder =
                     readTarget.isPositionalRowFormat()
@@ -599,7 +605,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         DataFileMeta firstFile = bunch.files().get(0);
         FileReadTarget readTarget =
-                readTarget(firstFile, dataFilePathFactory, rowRanges, groupSelection);
+                readTarget(
+                        firstFile, dataFilePathFactory, rowRanges, groupSelection, deletionVector);
         Builder formatBuilder =
                 readTarget.isPositionalRowFormat()
                         ? positionalRowFormatBuilder(readRowType, null, nestedFieldEnabled)
@@ -842,7 +849,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         FileReadTarget readTarget =
-                readTarget(file, dataFilePathFactory, rowRanges, fileIndexResult);
+                readTarget(file, dataFilePathFactory, rowRanges, fileIndexResult, deletionVector);
         String formatIdentifier = readTarget.formatIdentifier;
         boolean positionalRowFormat = readTarget.isPositionalRowFormat();
         Builder targetFormatBuilder =
@@ -912,7 +919,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 formatReaderMapping,
                 rowRanges,
                 readRowType,
-                readTarget(file, dataFilePathFactory, rowRanges, groupSelection),
+                readTarget(file, dataFilePathFactory, rowRanges, groupSelection, deletionVector),
                 deletionVector,
                 groupSelection,
                 metadataCache);
@@ -1527,7 +1534,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
             List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult)
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         String rowSidecar = rowSidecarFileName(file);
         if (rowSidecar != null
@@ -1535,6 +1543,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         file,
                         rowRanges,
                         fileIndexResult,
+                        deletionVector,
                         coreOptions.dataEvolutionRowSidecarMaxSelectedRows(),
                         coreOptions.dataEvolutionRowSidecarMaxSelectionRatio())) {
             Path rowPath = dataFilePathFactory.toAlignedPath(rowSidecar, file);
@@ -1569,6 +1578,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 file,
                 rowRanges,
                 null,
+                (DeletionVector) null,
                 CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.defaultValue(),
                 CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.defaultValue());
     }
@@ -1579,7 +1589,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable List<Range> rowRanges,
             long maxSelectedRows,
             double maxSelectionRatio) {
-        return shouldReadRowSidecar(file, rowRanges, null, maxSelectedRows, maxSelectionRatio);
+        return shouldReadRowSidecar(
+                file, rowRanges, null, (DeletionVector) null, maxSelectedRows, maxSelectionRatio);
     }
 
     @VisibleForTesting
@@ -1589,6 +1600,58 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable FileIndexResult fileIndexResult,
             long maxSelectedRows,
             double maxSelectionRatio) {
+        return shouldReadRowSidecar(
+                file,
+                rowRanges,
+                fileIndexResult,
+                (DeletionVector) null,
+                maxSelectedRows,
+                maxSelectionRatio);
+    }
+
+    private static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable DeletionVectorWithRange deletionVector,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        return shouldReadRowSidecar(
+                file,
+                rowRanges,
+                fileIndexResult,
+                deletionVector == null ? null : deletionVector.deletionVector,
+                deletionVector == null ? null : deletionVector.range,
+                maxSelectedRows,
+                maxSelectionRatio);
+    }
+
+    @VisibleForTesting
+    static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable DeletionVector deletionVector,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        return shouldReadRowSidecar(
+                file,
+                rowRanges,
+                fileIndexResult,
+                deletionVector,
+                null,
+                maxSelectedRows,
+                maxSelectionRatio);
+    }
+
+    private static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable DeletionVector deletionVector,
+            @Nullable Range deletionVectorRange,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
         if (file.rowCount() <= 0
                 || isBlobFile(file.fileName())
                 || isVectorStoreFile(file.fileName())
@@ -1596,7 +1659,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             return false;
         }
 
-        long selectedRowCount = selectedRowCount(file, rowRanges, fileIndexResult);
+        long selectedRowCount =
+                selectedRowCount(
+                        file, rowRanges, fileIndexResult, deletionVector, deletionVectorRange);
         if (selectedRowCount <= 0 || selectedRowCount >= file.rowCount()) {
             return false;
         }
@@ -1620,10 +1685,72 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 .sum();
     }
 
-    private static long selectedRowCount(
+    @VisibleForTesting
+    static long selectedRowCount(
             DataFileMeta file,
             @Nullable List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult) {
+            @Nullable FileIndexResult fileIndexResult,
+            @Nullable DeletionVector deletionVector,
+            @Nullable Range deletionVectorRange) {
+        if (deletionVector != null && !deletionVector.isEmpty()) {
+            RoaringBitmap32 selection = file.toFileSelection(rowRanges);
+            if (fileIndexResult instanceof BitmapIndexResult) {
+                RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
+                selection =
+                        selection == null
+                                ? indexSelection.clone()
+                                : RoaringBitmap32.and(selection, indexSelection);
+            }
+            long rangeStart =
+                    deletionVectorRange == null
+                            ? file.nonNullFirstRowId()
+                            : deletionVectorRange.from;
+            if (selection == null) {
+                if (deletionVectorRange != null
+                        && deletionVectorRange.equals(file.nonNullRowIdRange())) {
+                    return file.rowCount() - deletionVector.getCardinality();
+                }
+                // Iterate the deletion vector instead of every row of the file: the
+                // deletion vector is usually far smaller than the row count. A deleted
+                // position outside this file's range simply does not count.
+                long firstRowId = file.nonNullFirstRowId();
+                long rowCount = file.rowCount();
+                long[] deletedInRange = new long[1];
+                deletionVector.forEachDeletedPosition(
+                        deletedPosition -> {
+                            long position = deletedPosition - firstRowId + rangeStart;
+                            if (position >= 0 && position < rowCount) {
+                                deletedInRange[0]++;
+                            }
+                        });
+                return rowCount - deletedInRange[0];
+            }
+            long selected = selection.getCardinality();
+            long deleted = deletionVector.getCardinality();
+            long offset = file.nonNullFirstRowId() - rangeStart;
+            if (selected <= deleted) {
+                long live = 0;
+                Iterator<Integer> iterator = selection.iterator();
+                while (iterator.hasNext()) {
+                    if (!deletionVector.isDeleted(iterator.next() + offset)) {
+                        live++;
+                    }
+                }
+                return live;
+            }
+            RoaringBitmap32 finalSelection = selection;
+            long[] deletedInSelection = new long[1];
+            deletionVector.forEachDeletedPosition(
+                    deletedPosition -> {
+                        long localPosition = deletedPosition - offset;
+                        if (localPosition >= 0
+                                && localPosition <= Integer.MAX_VALUE
+                                && finalSelection.contains((int) localPosition)) {
+                            deletedInSelection[0]++;
+                        }
+                    });
+            return selected - deletedInSelection[0];
+        }
         if (fileIndexResult instanceof BitmapIndexResult) {
             RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
             RoaringBitmap32 rangeSelection = file.toFileSelection(rowRanges);
