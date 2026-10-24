@@ -5972,6 +5972,30 @@ class CoalesceRangesTest(unittest.TestCase):
     """read_ranges_coalesced merges same-file adjacent reads into fewer requests
     (JingsongLi's IO-merging suggestion) while returning identical bytes."""
 
+    def test_single_lane_runs_without_executor(self):
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "data")
+            with open(path, "wb") as stream:
+                stream.write(b"0123456789")
+            file_io = LocalFileIO()
+            # Adjacent requests coalesce to one lane even with parallelism > 1.
+            for parallelism in (1, 8):
+                with self.subTest(parallelism=parallelism), patch(
+                        "concurrent.futures.ThreadPoolExecutor",
+                        side_effect=AssertionError("Unexpected executor")):
+                    ranges = [(path, 4, 2), (path, 2, 2)]
+                    self.assertEqual([b"45", b"23"],
+                                     file_io.read_ranges_coalesced(ranges, parallelism))
+                    views = file_io.read_ranges_coalesced_views(ranges, parallelism)
+                    self.assertEqual([b"45", b"23"], [bytes(view) for view in views])
+                    self.assertTrue(all(isinstance(view, memoryview) for view in views))
+                    with self.assertRaises(FileNotFoundError):
+                        file_io.read_ranges_coalesced(
+                            [(path + "-missing", 0, 1)], parallelism)
+
     def test_coalesce_ranges_grouping(self):
         from pypaimon.common.file_io import _coalesce_ranges
         items = [(0, "a", 0, 10), (1, "a", 10, 10), (2, "a", 1000, 10), (3, "b", 0, 5)]
