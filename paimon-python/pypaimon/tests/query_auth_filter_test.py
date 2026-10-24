@@ -22,7 +22,6 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -263,8 +262,9 @@ def test_unmasked_conjunct_keeps_its_pushdown(table):
     predicate = PredicateBuilder.and_predicates([unmasked, predicates.is_null('secret')])
     scan = table.new_read_builder().with_filter(predicate).new_scan()
     scan.plan()
-    assert PythonTableScan(scan)._file_scanner().predicate == unmasked
-    assert PythonTableScan(scan)._file_scanner().auth_has_non_partition_filter
+    scanner = scan._execution._file_scanner()
+    assert scanner.predicate == unmasked
+    assert scanner.auth_has_non_partition_filter
 
 
 def test_same_scan_refreshes_masked_filter_rules(table):
@@ -351,10 +351,14 @@ def test_write_scan_restores_filter_after_rules_are_removed(table):
     builder = table.new_read_builder().with_filter(predicate)
     scan = builder.new_scan()
     scan.plan()
+    scanner = scan._execution._file_scanner()
+    assert scanner.predicate is None
+    assert scanner.auth_has_non_partition_filter
     state[0] = None
     splits = scan.plan_all().splits()
-    assert PythonTableScan(scan)._file_scanner().predicate == predicate
-    assert not PythonTableScan(scan)._file_scanner().auth_has_non_partition_filter
+    scanner = scan._execution._file_scanner()
+    assert scanner.predicate == predicate
+    assert not scanner.auth_has_non_partition_filter
     assert arrow_rows(builder.new_read().to_arrow(splits)) == []
 
 

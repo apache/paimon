@@ -23,7 +23,6 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.python.read.table_scan import PythonTableScan
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
@@ -33,6 +32,7 @@ from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalI
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.read.read_dispatch import _python_scan_execution
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -280,17 +280,18 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             )
 
             baseline_scan = read_builder.new_scan()
-            PythonTableScan(baseline_scan)._file_scanner()._global_index_result = index_plan
-            PythonTableScan(baseline_scan)._file_scanner().predicate_for_stats = None
+            baseline_scanner = _python_scan_execution(baseline_scan)._file_scanner()
+            baseline_scanner._global_index_result = index_plan
+            baseline_scanner.predicate_for_stats = None
             baseline_plan = baseline_scan.plan()
 
             scan = read_builder.new_scan()
-            PythonTableScan(scan)._file_scanner()._global_index_result = index_plan
+            _python_scan_execution(scan)._file_scanner()._global_index_result = index_plan
             plan = scan.plan()
 
             stats_scan = read_builder.new_scan()
-            PythonTableScan(stats_scan)._file_scanner()._global_index_result = index_plan
-            stats_plan, stats = PythonTableScan(stats_scan)._file_scanner().scan_with_stats()
+            _python_scan_execution(stats_scan)._file_scanner()._global_index_result = index_plan
+            stats_plan, stats = stats_scan.scan_with_stats()
 
             self.assertEqual(
                 10,
