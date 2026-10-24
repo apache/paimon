@@ -26,7 +26,9 @@ import org.apache.paimon.table.source.VectorSearchBuilderImpl;
  * Spark-aware {@link VectorSearchBuilderImpl} which produces Spark-specific vector readers so
  * data-evolution splits and primary-key bucket groups can be evaluated across the Spark cluster.
  *
- * <p>Single-vector only; batch search has no Spark-dispatched path yet (TODO).
+ * <p>Single-vector only. Distributed LATERAL batch search uses {@link
+ * SparkBatchVectorSearchBuilderImpl} from the driver. Executor tasks stay on the local batch
+ * reader.
  */
 public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
 

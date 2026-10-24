@@ -32,7 +32,7 @@ import org.apache.paimon.spark.catalyst.optimizer.RepartitionLateralVectorSearch
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, LateralVectorSearch, PaimonCallCommand, PaimonDropPartitions, PaimonTableValuedFunctions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.format.PaimonFormatTable
-import org.apache.paimon.spark.read.VectorSearchResultUtils
+import org.apache.paimon.spark.read.{SparkBatchVectorSearchBuilderImpl, VectorSearchResultUtils}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
 import org.apache.paimon.table.source.{BatchVectorSearchBuilder, DataSplit, InnerTableScan, PrimaryKeyScoredResult, PrimaryKeySearchPosition, PrimaryKeyVectorResult, ReadBuilder, VectorScan}
@@ -44,7 +44,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.optimizer.BuildRight
 import org.apache.spark.sql.catalyst.planning.PhysicalOperation
 import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, CreateTableAsSelect, DescribeRelation, DropPartitions, LogicalPlan, RepairTable, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
@@ -348,6 +348,50 @@ private case class EmptyPostponeMergeExec(output: Seq[Attribute]) extends LeafEx
   override protected def doExecute(): RDD[InternalRow] = sparkContext.emptyRDD[InternalRow]
 }
 
+object LateralVectorSearchExec {
+
+  /**
+   * One readBatch can submit one indexed-search job and one raw-search job. Query count and
+   * lateral-join batch size therefore bound the number of distributed search jobs.
+   */
+  val MAX_DISTRIBUTED_SEARCH_JOBS_PER_BATCH: Int = 2
+
+  def maxDistributedSearchJobs(queryCount: Int, batchSize: Int): Int = {
+    require(queryCount >= 0 && batchSize > 0)
+    if (queryCount == 0) {
+      0
+    } else {
+      ((queryCount + batchSize - 1) / batchSize) * MAX_DISTRIBUTED_SEARCH_JOBS_PER_BATCH
+    }
+  }
+
+  // Projections may reuse their row buffer. Check the budget before retaining a copy, and consume
+  // results lazily so an overflow stops the current batch as well as subsequent search batches.
+  private[spark] def collectDistributedResults(
+      rows: Iterator[UnsafeRow],
+      maxResultBytes: Long): Seq[Array[Byte]] = {
+    val result = ArrayBuffer[Array[Byte]]()
+    var resultBytes = 0L
+    rows.foreach {
+      row =>
+        val rowBytes = row.getSizeInBytes
+        if (rowBytes > maxResultBytes - resultBytes) {
+          throw new IllegalArgumentException(
+            s"Distributed LATERAL vector search retains at most $maxResultBytes result bytes on " +
+              s"the driver (${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_RESULT_BYTES.key()}). " +
+              s"The next row would exceed that limit. Project fewer columns, lower the topK, " +
+              s"reduce the left side, raise " +
+              s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_RESULT_BYTES.key()}, or set " +
+              s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_ENABLED.key()} to false. " +
+              s"No further search batch is submitted.")
+        }
+        result += row.copy().getBytes
+        resultBytes += rowBytes
+    }
+    result.toSeq
+  }
+}
+
 case class LateralVectorSearchExec(
     innerTable: InnerTable,
     columnName: String,
@@ -404,6 +448,14 @@ case class LateralVectorSearchExec(
   }
 
   override protected def doExecute(): RDD[InternalRow] = {
+    if (new CoreOptions(innerTable.options()).vectorSearchDistributeEnabled()) {
+      executeDistributed()
+    } else {
+      executeLocal()
+    }
+  }
+
+  private def executeLocal(): RDD[InternalRow] = {
     child.execute().mapPartitions {
       outerRows =>
         val queryVectorProjection = UnsafeProjection.create(Seq(queryVectorExpr), child.output)
@@ -413,7 +465,7 @@ case class LateralVectorSearchExec(
         val readerTracker = new LateralVectorSearchReaderTracker
         Option(TaskContext.get())
           .foreach(_.addTaskCompletionListener[Unit](_ => readerTracker.closeCurrent()))
-        val searchContext = createSearchContext(rightProjection, readerTracker)
+        val searchContext = createSearchContext(rightProjection, readerTracker, distributed = false)
         val batchSize = searchContext.batchSize
 
         outerRows.map(_.copy()).grouped(batchSize).flatMap {
@@ -439,9 +491,139 @@ case class LateralVectorSearchExec(
     }
   }
 
+  // Query vectors are produced by the left side, so they are not known while planning. Collect a
+  // bounded sample on the driver, where this method runs, and submit each search batch from there.
+  private def executeDistributed(): RDD[InternalRow] = {
+    val coreOptions = new CoreOptions(innerTable.options())
+    val maxQueries = coreOptions.vectorSearchDistributeLateralMaxQueries()
+    val maxLimit = coreOptions.vectorSearchDistributeLateralMaxLimit()
+    val maxQueryBytes = coreOptions.vectorSearchDistributeLateralMaxQueryBytes()
+    val maxResultBytes = coreOptions.vectorSearchDistributeLateralMaxResultBytes()
+    checkDistributedLateralLimits(maxQueries, maxLimit, maxQueryBytes, maxResultBytes)
+
+    val queries = collectQueries(maxQueries, maxQueryBytes)
+    if (queries.isEmpty) {
+      return sparkContext.emptyRDD[InternalRow]
+    }
+
+    val rightProjection =
+      UnsafeProjection.create(projectList, child.output ++ vectorSearchOutput)
+    val outputProjection = UnsafeProjection.create(output.map(_.dataType).toArray)
+    val joinedRow = new JoinedRow
+    val readerTracker = new LateralVectorSearchReaderTracker
+    val searchContext = createSearchContext(rightProjection, readerTracker, distributed = true)
+    try {
+      val joined = queries.iterator.grouped(searchContext.batchSize).flatMap {
+        batch =>
+          search(batch, searchContext).map {
+            case (outerRow, rightRow) =>
+              joinedRow(outerRow, rightRow)
+              outputProjection(joinedRow)
+          }
+      }
+      val result = LateralVectorSearchExec.collectDistributedResults(joined, maxResultBytes)
+      val fieldCount = output.length
+      val rows: RDD[InternalRow] =
+        sparkContext.parallelize(result).map {
+          bytes =>
+            val row = new UnsafeRow(fieldCount)
+            row.pointTo(bytes, bytes.length)
+            row: InternalRow
+        }
+      rows
+    } finally {
+      readerTracker.closeCurrent()
+    }
+  }
+
+  private def checkDistributedLateralLimits(
+      maxQueries: Int,
+      maxLimit: Int,
+      maxQueryBytes: Long,
+      maxResultBytes: Long): Unit = {
+    if (maxQueries <= 0 || maxQueries == Int.MaxValue) {
+      throw new IllegalArgumentException(
+        s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERIES.key()} must be positive and " +
+          s"less than ${Int.MaxValue}, but was $maxQueries.")
+    }
+    if (maxLimit <= 0) {
+      throw new IllegalArgumentException(
+        s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_LIMIT.key()} must be positive, " +
+          s"but was $maxLimit.")
+    }
+    if (maxQueryBytes <= 0) {
+      throw new IllegalArgumentException(
+        s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERY_BYTES.key()} must be " +
+          s"positive, but was $maxQueryBytes bytes.")
+    }
+    if (maxResultBytes <= 0) {
+      throw new IllegalArgumentException(
+        s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_RESULT_BYTES.key()} must be " +
+          s"positive, but was $maxResultBytes bytes.")
+    }
+    if (limit > maxLimit) {
+      throw new IllegalArgumentException(
+        s"Distributed LATERAL vector search accepts at most $maxLimit hits per query " +
+          s"(${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_LIMIT.key()}). This query asks " +
+          s"for $limit. Lower the vector_search limit, raise " +
+          s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_LIMIT.key()}, or set " +
+          s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_ENABLED.key()} to false.")
+    }
+  }
+
+  private def collectQueries(
+      maxQueries: Int,
+      maxQueryBytes: Long): Seq[LateralVectorSearchQuery] = {
+    val numFields = child.output.length
+    val collected = child
+      .execute()
+      .mapPartitions {
+        rows =>
+          val queryVectorProjection = UnsafeProjection.create(Seq(queryVectorExpr), child.output)
+          val rowProjection = UnsafeProjection.create(child.output, child.output)
+          rows.flatMap {
+            row =>
+              val unsafeRow = rowProjection(row)
+              toFloatArray(queryVectorProjection(unsafeRow).get(0, queryVectorExpr.dataType)).map {
+                vector =>
+                  val queryBytes = unsafeRow.getSizeInBytes.toLong + vector.length.toLong * 4
+                  if (queryBytes > maxQueryBytes) {
+                    throw new IllegalArgumentException(
+                      s"Distributed LATERAL vector search accepts at most $maxQueryBytes bytes " +
+                        s"per query " +
+                        s"(${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERY_BYTES.key()}). " +
+                        s"The outer row and query vector require $queryBytes bytes. Project fewer " +
+                        s"columns from the left side, raise " +
+                        s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERY_BYTES.key()}, " +
+                        s"or set ${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_ENABLED.key()} to false.")
+                  }
+                  (unsafeRow.copy().getBytes, vector)
+              }
+          }
+      }
+      .take(maxQueries + 1)
+    if (collected.length > maxQueries) {
+      throw new IllegalArgumentException(
+        s"Distributed LATERAL vector search collects at most $maxQueries query vectors on the " +
+          s"driver (${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERIES.key()}). This " +
+          s"query has more. Filter or limit the left side, raise " +
+          s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_LATERAL_MAX_QUERIES.key()}, or set " +
+          s"${CoreOptions.VECTOR_SEARCH_DISTRIBUTE_ENABLED.key()} to false. " +
+          s"${CoreOptions.VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE.key()} only sets how many " +
+          s"vectors one readBatch receives.")
+    }
+    collected.toSeq.map {
+      case (bytes, vector) =>
+        val outerRow = new UnsafeRow(numFields)
+        outerRow.pointTo(bytes, bytes.length)
+        LateralVectorSearchQuery(outerRow, vector)
+    }
+  }
+
   private def createSearchContext(
       rightProjection: UnsafeProjection,
-      readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
+      readerTracker: LateralVectorSearchReaderTracker,
+      distributed: Boolean): LateralVectorSearchContext = {
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
       .filterNot(
@@ -474,11 +656,19 @@ case class LateralVectorSearchExec(
             _.toPaimonDataField)).asJava)
       }
     val sparkRow = SparkInternalRow.create(resultRowType)
-    val vectorSearchBuilder = innerTable
-      .newBatchVectorSearchBuilder()
-      .withVectorColumn(columnName)
-      .withLimit(limit)
-      .withOptions(options.asJava)
+    // The Spark reader submits a job. Only the driver path may construct it.
+    val vectorSearchBuilder = {
+      val builder =
+        if (distributed) {
+          new SparkBatchVectorSearchBuilderImpl(innerTable)
+        } else {
+          innerTable.newBatchVectorSearchBuilder()
+        }
+      builder
+        .withVectorColumn(columnName)
+        .withLimit(limit)
+        .withOptions(options.asJava)
+    }
     pushSearchFilters(Seq(readBuilder, physicalReadBuilder), vectorSearchBuilder)
 
     val vectorPlan = vectorSearchBuilder.newVectorScan().scan()

@@ -39,8 +39,9 @@ public class PrimaryKeyBatchVectorRead implements BatchVectorRead, Serializable 
 
     private static final long serialVersionUID = 1L;
 
-    private final float[][] queries;
-    private final List<PrimaryKeyVectorRead> queryReads;
+    protected final FileStoreTable table;
+    protected final float[][] queries;
+    protected final List<PrimaryKeyVectorRead> queryReads;
 
     public PrimaryKeyBatchVectorRead(
             FileStoreTable table,
@@ -50,6 +51,7 @@ public class PrimaryKeyBatchVectorRead implements BatchVectorRead, Serializable 
             Map<String, String> searchOptions,
             @Nullable Predicate filter) {
         checkArgument(queries != null && queries.length > 0, "Query vectors cannot be empty.");
+        this.table = table;
         this.queries = new float[queries.length][];
         this.queryReads = new ArrayList<>(queries.length);
         for (int i = 0; i < queries.length; i++) {
@@ -66,7 +68,7 @@ public class PrimaryKeyBatchVectorRead implements BatchVectorRead, Serializable 
         PrimaryKeyVectorRead firstRead = queryReads.get(0);
         PrimaryKeyVectorScan.Plan primaryKeyPlan = firstRead.primaryKeyPlan(plan);
         List<PrimaryKeyVectorRead.SearchResult> searchResults =
-                firstRead.searchBuckets(firstRead.bucketSplits(primaryKeyPlan), queries);
+                searchAllBuckets(firstRead, firstRead.bucketSplits(primaryKeyPlan));
         checkArgument(
                 searchResults.size() == queryReads.size(),
                 "Primary-key vector batch result count does not match query count.");
@@ -76,5 +78,14 @@ public class PrimaryKeyBatchVectorRead implements BatchVectorRead, Serializable 
             results.add(queryReads.get(i).createResult(primaryKeyPlan, searchResults.get(i)));
         }
         return Collections.unmodifiableList(results);
+    }
+
+    /**
+     * Searches every bucket for every query vector. Spark overrides this to evaluate bucket groups
+     * on the cluster.
+     */
+    protected List<PrimaryKeyVectorRead.SearchResult> searchAllBuckets(
+            PrimaryKeyVectorRead firstRead, List<BucketVectorSearchSplit> splits) {
+        return firstRead.searchBuckets(splits, queries);
     }
 }

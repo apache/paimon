@@ -20,6 +20,8 @@ package org.apache.paimon.spark.read;
 
 import org.apache.paimon.utils.SerializableFunction;
 
+import org.apache.spark.TaskContext;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
@@ -36,9 +38,18 @@ import java.util.stream.Stream;
  */
 public class SparkEngineContext {
 
+    public static final String DISTRIBUTED_VECTOR_SEARCH_JOB_DESCRIPTION =
+            "paimon-distributed-vector-search";
+
     private final JavaSparkContext jsc;
 
     public SparkEngineContext() {
+        // mapPartitions tasks must not submit another Spark job. Callers run on the driver.
+        if (TaskContext.get() != null) {
+            throw new IllegalStateException(
+                    "Spark-dispatched vector search must be submitted from the driver. "
+                            + "An executor task cannot start another Spark job.");
+        }
         this.jsc = JavaSparkContext.fromSparkContext(SparkSession.active().sparkContext());
     }
 
@@ -50,7 +61,7 @@ public class SparkEngineContext {
         if (data.isEmpty()) {
             return Collections.emptyList();
         }
-        return jsc.parallelize(data, parallelism).map(func::apply).collect();
+        return collect(jsc.parallelize(data, parallelism).map(func::apply));
     }
 
     public <I, O> List<O> flatMap(
@@ -58,6 +69,17 @@ public class SparkEngineContext {
         if (data.isEmpty()) {
             return Collections.emptyList();
         }
-        return jsc.parallelize(data, parallelism).flatMap(x -> func.apply(x).iterator()).collect();
+        return collect(jsc.parallelize(data, parallelism).flatMap(x -> func.apply(x).iterator()));
+    }
+
+    private <O> List<O> collect(JavaRDD<O> rdd) {
+        String key = "spark.job.description";
+        String previous = jsc.getLocalProperty(key);
+        jsc.setLocalProperty(key, DISTRIBUTED_VECTOR_SEARCH_JOB_DESCRIPTION);
+        try {
+            return rdd.collect();
+        } finally {
+            jsc.setLocalProperty(key, previous);
+        }
     }
 }
