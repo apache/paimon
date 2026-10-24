@@ -1,0 +1,178 @@
+<!doctype html>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>paimon_es_search: Java search for Spark, Flink and SDK</title>
+  <style>
+    body { max-width: 960px; margin: 40px auto; padding: 0 24px; color: #202a35;
+           font: 16px/1.65 system-ui, sans-serif; }
+    h1, h2 { line-height: 1.25; }
+    h2 { margin-top: 36px; }
+    code, pre { font-family: ui-monospace, monospace; font-size: .9em; }
+    pre { overflow-x: auto; padding: 20px; background: #f1f5f8; border-radius: 6px; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { padding: 10px; border: 1px solid #d6dfe7; text-align: left; vertical-align: top; }
+    a { color: #1459a6; }
+  </style>
+</head>
+<body>
+<h1>Query ESM1 indexes with <code>paimon_es_search</code></h1>
+<p>Spark, Flink and the Java SDK share the same version-1 request, snapshot planning,
+field-ID binding, global reduction and result records. The Java module builds and queries Lucene archives using the published ESLib dependency.</p>
+<table><tr><th>Entry</th><th>Execution</th></tr>
+<tr><td>Spark <code>paimon_es_search(catalog, request_json)</code></td><td>Shard queries on executors; bounded global top-K and source fetch on driver.</td></tr>
+<tr><td>Flink <code>CALL catalog.sys.paimon_es_search(request_json)</code></td><td>Shard groups on TaskManagers; bounded worker top-K followed by client merge/source fetch. Returns one JSON string per HIT/PAGE_END row.</td></tr>
+<tr><td>Java <code>EsIndexSearch.search(catalog, requestJson)</code></td><td>Local SDK execution with the same planning, readers and bounded result.</td></tr></table>
+<h2>Runtime and index prerequisites</h2>
+<p>Use JDK 11+, the matching Paimon connector and <code>org.apache.paimon:paimon-elasticsearch</code>
+with its POM runtime dependencies (published ESLib 1.0.7 and Lucene 9.12.0). The former module,
+artifact and profile were named <code>paimon-eslib</code>; Java package names and <code>es-index</code>
+remain unchanged. Keep the connector, index module and dependencies together on every worker.
+IK requires an additional compatible analyzer JAR.</p>
+<p>The existing Java archive format and persisted field mappings remain compatible.
+The module rename does not require an index rebuild.</p>
+<p>Use an append-only data-evolution table with tracked row IDs and construction-snapshot metadata
+emitted by <code>create_global_index</code>. Spark additionally needs
+<code>org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions</code>. No Elasticsearch server is required for this search entry.</p>
+<pre><code>CREATE DATABASE IF NOT EXISTS paimon.demo;
+CREATE TABLE paimon.demo.docs (
+  id INT, embedding ARRAY&lt;FLOAT&gt;, title STRING, tag STRING
+) USING paimon TBLPROPERTIES (
+  'bucket'='-1',
+  'row-tracking.enabled'='true',
+  'data-evolution.enabled'='true',
+  'global-index.es-index.fields.embedding.dimension'='3',
+  'global-index.es-index.fields.embedding.algorithm'='hnsw',
+  'global-index.es-index.fields.embedding.metric'='l2',
+  'global-index.es-index.fields.title.type'='fulltext',
+  'global-index.es-index.fields.tag.type'='keyword'
+);
+INSERT INTO paimon.demo.docs VALUES
+  (1, array(1.0f, 0.0f, 0.0f), 'paimon lake', 'active'),
+  (2, array(0.0f, 1.0f, 0.0f), 'river meadow', 'inactive');
+CALL paimon.sys.create_global_index(
+  table =&gt; 'demo.docs', index_column =&gt; 'embedding,title,tag,id', index_type =&gt; 'es-index'
+);</code></pre>
+<p>The new schema above has field IDs <code>id=0, embedding=1, title=2, tag=3</code>.
+For an existing table, read its schema IDs; do not infer them from current column positions.
+The index field group must match the persisted order. Query aliases bind to these stable IDs.</p>
+
+<h2>Text and filter-KNN examples</h2>
+<pre><code>SELECT row_id, score, rank, source_schema_json, source_binary
+FROM paimon_es_search('paimon', '{
+  "version": 1, "operation": "SEARCH",
+  "targets": [{
+    "name": "docs", "database": "demo", "table": "docs",
+    "indexes": [[1, 2, 3, 0]],
+    "bindings": {"text": 2, "label": 3, "v": 1, "number": 0}
+  }],
+  "request": {
+    "query": {"match": {"text": "paimon"}},
+    "size": 10, "fetch": "SOURCE"
+  }
+}') WHERE record_kind = 'HIT' ORDER BY rank;</code></pre>
+<p>To run filter-KNN, replace the <code>request</code> object with:</p>
+<pre><code>{
+  "query": {"knn": {
+    "field": "v", "query_vector": [1.0, 0.0, 0.0],
+    "k": 3, "num_candidates": 100,
+    "filter": {"term": {"label": "active"}}
+  }},
+  "size": 3, "fetch": "SOURCE"
+}</code></pre>
+<p>Put vector prefilters inside <code>knn.filter</code>. An outer SQL <code>WHERE</code>
+filters the returned result rows and does not change the KNN candidate set.</p>
+
+<h2>Supported contract</h2>
+<table>
+  <tr><th>Area</th><th>Behavior</th></tr>
+  <tr><td>Arguments</td><td>Two non-null constant strings: catalog name and JSON envelope.
+    Duplicate members, trailing JSON and unknown options are rejected before catalog IO.</td></tr>
+  <tr><td>Targets</td><td>One table on <code>main</code>, one ordered index field group.
+    Latest snapshot by default; explicit selector:
+    <code>{"kind":"snapshot","snapshot_id":"123","tag":null}</code>.</td></tr>
+  <tr><td>DSL</td><td><code>match_all</code>, <code>match_none</code>, scalar <code>term</code>,
+    <code>terms</code>, <code>range</code>, <code>exists</code>, <code>match</code>,
+    <code>match_phrase</code>, <code>bool</code> and root-level <code>knn</code> with an optional
+    filter. The persisted field mappings and analyzers determine query semantics. Java numeric terms are typed, integer fields require integral values, and date bounds use epoch milliseconds.</td></tr>
+  <tr><td>Ranking</td><td>Descending ES/Lucene score, then ascending absolute row ID for ties.
+    Shard-local <code>QUERY_THEN_FETCH</code> scoring; text scores use each shard's statistics.
+    Vector scores retain the ES/Lucene convention: larger is better.</td></tr>
+  <tr><td>Limits</td><td><code>size</code> is positive; <code>from + size &lt;= 10000</code>.
+    KNN requires <code>from + size &lt;= k &lt;= num_candidates &lt;= 10000</code>.
+    At most 10,000 index shards and 100,000 data files per plan. JSON nesting is at most 32;
+    the input is conservatively limited to 349,525 Java characters.</td></tr>
+  <tr><td>Completeness</td><td>Every row range in the chosen snapshot must have one matching
+    index generation. Unindexed appends, stale indexed columns, missing construction metadata,
+    overlapping shards and snapshots containing deletion vectors fail explicitly.
+    Row-level query authorization policies are rejected by the existing Paimon search guard.</td></tr>
+  <tr><td>Snapshot lifetime</td><td>Planning and source fetch use the same snapshot ID.
+    This entry does not create a retention tag; callers must retain the queried snapshot and
+    files while the query runs. Expiration or IO failures propagate as query failures.</td></tr>
+</table>
+<p>This entry does not implement aggregation, multi-target or batch search, hybrid fusion,
+DFS scoring, custom sort, scan cursors, tags, source projection, global total-hit counts or
+<code>rescore_vector</code>. Only the documented bounded SEARCH contract is supported.</p>
+
+<h2>Result rows and source decoding</h2>
+<p>The result has 17 columns: <code>record_kind, query_id, query_ordinal, execution_query_id,
+target, table_name, branch, snapshot_id, row_id, score, rank, sort_values_json,
+source_schema_json, source_binary, source_encoding, metadata_json, index_fields_json</code>.
+Each selected hit produces <code>HIT</code>; a final <code>PAGE_END</code> record exists even for
+zero hits. Ranks are one-based and include the requested offset. Use <code>ORDER BY rank</code>
+when SQL result ordering matters. Sort and index-discovery columns remain null.</p>
+<p><code>fetch</code> defaults to <code>NONE</code>. With <code>SOURCE</code>, source rows are
+encoded with Paimon's <code>InternalRowSerializer</code>, include <code>_ROW_ID</code>, and carry
+the JSON row type plus the encoding label <code>paimon-internal-row-v1</code>. Decode with the
+same Paimon version. The total encoded source result is capped at 32 MiB.</p>
+<pre><code>RowType type = JsonSerdeUtil.fromJson(sourceSchemaJson, RowType.class);
+InternalRow row = new InternalRowSerializer(type)
+    .deserialize(new DataInputDeserializer(sourceBinary));</code></pre>
+
+<h2>Flink and Java SDK calls</h2>
+<p>Use the same envelope shown above; target database/table identify the table within the selected catalog.</p>
+<pre><code>-- Flink: request_json is a constant JSON string using the same version-1 contract.
+CALL paimon.sys.paimon_es_search('&lt;request_json&gt;');</code></pre>
+<pre><code>import org.apache.paimon.globalindex.EsIndexSearch;
+import org.apache.paimon.globalindex.EsSearchResult;
+
+EsSearchResult result = EsIndexSearch.search(catalog, requestJson);
+for (String record : result.jsonRecords()) {
+    System.out.println(record);
+}</code></pre>
+<p>SDK <code>records()</code> returns typed values in the Spark column order; <code>jsonRecords()</code>
+uses the same fields and Base64 for <code>source_binary</code>. Row IDs/snapshot IDs are JSON integers;
+clients must preserve 64-bit precision. Text scores use shard-local statistics. Java quantized KNN
+candidates are reranked with stored float vectors before the global merge.</p>
+<h2>Reproduce the Java tests</h2>
+<pre><code>mvn -B -ntp -Pspark3,flink1,paimon-elasticsearch \
+  -pl paimon-spark/paimon-spark-ut,paimon-flink/paimon-flink-common -am \
+  -Dpaimon.es.java.tests -Dmaven.jar.forceCreation=true \
+  -Dtest=EsSearch*Test,ESIndex*Test,PaimonEsSearchProcedureITCase \
+  -DfailIfNoTests=false \
+  -DwildcardSuites=org.apache.paimon.spark.catalyst.plans.logical.PaimonEsSearchQueryTest,org.apache.paimon.spark.query.PaimonEsSearchJavaTest \
+  verify</code></pre>
+<p>The Java suite builds real multi-shard indexes for HNSW, INT8 HNSW and DiskBBQ, executes text,
+filter-KNN, pagination and source reads, and compares SDK results. Flink tests include actual
+TaskManager shard execution. The CI Elasticsearch/JDK 11 lane runs these tests using the published Java dependencies.</p>
+</body>
+</html>
