@@ -28,11 +28,6 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
-                                              FixedBucketRowKeyExtractor,
-                                              PostponeBucketRowKeyExtractor,
-                                              RowKeyExtractor,
-                                              UnawareBucketRowKeyExtractor)
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
@@ -488,30 +483,6 @@ class FileStoreTable(Table):
             dry_run=dry_run,
         )
 
-    def create_row_key_extractor(
-        self, ignore_existing: bool = False
-    ) -> RowKeyExtractor:
-        bucket_mode = self.bucket_mode()
-        if bucket_mode == BucketMode.HASH_FIXED:
-            return FixedBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.BUCKET_UNAWARE:
-            return UnawareBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.POSTPONE_MODE:
-            return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC:
-            return DynamicBucketRowKeyExtractor(
-                self.table_schema,
-                table=self,
-                ignore_existing=ignore_existing,
-            )
-        elif bucket_mode == BucketMode.CROSS_PARTITION:
-            raise ValueError(
-                "CROSS_PARTITION primary-key writes require a persistent "
-                "global primary-key index, which PyPaimon does not yet support"
-            )
-        else:
-            raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
-
     def copy(self, options: dict) -> 'FileStoreTable':
         return self._copy(options, resolve_time_travel=True)
 
@@ -586,6 +557,9 @@ class FileStoreTable(Table):
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
+            # Copies of one pinned view share lazily allocated backend
+            # resources. Copying a Python table must not initialize a backend.
+            new_table._pinned_read_resources = vars(self).setdefault('_pinned_read_resources', {})
         return new_table
 
     def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:

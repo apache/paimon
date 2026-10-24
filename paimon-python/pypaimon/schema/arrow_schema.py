@@ -15,19 +15,47 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""STRING compatibility and canonical Arrow input for core writers."""
+"""Shared Arrow read schemas, STRING compatibility and canonical writer input."""
 
 import pyarrow as pa
+import pyarrow.compute as pc
+
+from pypaimon.schema.data_types import ArrayType, MapType, PyarrowFieldParser, RowType
 
 
-def _normalize_string_type(data_type):
+def _read_arrow_type(data_type):
+    if isinstance(data_type, RowType):
+        return pa.struct([pa.field(field.name, _read_arrow_type(field.type)) for field in data_type.fields])
+    if isinstance(data_type, ArrayType):
+        return pa.list_(pa.field('element', _read_arrow_type(data_type.element)))
+    if isinstance(data_type, MapType):
+        return pa.map_(pa.field('key', _read_arrow_type(data_type.key), nullable=False),
+                       pa.field('value', _read_arrow_type(data_type.value)))
+    return PyarrowFieldParser.from_paimon_type(data_type)
+
+
+def read_arrow_schema(fields):
+    """Keep runtime NULLs representable without changing logical write constraints.
+
+    Old files can lack a requested field, and Java casts can produce NULL on
+    overflow. ROW fields, ARRAY elements and MAP values therefore stay nullable
+    in read results, including declared NOT NULL children.
+    """
+    return pa.schema([pa.field(field.name, _read_arrow_type(field.type)) for field in fields])
+
+
+def _normalize_string_type(data_type, ignore_child_nullability=False):
+    def child(field):
+        field = field.with_type(_normalize_string_type(field.type, ignore_child_nullability))
+        return field.with_nullable(True) if ignore_child_nullability else field
+
     if pa.types.is_large_string(data_type):
         return pa.string()
     if pa.types.is_struct(data_type):
-        return pa.struct([field.with_type(_normalize_string_type(field.type)) for field in data_type])
+        return pa.struct([child(field) for field in data_type])
     if (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
             or pa.types.is_fixed_size_list(data_type)):
-        field = data_type.value_field.with_type(_normalize_string_type(data_type.value_type))
+        field = child(data_type.value_field)
         if pa.types.is_large_list(data_type):
             return pa.large_list(field)
         if pa.types.is_fixed_size_list(data_type):
@@ -38,13 +66,14 @@ def _normalize_string_type(data_type):
         # includes the sorting flag. Preserve it along with the child fields.
         sorted_keys = data_type == pa.map_(data_type.key_field, data_type.item_field, keys_sorted=True)
         return pa.map_(
-            data_type.key_field.with_type(_normalize_string_type(data_type.key_type)),
-            data_type.item_field.with_type(_normalize_string_type(data_type.item_type)),
+            data_type.key_field.with_type(_normalize_string_type(data_type.key_type, ignore_child_nullability)),
+            child(data_type.item_field),
             keys_sorted=sorted_keys)
     return data_type
 
 
-def arrow_schemas_compatible(source, target, check_top_level_nullability=True, allow_binary_compatibility=False):
+def arrow_schemas_compatible(source, target, check_top_level_nullability=True, allow_binary_compatibility=False,
+                             check_nested_nullability=True):
     """Compare ordered fields, ignoring metadata and STRING offset width.
 
     The writer opts into its existing top-level nullability and binary /
@@ -55,7 +84,9 @@ def arrow_schemas_compatible(source, target, check_top_level_nullability=True, a
     for actual, expected in zip(source, target):
         if check_top_level_nullability and actual.nullable != expected.nullable:
             return False
-        if actual.type == expected.type or _normalize_string_type(actual.type) == _normalize_string_type(expected.type):
+        if (actual.type == expected.type
+                or _normalize_string_type(actual.type, not check_nested_nullability)
+                == _normalize_string_type(expected.type, not check_nested_nullability)):
             continue
         if allow_binary_compatibility and all(
                 pa.types.is_binary(t) or pa.types.is_fixed_size_binary(t)
@@ -63,6 +94,115 @@ def arrow_schemas_compatible(source, target, check_top_level_nullability=True, a
             continue
         return False
     return True
+
+
+def normalize_arrow_write_nullability(data, target):
+    """Restore declared child nullability after checking visible input values.
+
+    Runtime read schemas relax nested nullability. Validate only children of
+    non-NULL parents before restoring those declarations, independently of the
+    optional Native runtime. This does not convert physical Arrow types.
+    """
+    options = dict(check_top_level_nullability=False, allow_binary_compatibility=True)
+    if (arrow_schemas_compatible(data.schema, target, **options)
+            or not arrow_schemas_compatible(data.schema, target, check_nested_nullability=False, **options)):
+        return data
+    arrays, fields = [], []
+    for column, field, expected in zip(data.columns, data.schema, target):
+        data_type = _write_child_nullability(column.type, expected.type)
+        if data_type != column.type:
+            chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
+            normalized = []
+            for chunk in chunks:
+                _check_write_nullability(chunk, expected.with_nullable(True), field.name)
+                normalized.append(_with_child_nullability(chunk, data_type))
+            column = (pa.chunked_array(normalized, type=data_type)
+                      if isinstance(column, pa.ChunkedArray) else normalized[0])
+        arrays.append(column)
+        fields.append(field.with_type(column.type))
+    schema = pa.schema(fields, metadata=data.schema.metadata)
+    if isinstance(data, pa.RecordBatch):
+        return pa.RecordBatch.from_arrays(arrays, schema=schema)
+    return pa.Table.from_arrays(arrays, schema=schema)
+
+
+def _write_child_nullability(source, target):
+    """Copy child declarations without changing layouts or scalar types."""
+    def child(actual, expected):
+        return expected.with_type(_write_child_nullability(actual.type, expected.type))
+
+    if pa.types.is_struct(source) and pa.types.is_struct(target):
+        return pa.struct([child(actual, expected) for actual, expected in zip(source, target)])
+    if ((pa.types.is_list(source) or pa.types.is_large_list(source) or pa.types.is_fixed_size_list(source))
+            and (pa.types.is_list(target) or pa.types.is_large_list(target) or pa.types.is_fixed_size_list(target))):
+        field = child(source.value_field, target.value_field)
+        if pa.types.is_large_list(source):
+            return pa.large_list(field)
+        if pa.types.is_fixed_size_list(source):
+            return pa.list_(field, source.list_size)
+        return pa.list_(field)
+    if pa.types.is_map(source) and pa.types.is_map(target):
+        sorted_keys = source == pa.map_(source.key_field, source.item_field, keys_sorted=True)
+        return pa.map_(child(source.key_field, target.key_field), child(source.item_field, target.item_field),
+                       keys_sorted=sorted_keys)
+    return source
+
+
+def _check_write_nullability(array, field, path):
+    if not field.nullable and array.null_count:
+        raise ValueError("Input schema isn't consistent with table schema: non-nullable field %s contains NULL" % path)
+    if array.null_count == len(array):
+        return
+    data_type = field.type
+    if pa.types.is_struct(data_type):
+        valid = pc.is_valid(array) if array.null_count else None
+        for index, child in enumerate(data_type):
+            values = array.field(index)
+            if valid is not None:
+                values = pc.filter(values, valid)
+            _check_write_nullability(values, child, path + '.' + child.name)
+    elif (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
+          or pa.types.is_fixed_size_list(data_type)):
+        child = data_type.value_field
+        _check_write_nullability(pc.list_flatten(array), child, path + '.' + child.name)
+    elif pa.types.is_map(data_type):
+        # MAP and LIST<STRUCT<key, value>> share a layout. Retain the parent's
+        # validity and offset so flatten selects only visible entries, including
+        # with Arrow 6 where ListArray.from_arrays has no mask argument.
+        entries = pa.StructArray.from_arrays(
+            [array.keys, array.items],
+            fields=[array.type.key_field, array.type.item_field])
+        entries = pc.list_flatten(pa.Array.from_buffers(
+            pa.list_(entries.type), len(array), array.buffers()[:2], children=[entries],
+            offset=array.offset, null_count=array.null_count))
+        for index, child in enumerate((data_type.key_field, data_type.item_field)):
+            _check_write_nullability(entries.field(index), child, path + '.' + child.name)
+
+
+def _with_child_nullability(array, data_type):
+    """Retype nested wrappers while retaining payloads, slices and validity."""
+    if array.type == data_type:
+        return array
+    if pa.types.is_struct(data_type):
+        # StructArray.field() already applies the parent's slice. Construct an
+        # offset-zero wrapper so the offset is not applied to children twice.
+        children = [_with_child_nullability(array.field(index), child.type)
+                    for index, child in enumerate(data_type)]
+        return pa.StructArray.from_arrays(children, fields=list(data_type), mask=pc.is_null(array))
+    if pa.types.is_map(data_type):
+        entries = pa.StructArray.from_arrays(
+            [_with_child_nullability(array.keys, data_type.key_type),
+             _with_child_nullability(array.items, data_type.item_type)],
+            fields=[data_type.key_field, data_type.item_field])
+        return pa.Array.from_buffers(data_type, len(array), array.buffers()[:2],
+                                     children=[entries], offset=array.offset, null_count=array.null_count)
+    if (pa.types.is_list(data_type) or pa.types.is_large_list(data_type)
+            or pa.types.is_fixed_size_list(data_type)):
+        children = [_with_child_nullability(array.values, data_type.value_type)]
+        buffers = array.buffers()[:1 if pa.types.is_fixed_size_list(data_type) else 2]
+        return pa.Array.from_buffers(data_type, len(array), buffers, children=children,
+                                     offset=array.offset, null_count=array.null_count)
+    return array
 
 
 def normalize_arrow_strings(data):
@@ -90,3 +230,17 @@ def normalize_arrow_strings(data):
         raise ValueError(
             "Cannot convert large_string input to string with PyArrow %s: %s"
             % (pa.__version__, error)) from error
+
+
+def project_arrow_batch(data, column_names):
+    """Project batch fields in order while retaining field/schema metadata."""
+    indices = [data.schema.get_field_index(name) for name in column_names]
+    missing = [name for name, index in zip(column_names, indices) if index < 0]
+    if missing:
+        raise KeyError('Columns not found in record batch: %s' % missing)
+    if not indices:
+        # With no child arrays, from_arrays cannot infer the batch row count.
+        rows = pa.StructArray.from_buffers(pa.struct([]), data.num_rows, [None])
+        return pa.RecordBatch.from_struct_array(rows).replace_schema_metadata(data.schema.metadata)
+    schema = pa.schema([data.schema.field(index) for index in indices], metadata=data.schema.metadata)
+    return pa.RecordBatch.from_arrays([data.column(index) for index in indices], schema=schema)

@@ -1346,6 +1346,20 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(rows).containsExactlyInAnyOrder(expectedRow);
     }
 
+    @Test
+    @EnabledIf("isFlink2_1OrAbove")
+    void testVariantNotNull() throws Exception {
+        sql("CREATE TABLE t (id INT, v VARIANT NOT NULL)");
+
+        assertThatThrownBy(() -> sql("INSERT INTO t VALUES (1, CAST(NULL AS VARIANT))"))
+                .hasRootCauseMessage(
+                        "Column 'v' is NOT NULL, however, a null value is being written into it. "
+                                + "You can set job configuration 'table.exec.sink.not-null-enforcer'='DROP' "
+                                + "to suppress this exception and drop such records silently.");
+        assertThat(sql("SELECT * FROM t")).isEmpty();
+        assertThat(paimonTable("t").rowType().getTypeAt(1).isNullable()).isFalse();
+    }
+
     private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value

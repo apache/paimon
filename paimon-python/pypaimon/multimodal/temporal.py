@@ -28,21 +28,15 @@ import pyarrow.compute as pc
 
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.common.options.core_options import CoreOptions, StartupMode
-from pypaimon.common.predicate_json_parser import (
-    _apply_predicate_transform,
-    _collect_all_field_refs_from_transform,
-)
+from pypaimon.common.predicate_json_parser import _collect_all_field_refs_from_transform
+from pypaimon.common.transform_schema import effective_masked_schema as _effective_masked_schema
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.read.query_auth_split import QueryAuthSplit, resolve_auth_result
-from pypaimon.read.reader.format_pyarrow_reader import _DecodedRowGroupCache
-from pypaimon.read.table_read import _ClosableArrowBatchReader
+from pypaimon.read.read_support import _ClosableArrowBatchReader, _ParquetRowGroupCacheRequest
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.table.source.global_index_live_row_filter import (
-    table_at_snapshot,
-)
 from pypaimon.utils.range import Range
 
 
@@ -206,7 +200,7 @@ class TemporalAlignment:
 
         anchor_metadata = _metadata_batches(
             self._anchor, self._on, self._by, batch_size)
-        row_group_cache = _DecodedRowGroupCache(
+        row_group_cache = _ParquetRowGroupCacheRequest(
             _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE)
         anchor_fetcher = _RowIdFetcher(self._anchor, row_group_cache)
         source_fetchers = []
@@ -968,7 +962,7 @@ def _pin_scan_to_snapshot(query):
         else None
     )
     if snapshot is not None and tag_name is None:
-        table = table_at_snapshot(table, snapshot)
+        table = table._copy_with_snapshot(snapshot)
     pinned = ScanQuery(table)
     pinned._predicate = query._predicate
     pinned._projection = query._projection
@@ -1461,26 +1455,6 @@ def _mask_dependencies(masking, targets, table_schema):
     return [
         name for name in table_schema.names if name in dependencies
     ]
-
-
-def _effective_masked_schema(schema, masking):
-    if not masking:
-        return schema
-    batch = pa.RecordBatch.from_arrays([
-        pa.array([], type=field.type) for field in schema
-    ], schema=schema)
-    fields = []
-    for field in schema:
-        transform = masking.get(field.name)
-        if transform is None:
-            fields.append(field)
-            continue
-        masked = _apply_predicate_transform(
-            transform, batch, null_type=field.type)
-        fields.append(pa.field(
-            field.name, masked.type, nullable=True,
-            metadata=field.metadata))
-    return pa.schema(fields, metadata=schema.metadata)
 
 
 def _project_effective_schema(

@@ -69,6 +69,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -479,6 +480,46 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
 
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
         coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCloseDrainsQueuedSavepointTag() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinatorWithAutoTag(table, context);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // Hold the commit executor so the commit and tag of a stop-with-savepoint are still
+        // queued when close() starts.
+        CountDownLatch release = new CountDownLatch(1);
+        coordinator.runInEventLoop(release::await, "blocking");
+        coordinator.handleEventFromOperator(
+                0, 0, savepointEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        coordinator.notifyCheckpointComplete(1L);
+
+        CompletableFuture<Void> closed =
+                CompletableFuture.runAsync(
+                        () -> {
+                            try {
+                                coordinator.close();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        // Release the executor only once close() has shut it down.
+        while (!coordinator.isCommitExecutorShutdown()) {
+            Thread.sleep(10);
+        }
+        release.countDown();
+        closed.get();
+
+        assertThat(coordinator.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.CLOSED);
+        assertThat(table.snapshotManager().latestSnapshot().commitIdentifier()).isEqualTo(1L);
+        assertThat(table.tagManager().tagExists(savepointTag(1L))).isTrue();
     }
 
     private static String savepointTag(long checkpointId) {

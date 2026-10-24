@@ -17,14 +17,14 @@
 
 """Native writes of the partition/bucket groups produced by Daft."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 pytestmark = pytest.mark.native_plan
@@ -138,7 +138,7 @@ def test_native_computes_java_hashes_for_multiple_batches(tmp_path, streaming, p
                             {'id': 2, 'value': 'updated', 'pt': 'a'},
                             {'id': 3, 'value': 'three', 'pt': 'a'}]
     # Restored hashes and indexes remain readable by Python's assigner.
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     extractor = DynamicBucketRowKeyExtractor(table.table_schema, table=table)
     assert extractor.extract_partition_bucket_batch(_batch([1, 2, 3], ['a', 'b', 'c']))[1] == [12, 12, 12]
@@ -194,17 +194,17 @@ def test_pinned_dynamic_configuration_survives_early_python_selection(tmp_path, 
     initial.new_commit().commit(first.prepare_commit())
     first.close()
     pinned_id = table.snapshot_manager().get_latest_snapshot().id
-    writer = table.new_batch_write_builder().with_restore_snapshot(pinned_id).new_write()
+    from pypaimon.write.backend_dispatch import create_python_write
+    writer = create_python_write(table, 'pinned-python', restore_snapshot_id=pinned_id)
     try:
         later = table.new_batch_write_builder()
         second = later.new_write()
         second.write_arrow(_batch([2], ['later']), bucket=0)
         later.new_commit().commit(second.prepare_commit())
         second.close()
-        # BlobConsumer is native now; explicitly select the Python branch whose
-        # pinned snapshot transport this test exercises before any write.
-        writer._switch_to_python()
-        assert writer._python_writer.row_key_extractor.base_snapshot_id == pinned_id
+        # The already-selected Python writer keeps its original restore point
+        # even when the source table's default execution is Native.
+        assert writer._execution.row_key_extractor.base_snapshot_id == pinned_id
         writer.write_arrow(_batch([1], ['restored']), bucket=0)
         messages = writer.prepare_commit()
         assert messages[0].new_files[0].min_sequence_number == 1
@@ -377,7 +377,7 @@ def test_empty_restore_ignores_existing_sequences_and_hashes(tmp_path, python_fa
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_empty_restore_preserves_python_write_authorization(tmp_path, overwrite):
+def test_empty_restore_does_not_apply_select_policy_to_python_writes(tmp_path, overwrite):
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
     from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 
@@ -389,14 +389,21 @@ def test_empty_restore_preserves_python_write_authorization(tmp_path, overwrite)
     # Exercise the ordinary writer selected before any Native data is staged.
     writer._switch_to_python()
     auth = TableQueryAuthResult(None, {'value': '{"name":"NULL"}'})
+    authorize = Mock(return_value=auth)
     try:
         with patch.object(type(table.catalog_environment), 'table_query_auth',
-                          return_value=lambda _: auth):
+                          return_value=authorize):
+            writer.write_arrow(_batch([1], ['written']), bucket=0)
+            messages = writer.prepare_commit()
+            assert messages[0].new_files[0].min_sequence_number == 0
+            authorize.assert_not_called()
+            # Only the explicit whole-table read requires an unrestricted grant.
             with pytest.raises(TableNoPermissionException):
-                writer.write_arrow(_batch([1], ['forbidden']), bucket=0)
+                table.new_read_builder().new_scan().plan_all()
+        builder.new_commit().commit(messages)
     finally:
         writer.close()
-    assert table.snapshot_manager().get_latest_snapshot() is None
+    assert _rows(table) == [{'id': 1, 'value': 'written', 'pt': 'a'}]
 
 
 def test_python_pk_file_sequence_range_matches_deduplicated_rows(tmp_path):

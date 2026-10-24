@@ -15,18 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import math
-import struct
 from datetime import date, timezone
-from decimal import Decimal
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
-from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.utils.numeric_utils import java_floating_string
+from pypaimon.utils.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.utils.path import resolve_path, to_file_io_path
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
+
+if TYPE_CHECKING:
+    from pypaimon.common.external_path_provider import ExternalPathProvider
 
 
 def _is_null_or_whitespace_only(value) -> bool:
@@ -80,41 +80,6 @@ def canonical_data_file_path(table, partition, bucket, file_name):
         # the literal escaped component, so use its physical local path.
         return str(LocalFileIO()._to_file(root) / path[len(root) + 1:])
     return path
-
-
-def _floating_partition_string(value, single_precision: bool) -> str:
-    # Java's JDK 19+ contract selects a shortest round-tripping form with at
-    # least two significant digits before applying its notation thresholds.
-    encoding = '>f' if single_precision else '>d'
-    bits = struct.pack(encoding, value)
-    value = struct.unpack(encoding, bits)[0]
-    if math.isnan(value):
-        return 'NaN'
-    if math.isinf(value):
-        return '-Infinity' if value < 0 else 'Infinity'
-    for precision in range(2, 10 if single_precision else 18):
-        text = format(value, '.{}g'.format(precision))
-        try:
-            rounded = struct.pack(encoding, float(text))
-        except OverflowError:
-            continue
-        if rounded != bits:
-            continue
-        decimal = Decimal(text)
-        if decimal.is_zero() or Decimal('0.001') <= abs(decimal) < Decimal('1e7'):
-            text = format(decimal, 'f')
-            if '.' in text:
-                text = text.rstrip('0').rstrip('.')
-            if '.' not in text:
-                text += '.0'
-        else:
-            mantissa, exponent = format(decimal, 'e').split('e')
-            mantissa = mantissa.rstrip('0').rstrip('.') if '.' in mantissa else mantissa
-            if '.' not in mantissa:
-                mantissa += '.0'
-            text = '{}E{}'.format(mantissa, int(exponent))
-        return text
-    return str(value)
 
 
 class FileStorePathFactory:
@@ -200,7 +165,7 @@ class FileStorePathFactory:
         for i, value in enumerate(partition):
             data_type = self.partition_types[i] if self.partition_types is not None else None
             type_name = str(data_type).split('(', 1)[0].split()[0]
-            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+            if value is not None and type_name in ('BINARY', 'VARBINARY', 'BYTES'):
                 value = _decode_java_utf8(value)
             if value is not None and _is_ltz_type(str(data_type).upper()):
                 # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
@@ -211,7 +176,7 @@ class FileStorePathFactory:
             if _is_null_or_whitespace_only(value):
                 text = self.default_part_value
             elif type_name in ('FLOAT', 'REAL', 'DOUBLE'):
-                text = _floating_partition_string(value, type_name != 'DOUBLE')
+                text = java_floating_string(value, type_name != 'DOUBLE')
             elif self.legacy_partition_name and type_name == 'DATE':
                 text = str((value - date(1970, 1, 1)).days)
             elif self.legacy_partition_name and type_name.startswith('TIMESTAMP'):
@@ -226,7 +191,9 @@ class FileStorePathFactory:
             elif self.legacy_partition_name and type_name.startswith('TIME'):
                 text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
                            + value.microsecond // 1000)
-            elif type_name in ('BINARY', 'VARBINARY', 'BYTES') and not self.legacy_partition_name:
+            elif type_name in ('BINARY', 'VARBINARY', 'BYTES'):
+                # Java uses the binary-to-string cast even in legacy mode:
+                # byte[].toString contains a fresh allocation identity.
                 text = value
             elif data_type is not None and not _is_unsupported(data_type):
                 text = cast_value_to_string(value, data_type)
@@ -275,9 +242,11 @@ class FileStorePathFactory:
 
     def create_external_path_provider(
         self, partition: Tuple, bucket: int, canonical_partition: bool = False
-    ) -> Optional[ExternalPathProvider]:
+    ) -> Optional['ExternalPathProvider']:
         if not self.external_paths:
             return None
+
+        from pypaimon.common.external_path_provider import ExternalPathProvider
 
         relative_bucket_path = self.relative_bucket_path(partition, bucket, canonical_partition)
         return ExternalPathProvider.create(

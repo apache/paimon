@@ -23,7 +23,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.row.generic_row import GenericRowDeserializer
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 pytestmark = pytest.mark.native_plan
@@ -41,17 +41,20 @@ def _table(tmp_path, schema, primary_key=False, options=None, partition_keys=Non
     return catalog.get_table('default.t')
 
 
-def _rows(table, native_read, for_write=False, chunk_shuffle=False):
+def _rows(table, native_read, all_files=False, chunk_shuffle=False):
     table = table.copy({'read.native.enabled': str(native_read).lower(),
                         'scan.native-plan.enabled': str(native_read).lower()})
     builder = table.new_read_builder()
     scan = builder.new_scan()
     if chunk_shuffle:
         scan.with_chunk_shuffle(seed=7, chunk_size=1)
-    splits = (scan.plan_for_write() if for_write else scan.plan()).splits()
+    splits = (scan.plan_all() if all_files else scan.plan()).splits()
     read = builder.new_read()
     if native_read:
-        with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+        with patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python fallback')
+        ):
             rows = read.to_arrow(splits).to_pylist()
     else:
         rows = read.to_arrow(splits).to_pylist()

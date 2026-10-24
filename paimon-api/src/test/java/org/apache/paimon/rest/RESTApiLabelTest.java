@@ -23,6 +23,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
+import org.apache.paimon.rest.requests.DeleteLabelRequest;
+import org.apache.paimon.rest.requests.GetLabelRequest;
 import org.apache.paimon.rest.requests.UpsertLabelRequest;
 import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.ListLabelsResponse;
@@ -40,7 +42,6 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +56,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /** HTTP contract tests for generic label operations. */
 class RESTApiLabelTest {
@@ -117,16 +119,21 @@ class RESTApiLabelTest {
         for (int i = 0; i < requests.size(); i++) {
             Request request = requests.get(i);
             assertThat(request.method).isEqualTo("POST");
-            assertThat(request.path).isEqualTo(BASE_PATH + "/TABLE/sales.orders/domain");
+            assertThat(request.path).isEqualTo(BASE_PATH + "/upsert");
             assertThat(request.query).isNull();
             assertThat(request.authorization).isEqualTo("Bearer test-token");
             assertThat(RESTApi.fromJson(request.body, Map.class))
-                    .isEqualTo(Collections.singletonMap("value", i == 0 ? "sales" : "finance"));
+                    .isEqualTo(
+                            labelFields(
+                                    "TABLE",
+                                    "sales.orders",
+                                    "domain",
+                                    i == 0 ? "sales" : "finance"));
         }
     }
 
     @Test
-    void testColumnAndProviderDefinedTypesUseGenericPaths() throws Exception {
+    void testColumnAndProviderDefinedTypesUseTheSameRoutes() throws Exception {
         for (String type : Arrays.asList("COLUMN", "MODEL_VERSION")) {
             enqueue(200, "");
             api.upsertLabel(type, "sales.orders.id", "classification", "");
@@ -135,56 +142,65 @@ class RESTApiLabelTest {
         for (int i = 0; i < requests.size(); i++) {
             Request request = requests.get(i);
             assertThat(request.method).isEqualTo("POST");
-            assertThat(request.path)
-                    .isEqualTo(
-                            BASE_PATH
-                                    + "/"
-                                    + (i == 0 ? "COLUMN" : "MODEL_VERSION")
-                                    + "/sales.orders.id/classification");
+            assertThat(request.path).isEqualTo(BASE_PATH + "/upsert");
             assertThat(RESTApi.fromJson(request.body, Map.class))
-                    .isEqualTo(Collections.singletonMap("value", ""));
+                    .isEqualTo(
+                            labelFields(
+                                    i == 0 ? "COLUMN" : "MODEL_VERSION",
+                                    "sales.orders.id",
+                                    "classification",
+                                    ""));
         }
     }
 
     @Test
-    void testEntityNameAndKeyRemainSingleEncodedSegments() throws Exception {
-        String name = "sales db.orders/华+%?#";
-        String key = "a/b+% ?#";
+    void testEntityNamesAndKeysNeverEnterThePath() throws Exception {
+        String name = "`sales db`.`orders/华+%?#;\\`.`a.b`";
+        String key = "a/b+% ?#`\"<>{}|^[]";
         enqueue(200, RESTApi.toJson(labelFields("COLUMN", name, key, "confidential")));
         GetLabelResponse label = api.getLabel("COLUMN", name, key);
 
-        assertThat(requests.get(0).method).isEqualTo("GET");
-        assertThat(requests.get(0).path)
-                .isEqualTo(
-                        BASE_PATH
-                                + "/COLUMN/sales+db.orders%2F%E5%8D%8E%2B%25%3F%23/a%2Fb%2B%25+%3F%23");
-        assertThat(label.getEntityType()).isEqualTo("COLUMN");
+        assertThat(requests.get(0).method).isEqualTo("POST");
+        assertThat(requests.get(0).path).isEqualTo(BASE_PATH + "/get");
+        assertThat(requests.get(0).query).isNull();
+        assertThat(RESTApi.fromJson(requests.get(0).body, Map.class))
+                .isEqualTo(identityFields("COLUMN", name, key));
         assertThat(label.getEntityName()).isEqualTo(name);
         assertThat(label.getKey()).isEqualTo(key);
         assertThat(label.getValue()).isEqualTo("confidential");
 
         enqueue(200, "");
         api.upsertLabel("COLUMN", name, key, "sensitive");
-        assertThat(requests.get(1).method).isEqualTo("POST");
-        assertThat(requests.get(1).path).isEqualTo(requests.get(0).path);
+        assertThat(requests.get(1).path).isEqualTo(BASE_PATH + "/upsert");
         assertThat(RESTApi.fromJson(requests.get(1).body, Map.class))
-                .isEqualTo(Collections.singletonMap("value", "sensitive"));
+                .isEqualTo(labelFields("COLUMN", name, key, "sensitive"));
 
         enqueue(200, "");
         api.deleteLabel("COLUMN", name, key);
-        assertThat(requests.get(2).method).isEqualTo("DELETE");
-        assertThat(requests.get(2).path).isEqualTo(requests.get(0).path);
+        assertThat(requests.get(2).method).isEqualTo("POST");
+        assertThat(requests.get(2).path).isEqualTo(BASE_PATH + "/delete");
+        assertThat(RESTApi.fromJson(requests.get(2).body, Map.class))
+                .isEqualTo(identityFields("COLUMN", name, key));
+
+        enqueue(200, "{\"labels\":[]}");
+        api.listLabelsPaged("COLUMN", name, null, null);
+        assertThat(requests.get(3).method).isEqualTo("GET");
+        assertThat(requests.get(3).path).isEqualTo(BASE_PATH);
+        assertThat(queryParameters(requests.get(3).query))
+                .containsOnly(entry("entityType", "COLUMN"), entry("entityName", name));
     }
 
     @Test
-    void testDotOnlyNamesRemainDataInThePath() {
+    void testDotOnlyNamesRemainData() throws Exception {
         enqueue(200, LABEL_JSON);
         api.getLabel("TABLE", ".", "..");
-        assertThat(requests.get(0).path).isEqualTo(BASE_PATH + "/TABLE/%2E/%2E%2E");
-        enqueue(200, "");
-        api.upsertLabel("TABLE", ".", "..", "value");
-        assertThat(requests.get(1).method).isEqualTo("POST");
-        assertThat(requests.get(1).path).isEqualTo(requests.get(0).path);
+        assertThat(requests.get(0).path).isEqualTo(BASE_PATH + "/get");
+        assertThat(RESTApi.fromJson(requests.get(0).body, Map.class))
+                .isEqualTo(identityFields("TABLE", ".", ".."));
+        enqueue(200, "{\"labels\":[]}");
+        api.listLabels("TABLE", "..");
+        assertThat(requests.get(1).path).isEqualTo(BASE_PATH);
+        assertThat(queryParameters(requests.get(1).query)).containsEntry("entityName", "..");
     }
 
     @Test
@@ -197,10 +213,15 @@ class RESTApiLabelTest {
         assertThat(labels).extracting(GetLabelResponse::getKey).containsExactly("domain", "owner");
         assertThat(requests).hasSize(2);
         assertThat(requests.get(0).method).isEqualTo("GET");
-        assertThat(requests.get(0).path).isEqualTo(BASE_PATH + "/TABLE/sales.orders");
-        assertThat(requests.get(0).query).isNull();
-        assertThat(requests.get(1).path).isEqualTo(requests.get(0).path);
-        assertThat(queryParameters(requests.get(1).query)).containsEntry("pageToken", "next +/%?&");
+        assertThat(requests.get(0).path).isEqualTo(BASE_PATH);
+        assertThat(queryParameters(requests.get(0).query))
+                .containsOnly(entry("entityType", "TABLE"), entry("entityName", "sales.orders"));
+        assertThat(requests.get(1).path).isEqualTo(BASE_PATH);
+        assertThat(queryParameters(requests.get(1).query))
+                .containsOnly(
+                        entry("entityType", "TABLE"),
+                        entry("entityName", "sales.orders"),
+                        entry("pageToken", "next +/%?&"));
     }
 
     @Test
@@ -213,22 +234,28 @@ class RESTApiLabelTest {
                 .containsExactly("sales");
         assertThat(first.getNextPageToken()).isEqualTo("next");
         assertThat(queryParameters(requests.get(0).query))
-                .containsEntry("maxResults", "1000")
-                .containsEntry("pageToken", "start +/%");
+                .containsOnly(
+                        entry("entityType", "TABLE"),
+                        entry("entityName", "sales.orders"),
+                        entry("maxResults", "1000"),
+                        entry("pageToken", "start +/%"));
 
         enqueue(200, "{\"labels\":[]}");
         PagedList<GetLabelResponse> last =
                 api.listLabelsPaged("COLUMN", "sales.orders.id", 1, "next");
         assertThat(last.getElements()).isEmpty();
         assertThat(last.getNextPageToken()).isNull();
-        assertThat(requests.get(1).path).isEqualTo(BASE_PATH + "/COLUMN/sales.orders.id");
+        assertThat(requests.get(1).path).isEqualTo(BASE_PATH);
+        assertThat(queryParameters(requests.get(1).query))
+                .containsEntry("entityType", "COLUMN")
+                .containsEntry("entityName", "sales.orders.id");
 
         enqueue(200, "{\"labels\":[]}");
         assertThat(api.listLabels("TABLE", "sales.empty")).isEmpty();
     }
 
     @Test
-    void testRepeatedDeleteDoesNotRequireARead() {
+    void testRepeatedDeleteDoesNotRequireARead() throws Exception {
         enqueue(200, "");
         enqueue(200, "");
         api.deleteLabel("TABLE", "sales.orders", "domain");
@@ -236,9 +263,11 @@ class RESTApiLabelTest {
 
         assertThat(requests).hasSize(2);
         for (Request request : requests) {
-            assertThat(request.method).isEqualTo("DELETE");
-            assertThat(request.path).isEqualTo(BASE_PATH + "/TABLE/sales.orders/domain");
-            assertThat(request.body).isEmpty();
+            assertThat(request.method).isEqualTo("POST");
+            assertThat(request.path).isEqualTo(BASE_PATH + "/delete");
+            assertThat(request.query).isNull();
+            assertThat(RESTApi.fromJson(request.body, Map.class))
+                    .isEqualTo(identityFields("TABLE", "sales.orders", "domain"));
         }
     }
 
@@ -294,9 +323,15 @@ class RESTApiLabelTest {
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> api.getLabel(invalid, "sales.orders", "domain"))
                     .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> api.getLabel("TABLE", "sales.orders", invalid))
+                    .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> api.listLabels("TABLE", invalid))
                     .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> api.listLabelsPaged(invalid, "sales.orders", null, null))
+                    .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> api.deleteLabel("TABLE", "sales.orders", invalid))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> api.deleteLabel("TABLE", invalid, "domain"))
                     .isInstanceOf(IllegalArgumentException.class);
         }
         assertThatThrownBy(() -> api.upsertLabel("TABLE", "sales.orders", "domain", null))
@@ -309,13 +344,37 @@ class RESTApiLabelTest {
     }
 
     @Test
-    void testWireModelsRequireWriteFieldsAndTolerateFutureResponseFields() throws Exception {
-        UpsertLabelRequest request =
-                RESTApi.fromJson("{\"value\":\"sales\"}", UpsertLabelRequest.class);
-        assertThat(RESTApi.fromJson(RESTApi.toJson(request), Map.class))
-                .isEqualTo(Collections.singletonMap("value", "sales"));
-        for (String json : Arrays.asList("{}", "{\"value\":null}")) {
+    void testWireModelsRequireIdentityAndTolerateFutureResponseFields() throws Exception {
+        String identity =
+                "\"entityType\":\"TABLE\",\"entityName\":\"sales.orders\",\"key\":\"domain\"";
+        UpsertLabelRequest upsert =
+                RESTApi.fromJson(
+                        "{" + identity + ",\"value\":\"sales\"}", UpsertLabelRequest.class);
+        assertThat(RESTApi.fromJson(RESTApi.toJson(upsert), Map.class))
+                .isEqualTo(labelFields("TABLE", "sales.orders", "domain", "sales"));
+        for (String json :
+                Arrays.asList(
+                        "{" + identity + "}",
+                        "{" + identity + ",\"value\":null}",
+                        "{\"entityType\":\"TABLE\",\"entityName\":\"sales.orders\",\"value\":\"x\"}",
+                        "{\"entityType\":\"TABLE\",\"key\":\"domain\",\"value\":\"x\"}",
+                        "{\"entityName\":\"sales.orders\",\"key\":\"domain\",\"value\":\"x\"}")) {
             assertThatThrownBy(() -> RESTApi.fromJson(json, UpsertLabelRequest.class))
+                    .hasRootCauseInstanceOf(IllegalArgumentException.class);
+        }
+        for (Class<? extends RESTRequest> type :
+                Arrays.<Class<? extends RESTRequest>>asList(
+                        GetLabelRequest.class, DeleteLabelRequest.class)) {
+            assertThat(
+                            RESTApi.fromJson(
+                                    RESTApi.toJson(RESTApi.fromJson("{" + identity + "}", type)),
+                                    Map.class))
+                    .isEqualTo(identityFields("TABLE", "sales.orders", "domain"));
+            assertThatThrownBy(
+                            () ->
+                                    RESTApi.fromJson(
+                                            "{\"entityType\":\"TABLE\",\"entityName\":\" \",\"key\":\"domain\"}",
+                                            type))
                     .hasRootCauseInstanceOf(IllegalArgumentException.class);
         }
 
@@ -346,6 +405,14 @@ class RESTApiLabelTest {
         fields.put("entityName", name);
         fields.put("key", key);
         fields.put("value", value);
+        return fields;
+    }
+
+    private static Map<String, String> identityFields(String type, String name, String key) {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("entityType", type);
+        fields.put("entityName", name);
+        fields.put("key", key);
         return fields;
     }
 

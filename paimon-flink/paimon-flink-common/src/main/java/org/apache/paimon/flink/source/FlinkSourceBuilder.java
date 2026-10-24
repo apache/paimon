@@ -431,11 +431,7 @@ public class FlinkSourceBuilder {
                             + " too many snapshots that could pose a risk to the file system.");
         }
 
-        if (PostponeMergeOnRead.configured(table)) {
-            if (!sourceBounded) {
-                throw new UnsupportedOperationException(
-                        "Option 'postpone.merge-on-read' is only supported for batch reads.");
-            }
+        if (sourceBounded && PostponeMergeOnRead.configured(table)) {
             DataStream<RowData> mergeSource = buildPostponeMergeSource();
             if (mergeSource != null) {
                 return mergeSource;

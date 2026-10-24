@@ -25,14 +25,32 @@ import pyarrow.parquet as pq
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.write.table_update_by_row_id import (
-    TableUpdateByRowId,
+from pypaimon.execution.python.write.table_update_by_row_id import (
+    PythonTableUpdateByRowId as TableUpdateByRowId,
+)
+from pypaimon.execution.python.write.table_update_by_row_id import (
     _RowIdUpdateFileWriter,
 )
-from pypaimon.write.writer.single_file_writer import SingleFileWriter
+from pypaimon.execution.python.write.writer.single_file_writer import SingleFileWriter
 
 
 class TableUpdateByRowIdChunkedTest(unittest.TestCase):
+
+    def test_write_normalization_accepts_legacy_record_batch_interface(self):
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        batch = pa.record_batch([pa.array([1, 2], type=pa.int32())], names=['payload'])
+
+        class LegacyRecordBatch:
+            # Arrow 6 exposes names through schema, not column_names.
+            schema = batch.schema
+            columns = batch.columns
+
+        updater = self._updater()
+        updater.table = mock.Mock(field_dict={'payload': DataField(0, 'payload', AtomicType('INT'))})
+        normalized = updater._normalize_write_data(LegacyRecordBatch())
+        self.assertEqual(normalized.schema, batch.schema)
+        self.assertEqual(normalized.columns[0].to_pylist(), [1, 2])
 
     def test_streaming_overlay_rejects_sidecar_before_output(self):
         table = mock.Mock()
@@ -193,6 +211,45 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "not contiguous at row ID 0"):
                     list(updater._merged_batches(0, updates, ["payload"]))
+
+    def test_streaming_update_closes_source_when_validation_or_writing_fails(self):
+        for validation_failure in (False, True):
+            with self.subTest(validation_failure=validation_failure):
+                closed = []
+                batch = pa.record_batch([pa.array([1])], names=['payload'])
+
+                def source():
+                    try:
+                        yield batch
+                    finally:
+                        closed.append(True)
+
+                def write(batches):
+                    next(batches)
+                    raise IOError('write failed')
+
+                updater = self._updater()
+                updater.table = mock.sentinel.table
+                updater._merged_batches = mock.Mock(return_value=source())
+                updater._normalize_write_data = mock.Mock(
+                    side_effect=ValueError('validation failed') if validation_failure else None,
+                    return_value=batch)
+                writer = mock.Mock()
+                writer.write_batches.side_effect = write
+                caught = []
+                with mock.patch('pypaimon.execution.python.write.table_update_by_row_id._RowIdUpdateFileWriter',
+                                return_value=writer):
+                    try:
+                        updater._write_group_streaming(mock.Mock(values=[]), 0, mock.sentinel.data, ['payload'])
+                    except (ValueError, IOError) as error:
+                        # Retain the traceback: cleanup must happen immediately,
+                        # without waiting for exception frames to be collected.
+                        caught.append(error)
+                self.assertEqual(len(caught), 1)
+                self.assertEqual(str(caught[0]), 'validation failed' if validation_failure else 'write failed')
+                self.assertEqual(closed, [True])
+                writer.abort.assert_called_once_with()
+                writer.close.assert_called_once_with()
 
     def test_streaming_update_rejects_row_ids_before_original_group(self):
         updates = pa.table({

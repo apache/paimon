@@ -465,7 +465,7 @@ class AOSimpleTest(RESTBaseTest):
         table_commit.commit(cm, 2)
         table_write.close()
         table_commit.close()
-        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+        self.assertEqual(2, table_write._execution.file_store_write.commit_identifier)
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()

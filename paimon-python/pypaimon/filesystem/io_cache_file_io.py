@@ -177,18 +177,6 @@ class IoCacheRoutingFileIO(FileIO):
         return self._call(Op.WRITE, path, lambda io: io.write_avro(
             path, data, avro_schema, compression, zstd_level, **kwargs))
 
-    def write_lance(self, path: str, data, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_lance(path, data, **kwargs))
-
-    def write_blob(self, path: str, data, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_blob(path, data, **kwargs))
-
-    def write_vortex(self, path: str, data, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_vortex(path, data, **kwargs))
-
-    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_row(path, data, fields, zstd_level, **kwargs))
-
     def close(self):
         with self._targets_lock:
             targets = list(self._targets.values())

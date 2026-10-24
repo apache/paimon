@@ -26,7 +26,7 @@ from pypaimon.common.options import CoreOptions, Options
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
-from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
+from pypaimon.schema.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         DataType, MapType, MultisetType, RowType,
                                         is_array_blob_type, is_blob_file_field,
@@ -483,6 +483,25 @@ def _validate_options(options: dict):
         )
 
 
+def _validate_row_tracking(options: dict, primary_keys: List[str]):
+    """Mirror the row tracking checks of Java SchemaValidation#validateRowTracking."""
+    core_options = CoreOptions(Options(options or {}))
+    row_tracking_enabled = core_options.row_tracking_enabled()
+    if row_tracking_enabled:
+        if primary_keys:
+            raise ValueError("Cannot define primary-key for row tracking table.")
+        if core_options.bucket() != -1:
+            raise ValueError(
+                f"Cannot define {CoreOptions.BUCKET.key()} for row tracking table, "
+                f"it only support bucket = -1"
+            )
+    if core_options.data_evolution_enabled() and not row_tracking_enabled:
+        raise ValueError(
+            f"Data evolution config must enabled with "
+            f"{CoreOptions.ROW_TRACKING_ENABLED.key()}"
+        )
+
+
 def _contains_blob_type(data_type: DataType) -> bool:
     if is_blob_type(data_type):
         return True
@@ -674,6 +693,7 @@ class SchemaManager:
             new_schema.primary_keys,
             new_schema.partition_keys,
         )
+        _validate_row_tracking(new_schema.options, new_schema.primary_keys)
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))

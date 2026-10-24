@@ -26,7 +26,7 @@ import pytest
 from pypaimon import CatalogFactory
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import Blob, BlobDescriptor
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -70,7 +70,10 @@ def _read(table, predicate=None, projection=None, limit=None, descriptors=False)
         builder.with_limit(limit)
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    guard = patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback'))
+    guard = patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    )
     with guard:
         return read.to_arrow(splits, blob_parallelism=2).to_pylist()
 

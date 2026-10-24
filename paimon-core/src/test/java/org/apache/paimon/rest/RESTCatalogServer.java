@@ -727,12 +727,14 @@ public class RESTCatalogServer {
                             if (!tableMetadataStore.containsKey(identifier.getFullName())) {
                                 throw new Catalog.TableNotExistException(identifier);
                             }
+                            MockRESTMessage.validateRollbackHead(
+                                    requestBody,
+                                    tableLatestSnapshotStore.get(identifier.getFullName()));
                             if (requestBody.getInstant() instanceof Instant.SnapshotInstant) {
                                 long snapshotId =
                                         ((Instant.SnapshotInstant) requestBody.getInstant())
                                                 .getSnapshotId();
-                                return rollbackTableByIdHandle(
-                                        identifier, snapshotId, requestBody.getFromSnapshot());
+                                return rollbackTableByIdHandle(identifier, snapshotId);
                             } else if (requestBody.getInstant() instanceof Instant.TagInstant) {
                                 String tagName =
                                         ((Instant.TagInstant) requestBody.getInstant())
@@ -1195,8 +1197,8 @@ public class RESTCatalogServer {
                 requestBody.getStatistics());
     }
 
-    private MockResponse rollbackTableByIdHandle(
-            Identifier identifier, long snapshotId, @Nullable Long fromSnapshot) throws Exception {
+    private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
+            throws Exception {
         FileStoreTable table = getFileTable(identifier);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
         TableSnapshot toSnapshot = tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId);
@@ -1207,16 +1209,6 @@ public class RESTCatalogServer {
                     404);
         }
         long latestSnapshotId = table.snapshotManager().latestSnapshotId();
-        if (fromSnapshot != null && fromSnapshot != latestSnapshotId) {
-            return mockResponse(
-                    new ErrorResponse(
-                            null,
-                            null,
-                            String.format(
-                                    "Latest snapshot %s is not %s", latestSnapshotId, fromSnapshot),
-                            500),
-                    500);
-        }
         table =
                 table.copy(
                         Collections.singletonMap(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));

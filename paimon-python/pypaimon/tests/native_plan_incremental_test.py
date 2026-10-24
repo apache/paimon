@@ -18,7 +18,6 @@
 """Compare committed timestamp windows, including cross-snapshot change events."""
 
 import json
-import os
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -27,16 +26,18 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.read.native_plan import native_method_available
-from pypaimon.read.scan_distribution import java_file_name_shard
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.read.split import DataSplit
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
 from pypaimon.utils.range import Range
 
 
 @pytest.fixture(params=[False, pytest.param(
     True, marks=[pytest.mark.native_plan, pytest.mark.skipif(
-        not native_method_available('Split', 'is_streaming'),
-        reason='pypaimon_rust combined incremental planning API required')])],
+        not native_runtime_available(),
+        reason='pypaimon-rust not installed')])],
     ids=['python', 'native'])
 def native(request):
     return request.param
@@ -71,14 +72,19 @@ def _set_time(table, timestamp):
     return snapshot.id
 
 
-def _write(table, timestamp, rows, overwrite=False):
+def _write(table, timestamp, rows, overwrite=False, kind=None):
     builder = table.new_batch_write_builder()
     if overwrite:
         builder.overwrite()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
-        writer.write_arrow(pa.Table.from_pydict({
-            key: [row[key] for row in rows] for key in SCHEMA.names}, schema=SCHEMA))
+        if kind is None:
+            writer.write_arrow(pa.Table.from_pydict({
+                key: [row[key] for row in rows] for key in SCHEMA.names}, schema=SCHEMA))
+        else:
+            for row in rows:
+                writer.write_row(GenericRow(
+                    [row[field.name] for field in table.fields], table.fields, kind))
         commit.commit(writer.prepare_commit())
     finally:
         writer.close()
@@ -107,10 +113,9 @@ def _read(table, native, window, predicate=None, limit=None, shard=None,
         scan.with_row_ranges(row_ranges)
     with ExitStack() as stack:
         if native:
-            for method in ('scan', 'scan_with_stats'):
-                stack.enter_context(patch.object(
-                    scan.file_scanner, method, side_effect=AssertionError(
-                        'incremental native plan fell back to Python')))
+            stack.enter_context(patch.object(
+                scan, '_create_file_scanner', side_effect=AssertionError(
+                    'incremental native plan fell back to Python')))
         plan = scan.scan_with_stats()[0] if with_stats else scan.plan()
     with ExitStack() as stack:
         if native:
@@ -118,7 +123,7 @@ def _read(table, native, window, predicate=None, limit=None, shard=None,
                 getattr(split, '_native_split', None) is not None
                 for split in plan.splits())
             stack.enter_context(patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'incremental native read fell back to Python')))
         result = builder.new_read().to_arrow(
@@ -327,7 +332,7 @@ def test_incremental_does_not_evaluate_endpoint_global_indexes(catalog, native):
 
 
 def test_incremental_rejects_manifest_delete_before_reconciliation(catalog, native):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
     table = _table(catalog, 'invalid_delta', True)
     _write(table, 100, [{'k': 1, 'v': 'old'}])
     _write(table, 200, [{'k': 1, 'v': 'new'}], overwrite=True)
@@ -347,20 +352,21 @@ def test_incremental_rejects_manifest_delete_before_reconciliation(catalog, nati
 
 def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
     import pyarrow.parquet as pq
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
     table = _table(catalog, 'row_kinds', True, {'bucket': '1'})
     scan = AsyncStreamingTableScan(table, prefetch_enabled=False)
     expected = []
     for kind in range(4):
-        snapshot_id = _write(table, (kind + 1) * 100, [{'k': 1, 'v': str(kind)}])
+        # Write each physical kind through the public API so committed files
+        # and manifest metadata remain consistent for both reader paths.
+        snapshot_id = _write(table, (kind + 1) * 100, [{'k': 1, 'v': str(kind)}], kind=RowKind(kind))
         plan = scan._create_delta_plan(table.snapshot_manager().get_snapshot_by_id(snapshot_id))
         file = plan.splits()[0].files[0]
-        physical = pq.read_table(file.file_path)
-        index = physical.schema.get_field_index('_VALUE_KIND')
-        physical = physical.set_column(index, physical.schema.field(index), pa.array([kind], pa.int8()))
-        pq.write_table(physical, file.file_path)
-        rows = list(table.new_read_builder().new_read().to_iterator(plan.splits()))
-        assert [(row.get_field(1), row.get_row_kind().value) for row in rows] == [(str(kind), kind)]
+        assert pq.read_table(file.file_path, columns=['_VALUE_KIND']).column(0).to_pylist() == [kind]
+        assert file.file_size == table.file_io.get_file_size(file.file_path)
+        rows = [(row.get_field(1), row.get_row_kind().value)
+                for row in table.new_read_builder().new_read().to_iterator(plan.splits())]
+        assert rows == [(str(kind), kind)]
         assert plan.snapshot_id == snapshot_id
         expected.append((str(kind), kind))
     builder = table.copy({'scan.native-plan.enabled': str(native).lower(),
@@ -369,30 +375,19 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
     batch_scan = builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(batch_scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('native fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')))
     plan = batch_scan.plan()
-    if native:
-        # The fixture rewrites Parquet bytes after commit to manufacture all
-        # four physical kinds. Refresh the opaque split's file-size metadata;
-        # real committed files already have matching manifest sizes.
-        from pypaimon_rust.datafusion import Split as NativeSplit
-        for split in plan.splits():
-            _, (state,) = split._native_split.__reduce__()
-            native_state = json.loads(bytes(state))
-            for native_file, data_file in zip(
-                    native_state['data_files'], split.files):
-                native_file['_FILE_SIZE'] = os.path.getsize(
-                    data_file.file_path)
-            split._native_split = NativeSplit(
-                json.dumps(native_state).encode())
-    rows = list(builder.new_read().to_iterator(plan.splits()))
-    assert sorted((row.get_field(1), row.get_row_kind().value) for row in rows) == expected
+    # InternalRow views are reused by the iterator; capture values as it advances.
+    rows = [(row.get_field(1), row.get_row_kind().value)
+            for row in builder.new_read().to_iterator(plan.splits())]
+    assert sorted(rows) == expected
     if native:
         read = builder.new_read()
         read.include_row_kind = True
         with patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('native row-kind read fell back')):
             arrow = read.to_arrow(plan.splits(), parallelism=2)
         assert sorted(zip(
@@ -449,7 +444,7 @@ def test_stream_read_builder_combines_native_nested_projection_and_row_kind(
     scan.restore(snapshot.id)
     plan = scan.plan()
     with patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError('streaming nested native read fell back')):
         rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
 
@@ -493,7 +488,7 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
                 return plans
 
     with patch(
-            'pypaimon.read.streaming_table_scan.ManifestFileManager',
+            'pypaimon.execution.python.read.streaming_table_scan.ManifestFileManager',
             side_effect=AssertionError(
                 'streaming changelog native plan fell back to Python')):
         plans = asyncio.run(first_two_frames())
@@ -507,7 +502,7 @@ def test_streaming_changelog_frames_use_native_plan_and_read(catalog):
         for plan in plans for split in plan.splits() for file in split.files)
 
     with patch(
-            'pypaimon.read.table_read.TableRead._create_split_read',
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
             side_effect=AssertionError(
                 'streaming changelog native read fell back to Python')):
         rows = [
@@ -553,7 +548,7 @@ def test_streaming_overwrite_is_skipped_by_default_like_java(catalog):
 
 
 def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native, tmp_path):
-    from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+    from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
     from pypaimon.table.source.deletion_file import DeletionFile
     table = _table(catalog, 'explicit_dv', True, {'bucket': '1'})
     _write(table, 100, [{'k': key, 'v': str(key)} for key in (1, 2, 3)])
@@ -584,7 +579,7 @@ def test_streaming_reader_honors_explicit_split_deletion_vector(catalog, native,
     with ExitStack() as stack:
         if native:
             stack.enter_context(patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('explicit DV native read fell back')))
         result = read_table.new_read_builder().new_read().to_arrow([dv_split]).to_pylist()
     assert result == [{'k': 1, 'v': '1'}, {'k': 3, 'v': '3'}]
@@ -602,13 +597,31 @@ def test_reverse_window_is_rejected_when_snapshots_exist(catalog):
     table = _table(catalog, 'reverse_window')
     _write(table, 100, [{'k': 1, 'v': 'base'}])
     with pytest.raises(ValueError, match='Ending timestamp'):
-        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan()
+        table.copy({'incremental-between-timestamp': '200,100'}).new_read_builder().new_scan().plan()
 
 
 def test_equal_window_is_empty_for_populated_tables(native, history):
     plan, rows = _read(history, native, (100, 100))
     assert rows == []
     assert plan.snapshot_id is None
+
+
+def test_timestamp_selection_is_deferred_until_planning(native, catalog):
+    table = _table(catalog, 'deferred_window')
+    builder = table.copy({
+        'scan.native-plan.enabled': str(native).lower(),
+        'read.native.enabled': str(native).lower(),
+        'incremental-between-timestamp': '0,200',
+    }).new_read_builder()
+    scan = builder.new_scan()
+    _write(table, 100, [{'k': 1, 'v': 'selected'}])
+    with ExitStack() as stack:
+        if native:
+            stack.enter_context(patch.object(
+                scan, '_create_file_scanner', side_effect=AssertionError('Python scanner ran')))
+        plan = scan.plan()
+    assert plan.snapshot_id == 1
+    assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [{'k': 1, 'v': 'selected'}]
 
 
 def test_timestamp_auto_reads_physical_changelog(native, catalog):

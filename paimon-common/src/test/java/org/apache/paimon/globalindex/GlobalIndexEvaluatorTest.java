@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -869,25 +870,26 @@ class GlobalIndexEvaluatorTest {
         executor = Executors.newFixedThreadPool(4);
         RowType rowType = rowType();
 
-        AtomicInteger concurrency = new AtomicInteger(0);
-        AtomicInteger maxConcurrency = new AtomicInteger(0);
+        CountDownLatch concurrentReads = new CountDownLatch(3);
 
         GlobalIndexReader concurrencyDetectingReader =
-                new StubGlobalIndexReader(resultOf(1, 2, 3, 4, 5)) {
+                new StubGlobalIndexReader(null) {
                     @Override
                     public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
                             FieldRef fieldRef, Object literal) {
                         return CompletableFuture.supplyAsync(
                                 () -> {
-                                    int c = concurrency.incrementAndGet();
-                                    maxConcurrency.updateAndGet(cur -> Math.max(cur, c));
+                                    concurrentReads.countDown();
                                     try {
-                                        Thread.sleep(50);
+                                        assertThat(concurrentReads.await(10, TimeUnit.SECONDS))
+                                                .isTrue();
                                     } catch (InterruptedException e) {
                                         Thread.currentThread().interrupt();
+                                        throw new RuntimeException(e);
                                     }
-                                    concurrency.decrementAndGet();
-                                    return Optional.ofNullable(result);
+                                    // Roaring's cardinality cache is mutable, so each asynchronous
+                                    // read must return its own bitmap.
+                                    return Optional.of(resultOf(1, 2, 3, 4, 5));
                                 },
                                 executor);
                     }
@@ -902,9 +904,10 @@ class GlobalIndexEvaluatorTest {
         Predicate predicate =
                 PredicateBuilder.and(builder.equal(0, 1), builder.equal(0, 2), builder.equal(0, 3));
 
-        evaluator.evaluate(predicate);
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
 
-        assertThat(maxConcurrency.get()).isGreaterThan(1);
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L, 4L, 5L);
         evaluator.close();
     }
 

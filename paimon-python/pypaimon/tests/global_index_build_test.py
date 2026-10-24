@@ -29,28 +29,32 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
-from pypaimon.globalindex.build_plan import (
+from pypaimon.execution.python.read.table_read import PythonTableRead
+from pypaimon.execution.python.globalindex.build_plan import (
     filter_non_indexable_splits as _filter_non_indexable_splits,
     split_by_global_index_shard as _split_by_global_index_shard,
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
+from pypaimon import Schema
+from pypaimon.common.json_util import JSON
+from pypaimon.execution.python.globalindex.bitmap.bitmap_index_writer import BITMAP_IDENTIFIER
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
-from pypaimon.globalindex.key_serializer import create_serializer
-from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
+from pypaimon.execution.python.globalindex.btree.btree_file_footer import BTreeFileFooter
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
+from pypaimon.globalindex.full_text_options import (
     FULL_TEXT_IDENTIFIER,
     NativeFullTextIndexOptions,
 )
-from pypaimon.globalindex.full_text.native_full_text_index_writer import (
-    NativeFullTextIndexWriter,
-)
-from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
+from pypaimon.execution.python.write.native_full_text_index_writer import NativeFullTextIndexWriter
+from pypaimon.execution.python.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
     _iter_training_batches,
     native_options,
     train_sample_ratio,
 )
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -221,6 +225,33 @@ class GlobalIndexBuildTest(
         'bucket': '-1',
         'file.format': 'parquet',
     }
+
+    def test_sorted_build_indexes_deleted_physical_rows_like_java(self):
+        for kind in (BTREE_IDENTIFIER, BITMAP_IDENTIFIER):
+            with self.subTest(kind=kind):
+                options = dict(self.table_options)
+                options.update({'deletion-vectors.enabled': 'true', 'write.native.enabled': 'false'})
+                table = self._create_table(options=options)
+                self._write_arrow(table, pa.table({
+                    'id': [1, 2, 3], 'name': ['a', 'b', 'a'],
+                    'age': [10, 20, 30], 'city': ['x', 'y', 'z'],
+                }, schema=self.pa_schema))
+                builder = table.new_batch_write_builder()
+                commit = builder.new_commit()
+                try:
+                    commit.commit(builder.new_update().delete_by_row_id([0, 2]))
+                finally:
+                    commit.close()
+                # Both deleted keys and the live key belong to index coverage.
+                self.assertEqual(1, table.create_global_index('name', index_type=kind))
+                entries = [e for e in IndexFileHandler(table).scan(None) if e.index_file.index_type == kind]
+                self.assertEqual(3, sum(e.index_file.row_count for e in entries))
+                self.assertEqual([(0, 2)], [(e.index_file.global_index_meta.row_range_start,
+                                            e.index_file.global_index_meta.row_range_end) for e in entries])
+                read = table.new_read_builder()
+                rows = read.new_read().to_arrow(read.new_scan().plan().splits())
+                self.assertEqual([2], rows.column('id').to_pylist())
+                self.assertEqual(0, table.create_global_index('name', index_type=kind))
 
     def test_create_btree_global_index_from_python(self):
         table = self._create_table()
@@ -651,7 +682,6 @@ class GlobalIndexBuildTest(
                 entry.index_file.file_name)))
 
     def test_create_vindex_streaming_failure_cleans_resources(self):
-        from pypaimon.read.table_read import TableRead
 
         schema = pa.schema([('embedding', pa.list_(pa.float32()))])
         table = self._create_table(pa_schema=schema, options=dict(
@@ -660,7 +690,7 @@ class GlobalIndexBuildTest(
             {'embedding': [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]}, schema=schema))
         snapshot_id = table.snapshot_manager().get_latest_snapshot().id
         original_write = VindexVectorIndexWriter.write_batch
-        original_batches = TableRead._arrow_batch_generator
+        original_batches = PythonTableRead._arrow_batch_generator
         temp_paths = []
         closed = []
         generators = []
@@ -682,7 +712,7 @@ class GlobalIndexBuildTest(
             return generator
 
         with patch.object(VindexVectorIndexWriter, 'write_batch', failing_write), \
-                patch.object(TableRead, '_arrow_batch_generator', tracked_batches):
+                patch.object(PythonTableRead, '_arrow_batch_generator', tracked_batches):
             with self.assertRaisesRegex(RuntimeError, 'injected write failure'):
                 table.create_global_index('embedding', index_type='ivf-flat', options={
                     'ivf-flat.dimension': '2',
@@ -1029,20 +1059,54 @@ class GlobalIndexBuildTest(
                 index_type=FULL_TEXT_IDENTIFIER,
             )
 
+    def _create_legacy_fixed_bucket_table(self, bucket):
+        # Older pypaimon versions skipped row tracking schema validation, so a
+        # row tracking table with a fixed bucket may already exist on disk.
+        # Simulate it by rewriting the committed schema file directly.
+        name = self._unique_name()
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            self.pa_schema, options=self.table_options), False)
+        table = self.catalog.get_table(name)
+        legacy_options = dict(table.table_schema.options)
+        legacy_options['bucket'] = str(bucket)
+        legacy_schema = table.table_schema.copy(new_options=legacy_options)
+        schema_file = table.schema_manager._to_schema_path(legacy_schema.id)
+        table.file_io.overwrite_file_utf8(
+            schema_file, JSON.to_json(legacy_schema, indent=2))
+        table.schema_manager.schema_cache.pop(legacy_schema.id, None)
+
+        legacy_table = self.catalog.get_table(name)
+        self.assertEqual(bucket, legacy_table.options.bucket())
+        self.assertTrue(legacy_table.options.row_tracking_enabled())
+        return legacy_table
+
+    def test_create_sorted_global_index_rejects_legacy_fixed_bucket_table(self):
+        table = self._create_legacy_fixed_bucket_table(bucket=4)
+        # A caller provided bucket only tunes the index build, so it must not be
+        # able to pass the validation on behalf of the table.
+        for index_type in (BTREE_IDENTIFIER, BITMAP_IDENTIFIER):
+            for options in (None, {'bucket': '-1'}):
+                with self.subTest(index_type=index_type, options=options):
+                    with self.assertRaisesRegex(
+                            ValueError,
+                            'Global index only supports unaware-bucket tables '
+                            r'\(bucket = -1\), but table .* has bucket = 4'):
+                        table.create_global_index(
+                            'id', index_type=index_type, options=options)
+        # Rejected before building, so no index snapshot is committed.
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
     def test_create_vindex_global_index_rejects_generic_unsupported_tables(self):
         schema = pa.schema([
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
+        # Row tracking tables with a fixed bucket are rejected at schema validation,
+        # so they can no longer reach the global index builder.
         bucket_options = dict(self.table_options)
         bucket_options['bucket'] = '1'
-        bucket_table = self._create_table(pa_schema=schema, options=bucket_options)
-        with self.assertRaisesRegex(ValueError, 'unaware-bucket'):
-            bucket_table.create_global_index(
-                'embedding',
-                index_type='ivf-flat',
-                options={'ivf-flat.dimension': '2'},
-            )
+        with self.assertRaisesRegex(ValueError, 'it only support bucket = -1'):
+            self._create_table(pa_schema=schema, options=bucket_options)
 
         dv_options = dict(self.table_options)
         dv_options['deletion-vectors.enabled'] = 'true'
@@ -1055,6 +1119,20 @@ class GlobalIndexBuildTest(
             )
         with self.assertRaisesRegex(ValueError, 'deletion vectors'):
             dv_table.create_global_index('embedding', index_type=FULL_TEXT_IDENTIFIER)
+
+    def test_build_options_cannot_change_table_deletion_vector_eligibility(self):
+        for enabled in (False, True):
+            with self.subTest(deletion_vectors=enabled):
+                table_options = dict(self.table_options)
+                table_options['deletion-vectors.enabled'] = str(enabled).lower()
+                table = self._create_table(options=table_options)
+                build_options = {'deletion-vectors.enabled': str(not enabled).lower()}
+                if enabled:
+                    with self.assertRaisesRegex(ValueError, 'deletion vectors'):
+                        GlobalIndexBuilder(table, 'name', index_type=FULL_TEXT_IDENTIFIER, options=build_options)
+                else:
+                    self.assertEqual([], GlobalIndexBuilder(
+                        table, 'name', index_type=FULL_TEXT_IDENTIFIER, options=build_options).build())
 
     def test_vindex_native_options_follow_java_mapping(self):
         data_type = ArrayType(True, AtomicType('FLOAT'))
@@ -1214,6 +1292,16 @@ class GlobalIndexBuildTest(
             [[file.file_name for file in s.files] for s in splits],
         )
 
+    def test_sorted_build_splits_omit_deletion_vectors_like_java(self):
+        split = _FakeSplit([_FakeFile('a', 0, 2), _FakeFile('b', 4, 2)])
+        deletion_files = [object(), object()]
+        split.data_deletion_files = deletion_files
+        splits = _split_one_by_contiguous_row_range(split)
+        self.assertEqual([['a'], ['b']], [[file.file_name for file in s.files] for s in splits])
+        self.assertTrue(all(s.data_deletion_files is None for s in splits))
+        # Planning a physical build must not alter the original query split.
+        self.assertIs(split.data_deletion_files, deletion_files)
+
     def test_split_by_global_index_shard_matches_java_default_builder(self):
         split = _FakeSplit([
             _FakeFile('a', 0, 3),
@@ -1354,7 +1442,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
     ])
 
     def setUp(self):
-        self.builder = object.__new__(GlobalIndexBuilder)
+        self.builder = object.__new__(PythonGlobalIndexBuilder)
         self.builder._table = Mock()
         self.builder._core_options = Mock()
         self.builder._core_options.global_index_row_count_per_shard.return_value = 10
@@ -1387,7 +1475,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
         self.generator = generate()
         reader = pa.RecordBatchReader.from_batches(self.schema, self.generator)
         self.read._new_arrow_batch_reader.return_value = reader, self.generator
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=[
             (_FakeSplit([]), Range(10, 19)),
         ]), patch(module + '._to_index_manifest_entries', return_value=[]):
@@ -1430,7 +1518,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             written.extend(zip(vectors.to_pylist(), row_ids.to_pylist()))
 
         self.writer.write_batch.side_effect = write_batch
-        with patch('pypaimon.globalindex.create_global_index.ADD_BATCH_SIZE', 2):
+        with patch('pypaimon.execution.python.globalindex.create_global_index.ADD_BATCH_SIZE', 2):
             self._build([
                 self._batch([], []),
                 self._batch([[9.0], [10.0], None, [12.0]], [9, 10, 11, 12]),
@@ -1531,7 +1619,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                     active -= 1
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards):
             messages = self.builder._build_generic_index(
                 [], [], Mock(), self.read, '/unused')
@@ -1571,7 +1659,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             raise RuntimeError('injected shard failure')
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(
@@ -1622,7 +1710,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                     raise RuntimeError("can't start new thread")
             return real_start(thread)
 
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 patch.object(threading.Thread, 'start', failing_start), \
                 self.assertRaisesRegex(RuntimeError, "can't start new thread"):
@@ -1664,7 +1752,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
             raise RuntimeError('injected shard failure')
 
         self.builder._build_generic_shard = Mock(side_effect=build_shard)
-        module = 'pypaimon.globalindex.create_global_index'
+        module = 'pypaimon.execution.python.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=shards), \
                 self.assertRaisesRegex(RuntimeError, 'injected shard failure'):
             self.builder._build_generic_index(

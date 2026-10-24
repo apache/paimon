@@ -21,9 +21,7 @@ from typing import Dict, List, Optional, Sequence, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.btree.btree_index_writer import BTREE_IDENTIFIER
-from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.globalindex.index_types import BTREE_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -89,53 +87,16 @@ class GlobalIndexDropper:
                 )
 
     def build(self) -> List[CommitMessage]:
-        snapshot = self._table.snapshot_manager().get_latest_snapshot()
-        if snapshot is None:
-            return []
-
-        target_field_ids = [
-            self._table.field_dict[column].id for column in self._index_columns
-        ]
         partition_filter = self._resolve_partition_filter()
-
-        def should_delete(entry: IndexManifestEntry) -> bool:
-            index_file = entry.index_file
-            global_meta = index_file.global_index_meta
-            if index_file.index_type.lower().strip() != self._index_type or global_meta is None:
-                return False
-            if _indexed_field_ids(global_meta) != target_field_ids:
-                return False
-            return partition_filter is None or partition_filter.test(entry.partition)
-
-        entries = IndexFileHandler(self._table).scan(snapshot, should_delete)
-        if not entries:
-            return []
-
-        by_partition = {}
-        for entry in entries:
-            key = tuple(entry.partition.values)
-            by_partition.setdefault(key, []).append(
-                IndexManifestEntry(
-                    kind=1,
-                    partition=entry.partition,
-                    bucket=entry.bucket,
-                    index_file=entry.index_file,
-                )
-            )
-
-        return [
-            CommitMessage(
-                partition=partition,
-                bucket=0,
-                new_files=[],
-                index_deletes=deletes,
-            )
-            for partition, deletes in by_partition.items()
-        ]
+        from pypaimon.globalindex.index_dispatch import build_global_index_drop
+        return build_global_index_drop(self, partition_filter)
 
     def _resolve_partition_filter(self) -> Optional[Predicate]:
         if self._partition_filter is not None:
-            return self._partition_filter
+            from pypaimon.read.push_down_utils import rewrite_predicate_indices
+
+            self._table.new_read_builder().with_partition_filter(self._partition_filter)
+            return rewrite_predicate_indices(self._partition_filter, self._table.partition_keys_fields)
         if self._partitions is None:
             return None
 
@@ -168,10 +129,3 @@ def _normalize_index_columns(index_column: Union[str, Sequence[str]]) -> List[st
     if isinstance(index_column, str):
         return [c.strip() for c in index_column.split(",") if c.strip()]
     return [str(c).strip() for c in index_column if str(c).strip()]
-
-
-def _indexed_field_ids(global_meta) -> List[int]:
-    field_ids = [global_meta.index_field_id]
-    if global_meta.extra_field_ids:
-        field_ids.extend(global_meta.extra_field_ids)
-    return field_ids

@@ -28,8 +28,8 @@ from pypaimon.common.options.options import Options
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.interval_partition import IntervalPartition, default_key_comparator
-from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
+from pypaimon.execution.python.read.interval_partition import IntervalPartition, default_key_comparator
+from pypaimon.execution.python.read.scanner.primary_key_table_split_generator import (PrimaryKeyTableSplitGenerator)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer, GenericRowSerializer
 

@@ -20,9 +20,10 @@
 import hashlib
 import logging
 import posixpath
-import re
 from datetime import timedelta
 from urllib.parse import unquote, urlparse, urlsplit
+
+from pypaimon.filesystem.uri_utils import normalize_uri_path, table_relative_path
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,24 +105,9 @@ def _validity_seconds(validity, has_security_token=False) -> int:
 def _validate_table_root(table_root, descriptor):
     root = urlparse(str(table_root))
     blob = urlparse(descriptor.uri)
-    root_path = _normalize_path(root.path)
-    blob_path = _normalize_path(blob.path)
-    if ((root.scheme or '').lower() != (blob.scheme or '').lower()
-            or root.netloc != blob.netloc):
-        raise ValueError(
-            "Blob descriptor URI must use the same scheme and authority "
-            "as table root.")
-    child_prefix = root_path if root_path.endswith('/') else root_path + '/'
-    if not blob_path.startswith(child_prefix):
-        raise ValueError("Blob descriptor URI must be under table root.")
-    return blob._replace(path=blob_path)
-
-
-def _normalize_path(path):
-    normalized = posixpath.normpath(re.sub('/+', '/', path or '/'))
-    if path.startswith('/') and not normalized.startswith('/'):
-        normalized = '/' + normalized
-    return normalized
+    relative_path = table_relative_path(table_root, descriptor.uri)
+    return blob._replace(
+        path=posixpath.join(normalize_uri_path(root.path), relative_path))
 
 
 def _head_object_if_exists(bucket, key):

@@ -412,7 +412,8 @@ class RESTCatalog(Catalog):
             raise TableNoPermissionException(identifier) from e
 
     def rollback_to(self, identifier: Union[str, Identifier], instant: Instant,
-                    from_snapshot: Optional[int] = None) -> None:
+                    from_snapshot: Optional[int] = None, *,
+                    table_uuid: Optional[str] = None) -> None:
         """Rollback table by the given identifier and instant.
 
         Args:
@@ -420,6 +421,7 @@ class RESTCatalog(Catalog):
             instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
             from_snapshot: Optional snapshot ID. Success only occurs when the
                 latest snapshot is this snapshot.
+            table_uuid: Expected table or branch UUID from the loaded table view.
 
         Raises:
             TableNotExistException: If the table does not exist.
@@ -428,7 +430,8 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            self.rest_api.rollback_to(identifier, instant, from_snapshot)
+            self.rest_api.rollback_to(
+                identifier, instant, from_snapshot, table_uuid=table_uuid)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(
@@ -652,7 +655,9 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
-            raise TableNotExistException(identifier) from e
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TABLE:
+                raise TableNotExistException(identifier) from e
+            raise
         except AlreadyExistsException as e:
             raise BranchAlreadyExistException(branch_name) from e
         except ForbiddenException as e:
@@ -672,16 +677,7 @@ class RESTCatalog(Catalog):
 
     def rename_branch(self, identifier: Union[str, Identifier], from_branch: str,
                       to_branch: str) -> None:
-        if not isinstance(identifier, Identifier):
-            identifier = Identifier.from_string(identifier)
-        try:
-            self.rest_api.rename_branch(identifier, from_branch, to_branch)
-        except NoSuchResourceException as e:
-            raise BranchNotExistException(from_branch) from e
-        except AlreadyExistsException as e:
-            raise BranchAlreadyExistException(to_branch) from e
-        except ForbiddenException as e:
-            raise TableNoPermissionException(identifier) from e
+        raise NotImplementedError('REST branch rename is not supported, matching Java RESTCatalog.')
 
     def fast_forward(self, identifier: Union[str, Identifier], branch_name: str) -> None:
         if not isinstance(identifier, Identifier):

@@ -30,8 +30,8 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
 from pypaimon.filesystem.jindo_file_system_handler import JindoInputFile
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-from pypaimon.read.reader.video_format_reader import VideoFileMeta
+from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
+from pypaimon.execution.python.read.reader.video_format_reader import (VideoFileMeta)
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import (
     Blob,
@@ -42,7 +42,7 @@ from pypaimon.table.row.blob import (
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
-from pypaimon.write.video_format_writer import VideoFormatWriter
+from pypaimon.execution.python.write.video_format_writer import VideoFormatWriter
 
 try:
     import av
@@ -153,6 +153,9 @@ class VideoFormatTest(unittest.TestCase):
         self.assertEqual(frames[0].payload_descriptor, frames[3].payload_descriptor)
         self.assertNotEqual(frames[0].payload_descriptor, frames[2].payload_descriptor)
         self.assertIsNone(values[4])
+        # The file index still exposes the placeholder sentinel. Materializing
+        # that cell without an older version yields NULL.
+        self.assertIsNone(self._read(target, row_indices=[5])[0])
 
     def test_cross_language_video_v1_fixture(self):
         fixture = self._fixture_bytes(self.VIDEO_FIXTURE)
@@ -350,7 +353,7 @@ class VideoFormatTest(unittest.TestCase):
 
         reader = mock.Mock()
         reader.new_input_stream.side_effect = lambda unused: JindoInputFile(
-            JindoStream())
+            JindoStream(), owner=reader)
         descriptor = VideoFrameDescriptor(
             "oss://bucket/video.mp4", 0, -1, 0, -1, 0)
         value = Blob.from_descriptor(reader, descriptor)

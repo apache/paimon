@@ -27,22 +27,57 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.beans.ConstructorProperties;
 
+import static org.apache.paimon.rest.requests.LabelRequests.requireNonBlank;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Value to set on the label binding identified by the request path. */
+/** Label binding to create or replace, identified entirely by the request body. */
 @Experimental
 public class UpsertLabelRequest implements RESTRequest {
 
+    private static final String FIELD_ENTITY_TYPE = "entityType";
+    private static final String FIELD_ENTITY_NAME = "entityName";
+    private static final String FIELD_KEY = "key";
     private static final String FIELD_VALUE = "value";
+
+    @JsonProperty(FIELD_ENTITY_TYPE)
+    private final String entityType;
+
+    @JsonProperty(FIELD_ENTITY_NAME)
+    private final String entityName;
+
+    @JsonProperty(FIELD_KEY)
+    private final String key;
 
     @JsonProperty(FIELD_VALUE)
     private final String value;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_VALUE})
-    public UpsertLabelRequest(@JsonProperty(FIELD_VALUE) String value) {
+    @ConstructorProperties({FIELD_ENTITY_TYPE, FIELD_ENTITY_NAME, FIELD_KEY, FIELD_VALUE})
+    public UpsertLabelRequest(
+            @JsonProperty(FIELD_ENTITY_TYPE) String entityType,
+            @JsonProperty(FIELD_ENTITY_NAME) String entityName,
+            @JsonProperty(FIELD_KEY) String key,
+            @JsonProperty(FIELD_VALUE) String value) {
+        this.entityType = requireNonBlank(entityType, FIELD_ENTITY_TYPE);
+        this.entityName = requireNonBlank(entityName, FIELD_ENTITY_NAME);
+        this.key = requireNonBlank(key, FIELD_KEY);
         checkArgument(value != null, "value must not be null");
         this.value = value;
+    }
+
+    @JsonGetter(FIELD_ENTITY_TYPE)
+    public String getEntityType() {
+        return entityType;
+    }
+
+    @JsonGetter(FIELD_ENTITY_NAME)
+    public String getEntityName() {
+        return entityName;
+    }
+
+    @JsonGetter(FIELD_KEY)
+    public String getKey() {
+        return key;
     }
 
     @JsonGetter(FIELD_VALUE)

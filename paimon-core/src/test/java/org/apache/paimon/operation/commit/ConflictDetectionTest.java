@@ -18,8 +18,12 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -34,11 +38,19 @@ import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -67,6 +79,177 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
+
+    @Test
+    void testFileEntryWithDVToStringPreservesOriginalOutput() {
+        // Guard the inherited toString() path after moving DV formatting to toStringWithPartition.
+        BinaryRow partition = BinaryRow.singleColumn(12);
+        SimpleFileEntry entry = createFileEntryWithRowId("base", ADD, partition, 2, 10L, 3L);
+        SimpleFileEntryWithDV entryWithDV = new SimpleFileEntryWithDV(entry, "dv-1");
+
+        assertThat(entryWithDV.toString())
+                .isEqualTo(entry + ", {dvFileName=dv-1}")
+                .contains("partition=" + partition);
+    }
+
+    @Test
+    void testConflictEntriesShowPartitionInFullAndSimplifiedExceptions() {
+        // Exceed the 50-entry limit in both lists while preserving DV metadata and the cause.
+        FileStorePathFactory pathFactory = mock(FileStorePathFactory.class);
+        BinaryRow partition = BinaryRow.singleColumn(12);
+        BinaryRow changedPartition = BinaryRow.singleColumn(13);
+        when(pathFactory.getPartitionString(partition)).thenReturn("hr=12/");
+        when(pathFactory.getPartitionString(changedPartition)).thenReturn("hr=13/");
+        ConflictDetection detection =
+                new AppendConflictDetection(
+                        "test-table",
+                        "test-user",
+                        RowType.of(new IntType()),
+                        pathFactory,
+                        BucketMode.HASH_FIXED,
+                        false,
+                        null,
+                        null);
+        SimpleFileEntry entry = createFileEntryWithRowId("base", ADD, partition, 2, 10L, 3L);
+        SimpleFileEntry change =
+                createFileEntryWithRowId("changed", DELETE, changedPartition, 2, 13L, 1L);
+        List<SimpleFileEntry> baseEntries = new ArrayList<>(Collections.nCopies(49, entry));
+        baseEntries.add(createFileEntryWithRowId("base-50", ADD, partition, 2, 13L, 1L));
+        baseEntries.add(createFileEntryWithRowId("base-51", ADD, partition, 2, 14L, 1L));
+        List<SimpleFileEntry> changes =
+                new ArrayList<>(Collections.nCopies(49, new SimpleFileEntryWithDV(change, "dv-1")));
+        changes.add(createFileEntryWithRowId("changed-50", DELETE, changedPartition, 2, 14L, 1L));
+        changes.add(createFileEntryWithRowId("changed-51", DELETE, changedPartition, 2, 15L, 1L));
+        RuntimeException cause = new RuntimeException("original conflict");
+
+        Pair<RuntimeException, RuntimeException> exceptions =
+                detection.createConflictException(
+                        "commit conflict", "base-user", baseEntries, changes, cause);
+
+        assertThat(exceptions.getLeft())
+                .hasMessageContaining("partition=hr=12/")
+                .hasMessageContaining("Changes are:\n{kind=DELETE, partition=hr=13/")
+                .hasMessageContaining("totalBuckets=1")
+                .hasMessageContaining("rowCount=3")
+                .hasMessageContaining("fileName=base-51")
+                .hasMessageContaining("fileName=changed-51")
+                .hasCause(cause);
+        assertThat(exceptions.getRight())
+                .hasMessageContaining("Base entries are:")
+                .hasMessageContaining("Changes are:\n{kind=DELETE, partition=hr=13/")
+                .hasMessageContaining("partition=hr=12/")
+                .hasMessageContaining("dvFileName=dv-1")
+                .hasMessageContaining("fileName=base-50")
+                .hasMessageContaining("fileName=changed-50")
+                .hasMessageNotContaining("fileName=base-51")
+                .hasMessageNotContaining("fileName=changed-51")
+                .hasCause(cause);
+    }
+
+    @Test
+    void testConflictEntriesUseEscapedPartitionPath(@TempDir java.nio.file.Path tempDir) {
+        // Use the real formatter to cover escaping and null defaults in a multi-column partition.
+        RowType partitionType =
+                RowType.of(
+                        new DataType[] {new VarCharType(10), new IntType()},
+                        new String[] {"dt", "hr"});
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        new Path(tempDir.toString()),
+                        partitionType,
+                        "default",
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null,
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
+                        null);
+        BinaryRow partition = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeString(0, BinaryString.fromString("a/b=c"));
+        writer.setNullAt(1);
+        writer.complete();
+        ConflictDetection detection =
+                new AppendConflictDetection(
+                        "test-table",
+                        "test-user",
+                        partitionType,
+                        pathFactory,
+                        BucketMode.HASH_FIXED,
+                        false,
+                        null,
+                        null);
+
+        Pair<RuntimeException, RuntimeException> exceptions =
+                detection.createConflictException(
+                        "commit conflict",
+                        "base-user",
+                        Collections.singletonList(
+                                createFileEntryWithRowId("base", ADD, partition, 2, 10L, 3L)),
+                        Collections.emptyList(),
+                        null);
+
+        assertThat(exceptions.getLeft()).hasMessageContaining("partition=dt=a%2Fb%3Dc/hr=default/");
+    }
+
+    @Test
+    void testConflictEntriesForNonPartitionedTable() {
+        // An empty partition schema should produce an explicit label without a path factory.
+        ConflictDetection detection = createConflictDetection(null, false, false);
+        SimpleFileEntry entry = createFileEntry("base", ADD);
+
+        Pair<RuntimeException, RuntimeException> exceptions =
+                detection.createConflictException(
+                        "commit conflict",
+                        "base-user",
+                        Collections.singletonList(entry),
+                        Collections.emptyList(),
+                        null);
+
+        assertThat(exceptions.getLeft())
+                .isSameAs(exceptions.getRight())
+                .hasMessageContaining("partition=<non-partitioned>");
+    }
+
+    @Test
+    void testConflictEntryFormattingFailurePreservesOriginalOutputAndCause() {
+        // A formatting error must not hide the original conflict or discard DV metadata.
+        FileStorePathFactory pathFactory = mock(FileStorePathFactory.class);
+        BinaryRow partition = BinaryRow.singleColumn(12);
+        when(pathFactory.getPartitionString(partition))
+                .thenThrow(new IllegalArgumentException("invalid partition"));
+        ConflictDetection detection =
+                new AppendConflictDetection(
+                        "test-table",
+                        "test-user",
+                        RowType.of(new IntType()),
+                        pathFactory,
+                        BucketMode.HASH_FIXED,
+                        false,
+                        null,
+                        null);
+        RuntimeException cause = new RuntimeException("original conflict");
+        SimpleFileEntry entry = createFileEntryWithRowId("base", ADD, partition, 2, 10L, 3L);
+        SimpleFileEntryWithDV entryWithDV = new SimpleFileEntryWithDV(entry, "dv-1");
+
+        Pair<RuntimeException, RuntimeException> exceptions =
+                detection.createConflictException(
+                        "commit conflict",
+                        "base-user",
+                        Arrays.asList(entry, entryWithDV),
+                        Collections.emptyList(),
+                        cause);
+
+        assertThat(exceptions.getLeft())
+                .hasMessageContaining("Base entries are:\n" + entry + "\n" + entryWithDV)
+                .hasCause(cause);
+    }
 
     @Test
     void testCreateConflictDetectionByTableType() {
@@ -1356,7 +1539,9 @@ class ConflictDetectionTest {
                         Snapshot.CommitKind.COMPACT);
 
         assertThat(exception).isPresent();
-        assertThat(exception.get()).isInstanceOf(DataEvolutionRowRangeConflictException.class);
+        assertThat(exception.get())
+                .isInstanceOf(DataEvolutionRowRangeConflictException.class)
+                .hasMessageContaining("partition=<non-partitioned>");
     }
 
     @Test
@@ -1377,11 +1562,55 @@ class ConflictDetectionTest {
         assertThat(exception).isPresent();
         assertThat(exception.get())
                 .isNotInstanceOf(DataEvolutionRowRangeConflictException.class)
+                .hasMessageContaining("partition=<non-partitioned>")
                 .hasMessageContaining("dedicated file")
                 .hasMessageContaining("p1.blob")
                 .hasMessageContaining("spans multiple data file ranges")
                 .hasMessageContaining("f1")
                 .hasMessageContaining("f2");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"compacted", "p1.blob", "p1.vector.data"})
+    void testRowRangeConflictEntriesShowPartitions(String fileName) {
+        // Cover overlapping data files and dedicated blob/vector files spanning adjacent ranges.
+        BinaryRow partition = BinaryRow.singleColumn(12);
+        FileStorePathFactory pathFactory = mock(FileStorePathFactory.class);
+        when(pathFactory.getPartitionString(partition)).thenReturn("hr=12/");
+        DataEvolutionConflictDetection detection =
+                new DataEvolutionConflictDetection(
+                        "test-table",
+                        "test-user",
+                        RowType.of(new DataType[] {new IntType()}, new String[] {"hr"}),
+                        pathFactory,
+                        BucketMode.HASH_FIXED,
+                        false,
+                        false,
+                        null,
+                        null,
+                        null);
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Arrays.asList(
+                                createFileEntryWithRowId("f1", ADD, partition, 0, 0L, 2L),
+                                createFileEntryWithRowId("f2", ADD, partition, 0, 2L, 2L)),
+                        Collections.singletonList(
+                                createFileEntryWithRowId(fileName, ADD, partition, 0, 0L, 4L)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get())
+                .hasMessageContaining("partition=hr=12/")
+                .hasMessageNotContaining("partition=org.apache.paimon.data.BinaryRow@")
+                .hasMessageContaining("fileName=f1")
+                .hasMessageContaining("fileName=f2")
+                .hasMessageContaining("fileName=" + fileName)
+                .hasMessageContaining("rowCount=4")
+                .hasMessageContaining("firstRowId=0");
     }
 
     @Test

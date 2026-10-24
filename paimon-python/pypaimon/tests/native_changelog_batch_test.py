@@ -25,7 +25,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.scan_distribution import java_file_name_shard
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
@@ -110,9 +110,10 @@ def _read(table, native, window=(0, 300), shard=None, predicate=None,
         scan.with_shard(*shard)
     with ExitStack() as stack:
         if native:
+            # Public scanner hooks select Python; guard the implementation instead.
             for method in ('scan', 'scan_with_stats'):
-                stack.enter_context(patch.object(
-                    scan.file_scanner, method,
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.' + method,
                     side_effect=AssertionError('batch changelog planning used Python')))
         plan = scan.scan_with_stats()[0] if with_stats else scan.plan()
     read = builder.new_read()
@@ -120,9 +121,10 @@ def _read(table, native, window=(0, 300), shard=None, predicate=None,
     with ExitStack() as stack:
         if native:
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
-            stack.enter_context(patch.object(
-                read, '_create_split_read',
-                side_effect=AssertionError('batch changelog reading used Python')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('batch changelog reading used Python')
+            ))
         rows = read.to_arrow(plan.splits(), parallelism=1).to_pylist()
     return plan, rows
 

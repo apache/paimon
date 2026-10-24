@@ -180,13 +180,21 @@ public class CatalogEnvironment implements Serializable {
                         lockContext, lockIdentifier, uuid, commitUser, tableOptions);
     }
 
+    /** Create rollback with the table incarnation and runtime branch. */
     @Nullable
-    public TableRollback catalogTableRollback() {
+    public TableRollback catalogTableRollback(@Nullable String branch) {
         if (catalogLoader != null && supportsVersionManagement) {
             Catalog catalog = catalogLoader.load();
+            Identifier rollbackIdentifier =
+                    branch == null
+                            ? identifier
+                            : new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
             return (instant, fromSnapshot) -> {
                 try {
-                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                    catalog.rollbackTo(rollbackIdentifier, uuid, instant, fromSnapshot);
                 } catch (Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
                 }
@@ -212,10 +220,12 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public SnapshotLoader snapshotLoader() {
-        if (catalogLoader == null) {
+        // Catalogs without version management cannot load snapshots, avoid loading the catalog
+        // only to fall back to the file system.
+        if (catalogLoader == null || !supportsVersionManagement) {
             return null;
         }
-        return new SnapshotLoaderImpl(catalogLoader, identifier);
+        return new SnapshotLoaderImpl(catalogLoader, identifier, uuid);
     }
 
     @Nullable
@@ -280,7 +290,7 @@ public class CatalogEnvironment implements Serializable {
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
-                uuid,
+                identifier.equals(this.identifier) ? uuid : null,
                 catalogLoader,
                 lockFactory,
                 lockContext,

@@ -109,12 +109,32 @@ class IndexManifestWriteTest(unittest.TestCase):
         survivors = {e.index_file.file_name for e in imf.read(new_name)}
         self.assertEqual({'idx-b'}, survivors)
 
-    def test_combine_unknown_delete_is_noop_on_content(self):
+    def test_combine_unknown_global_index_delete_is_rejected(self):
         imf = IndexManifestFile(self._table())
         previous = imf.write([self._entry('idx-a', 1)])
-        new_name = imf.combine_deletes(previous, [self._entry('idx-zzz', 9)])
-        survivors = {e.index_file.file_name for e in imf.read(new_name)}
-        self.assertEqual({'idx-a'}, survivors)
+        with self.assertRaisesRegex(RuntimeError, 'does not exist'):
+            imf.combine_deletes(previous, [self._entry('idx-zzz', 9)])
+        self.assertEqual(['idx-a'], [e.index_file.file_name for e in imf.read(previous)])
+
+    def test_combine_global_index_delete_retains_other_type_with_same_name(self):
+        imf = IndexManifestFile(self._table())
+        btree = self._entry('shared-name', 1)
+        bitmap = self._entry('shared-name', 1)
+        bitmap.index_file.index_type = 'bitmap'
+        previous = imf.write([btree, bitmap])
+        current = imf.combine_deletes(previous, [btree])
+        self.assertEqual(['bitmap'], [e.index_file.index_type for e in imf.read(current)])
+
+    def test_combine_hash_index_delete_keeps_bucketed_stale_delete_semantics(self):
+        imf = IndexManifestFile(self._table())
+        current = self._entry('current-hash', 1)
+        current.index_file.index_type = 'HASH'
+        current.index_file.global_index_meta = None
+        previous = imf.write([current])
+        stale = self._entry('old-hash', 1)
+        stale.index_file.index_type = 'HASH'
+        stale.index_file.global_index_meta = None
+        self.assertIsNone(imf.combine_deletes(previous, [stale]))
 
     def test_combine_empty_deletes_returns_previous(self):
         imf = IndexManifestFile(self._table())

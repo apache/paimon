@@ -15,13 +15,21 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import gc
 import os
 import pickle
+import signal
 import tempfile
+import threading
 import time
+import types
 import unittest
+import warnings
+import weakref
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
+
+from cachetools import TTLCache
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.rest_token import RESTToken
@@ -34,6 +42,33 @@ from pypaimon.filesystem.io_cache_routing import Op
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.table.row.blob import BlobDescriptor
 
+_FILE_IO_GET = 'pypaimon.catalog.rest.rest_token_file_io.FileIO.get'
+
+
+class _NonOwningStream:
+    """Like a pyjindo stream: does not keep the FileIO that opened it alive."""
+
+    def __init__(self, file_io):
+        self._file_io = weakref.ref(file_io)
+
+    def read(self):
+        if self._file_io() is None:
+            raise RuntimeError('use-after-free: the FileIO of this stream was released')
+        return b'x'
+
+
+class _FakeFileIO:
+
+    def __init__(self, path, options):
+        self.path = path
+        self.options = options
+
+    def new_input_stream(self, path):
+        return _NonOwningStream(self)
+
+    def exists(self, path):
+        return True
+
 
 class RESTTokenFileIOTest(unittest.TestCase):
     """Test cases for RESTTokenFileIO."""
@@ -44,12 +79,334 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.warehouse_path = f"file://{self.temp_dir}"
         self.identifier = Identifier.from_string("default.test_table")
         self.catalog_options = Options({})
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
 
     def tearDown(self):
         """Clean up test fixtures."""
         import shutil
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
+
+    @staticmethod
+    def _valid_token(name):
+        return RESTToken({OssOptions.OSS_SECURITY_TOKEN.key(): name},
+                         int(time.time() * 1000) + 7_200_000)
+
+    def _file_io_with_token(self, path, options, token):
+        file_io = RESTTokenFileIO(self.identifier, path, options)
+        file_io.token = token
+        return file_io
+
+    def test_token_refresh_keeps_file_io_of_open_streams(self):
+        table_path = "oss://bucket/db.db/table"
+        file_io = RESTTokenFileIO(self.identifier, table_path, self.catalog_options)
+        self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'refresh-test', None)
+        now = [1700000000]
+        issued = []
+
+        def refresh():
+            issued.append(RESTToken(
+                {OssOptions.OSS_SECURITY_TOKEN.key(): "sts-{}".format(len(issued))},
+                (now[0] + 2 * 3600) * 1000))
+            file_io.token = issued[-1]
+
+        with patch('pypaimon.catalog.rest.rest_token_file_io.time.time',
+                   side_effect=lambda: now[0]), \
+                patch.object(file_io, '_build_cache_key', return_value='refresh-test'), \
+                patch.object(file_io, 'refresh_token', side_effect=refresh), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            stream = file_io.new_input_stream(table_path + "/bucket-0/data.blob")
+            # Less than an hour left: the next call refreshes the token.
+            now[0] += 3600 + 1
+            self.assertTrue(file_io.exists(table_path + "/snapshot/LATEST"))
+            gc.collect()
+
+            self.assertEqual(2, len(issued))
+            self.assertEqual(b'x', stream.read())
+
+    def test_file_io_cache_separates_paths_and_options_with_same_token(self):
+        token = self._valid_token("shared")
+        legacy = Options({OssOptions.OSS_IMPL.key(): "legacy"})
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            bucket_a = self._file_io_with_token(
+                "oss://bucket-a/db.db/t", Options({}), token).file_io()
+            bucket_b = self._file_io_with_token(
+                "oss://bucket-b/db.db/t", Options({}), token).file_io()
+            bucket_a_legacy = self._file_io_with_token(
+                "oss://bucket-a/db.db/t", legacy, token).file_io()
+
+        self.assertEqual("oss://bucket-a/db.db/t", bucket_a.path)
+        self.assertEqual("oss://bucket-b/db.db/t", bucket_b.path)
+        self.assertIsNot(bucket_a, bucket_a_legacy)
+        self.assertEqual("legacy", bucket_a_legacy.options.get(OssOptions.OSS_IMPL))
+
+    def test_same_token_on_other_bucket_keeps_its_own_oss_bucket(self):
+        token = RESTToken({
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+        }, int(time.time() * 1000) + 7_200_000)
+        options = Options({OssOptions.OSS_IMPL.key(): "legacy"})
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            first = self._file_io_with_token("oss://bucket-a/db.db/t", options, token)
+            second = self._file_io_with_token("oss://bucket-b/db.db/t", options, token)
+            self.assertEqual("bucket-a", first.file_io()._oss_bucket)
+            self.assertEqual("bucket-b", second.file_io()._oss_bucket)
+
+    def test_instances_of_one_table_share_file_io(self):
+        token = self._valid_token("shared")
+        table_path = "oss://bucket/db.db/t"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO) as get_io:
+            first = self._file_io_with_token(table_path, Options({"k": "v"}), token)
+            second = self._file_io_with_token(table_path, Options({"k": "v"}), token)
+            restored = pickle.loads(pickle.dumps(first))
+
+            self.assertIs(first.file_io(), second.file_io())
+            self.assertIs(first.file_io(), restored.file_io())
+            self.assertEqual(1, get_io.call_count)
+
+    def test_file_io_cache_expires_idle_entries_only(self):
+        clock = [0]
+        hour = 3600
+        cache = TTLCache(maxsize=RESTTokenFileIO._FILE_IO_CACHE_MAXSIZE,
+                         ttl=RESTTokenFileIO._FILE_IO_CACHE_TTL, timer=lambda: clock[0])
+        with patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', cache), \
+                patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            file_io = self._file_io_with_token(
+                "oss://bucket/db.db/t", self.catalog_options, self._valid_token("first"))
+            first = file_io.file_io()
+            for _ in range(3):
+                clock[0] += 9 * hour
+                self.assertIs(first, file_io.file_io())
+
+            # The previous token's FileIO stays cached until it has been idle for the TTL.
+            file_io.token = self._valid_token("second")
+            second = file_io.file_io()
+            self.assertIsNot(first, second)
+            first_ref = weakref.ref(first)
+            del first
+            clock[0] += 9 * hour
+            file_io.file_io()
+            gc.collect()
+            self.assertIsNotNone(first_ref())
+            clock[0] += 2 * hour
+            self.assertIs(second, file_io.file_io())
+            gc.collect()
+            self.assertIsNone(first_ref())
+
+    def test_concurrent_lookups_create_one_file_io(self):
+        token = self._valid_token("shared")
+        threads_count = 8
+        barrier = threading.Barrier(threads_count)
+        results = []
+
+        def slow_file_io(path, options):
+            time.sleep(0.05)
+            return _FakeFileIO(path, options)
+
+        def lookup(file_io):
+            barrier.wait()
+            results.append(file_io.file_io())
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=slow_file_io) as get_io:
+            instances = [self._file_io_with_token("oss://bucket/db.db/t", Options({}), token)
+                         for _ in range(threads_count)]
+            threads = [threading.Thread(target=lookup, args=(i,)) for i in instances]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(threads_count, len(results))
+        self.assertTrue(all(r is results[0] for r in results))
+        self.assertEqual(1, get_io.call_count)
+
+    @staticmethod
+    def _run_in_forked_child(action):
+        with warnings.catch_warnings():
+            # Python 3.12+ warns about forking with other threads alive, which these tests do on purpose.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            pid = os.fork()
+        if pid == 0:
+            code = 1
+            try:
+                signal.alarm(10)
+                action()
+                code = 0
+            finally:
+                os._exit(code)
+        return os.waitpid(pid, 0)[1]
+
+    def _assert_child_succeeded(self, status):
+        self.assertFalse(os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGALRM,
+                         "the forked child blocked on a lock held by a parent thread")
+        self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, status)
+
+    def _touch_with_summary_stats(self, cache, stats, clock, open_files, steps):
+        # Each step sets the clock and open files, then reads through a FileIO with that token name.
+        module = 'pypaimon.catalog.rest.rest_token_file_io'
+        with patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', cache), \
+                patch.object(RESTTokenFileIO, '_FILE_IO_STATS', stats), \
+                patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(module + '.time', types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO), \
+                self.assertLogs(module, level='INFO') as logs:
+            for now, files, name in steps:
+                clock[0] = now
+                if files is not None:
+                    open_files[0] = files
+                if name is None:
+                    cache.clear()
+                    continue
+                self._file_io_with_token(
+                    self.warehouse_path, self.catalog_options, self._valid_token(name)).exists("x")
+        return logs.records
+
+    def test_cache_misses_log_one_summary_per_interval(self):
+        cache = TTLCache(maxsize=3, ttl=1e9)
+        stats = dict(RESTTokenFileIO._FILE_IO_STATS, created=0, evicted=0, warned=False, next_log=0.0,
+                     fds=None, next_scan=0.0)
+        open_files = [(10, 1000)]
+        scan = MagicMock(side_effect=lambda: open_files[0])
+        with patch('pypaimon.catalog.rest.rest_token_file_io._open_files', scan):
+            records = self._touch_with_summary_stats(cache, stats, [0.0], open_files, [
+                (1000, None, "a"),
+                (1100, None, "b"),
+                # Crowded descriptors warn at once, even within the interval of an INFO summary.
+                (1200, (900, 1000), "c"),
+                # After a warning, misses neither log nor list descriptors until the interval ends.
+                (1300, None, "d"),
+                (1801, (10, 1000), "e"),
+                (2402, None, None),
+                (2402, None, "f"),
+            ])
+
+        self.assertEqual(['INFO', 'WARNING', 'WARNING', 'INFO'], [r.levelname for r in records])
+        messages = [r.getMessage() for r in records]
+        self.assertIn("holds 1/3 FileIOs", messages[0])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[0])
+        self.assertIn("open files 10/1000", messages[0])
+        self.assertIn("holds 3/3 FileIOs", messages[1])
+        self.assertIn("2 FileIOs created and 0 evicted", messages[1])
+        self.assertIn("open files 900/1000", messages[1])
+        self.assertIn("2 FileIOs created and 2 evicted", messages[2])
+        self.assertIn("open files 10/1000", messages[2])
+        self.assertIn("1 FileIOs created and 0 evicted", messages[3])
+        self.assertEqual(5, scan.call_count)
+
+    def test_open_files_are_listed_at_most_one_percent_of_the_time(self):
+        clock = [100.0]
+        stats = {"fds": None, "next_scan": 0.0}
+
+        def scan():
+            clock[0] += 0.002
+            return 10, 1000
+
+        module = 'pypaimon.catalog.rest.rest_token_file_io'
+        with patch(module + '._open_files', side_effect=scan) as open_files, \
+                patch(module + '.time', types.SimpleNamespace(monotonic=lambda: clock[0], time=time.time)):
+            for now in (100.0, 100.1, 100.19, 100.21):
+                clock[0] = now
+                self.assertEqual((10, 1000), RESTTokenFileIO._sample_open_files(stats, now))
+        # A 2 ms scan at 100.0 defers the next one to 100.2.
+        self.assertEqual(2, open_files.call_count)
+
+    def test_cache_miss_reports_unknown_open_files_when_they_cannot_be_listed(self):
+        real_listdir = os.listdir
+
+        def listdir(path="."):
+            if path == "/proc/self/fd":
+                raise OSError("not listable")
+            return real_listdir(path)
+
+        stats = dict(RESTTokenFileIO._FILE_IO_STATS, created=0, evicted=0, warned=False, next_log=0.0,
+                     fds=None, next_scan=0.0)
+        with patch('os.listdir', side_effect=listdir):
+            records = self._touch_with_summary_stats(
+                TTLCache(maxsize=3, ttl=1e9), stats, [0.0], [None], [(1000, None, "a")])
+        self.assertEqual(1, len(records))
+        self.assertEqual('INFO', records[0].levelname)
+        self.assertIn("open files unknown", records[0].getMessage())
+
+    def test_short_lived_token_warns_once_per_interval(self):
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        file_io.api_instance = MagicMock()
+        now = int(time.time() * 1000)
+        lifetimes = [7_200_000, 1_800_000, 1_800_000, 1_800_000]
+        responses = [MagicMock(token={'ak': 'test-ak'}, expires_at_millis=now + lifetime)
+                     for lifetime in lifetimes]
+        file_io.api_instance.load_table_token.side_effect = responses
+
+        with patch.object(RESTTokenFileIO, '_SHORT_TOKEN_STATS', {"count": 0, "next_log": 0.0}), \
+                self.assertLogs('pypaimon.catalog.rest.rest_token_file_io', level='WARNING') as logs:
+            for _ in lifetimes:
+                file_io.refresh_token()
+
+        self.assertEqual(1, len(logs.records))
+        self.assertIn("within the 3600 s refresh margin", logs.records[0].getMessage())
+        self.assertIn("1 such tokens", logs.records[0].getMessage())
+
+    @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
+    def test_fork_while_another_thread_creates_file_io(self):
+        token = self._valid_token("shared")
+        creating = threading.Event()
+
+        def slow_file_io(path, options):
+            if path.endswith("/slow"):
+                creating.set()
+                time.sleep(0.3)
+            return _FakeFileIO(path, options)
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+                patch(_FILE_IO_GET, side_effect=slow_file_io) as get_io:
+            other = self._file_io_with_token("oss://bucket/db.db/other", Options({}), token)
+            slow = self._file_io_with_token("oss://bucket/db.db/slow", Options({}), token)
+
+            def in_child():
+                other.file_io()
+                # The fork waited for the creation, so the child finds that FileIO cached.
+                slow.file_io()
+                assert get_io.call_count == 2, get_io.call_count
+
+            creator = threading.Thread(target=slow.file_io)
+            creator.start()
+            self.assertTrue(creating.wait(5))
+            status = self._run_in_forked_child(in_child)
+            creator.join()
+        self._assert_child_succeeded(status)
+
+    @unittest.skipUnless(hasattr(os, "register_at_fork"), "needs os.register_at_fork")
+    def test_fork_while_another_thread_refreshes_token(self):
+        table_path = "oss://bucket/db.db/t"
+        refreshing, release = threading.Event(), threading.Event()
+        holders = []
+
+        def refresh(file_io):
+            if threading.current_thread() in holders:
+                refreshing.set()
+                release.wait(10)
+            file_io.token = self._valid_token("refreshed")
+
+        self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'fork-test', None)
+        with patch.object(RESTTokenFileIO, '_build_cache_key', return_value='fork-test'), \
+                patch.object(RESTTokenFileIO, 'refresh_token', autospec=True, side_effect=refresh), \
+                patch(_FILE_IO_GET, side_effect=_FakeFileIO):
+            file_io = RESTTokenFileIO(self.identifier, table_path, Options({}))
+            holders.append(threading.Thread(target=file_io.file_io))
+            holders[0].start()
+            self.assertTrue(refreshing.wait(5))
+            # The child uses the object whose locks are held, and another object of that table.
+            status = self._run_in_forked_child(lambda: (
+                file_io.file_io(),
+                RESTTokenFileIO(self.identifier, table_path, Options({})).file_io()))
+            release.set()
+            holders[0].join()
+        self._assert_child_succeeded(status)
 
     def test_existing_valid_token_does_not_refresh_or_read_shared_cache(self):
         file_io = RESTTokenFileIO(self.identifier, self.warehouse_path)
@@ -298,7 +655,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertIsNone(deserialized_file_io.api_instance)
-            self.assertIsNot(deserialized_file_io.file_io(), original_backend)
+            self.assertIs(deserialized_file_io.file_io(), original_backend)
 
             test_file_path = f"file://{self.temp_dir}/pickle_test.txt"
             test_content = b"pickle test content"
@@ -619,6 +976,81 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.assertIsNotNone(cached, "file_io_2 should see file_io_1's cached token")
         self.assertEqual(cached.token.get("fs.oss.accessKeyId"), "shared-data-ak")
 
+    def test_token_cache_drops_expired_tokens_of_rotated_identities(self):
+        now = int(time.time() * 1000)
+        live = RESTToken({"fs.oss.accessKeyId": "live"}, now + 7_200_000)
+        expired = RESTToken({"fs.oss.accessKeyId": "expired"}, now - 1)
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_CACHE_PRUNE_SIZE', 4):
+            for sts_ak in ("STS.1", "STS.2"):
+                key = sts_ak + ":" + str(self.identifier)
+                file_io._get_global_token_lock(key)
+                file_io._set_cached_token(key, expired)
+            busy = file_io._get_global_token_lock("STS.3:" + str(self.identifier))
+            busy.acquire()
+            self.addCleanup(busy.release)
+            file_io._set_cached_token("STS.3:other", live)
+            self.assertEqual(3, len(RESTTokenFileIO._TOKEN_CACHE))
+
+            file_io._set_cached_token("STS.4:" + str(self.identifier), live)
+
+            self.assertEqual(["STS.3:other", "STS.4:" + str(self.identifier)],
+                             sorted(RESTTokenFileIO._TOKEN_CACHE))
+            # A lock that a refresh still holds stays; idle locks of dropped tokens go.
+            self.assertEqual(["STS.3:" + str(self.identifier)], list(RESTTokenFileIO._TOKEN_LOCKS))
+            self.assertEqual(1024, RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE)
+
+    def test_token_cache_prune_size_doubles_with_live_tokens(self):
+        now = int(time.time() * 1000)
+        live = RESTToken({"fs.oss.accessKeyId": "live"}, now + 7_200_000)
+        expired = RESTToken({"fs.oss.accessKeyId": "expired"}, now - 1)
+        cache = {"live-%d" % i: live for i in range(1023)}
+        cache["expired-0"] = expired
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', cache), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_CACHE_PRUNE_SIZE', 1024):
+            file_io._set_cached_token("live-1023", live)
+            self.assertNotIn("expired-0", cache)
+            self.assertEqual(2048, RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE)
+
+            # Below the doubled size, caching another token scans nothing.
+            file_io._set_cached_token("expired-1", expired)
+            self.assertIn("expired-1", cache)
+            self.assertEqual(1025, len(cache))
+
+    def test_token_cache_prune_size_doubles_with_held_locks(self):
+        held = {"refreshing-%d" % i: threading.Lock() for i in range(1100)}
+        for lock in held.values():
+            lock.acquire()
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', dict(held)), \
+                patch.object(RESTTokenFileIO, '_TOKEN_CACHE_PRUNE_SIZE', 1024):
+            file_io._get_global_token_lock("new")
+            # Locks of refreshes in flight stay, so the next prune waits until the lock count doubles.
+            self.assertEqual(1101, len(RESTTokenFileIO._TOKEN_LOCKS))
+            self.assertEqual(2200, RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE)
+
+    def test_failed_refreshes_drop_idle_locks(self):
+        keys = ["STS.%d:%s" % (i, self.identifier) for i in range(6)]
+        file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+        with patch.object(RESTTokenFileIO, '_TOKEN_CACHE', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_LOCKS', {}), \
+                patch.object(RESTTokenFileIO, '_TOKEN_CACHE_PRUNE_SIZE', 4), \
+                patch.object(RESTTokenFileIO, '_build_cache_key', side_effect=keys), \
+                patch.object(RESTTokenFileIO, 'refresh_token', side_effect=RuntimeError("forbidden")):
+            for _ in keys:
+                with self.assertRaises(RuntimeError):
+                    file_io.try_to_refresh_token()
+
+            # The fifth lock found four idle ones without tokens and dropped them first.
+            self.assertEqual(keys[4:], sorted(RESTTokenFileIO._TOKEN_LOCKS))
+            self.assertEqual({}, RESTTokenFileIO._TOKEN_CACHE)
+            self.assertEqual(1024, RESTTokenFileIO._TOKEN_CACHE_PRUNE_SIZE)
+
     def test_refresh_token_strips_system_table_suffix(self):
         """refresh_token() strips $snapshots suffix before requesting token."""
         system_identifier = Identifier.create("db", "my_table", system_table="snapshots")
@@ -674,6 +1106,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
         after creating the given targets."""
         file_io = RESTTokenFileIO(self.identifier, path, Options(catalog_options or {}))
         file_io.token = RESTToken(token, int(time.time() * 1000) + 7_200_000)
+        # The FileIO cache is process-wide; a token equal to the previous call's must not reuse its FileIO.
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
                 patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get') as get_io:
             get_io.side_effect = lambda location, options: MagicMock(name=location)

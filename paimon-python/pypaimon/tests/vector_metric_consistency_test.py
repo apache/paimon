@@ -21,8 +21,11 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
-from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchReadImpl, DataEvolutionVectorRead, _raw_search_metric)
+from pypaimon.execution.python.read.search.vector_search_read import (
+    BatchVectorSearchReadImpl,
+    DataEvolutionVectorRead,
+    _raw_search_metric,
+)
 from pypaimon.tests.vector_search_filter_test import (
     _StubTable, _entry, _field, _install_raw_vector_read_builder)
 from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
@@ -167,13 +170,23 @@ class VectorMetricResolutionTest(unittest.TestCase):
         self.assertEqual('inner_product', _raw_search_metric(
             self.table, self.column, {'fields.other.metric': 'l2'}, 'ivf-flat'))
 
-    def test_raw_only_defaults_match_vindex_writers(self):
-        for kind in ('ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann'):
+    def test_raw_only_defaults_match_index_writers(self):
+        for kind in ('ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann', 'lumina', 'lumina-vector-ann'):
             self.assertEqual('inner_product', _raw_search_metric(self.table, self.column, {}, kind))
             self.assertEqual('cosine', _raw_search_metric(
                 self.table, self.column, {'metric': 'cosine'}, kind))
         self.assertEqual('l2', _raw_search_metric(self.table, self.column, {}))
-        self.assertEqual('l2', _raw_search_metric(self.table, self.column, {}, 'lumina'))
+
+    def test_known_families_ignore_other_columns_metric(self):
+        for kind in ('ivf-flat', 'lumina', 'lumina-vector-ann'):
+            with self.subTest(index_type=kind):
+                self.table.options.options.to_map()['fields.other.metric'] = 'l2'
+                self.assertEqual('inner_product', _raw_search_metric(
+                    self.table, self.column, {'fields.other.metric': 'cosine'}, kind))
+                self.assertEqual('cosine', _raw_search_metric(
+                    self.table, self.column, {kind + '.distance.metric': 'cosine'}, kind))
+                self.assertEqual('l2', _raw_search_metric(
+                    self.table, self.column, {'fields.embedding.distance.metric': 'l2'}, kind))
 
     def test_reader_closes_on_metadata_and_metric_errors(self):
         entry = _entry(None, field_id=1, index_type='ivf-flat', file_name='vectors.index',
@@ -191,14 +204,16 @@ class VectorMetricResolutionTest(unittest.TestCase):
                     previous = Mock(spec=['vector_metric'])
                     previous.vector_metric.return_value = 'cosine'
                     reader._record_index_metric(previous, 'ivf-flat')
-                with patch('pypaimon.table.source.vector_search_read._create_vector_reader', return_value=native):
+                with patch('pypaimon.execution.python.read.search.vector_search_read._create_vector_reader',
+                           return_value=native):
                     with self.assertRaises((RuntimeError, ValueError, KeyboardInterrupt)):
                         reader._open_offset_reader([entry.index_file], 0, 1)
                 native.close.assert_called_once_with()
 
     def test_lumina_open_closes_stream_on_interrupt(self):
         from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-        from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import LuminaVectorGlobalIndexReader
+        from pypaimon.execution.python.globalindex.lumina.lumina_vector_global_index_reader import (
+            LuminaVectorGlobalIndexReader)
 
         stream, native, file_io = Mock(), Mock(), Mock()
         file_io.new_input_stream.return_value = stream

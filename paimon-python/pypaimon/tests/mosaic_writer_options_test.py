@@ -25,8 +25,8 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
-from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
-from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.execution.python.write.writer.mosaic_writer_options import create_mosaic_writer_options
 
 
 class _FakeWriterOptions:

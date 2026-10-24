@@ -29,8 +29,8 @@ import unittest
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.read.reader.aggregate import create_field_aggregator
-from pypaimon.read.reader.aggregation_merge_function import (
+from pypaimon.execution.python.read.reader.aggregate import (create_field_aggregator)
+from pypaimon.execution.python.read.reader.aggregation_merge_function import (
     AggregateMergeFunction,
     build_field_aggregators,
     resolve_agg_func_name,

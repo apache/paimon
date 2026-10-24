@@ -25,7 +25,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 
 
 SCHEMA = pa.schema([('id', pa.int64()), ('v', pa.string())])
@@ -82,7 +82,9 @@ def _read(table, native, predicate=None):
         builder.with_filter(predicate)
     scan = builder.new_scan()
     if native:
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
     else:
         plan = scan.plan()
@@ -119,7 +121,7 @@ def test_write_and_incremental_scans_keep_l0(tmp_path, engine, dv):
     _write(table, [{'id': 1, 'v': 'updated'}, {'id': 2, 'v': 'new'}], 200)
     scan = table.new_read_builder().new_scan()
     assert sum(len(split.files) for split in scan.plan().splits()) == 1
-    assert sum(len(split.files) for split in scan.plan_for_write().splits()) == 2
+    assert sum(len(split.files) for split in scan.plan_all().splits()) == 2
     assert sum(len(split.files) for split in scan.plan().splits()) == 1
     incremental = table.copy({'incremental-between-timestamp': '100,200'})
     assert _read(incremental, False)[1] == [{'id': 1, 'v': 'updated'}, {'id': 2, 'v': 'new'}]
@@ -136,7 +138,7 @@ def test_copy_can_disable_persisted_merge_on_read(tmp_path, native, override):
 
 
 def test_first_row_streaming_and_overwrite_see_uncompacted_files(tmp_path):
-    from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+    from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 
     table = _table(tmp_path, 'first-row', False, False)
     _write(table, [{'id': 1, 'v': 'before'}], 100)
@@ -149,6 +151,6 @@ def test_first_row_streaming_and_overwrite_see_uncompacted_files(tmp_path):
 
     _write(table, [{'id': 2, 'v': 'after'}], 200, overwrite=True)
     builder = table.new_read_builder()
-    plan = builder.new_scan().plan_for_write()
+    plan = builder.new_scan().plan_all()
     assert sum(len(split.files) for split in plan.splits()) == 1
     assert builder.new_read().to_arrow(plan.splits()).to_pylist() == [{'id': 2, 'v': 'after'}]

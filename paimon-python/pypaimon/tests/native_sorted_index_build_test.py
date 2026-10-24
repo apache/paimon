@@ -26,20 +26,25 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
+from pypaimon.api.api_response import AuthTableQueryResponse, ErrorResponse, GetTableSnapshotResponse
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.read.native_plan import _native_table, _predicate_to_native, native_method_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_commit import from_native_commit_messages
+from pypaimon.execution.native.write.native_commit import from_native_commit_messages
 from pypaimon.write.table_commit import BatchTableCommit
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = [pytest.mark.native_plan, pytest.mark.skipif(
-    not native_method_available('Table', 'new_global_index_build_builder'),
-    reason='Rust index builder required')]
+    not native_runtime_available(),
+    reason='pypaimon-rust not installed')]
 
 SCHEMA = pa.schema([('id', pa.int32()), ('name', pa.string()), ('pt', pa.int32())])
 ROWS = [
@@ -105,8 +110,96 @@ def _ids(table, predicate=None):
 
 def _build(table, kind, column='name', **kwargs):
     # A native build must never materialize or sort rows in Python.
-    with patch.object(GlobalIndexBuilder, '_build_sorted_index', side_effect=AssertionError('Python index build ran')):
+    with patch.object(PythonGlobalIndexBuilder, '_build_sorted_index',
+                      side_effect=AssertionError('Python index build ran')):
         return GlobalIndexBuilder(table, column, index_type=kind, **kwargs).build()
+
+
+def _delete(table, ids):
+    builder = table.new_batch_write_builder()
+    _commit(table, builder.new_update().delete_by_row_id(ids))
+
+
+@pytest.mark.python_plan
+@pytest.mark.python_read
+@pytest.mark.python_write
+@pytest.mark.python_commit
+@pytest.mark.parametrize('policy', ['unrestricted', 'filtered', 'masked', 'denied'])
+def test_query_auth_keeps_python_index_build_authorization(rest_catalog, policy):
+    catalog, server = rest_catalog
+    table = _create(catalog, options={'scan.native-plan.enabled': 'false'})
+    _append(table, ROWS)
+    catalog.alter_table(table.identifier, [SchemaChange.set_option('query-auth.enabled', 'true')])
+    table = catalog.get_table(table.identifier)
+    if policy == 'denied':
+        reply = server._mock_response(ErrorResponse('TABLE', 'indexes', 'index build denied', 403), 403)
+    else:
+        response = AuthTableQueryResponse(
+            filter=['{"kind":"LEAF","transform":{"name":"FIELD_REF",'
+                    '"fieldRef":{"name":"id","index":0,"type":"INT"}},'
+                    '"function":"GREATER_THAN","literals":[1]}'] if policy == 'filtered' else None,
+            column_masking={'name': '{"name":"NULL"}'} if policy == 'masked' else None)
+        reply = server._mock_response(response, 200)
+    native_module = 'pypaimon.execution.native.write.native_index_build'
+    with patch.object(server, '_table_query_auth_handle', return_value=reply) as authorize, \
+            patch(native_module + '._native_table', side_effect=AssertionError('Native index build selected')):
+        for native in [False, True]:
+            request = GlobalIndexBuilder(table.copy({'write.native.enabled': str(native).lower()}), 'name')
+            if policy == 'unrestricted':
+                files = _message_files(request.build())
+                assert sum(file.row_count for file in files) == len(ROWS)
+                assert all(table.file_io.exists(_path(table, file)) for file in files)
+            else:
+                with pytest.raises(TableNoPermissionException):
+                    request.build()
+        assert authorize.call_count >= 2
+    assert _files(table) == []
+    assert table.snapshot_manager().get_latest_snapshot().id == 1
+
+
+@pytest.mark.parametrize('kind', ['btree', 'bitmap'])
+@pytest.mark.parametrize('deleted', [[0, 2], [0, 1, 2, 3]])
+@pytest.mark.parametrize('native_commit', [False, True])
+def test_deletion_vectors_do_not_change_physical_index_coverage(rest_catalog, kind, deleted, native_commit):
+    catalog, _ = rest_catalog
+    table = _create(catalog, options={'deletion-vectors.enabled': 'true',
+                                      'commit.native.enabled': str(native_commit).lower()})
+    rows = [{'id': i + 1, 'name': 'b' if i % 2 else 'a', 'pt': 0} for i in range(4)]
+    _append(table, rows)
+    _delete(table, deleted)
+    before = table.snapshot_manager().get_latest_snapshot().id
+    messages = _build(table, kind)
+    files = _message_files(messages)
+    assert sum(file.row_count for file in files) == 4
+    assert sorted((file.global_index_meta.row_range_start,
+                   file.global_index_meta.row_range_end) for file in files) == [(0, 1), (2, 3)]
+    classic = GlobalIndexBuilder(table.copy({'write.native.enabled': 'false'}), 'name', index_type=kind).build()
+    assert sum(file.row_count for file in _message_files(classic)) == 4
+    assert table.snapshot_manager().get_latest_snapshot().id == before
+    _commit(table, messages)
+    predicate = table.new_read_builder().new_predicate_builder().equal('name', 'b')
+
+    def assert_readers(expected, source=table):
+        for native in [False, True]:
+            reader = source.copy({'read.native.enabled': str(native).lower(),
+                                  'scan.native-plan.enabled': str(native).lower()})
+            assert _ids(reader, predicate) == expected
+
+    expected = [2, 4] if len(deleted) == 2 else []
+    assert_readers(expected)
+    indexed_snapshot = table.snapshot_manager().get_latest_snapshot().id
+    assert _build(table, kind) == []
+    _append(table, [{'id': 5, 'name': 'b', 'pt': 0}, {'id': 6, 'name': None, 'pt': 0}])
+    messages = _build(table, kind)
+    files = _message_files(messages)
+    assert sum(file.row_count for file in files) == 2
+    assert all(file.global_index_meta.row_range_start == 4 for file in files)
+    # A concurrent deletion changes live rows, not the staged index's source values.
+    _delete(table, [1, 4])
+    _commit(table, messages)
+    assert_readers([4] if len(deleted) == 2 else [])
+    assert_readers(expected, table.copy({'scan.snapshot-id': str(indexed_snapshot)}))
+    assert _build(table, kind) == []
 
 
 @pytest.mark.parametrize('kind', ['btree', 'bitmap'])
@@ -353,13 +446,13 @@ def test_java_records_per_file_option_overrides_table_alias(rest_catalog, kind):
     assert _ids(table, table.new_read_builder().new_predicate_builder().equal('name', 'a')) == [1, 5]
 
 
-@pytest.mark.parametrize('options', [{'write.native.enabled': 'false'}, {'data-evolution.enabled': 'false'}])
+@pytest.mark.parametrize('options', [{'write.native.enabled': 'false'}])
 def test_ineligible_tables_choose_python_before_building(rest_catalog, options):
     catalog, _ = rest_catalog
     table = _create(catalog, options=options)
     _append(table, ROWS)
-    original = GlobalIndexBuilder._build_sorted_index
-    with patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
+    original = PythonGlobalIndexBuilder._build_sorted_index
+    with patch.object(PythonGlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         assert table.create_global_index('name') > 0
     build.assert_called_once()
     assert _ids(table, table.new_read_builder().new_predicate_builder().equal('name', 'a')) == [1, 5]
@@ -421,20 +514,19 @@ def test_partition_set_predicates_follow_java_null_semantics(rest_catalog, kind,
 
 @pytest.mark.parametrize('restricted', [False, True])
 def test_query_authorization_remains_on_python_build_path(rest_catalog, restricted):
-    from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-    from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+    from pypaimon.api.api_response import AuthTableQueryResponse
     from pypaimon.catalog.catalog_exception import TableNoPermissionException
 
-    catalog, _ = rest_catalog
+    catalog, server = rest_catalog
     table = _create(catalog)
     _append(table, ROWS)
     table = table.copy({'query-auth.enabled': 'true'})
-    auth = TableQueryAuthResult(None, {'name': '{"name":"NULL"}'} if restricted else None)
-    original = GlobalIndexBuilder._build_sorted_index
-    with patch.object(RESTCatalog, 'auth_table_query', return_value=auth), \
-            patch('pypaimon.globalindex.native_index_build._native_table',
-                  side_effect=AssertionError('native auth build')), \
-            patch.object(GlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
+    server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
+        column_masking={'name': '{"name":"NULL"}'} if restricted else None)
+    original = PythonGlobalIndexBuilder._build_sorted_index
+    with patch('pypaimon.execution.native.write.native_index_build._native_table',
+               side_effect=AssertionError('native auth build')), \
+            patch.object(PythonGlobalIndexBuilder, '_build_sorted_index', autospec=True, side_effect=original) as build:
         if restricted:
             with pytest.raises(TableNoPermissionException):
                 GlobalIndexBuilder(table, 'name').build()

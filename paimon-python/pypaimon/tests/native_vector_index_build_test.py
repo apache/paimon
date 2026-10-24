@@ -23,12 +23,16 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
-    PaimonVindexInput, VINDEX_IDENTIFIERS,
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
+from pypaimon.globalindex.vindex_input import (
+    PaimonVindexInput,
+)
+from pypaimon.globalindex.vindex_options import (
+    VINDEX_IDENTIFIERS,
 )
 from pypaimon.tests import native_generic_index_build_test as generic
 from pypaimon.tests import native_sorted_index_build_test as indexes
-from pypaimon.read.native_plan import _native_table
+from pypaimon.execution.native.table import (_native_table)
 
 rest_catalog = indexes.rest_catalog
 pytestmark = generic.pytestmark
@@ -48,7 +52,7 @@ def _table(catalog, vectors, options=None, partitioned=False):
 
 
 def _build(table, kind, options=None, **kwargs):
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                       side_effect=AssertionError('Python vector rows were materialized')):
         return GlobalIndexBuilder(table, 'embedding', index_type=kind, options=options, **kwargs).build()
 
@@ -77,8 +81,77 @@ def _assert_ids(table, expected, kind):
               .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute_local())
     assert sorted(result.results()) == expected
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
-              .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute_local())
+              .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute())
     assert sorted(result.row_ids()) == expected
+
+
+@pytest.mark.parametrize('kind', VINDEX_IDENTIFIERS)
+@pytest.mark.parametrize('granule', [False, True])
+@pytest.mark.parametrize('all_deleted', [False, True])
+def test_deletion_vectors_preserve_training_rows_and_live_search(rest_catalog, kind, granule, all_deleted):
+    catalog, _ = rest_catalog
+    vectors = [[1., 0.], [0., 1.], None, [1., 1.], [2., 2.]]
+    table = _table(catalog, vectors, {'deletion-vectors.enabled': 'true'})
+    indexes._delete(table, list(range(5)) if all_deleted else [0, 2, 3])
+    options = generic._options(kind)
+    if kind != 'diskann':
+        options['vindex.build.granule.enabled'] = str(granule).lower()
+    before = table.snapshot_manager().get_latest_snapshot().id
+    messages = _build(table, kind, options)
+    files = indexes._message_files(messages)
+    assert len(files) == 1
+    assert files[0].row_count == 5
+    assert (files[0].global_index_meta.row_range_start, files[0].global_index_meta.row_range_end) == (0, 4)
+    # Java indexes the stable physical rows; deleted vectors still participate in training.
+    assert _metadata(table, files[0]).total_vectors == 4
+    classic = GlobalIndexBuilder(table.copy({'write.native.enabled': 'false'}), 'embedding',
+                                 index_type=kind, options=options).build()
+    assert _bytes(table, files[0]) == _bytes(table, indexes._message_files(classic)[0])
+    assert table.snapshot_manager().get_latest_snapshot().id == before
+    indexes._commit(table, messages)
+    expected = [] if all_deleted else [1, 4]
+    _assert_ids(table, expected, kind)
+    indexed_snapshot = table.snapshot_manager().get_latest_snapshot().id
+    assert _build(table, kind, options) == []
+
+    indexes._append(table, _rows([[3., 3.], [4., 4.]], start=5), SCHEMA)
+    messages = _build(table, kind, options)
+    file = indexes._message_files(messages)[0]
+    assert file.row_count == 2
+    assert (file.global_index_meta.row_range_start, file.global_index_meta.row_range_end) == (5, 6)
+    indexes._delete(table, [1, 5])
+    indexes._commit(table, messages)
+    _assert_ids(table, [6] if all_deleted else [4, 6], kind)
+    _assert_ids(table.copy({'scan.snapshot-id': str(indexed_snapshot)}), expected, kind)
+    assert _build(table, kind, options) == []
+
+
+@pytest.mark.parametrize('kind', VINDEX_IDENTIFIERS)
+def test_native_search_filters_live_null_vectors_with_deletion_vectors(rest_catalog, kind):
+    catalog, _ = rest_catalog
+    table = _table(catalog, [[1., 0.], [0., 1.], None, [1., 1.], [2., 2.]],
+                   {'deletion-vectors.enabled': 'true'})
+    indexes._delete(table, [0, 3])
+    indexes._commit(table, _build(table, kind, generic._options(kind)))
+    options = {'diskann.l_search': '64'} if kind == 'diskann' else {'ivf.nprobe': '64'}
+    result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
+              .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute())
+    assert sorted(result.row_ids()) == [1, 4]
+    # Python table-level reads use the batch ABI for short filtered results.
+    _assert_ids(table, [1, 4], kind)
+
+
+@pytest.mark.parametrize('kind', VINDEX_IDENTIFIERS)
+def test_deleted_vectors_still_validate_physical_dimensions(rest_catalog, kind):
+    catalog, _ = rest_catalog
+    table = _table(catalog, [[1., 0., 3.], [0., 1.]], {'deletion-vectors.enabled': 'true'})
+    indexes._delete(table, [0])
+    before = table.snapshot_manager().get_latest_snapshot().id
+    deletion_files = [file.file_name for file in indexes._files(table)]
+    with pytest.raises(Exception, match='dimension'):
+        _build(table, kind, generic._options(kind))
+    assert table.snapshot_manager().get_latest_snapshot().id == before
+    assert [file.file_name for file in indexes._files(table)] == deletion_files
 
 
 @pytest.mark.parametrize('kind', VINDEX_IDENTIFIERS)

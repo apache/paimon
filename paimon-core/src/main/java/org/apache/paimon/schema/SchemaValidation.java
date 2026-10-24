@@ -104,6 +104,8 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupSortOrderOption;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.parseSequenceGroupSortOrders;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupOrderingFields;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupProtectedFields;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
@@ -192,6 +194,8 @@ public class SchemaValidation {
 
         validateSequenceGroupOrderingFields(schema, options);
 
+        validateSequenceGroupSortOrder(schema, options);
+
         validateMergeFunction(schema);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
@@ -252,8 +256,7 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
-        validateGeospatialTypes(schema, options, tableRowType);
-        validateVariantTypes(schema, options);
+        validateIcebergGeospatialTypes(tableRowType, options);
         validateIcebergTimestampPrecisions(tableRowType, options);
         validateIcebergTimePrecisions(tableRowType, options);
         validateIcebergPublishableTypes(tableRowType, options);
@@ -413,6 +416,24 @@ public class SchemaValidation {
 
         validateRowTracking(schema, options);
 
+        List<String> geospatialClusteringColumns =
+                schema.fields().stream()
+                        .filter(field -> options.clusteringColumns().contains(field.name()))
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type ->
+                                                        type.isAnyOf(
+                                                                DataTypeRoot.GEOMETRY,
+                                                                DataTypeRoot.GEOGRAPHY)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                geospatialClusteringColumns.isEmpty(),
+                "Geometry and geography columns cannot be clustering columns: %s.",
+                geospatialClusteringColumns);
+
         validateIncrementalClustering(schema, options);
 
         validateChainTable(schema, options);
@@ -494,125 +515,6 @@ public class SchemaValidation {
                 }
             }
         }
-    }
-
-    /**
-     * Only the Parquet format can store {@code VARIANT}, so every format the table may write data
-     * files with has to be parquet: the main format, each per-level override and the changelog
-     * format. Checking here reports the column and the option at DDL time, rather than the bare
-     * "unsupported type" a non-parquet writer raises on the first row.
-     */
-    private static void validateVariantTypes(TableSchema schema, CoreOptions options) {
-        List<String> variantColumns =
-                schema.fields().stream()
-                        .filter(
-                                field ->
-                                        containsType(
-                                                field.type(),
-                                                type -> type.is(DataTypeRoot.VARIANT)))
-                        .map(DataField::name)
-                        .collect(Collectors.toList());
-        if (variantColumns.isEmpty()) {
-            return;
-        }
-
-        checkArgument(
-                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
-                "Variant columns %s require '%s'='parquet', but was '%s'.",
-                variantColumns,
-                CoreOptions.FILE_FORMAT.key(),
-                options.formatType());
-        options.fileFormatPerLevel()
-                .forEach(
-                        (level, format) ->
-                                checkArgument(
-                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
-                                        "Variant columns %s require parquet at every level, but '%s' contains '%s:%s'.",
-                                        variantColumns,
-                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
-                                        level,
-                                        format));
-        checkArgument(
-                options.changelogFileFormat() == null
-                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
-                "Variant columns %s require '%s' to be parquet, but was '%s'.",
-                variantColumns,
-                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
-                options.changelogFileFormat());
-    }
-
-    private static void validateGeospatialTypes(
-            TableSchema schema, CoreOptions options, RowType rowType) {
-        boolean hasGeospatial =
-                containsType(
-                        rowType,
-                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
-        if (!hasGeospatial) {
-            return;
-        }
-
-        checkArgument(
-                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
-                "Geometry and geography columns require '%s'='parquet', but was '%s'.",
-                CoreOptions.FILE_FORMAT.key(),
-                options.formatType());
-        options.fileFormatPerLevel()
-                .forEach(
-                        (level, format) ->
-                                checkArgument(
-                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
-                                        "Geometry and geography columns require parquet at every level, but '%s' contains '%s:%s'.",
-                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
-                                        level,
-                                        format));
-        checkArgument(
-                options.changelogFileFormat() == null
-                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
-                "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
-                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
-                options.changelogFileFormat());
-        validateIcebergGeospatialTypes(rowType, options);
-
-        List<String> geospatialClusteringColumns =
-                schema.fields().stream()
-                        .filter(field -> options.clusteringColumns().contains(field.name()))
-                        .filter(
-                                field ->
-                                        containsType(
-                                                field.type(),
-                                                type ->
-                                                        type.isAnyOf(
-                                                                DataTypeRoot.GEOMETRY,
-                                                                DataTypeRoot.GEOGRAPHY)))
-                        .map(DataField::name)
-                        .collect(Collectors.toList());
-        checkArgument(
-                geospatialClusteringColumns.isEmpty(),
-                "Geometry and geography columns cannot be clustering columns: %s.",
-                geospatialClusteringColumns);
-
-        Set<String> geospatialFields =
-                schema.fields().stream()
-                        .filter(
-                                field ->
-                                        field.type()
-                                                .isAnyOf(
-                                                        DataTypeRoot.GEOMETRY,
-                                                        DataTypeRoot.GEOGRAPHY))
-                        .map(DataField::name)
-                        .collect(Collectors.toSet());
-        Set<String> geospatialBucketKeys = new HashSet<>(schema.bucketKeys());
-        geospatialBucketKeys.retainAll(geospatialFields);
-        checkArgument(
-                geospatialBucketKeys.isEmpty(),
-                "Geometry and geography columns cannot be bucket keys: %s.",
-                geospatialBucketKeys);
-        Set<String> geospatialSequenceFields = new HashSet<>(options.sequenceField());
-        geospatialSequenceFields.retainAll(geospatialFields);
-        checkArgument(
-                geospatialSequenceFields.isEmpty(),
-                "Geometry and geography columns cannot be sequence fields: %s.",
-                geospatialSequenceFields);
     }
 
     /**
@@ -942,8 +844,13 @@ public class SchemaValidation {
                                 // PAIMON-6471: dot paths into a ROW field's members
                                 // (e.g. fields.row.inner.aggregate-function) are silently
                                 // dropped today and produce wrong results. This check
-                                // rejects them.
-                                if (segments.length > 3 && fields.length == 1) {
+                                // rejects them, except for the top-level sequence-group.sort-order
+                                // option, whose suffix itself contains a dot.
+                                boolean sequenceGroupSortOrder =
+                                        segments.length == 4 && isSequenceGroupSortOrderOption(k);
+                                if (segments.length > 3
+                                        && fields.length == 1
+                                        && !sequenceGroupSortOrder) {
                                     String parent = fields[0];
                                     schema.fields().stream()
                                             .filter(f -> f.name().equals(parent))
@@ -958,6 +865,17 @@ public class SchemaValidation {
                                 }
                             }
                         });
+    }
+
+    private static void validateSequenceGroupSortOrder(TableSchema schema, CoreOptions options) {
+        if (options.toMap().keySet().stream()
+                .anyMatch(optionKey -> isSequenceGroupSortOrderOption(optionKey))) {
+            checkArgument(
+                    !schema.primaryKeys().isEmpty()
+                            && options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
+                    "Sequence group sort-order options are only supported by primary-key tables with the partial-update merge engine.");
+            parseSequenceGroupSortOrders(options.toConfiguration());
+        }
     }
 
     private static void validateMergeFunction(TableSchema schema) {
@@ -1583,6 +1501,22 @@ public class SchemaValidation {
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
         }
+
+        Set<String> geospatialSequenceFields =
+                schema.fields().stream()
+                        .filter(field -> sequenceField.contains(field.name()))
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        checkArgument(
+                geospatialSequenceFields.isEmpty(),
+                "Geometry and geography columns cannot be sequence fields: %s.",
+                geospatialSequenceFields);
     }
 
     private static void validateBucket(TableSchema schema, CoreOptions options) {
@@ -1630,6 +1564,22 @@ public class SchemaValidation {
                 }
             }
         }
+
+        Set<String> geospatialBucketKeys =
+                schema.fields().stream()
+                        .filter(field -> schema.bucketKeys().contains(field.name()))
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        checkArgument(
+                geospatialBucketKeys.isEmpty(),
+                "Geometry and geography columns cannot be bucket keys: %s.",
+                geospatialBucketKeys);
     }
 
     private static boolean isPostponeBucketTable(TableSchema schema, int bucket) {

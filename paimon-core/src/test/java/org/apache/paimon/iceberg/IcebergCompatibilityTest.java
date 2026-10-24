@@ -34,6 +34,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
@@ -66,8 +67,11 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
@@ -90,6 +94,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -107,7 +112,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -300,6 +307,150 @@ public class IcebergCompatibilityTest {
         }
         assertThat(manifests).isGreaterThan(0);
         assertThat(deleted).as("this commit's deletions must survive compaction").isGreaterThan(0);
+
+        write.close();
+        commit.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSnapshotSummaryTotalsMatchManifests(boolean deletionVector) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        if (deletionVector) {
+            customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        }
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // after the first snapshot, level-0 files are not exported to Iceberg, and each full
+        // compaction removes them
+        long id = 1;
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 3; i++) {
+                int k = round * 3 + i;
+                write.write(GenericRow.of(k, k * 10));
+                commit.commit(id, write.prepareCommit(false, id));
+                id++;
+                assertSummaryTotalsMatchManifests(table);
+            }
+            write.write(GenericRow.ofKind(RowKind.DELETE, round * 3, round * 30));
+            write.write(GenericRow.of(round * 3 + 1, -1));
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            commit.commit(id, write.prepareCommit(true, id));
+            id++;
+            assertSummaryTotalsMatchManifests(table);
+        }
+        assertThat(getIcebergResult()).hasSize(6);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSummaryIgnoresRemovedFilesNotInIceberg() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        1,
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        // the only file of pt=2 is a level-0 file, which is not exported to Iceberg
+        write.write(GenericRow.of(2, 1, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        assertSummaryTotalsMatchManifests(table);
+
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", "2");
+        commit.truncatePartitions(Collections.singletonList(partition));
+        assertSummaryTotalsMatchManifests(table);
+        assertThat(getIcebergResult()).containsExactly("Record(1, 1, 10)");
+
+        write.close();
+        commit.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSnapshotSummaryTotalsRepairedWhenBaseTotalsAreUnusable(boolean missing)
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        // leaves DELETED entries in the current manifests
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        String[] totals = {"total-data-files", "total-records", "total-files-size"};
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        Path metadataPath =
+                new Path(table.location(), "metadata/v" + latestSnapshotId + ".metadata.json");
+        ObjectNode metadataJson =
+                JsonSerdeUtil.asSpecificNodeType(
+                        table.fileIO().readFileUtf8(metadataPath), ObjectNode.class);
+        JsonNode snapshots = metadataJson.get("snapshots");
+        ObjectNode summary = (ObjectNode) snapshots.get(snapshots.size() - 1).get("summary");
+        for (String total : totals) {
+            if (missing) {
+                summary.remove(total);
+            } else {
+                summary.put(total, "0");
+            }
+        }
+        table.fileIO()
+                .overwriteFileUtf8(metadataPath, JsonSerdeUtil.writeValueAsString(metadataJson));
+
+        write.write(GenericRow.of(4, 40));
+        commit.commit(3, write.prepareCommit(false, 3));
+        assertSummaryTotalsMatchManifests(table);
+
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(4, write.prepareCommit(true, 4));
+        assertSummaryTotalsMatchManifests(table);
+        assertThat(getIcebergResult()).hasSize(4);
 
         write.close();
         commit.close();
@@ -1429,6 +1580,110 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testDropNanPartitionInManifestWithOtherPartitions() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DOUBLE(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // one manifest holds all partitions, and its bounds [1.0, 2.0] leave out NaN
+        write.write(GenericRow.of(1.0, 1));
+        write.write(GenericRow.of(Double.NaN, 2));
+        write.write(GenericRow.of(2.0, 3));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1.0, 1)", "Record(NaN, 2)", "Record(2.0, 3)");
+
+        // the bounds still cover a finite partition
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "2.0")));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1.0, 1)", "Record(NaN, 2)");
+
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "NaN")));
+        assertThat(getIcebergResult()).containsExactly("Record(1.0, 1)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPartitionDropSkipsManifestsWhoseBoundsExcludeIt() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DOUBLE(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        ReadCountingFileIO fileIO = new ReadCountingFileIO();
+        FileStoreTable table =
+                createPaimonTable(
+                        fileIO,
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        -1,
+                        new HashMap<>());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // this manifest saw NaN, and its bounds [5.0, 5.0] rule out pt=1.0
+        write.write(GenericRow.of(5.0, 1));
+        write.write(GenericRow.of(Double.NaN, 2));
+        commit.commit(1, write.prepareCommit(false, 1));
+        Set<String> nanManifests = currentManifestNames(table);
+        assertThat(nanManifests).hasSize(1);
+
+        write.write(GenericRow.of(1.0, 3));
+        commit.commit(2, write.prepareCommit(false, 2));
+        Set<String> finiteManifests = currentManifestNames(table);
+
+        // this manifest has no NaN, and its bounds [2.0, 2.0] rule out pt=NaN
+        write.write(GenericRow.of(2.0, 4));
+        commit.commit(3, write.prepareCommit(false, 3));
+        Set<String> finiteOnlyManifests = currentManifestNames(table);
+        finiteOnlyManifests.removeAll(finiteManifests);
+        assertThat(finiteOnlyManifests).hasSize(1);
+
+        fileIO.readCounts.clear();
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "1.0")));
+        assertThat(fileIO.readCounts.keySet()).doesNotContainAnyElementsOf(nanManifests);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(5.0, 1)", "Record(NaN, 2)", "Record(2.0, 4)");
+
+        fileIO.readCounts.clear();
+        commit.truncatePartitions(Collections.singletonList(Collections.singletonMap("pt", "NaN")));
+        assertThat(fileIO.readCounts.keySet()).doesNotContainAnyElementsOf(finiteOnlyManifests);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(5.0, 1)", "Record(2.0, 4)");
+
+        write.close();
+        commit.close();
+    }
+
+    private Set<String> currentManifestNames(FileStoreTable table) {
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(
+                                table.location(),
+                                "metadata/v" + latestSnapshotId + ".metadata.json"));
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        return IcebergManifestList.create(table, pathFactory)
+                .read(new Path(metadata.currentSnapshot().manifestList()).getName()).stream()
+                .map(meta -> new Path(meta.manifestPath()).getName())
+                .collect(Collectors.toCollection(HashSet::new));
+    }
+
+    @Test
     public void testNullPartitionValue() throws Exception {
         RowType rowType =
                 RowType.of(
@@ -1490,6 +1745,39 @@ public class IcebergCompatibilityTest {
         commit.truncatePartitions(Collections.singletonList(partition));
 
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(null, 2)", "Record(b, 3)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testDropPartitionInManifestWithOneLiveRowAndNullPartition() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(null, 1));
+        write.write(GenericRow.of(1, 2));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // the rewritten manifest still reports contains_null for the deleted entry, and has a
+        // single live row left
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", table.coreOptions().partitionDefaultName());
+        commit.truncatePartitions(Collections.singletonList(partition));
+        assertThat(getIcebergResult()).containsExactly("Record(1, 2)");
+
+        partition.put("pt", "1");
+        commit.truncatePartitions(Collections.singletonList(partition));
+        assertThat(getIcebergResult()).isEmpty();
 
         write.close();
         commit.close();
@@ -3036,7 +3324,23 @@ public class IcebergCompatibilityTest {
             int numBuckets,
             Map<String, String> customOptions)
             throws Exception {
-        LocalFileIO fileIO = LocalFileIO.create();
+        return createPaimonTable(
+                LocalFileIO.create(),
+                rowType,
+                partitionKeys,
+                primaryKeys,
+                numBuckets,
+                customOptions);
+    }
+
+    private FileStoreTable createPaimonTable(
+            FileIO fileIO,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            int numBuckets,
+            Map<String, String> customOptions)
+            throws Exception {
         Path path = new Path(tempDir.toString());
 
         Options options = new Options(customOptions);
@@ -3064,6 +3368,69 @@ public class IcebergCompatibilityTest {
     private List<String> getIcebergResult() throws Exception {
         return getIcebergResult(
                 icebergTable -> IcebergGenerics.read(icebergTable).build(), Record::toString);
+    }
+
+    private void assertSummaryTotalsMatchManifests(FileStoreTable table) throws Exception {
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(
+                                table.location(),
+                                "metadata/v" + latestSnapshotId + ".metadata.json"));
+        IcebergSnapshot snapshot = metadata.currentSnapshot();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, pathFactory);
+
+        long dataFiles = 0;
+        long records = 0;
+        long filesSize = 0;
+        long deletedDataFiles = 0;
+        long deletedRecords = 0;
+        long removedFilesSize = 0;
+        long deleteFiles = 0;
+        long positionDeletes = 0;
+        Set<BinaryRow> changedPartitions = new HashSet<>();
+        for (IcebergManifestFileMeta fileMeta :
+                manifestList.read(new Path(snapshot.manifestList()).getName())) {
+            for (IcebergManifestEntry entry : manifestFile.read(fileMeta.manifestPath())) {
+                if (fileMeta.content() == IcebergManifestFileMeta.Content.DELETES) {
+                    if (entry.isLive()) {
+                        deleteFiles++;
+                        positionDeletes += entry.file().recordCount();
+                    }
+                    continue;
+                }
+                if (entry.isLive()) {
+                    dataFiles++;
+                    records += entry.file().recordCount();
+                    filesSize += entry.file().fileSizeInBytes();
+                } else if (entry.snapshotId() == snapshot.snapshotId()) {
+                    deletedDataFiles++;
+                    deletedRecords += entry.file().recordCount();
+                    removedFilesSize += entry.file().fileSizeInBytes();
+                }
+                if (entry.status() != IcebergManifestEntry.Status.EXISTING
+                        && entry.snapshotId() == snapshot.snapshotId()) {
+                    changedPartitions.add(entry.file().partition());
+                }
+            }
+        }
+
+        assertThat(snapshot.summary().getSummary())
+                .as("summary of Iceberg snapshot %s", snapshot.snapshotId())
+                .containsEntry("total-data-files", String.valueOf(dataFiles))
+                .containsEntry("total-records", String.valueOf(records))
+                .containsEntry("total-files-size", String.valueOf(filesSize))
+                .containsEntry("deleted-data-files", String.valueOf(deletedDataFiles))
+                .containsEntry("deleted-records", String.valueOf(deletedRecords))
+                .containsEntry("removed-files-size", String.valueOf(removedFilesSize))
+                .containsEntry("changed-partition-count", String.valueOf(changedPartitions.size()))
+                .containsEntry("total-delete-files", String.valueOf(deleteFiles))
+                .containsEntry("total-position-deletes", String.valueOf(positionDeletes));
     }
 
     private List<GenericRecord> readPartitionSummaries(FileStoreTable table, long version)
@@ -3162,5 +3529,19 @@ public class IcebergCompatibilityTest {
 
         IcebergCommitCallback.checkVariantNotPublishable(
                 RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}));
+    }
+
+    /** A {@link LocalFileIO} that counts the reads of each file name. */
+    private static class ReadCountingFileIO extends LocalFileIO {
+
+        private final Map<String, AtomicInteger> readCounts = new ConcurrentHashMap<>();
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            readCounts
+                    .computeIfAbsent(path.getName(), ignored -> new AtomicInteger())
+                    .incrementAndGet();
+            return super.newInputStream(path);
+        }
     }
 }

@@ -62,11 +62,6 @@ jobs:
           restore-keys: |
             ci-maven-python-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Set up Maven
-        uses: stCarolas/setup-maven@v5
-        with:
-          maven-version: 3.8.8
-
       - name: Install system dependencies
         shell: bash
         run: |
@@ -85,6 +80,22 @@ jobs:
             libclang-dev \
             && apt-get clean \
             && rm -rf /var/lib/apt/lists/*
+
+      - name: Set up Maven
+        shell: bash
+        env:
+          MAVEN_VERSION: '3.8.8'
+        run: |
+          maven_archive="${RUNNER_TEMP}/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          # Central can return transient 404s even for an existing release.
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+            --output "$maven_archive" \
+            "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+            || curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+              --output "$maven_archive" \
+              "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          tar -xzf "$maven_archive" -C "$RUNNER_TEMP"
+          echo "${RUNNER_TEMP}/apache-maven-${MAVEN_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Verify Java and Maven installation
         run: |
@@ -131,13 +142,21 @@ jobs:
             python paimon-python/dev/install.py legacy
           else
             python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-            dependency_group=dev
+            dependency_group=python-tests
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
               dependency_group=torch
             fi
             python -m pip install -e ./paimon-python --group "./paimon-python/pyproject.toml:${dependency_group}"
           fi
           python -m pip check
+
+      - name: Verify Python test environment
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          assert importlib.util.find_spec('pypaimon_rust') is None, 'Rust is tested in Native CI'
+          PY
 
       - name: Run lint-python.sh
         shell: bash
@@ -146,13 +165,13 @@ jobs:
           ./paimon-python/dev/lint-python.sh -e pytest_torch
 
   s3-delete-compatibility:
-    name: S3 deletion / PyArrow ${{ matrix.pyarrow }}
+    name: Compatibility / PyArrow ${{ matrix.pyarrow }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        pyarrow: ['22.0.0', '23.0.0']
+        pyarrow: ['16.1.0', '20.0.0', '21.0.0', '22.0.0']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
@@ -162,14 +181,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ./paimon-python --group './paimon-python/pyproject.toml:test'
-          # Exercise the compatibility path before widening the package's Arrow range.
+          # Exercise each supported PyArrow version.
           python -m pip install --no-deps 'pyarrow==${{ matrix.pyarrow }}'
-      - name: Test S3 compatibility
+      - name: Test Arrow compatibility
         working-directory: paimon-python
         run: |
           python -m pytest -q pypaimon/tests/s3_delete_compatibility_test.py \
             pypaimon/tests/s3_client_compatibility_test.py pypaimon/tests/oss_legacy_mode_test.py \
-            pypaimon/tests/file_io_test.py pypaimon/tests/filesystem_catalog_test.py
+            pypaimon/tests/file_io_test.py pypaimon/tests/filesystem_catalog_test.py \
+            pypaimon/tests/table_update_arrow_compatibility_test.py
 
   rust-plan:
     name: Native CI
@@ -183,7 +203,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update && apt-get install -y --no-install-recommends \
-            build-essential git curl cmake pkg-config libssl-dev libclang-dev \
+            build-essential git curl cmake pkg-config libssl-dev libclang-dev tzdata \
             && rm -rf /var/lib/apt/lists/*
 
       - name: Install Rust toolchain
@@ -219,6 +239,8 @@ jobs:
       - name: Run Python tests with native planning, reading, writing, updating and committing
         shell: bash
         env:
+          DAFT_RUNNER: 'native'
+          PYTEST_ADDOPTS: '--durations=20'
           PYPAIMON_TEST_NATIVE_PLAN: '1'
           PYPAIMON_TEST_NATIVE_READ: '1'
           PYPAIMON_TEST_NATIVE_WRITE: '1'
@@ -226,6 +248,59 @@ jobs:
           PYPAIMON_TEST_NATIVE_COMMIT: '1'
         run: |
           bash paimon-python/dev/lint-python.sh -i pytest
+
+      - name: Verify native temporal casts in non-UTC system zones
+        shell: bash
+        env:
+          PYPAIMON_TEST_NATIVE_PLAN: '1'
+          PYPAIMON_TEST_NATIVE_READ: '1'
+          PYPAIMON_TEST_NATIVE_WRITE: '1'
+          PYPAIMON_TEST_NATIVE_COMMIT: '1'
+        run: |
+          for zone in Asia/Shanghai America/New_York; do
+            TZ="$zone" python -m pytest -q \
+              paimon-python/pypaimon/tests/native_cast_completion_test.py \
+              paimon-python/pypaimon/tests/native_temporal_zone_cast_test.py \
+              paimon-python/pypaimon/tests/native_schema_cast_test.py \
+              paimon-python/pypaimon/tests/native_partition_metadata_test.py \
+              -k 'TIMESTAMP or temporal'
+          done
+
+  lerobot-compatibility:
+    name: LeRobot ${{ matrix.lerobot }} / Python ${{ matrix.python }}
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10"
+            lerobot: "0.4.4"
+          - python: "3.12"
+            lerobot: "0.6.0"
+          - python: "3.12"
+            lerobot: "0.6.1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install LeRobot dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.7.1 torchvision==0.22.1 torchcodec==0.3.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e './paimon-python[lerobot]' 'lerobot==${{ matrix.lerobot }}' --group ./paimon-python/pyproject.toml:test
+          python -m pip check
+          python -c 'from lerobot.datasets.lerobot_dataset import LeRobotDataset'
+      - name: Test import, training reads and writer statistics
+        working-directory: paimon-python
+        run: |
+          python -m pytest -q \
+            pypaimon/tests/multimodal_lerobot_test.py \
+            pypaimon/tests/multimodal_lerobot_writer_test.py::PaimonLeRobotWriterTest::test_multiframe_boolean_statistics_preserve_extrema \
+            pypaimon/tests/multimodal_lerobot_writer_test.py::PaimonLeRobotWriterTest::test_multiframe_int64_statistics_preserve_extrema
 
   torch:
     name: PyTorch / Python 3.10
@@ -256,6 +331,14 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ./paimon-python --group ./paimon-python/pyproject.toml:torch
           python -m pip check
+      - name: Verify Python test environment
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          assert importlib.util.find_spec('pypaimon_rust') is None, 'Rust is tested in Native CI'
+          PY
+
       - name: Run lint-python.sh
         shell: bash
         run: |
@@ -266,7 +349,8 @@ jobs:
   compatibility:
     name: Package and Ray compatibility
     timeout-minutes: 60
-    runs-on: ubuntu-latest
+    # setup-python provides Python 3.9 builds for Ubuntu 24.04, not 26.04.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

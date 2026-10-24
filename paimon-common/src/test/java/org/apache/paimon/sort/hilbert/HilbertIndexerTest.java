@@ -152,6 +152,56 @@ public class HilbertIndexerTest {
         }
     }
 
+    /**
+     * The curve covers one half of the plane before the other, so sorted by key one of the two
+     * coordinates changes sign exactly once. A key that ignores the sign bit puts {@code x} and
+     * {@code -x} on the same point and interleaves both signs.
+     */
+    @Test
+    public void testFloatingPointKeysKeepTheSign() {
+        double[] values = {-4.5, -3.5, -2.5, -1.5, 1.5, 2.5, 3.5, 4.5};
+        for (DataType type : new DataType[] {DataTypes.DOUBLE(), DataTypes.FLOAT()}) {
+            RowType rowType = RowType.of(new DataType[] {type, type}, new String[] {"x", "y"});
+            HilbertIndexer indexer = new HilbertIndexer(rowType, Arrays.asList("x", "y"));
+            indexer.open();
+
+            List<double[]> points = new ArrayList<>();
+            for (double x : values) {
+                for (double y : values) {
+                    points.add(new double[] {x, y});
+                }
+            }
+            points.sort(
+                    (left, right) ->
+                            compareUnsigned(
+                                    indexer.index(row(type, left)),
+                                    indexer.index(row(type, right))));
+
+            assertThat(indexer.index(row(type, new double[] {1.5, 2.5})))
+                    .as("%s", type)
+                    .isNotEqualTo(indexer.index(row(type, new double[] {-1.5, -2.5})));
+            assertThat(Math.min(signChanges(points, 0), signChanges(points, 1)))
+                    .as("%s", type)
+                    .isEqualTo(1);
+        }
+    }
+
+    private static int signChanges(List<double[]> points, int column) {
+        int changes = 0;
+        for (int i = 1; i < points.size(); i++) {
+            if ((points.get(i - 1)[column] < 0) != (points.get(i)[column] < 0)) {
+                changes++;
+            }
+        }
+        return changes;
+    }
+
+    private static GenericRow row(DataType type, double[] point) {
+        return type.equals(DataTypes.FLOAT())
+                ? GenericRow.of((float) point[0], (float) point[1])
+                : GenericRow.of(point[0], point[1]);
+    }
+
     private static BigInteger index(Long[] points) {
         long[] data = Arrays.stream(points).mapToLong(Long::longValue).toArray();
         return HilbertCurve.bits(63).dimensions(points.length).index(data);

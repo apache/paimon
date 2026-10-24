@@ -62,9 +62,8 @@ dependency availability can also depend on the operating system.
 | HDF5 import | `python -m pip install 'pypaimon[hdf5]'` | 3.8+ |
 | ROSBag import | `python -m pip install 'pypaimon[rosbag]'` | 3.10+ |
 | LeRobot datasets | `python -m pip install 'pypaimon[lerobot]'` | 3.10+ |
-| ACT benchmark | `python -m pip install 'pypaimon[act]'` | 3.10+ |
 | Mosaic files | `python -m pip install 'pypaimon[mosaic]'` | 3.9+ |
-| Lance files | `python -m pip install 'pypaimon[lance]'` | 3.8+ |
+| Lance dataset export | `python -m pip install 'pypaimon[lance]'` | 3.10+ |
 | Vortex files | `python -m pip install 'pypaimon[vortex]'` | 3.11+ |
 | IVF-PQ vector indexes | `python -m pip install 'pypaimon[vindex]'` | 3.9+ |
 | Full-text indexes | `python -m pip install 'pypaimon[full-text]'` | 3.8+ |

@@ -33,8 +33,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import HdfsOptions, SecurityOptions
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem import _kerberos
-from pypaimon.schema.data_types import AtomicType, DataField, PyarrowFieldParser
-from pypaimon.write.blob_format_writer import BlobFormatWriter
+from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 class _HdfsFileInfo:
@@ -617,73 +616,6 @@ class HdfsNativeFileIO(FileIO):
             fastavro.writer(output_stream, avro_schema,
                             record_generator(), codec=codec, **kwargs)
 
-    def write_row(self, path: str, data: pyarrow.Table, fields=None,
-                  zstd_level: int = 1, **kwargs):
-        try:
-            from pypaimon.write.writer.format_row_writer import FormatRowWriter
-
-            if fields is None:
-                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
-
-            with self.new_output_stream(path) as output_stream:
-                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
-                writer.write_table(data)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
-
-    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            if data.num_columns != 1:
-                raise RuntimeError(
-                    f"Blob format only supports a single column, "
-                    f"got {data.num_columns} columns")
-            field = data.schema[0]
-            if pyarrow.types.is_large_binary(field.type):
-                fields = [DataField(0, field.name, AtomicType("BLOB"))]
-            else:
-                paimon_type = PyarrowFieldParser.to_paimon_type(
-                    field.type, field.nullable)
-                fields = [DataField(0, field.name, paimon_type)]
-            records_dict = data.to_pydict()
-            num_rows = data.num_rows
-            field_name = fields[0].name
-            with self.new_output_stream(path) as output_stream:
-                writer = BlobFormatWriter(output_stream)
-                for i in range(num_rows):
-                    writer.write_value(records_dict[field_name][i],
-                                       fields, self.uri_reader_factory)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
-
-    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
-        # Mirror the remote-scheme writer: lance/vortex talk to the backend
-        # through their own object_store, so we hand them the URI plus any
-        # storage options the FileIO exposes rather than routing through the
-        # native client. Without these two methods, an HDFS table configured
-        # with file.format=lance/vortex would hit FileIO's NotImplementedError
-        # now that this class is the default hdfs:// backend.
-        try:
-            import lance
-
-            from pypaimon.read.reader.lance_utils import to_lance_specified
-            file_path_for_lance, storage_options = to_lance_specified(self, path)
-
-            writer = lance.file.LanceFileWriter(
-                file_path_for_lance, data.schema,
-                storage_options=storage_options, **kwargs)
-            try:
-                for batch in data.to_batches():
-                    writer.write_batch(batch)
-            finally:
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
-
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import mosaic
@@ -692,24 +624,6 @@ class HdfsNativeFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
-
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import vortex
-            from vortex import store
-
-            from pypaimon.read.reader.vortex_utils import to_vortex_specified
-            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
-
-            if store_kwargs:
-                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                from vortex._lib.io import write as vortex_write
-                vortex_write(vortex.array(data), file_path_for_vortex)
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
 
     def close(self):
         self._client = None

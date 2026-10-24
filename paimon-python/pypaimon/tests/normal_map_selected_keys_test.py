@@ -20,7 +20,7 @@ import unittest
 
 import pyarrow as pa
 
-from pypaimon.data.map_shared_shredding import assemble_normal_map_selected_keys
+from pypaimon.execution.python.read.map_shared_shredding import assemble_normal_map_selected_keys
 
 
 class NormalMapSelectedKeysTest(unittest.TestCase):

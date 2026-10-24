@@ -19,12 +19,14 @@
 import json
 import time
 import unittest
+from unittest.mock import patch
 
 from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
 
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -32,8 +34,9 @@ from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.table_scan import TableScan, validate_auth_rules
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_request import ScanRequest
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.special_fields import SpecialFields
 
@@ -109,9 +112,14 @@ class _FakeTable:
 
 def _make_scan(auth_result, read_type, table):
     scan = TableScan.__new__(TableScan)
+    scan.predicate = None
+    scan.partition_predicate = None
     scan._query_auth_fn = lambda select: auth_result
     scan._read_type = read_type
     scan.table = table
+    scan.limit = None
+    scan._file_scanner = None
+    scan._scan_configuration = ScanRequest()
     return scan
 
 
@@ -484,7 +492,7 @@ class TestReadValidationWiring(unittest.TestCase):
             [_string_field(0, "id"), _string_field(2, "s_a")],
             [["id"], ["s", "a"]])
         with self.assertRaises(RuntimeError) as ctx:
-            read._TableRead__authed_reader(None, auth)
+            PythonTableRead(read)._authed_reader(None, auth)
         self.assertIn("partial column", str(ctx.exception))
 
     def test_read_rejects_nested_projection_of_filter_operand(self):
@@ -495,7 +503,7 @@ class TestReadValidationWiring(unittest.TestCase):
             [_string_field(0, "id"), _string_field(2, "s_a")],
             [["id"], ["s", "a"]])
         with self.assertRaises(RuntimeError) as ctx:
-            read._TableRead__authed_reader(None, auth)
+            PythonTableRead(read)._authed_reader(None, auth)
         self.assertIn("partial column", str(ctx.exception))
 
 
@@ -542,12 +550,13 @@ class TestCodexReviewFindings(unittest.TestCase):
         self.assertIn("masked too", str(ctx.exception))
 
     def test_streaming_scan_validates_like_the_batch_scan(self):
-        from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
+        from pypaimon.execution.python.read.streaming_table_scan import AsyncStreamingTableScan
         auth = TableQueryAuthResult(None, {"email": _null_mask()})
         fields = [_string_field(0, "id"), _string_field(1, "mail")]
         scan = AsyncStreamingTableScan.__new__(AsyncStreamingTableScan)
         scan._query_auth_fn = lambda select: auth
         scan._read_type = fields
+        scan.predicate = None
         scan.table = _FakeTable(fields)
         with self.assertRaises(ValueError) as ctx:
             scan._AsyncStreamingTableScan__auth_query()
@@ -606,6 +615,7 @@ class TestStreamingPlanAuthorization(unittest.TestCase):
         auth = TableQueryAuthResult(None, {"email": _null_mask()})
         scan = AsyncStreamingTableScan.__new__(AsyncStreamingTableScan)
         scan.table = _FakeTable(fields, latest_fields=latest)
+        scan.predicate = None
         scan._read_type = fields
         scan._query_auth_fn = lambda select: auth
         raw = Plan([object()], snapshot_id=7)
@@ -618,19 +628,17 @@ class TestStreamingPlanAuthorization(unittest.TestCase):
     def _entry(self, scan, path):
         if path == "initial":
             return lambda: scan._create_initial_plan(None)
-        if path == "catchup":
-            return lambda: scan._create_catch_up_plan(1, None)
         return lambda: scan._create_follow_up_plan(None)
 
     def test_every_plan_path_wraps_with_the_authorization(self):
-        for path in ("initial", "delta", "catchup"):
+        for path in ("initial", "delta"):
             scan, auth = self._scan(stale=False)
             plan = self._entry(scan, path)()
             self.assertIsInstance(plan.splits()[0], QueryAuthSplit)
             self.assertIs(plan.splits()[0].auth_result, auth)
 
     def test_every_plan_path_refuses_a_stale_rule(self):
-        for path in ("initial", "delta", "catchup"):
+        for path in ("initial", "delta"):
             scan, _ = self._scan(stale=True)
             with self.assertRaises(ValueError):
                 self._entry(scan, path)()
@@ -788,6 +796,7 @@ def _exploding_schema_manager():
     return SimpleNamespace(latest=boom)
 
 
+@pytest.mark.python_read
 class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
 
     def _table(self, cached, latest):
@@ -818,8 +827,11 @@ class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
         batch = pa.RecordBatch.from_pydict(
             {"id": ["1"], "email": ["SECRET"]},
             schema=PyarrowFieldParser.from_paimon_schema(fields))
-        read._create_split_read = lambda split, **kw: SimpleNamespace(
-            create_reader=lambda: _OneBatch(batch))
+        storage = patch.object(
+            PythonTableRead, '_create_split_read', side_effect=lambda split, **kw: SimpleNamespace(
+                create_reader=lambda: _OneBatch(batch)))
+        storage.start()
+        self.addCleanup(storage.stop)
         return read
 
     def test_a_read_asks_the_catalog_once_across_workers_and_rule_objects(self):
@@ -861,6 +873,7 @@ class TestSchemaRefreshAsksTheCatalog(unittest.TestCase):
         pickle.dumps(read._auth_schema)
 
 
+@pytest.mark.python_read
 class TestReaderAppliesTheRules(unittest.TestCase):
 
     def _read(self, fields, data, latest=None, projected=None):
@@ -877,7 +890,9 @@ class TestReaderAppliesTheRules(unittest.TestCase):
                 {f.name: data[f.name] for f in requested}, schema=schema)
             return SimpleNamespace(create_reader=lambda: _OneBatch(batch))
 
-        read._create_split_read = storage
+        stub = patch.object(PythonTableRead, '_create_split_read', side_effect=storage)
+        stub.start()
+        self.addCleanup(stub.stop)
         return read
 
     def _rows(self, read, auth):

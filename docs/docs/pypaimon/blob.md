@@ -181,6 +181,9 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
 Set `cache.blob-index.max-size` in Catalog options to limit parsed indexes per
 Catalog context (default: `64 mb`; `0 b` disables). The cache is process-local
 and only used by the Python BLOB reader.
+With caching enabled, concurrent readers of the same file share one in-flight
+index load. Failed loads can be retried; indexes exceeding the budget are shared
+only with current waiters and are not retained.
 
 ## See Also
 

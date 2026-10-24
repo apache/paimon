@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -64,6 +65,8 @@ public class FlinkRowWrapper implements InternalRow {
     private final boolean writeNullOnFetchFailure;
     private final Set<Integer> blobFields;
     private final Set<Integer> materializedBlobFields;
+    /** When true, blob getters return the stored bytes and do not open a URI reader. */
+    private final boolean carryBlobBytes;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
@@ -113,7 +116,8 @@ public class FlinkRowWrapper implements InternalRow {
                 checkBlobDescriptorExists,
                 writeNullOnFetchFailure,
                 blobFields,
-                Collections.emptySet());
+                Collections.emptySet(),
+                false);
     }
 
     public static FlinkRowWrapper fromUriReaderFactory(
@@ -138,13 +142,32 @@ public class FlinkRowWrapper implements InternalRow {
             boolean writeNullOnFetchFailure,
             Set<Integer> blobFields,
             Set<Integer> materializedBlobFields) {
+        return fromUriReaderFactory(
+                row,
+                uriReaderFactory,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields,
+                materializedBlobFields,
+                false);
+    }
+
+    public static FlinkRowWrapper fromUriReaderFactory(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields,
+            Set<Integer> materializedBlobFields,
+            boolean carryBlobBytes) {
         return new FlinkRowWrapper(
                 row,
                 uriReaderFactory,
                 checkBlobDescriptorExists,
                 writeNullOnFetchFailure,
                 blobFields,
-                materializedBlobFields);
+                materializedBlobFields,
+                carryBlobBytes);
     }
 
     private FlinkRowWrapper(
@@ -153,13 +176,15 @@ public class FlinkRowWrapper implements InternalRow {
             boolean checkBlobDescriptorExists,
             boolean writeNullOnFetchFailure,
             Set<Integer> blobFields,
-            Set<Integer> materializedBlobFields) {
+            Set<Integer> materializedBlobFields,
+            boolean carryBlobBytes) {
         this.row = row;
         this.uriReaderFactory = uriReaderFactory;
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFields = blobFields;
         this.materializedBlobFields = materializedBlobFields;
+        this.carryBlobBytes = carryBlobBytes;
     }
 
     public static Set<Integer> blobFieldIndexes(org.apache.paimon.types.RowType rowType) {
@@ -262,7 +287,21 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        byte[] bytes = row.getBinary(pos);
+        return blobFromStoredBytes(row.getBinary(pos), uriReaderFactory, carryBlobBytes);
+    }
+
+    /**
+     * Sort inlines whatever {@link #getBlob} returns. Returning the stored bytes leaves descriptor
+     * resolution to the blob writer, which applies the fetch-failure NULL policy.
+     */
+    private static Blob blobFromStoredBytes(
+            byte[] bytes, @Nullable UriReaderFactory uriReaderFactory, boolean carryBlobBytes) {
+        if (bytes == null) {
+            return null;
+        }
+        if (carryBlobBytes) {
+            return new BlobData(bytes);
+        }
         return Blob.fromBytes(bytes, uriReaderFactory, null);
     }
 
@@ -344,17 +383,17 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public InternalArray getArray(int pos) {
-        return new FlinkArrayWrapper(row.getArray(pos), uriReaderFactory);
+        return new FlinkArrayWrapper(row.getArray(pos), uriReaderFactory, carryBlobBytes);
     }
 
     @Override
     public InternalVector getVector(int pos) {
-        return new FlinkVectorWrapper(row.getArray(pos), uriReaderFactory);
+        return new FlinkVectorWrapper(row.getArray(pos), uriReaderFactory, carryBlobBytes);
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        return new FlinkMapWrapper(row.getMap(pos), uriReaderFactory);
+        return new FlinkMapWrapper(row.getMap(pos), uriReaderFactory, carryBlobBytes);
     }
 
     @Override
@@ -366,16 +405,19 @@ public class FlinkRowWrapper implements InternalRow {
 
         private final org.apache.flink.table.data.ArrayData array;
         @Nullable private final UriReaderFactory uriReaderFactory;
+        private final boolean carryBlobBytes;
 
         private FlinkArrayWrapper(org.apache.flink.table.data.ArrayData array) {
-            this(array, null);
+            this(array, null, false);
         }
 
         private FlinkArrayWrapper(
                 org.apache.flink.table.data.ArrayData array,
-                @Nullable UriReaderFactory uriReaderFactory) {
+                @Nullable UriReaderFactory uriReaderFactory,
+                boolean carryBlobBytes) {
             this.array = array;
             this.uriReaderFactory = uriReaderFactory;
+            this.carryBlobBytes = carryBlobBytes;
         }
 
         @Override
@@ -452,22 +494,22 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public Blob getBlob(int pos) {
-            return Blob.fromBytes(array.getBinary(pos), uriReaderFactory, null);
+            return blobFromStoredBytes(array.getBinary(pos), uriReaderFactory, carryBlobBytes);
         }
 
         @Override
         public InternalArray getArray(int pos) {
-            return new FlinkArrayWrapper(array.getArray(pos), uriReaderFactory);
+            return new FlinkArrayWrapper(array.getArray(pos), uriReaderFactory, carryBlobBytes);
         }
 
         @Override
         public InternalVector getVector(int pos) {
-            return new FlinkVectorWrapper(array.getArray(pos), uriReaderFactory);
+            return new FlinkVectorWrapper(array.getArray(pos), uriReaderFactory, carryBlobBytes);
         }
 
         @Override
         public InternalMap getMap(int pos) {
-            return new FlinkMapWrapper(array.getMap(pos), uriReaderFactory);
+            return new FlinkMapWrapper(array.getMap(pos), uriReaderFactory, carryBlobBytes);
         }
 
         @Override
@@ -518,8 +560,9 @@ public class FlinkRowWrapper implements InternalRow {
 
         private FlinkVectorWrapper(
                 org.apache.flink.table.data.ArrayData array,
-                @Nullable UriReaderFactory uriReaderFactory) {
-            super(array, uriReaderFactory);
+                @Nullable UriReaderFactory uriReaderFactory,
+                boolean carryBlobBytes) {
+            super(array, uriReaderFactory, carryBlobBytes);
         }
     }
 
@@ -527,16 +570,19 @@ public class FlinkRowWrapper implements InternalRow {
 
         private final org.apache.flink.table.data.MapData map;
         @Nullable private final UriReaderFactory uriReaderFactory;
+        private final boolean carryBlobBytes;
 
         private FlinkMapWrapper(org.apache.flink.table.data.MapData map) {
-            this(map, null);
+            this(map, null, false);
         }
 
         private FlinkMapWrapper(
                 org.apache.flink.table.data.MapData map,
-                @Nullable UriReaderFactory uriReaderFactory) {
+                @Nullable UriReaderFactory uriReaderFactory,
+                boolean carryBlobBytes) {
             this.map = map;
             this.uriReaderFactory = uriReaderFactory;
+            this.carryBlobBytes = carryBlobBytes;
         }
 
         @Override
@@ -546,12 +592,12 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public InternalArray keyArray() {
-            return new FlinkArrayWrapper(map.keyArray(), uriReaderFactory);
+            return new FlinkArrayWrapper(map.keyArray(), uriReaderFactory, carryBlobBytes);
         }
 
         @Override
         public InternalArray valueArray() {
-            return new FlinkArrayWrapper(map.valueArray(), uriReaderFactory);
+            return new FlinkArrayWrapper(map.valueArray(), uriReaderFactory, carryBlobBytes);
         }
     }
 

@@ -446,16 +446,14 @@ class SequenceFieldComparabilityUnitTest(unittest.TestCase):
     """
 
     def test_variant_sequence_field_not_comparable(self):
-        from pypaimon.read.reader.sort_merge_reader import (
-            is_comparable_seq_field)
+        from pypaimon.execution.python.read.reader.sort_merge_reader import (is_comparable_seq_field)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         variant = DataField(0, 'seq', AtomicType('VARIANT'))
         self.assertFalse(is_comparable_seq_field(variant))
 
     def test_atomic_types_are_comparable(self):
-        from pypaimon.read.reader.sort_merge_reader import (
-            is_comparable_seq_field)
+        from pypaimon.execution.python.read.reader.sort_merge_reader import (is_comparable_seq_field)
         from pypaimon.schema.data_types import AtomicType, DataField
 
         for type_str in ('BIGINT', 'INT', 'TIMESTAMP(6)', 'DECIMAL(10, 2)',
@@ -465,8 +463,7 @@ class SequenceFieldComparabilityUnitTest(unittest.TestCase):
                             '{} should be comparable'.format(type_str))
 
     def test_complex_types_not_comparable(self):
-        from pypaimon.read.reader.sort_merge_reader import (
-            is_comparable_seq_field)
+        from pypaimon.execution.python.read.reader.sort_merge_reader import (is_comparable_seq_field)
         from pypaimon.schema.data_types import (
             ArrayType, AtomicType, DataField)
 

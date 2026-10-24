@@ -27,7 +27,7 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.projected_row import ProjectedRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 @pytest.fixture(

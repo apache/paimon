@@ -23,7 +23,9 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.table.format.format_table import Format, FormatTable
-from pypaimon.write.table_update_by_row_id import _RowIdUpdateFileWriter
+from pypaimon.execution.python.write.table_update_by_row_id import (
+    _RowIdUpdateFileWriter,
+)
 
 
 OPTION = 'parquet.write-page-index.enabled'

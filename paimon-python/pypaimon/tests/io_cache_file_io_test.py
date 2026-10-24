@@ -39,13 +39,13 @@ import pytest
 from pyarrow._fs import FileSystemHandler
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.execution.python.read.reader.format_avro_reader import FormatAvroReader
+from pypaimon.execution.python.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.filesystem.caching_file_io import (CachingFileIO,
                                                  LocalMemoryCacheManager)
 from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader.format_avro_reader import FormatAvroReader
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.file_type import FileType

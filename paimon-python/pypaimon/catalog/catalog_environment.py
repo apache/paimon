@@ -82,7 +82,7 @@ class CatalogEnvironment:
         if self.catalog_loader is not None and self.supports_version_management:
             from pypaimon.catalog.table_rollback import TableRollback
             catalog = self.catalog_loader.load()
-            return TableRollback(catalog, self.identifier)
+            return TableRollback(catalog, self.identifier, self.uuid)
         return None
 
     def snapshot_loader(self) -> Optional[SnapshotLoader]:
@@ -140,7 +140,7 @@ class CatalogEnvironment:
         """
         return CatalogEnvironment(
             identifier=identifier,
-            uuid=self.uuid,
+            uuid=self.uuid if identifier == self.identifier else None,
             catalog_loader=self.catalog_loader,
             supports_version_management=self.supports_version_management,
             rest_table_response=getattr(self, 'rest_table_response', None)

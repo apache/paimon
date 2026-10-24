@@ -519,20 +519,8 @@ class CachingFileIO(FileIO):
     def write_avro(self, *args, **kwargs):
         return self._delegate.write_avro(*args, **kwargs)
 
-    def write_lance(self, *args, **kwargs):
-        return self._delegate.write_lance(*args, **kwargs)
-
-    def write_blob(self, *args, **kwargs):
-        return self._delegate.write_blob(*args, **kwargs)
-
     def write_mosaic(self, *args, **kwargs):
         return self._delegate.write_mosaic(*args, **kwargs)
-
-    def write_vortex(self, *args, **kwargs):
-        return self._delegate.write_vortex(*args, **kwargs)
-
-    def write_row(self, *args, **kwargs):
-        return self._delegate.write_row(*args, **kwargs)
 
     def __getattr__(self, name):
         delegate = self.__dict__.get('_delegate')

@@ -712,7 +712,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+    public void rollbackTo(
+            Identifier identifier,
+            @Nullable String tableUuid,
+            Instant instant,
+            @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }

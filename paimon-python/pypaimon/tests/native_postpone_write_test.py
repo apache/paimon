@@ -23,7 +23,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('p', pa.string()),
@@ -82,8 +82,9 @@ def test_postpone_native_files_roll_and_preserve_replay_order(
             assert [(f.min_key.values, f.max_key.values) for f in files] == [([5], [2]), ([1], [1])]
             assert _file_rows(table, files) == data
             if native_commit:
-                with patch.object(commit.file_store_commit, 'commit',
-                                  side_effect=AssertionError('Python commit fallback')):
+                with patch('pypaimon.execution.python.write.file_store_commit.'
+                           'FileStoreCommit.commit',
+                           side_effect=AssertionError('Python commit fallback')):
                     commit.commit(messages, checkpoint) if stream else commit.commit(messages)
             else:
                 commit.commit(messages, checkpoint) if stream else commit.commit(messages)
@@ -116,8 +117,9 @@ def test_postpone_native_overwrite_and_abort(tmp_path, native_rest_catalog, nati
             assert _file_rows(table, files) == [(1, 'a', 20 if overwrite else 10, '+I')]
             all_files.extend(files)
             if native_commit:
-                with patch.object(commit.file_store_commit, 'commit',
-                                  side_effect=AssertionError('Python commit fallback')):
+                with patch('pypaimon.execution.python.write.file_store_commit.'
+                           'FileStoreCommit.commit',
+                           side_effect=AssertionError('Python commit fallback')):
                     commit.commit(messages)
             else:
                 commit.commit(messages)
@@ -221,7 +223,7 @@ def test_pending_files_participate_in_partition_metadata_deletes(tmp_path, opera
     expected = 0 if operation == 'truncate_table' else 1
     assert table.snapshot_manager().get_latest_snapshot().total_record_count == expected
     from pypaimon.manifest.manifest_list_manager import ManifestListManager
-    from pypaimon.read.scanner.file_scanner import FileScanner
+    from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
     snapshot = table.snapshot_manager().get_latest_snapshot()
     entries = FileScanner(table, lambda: ([], None)).with_all_buckets().read_manifest_entries(
         ManifestListManager(table).read_all(snapshot))

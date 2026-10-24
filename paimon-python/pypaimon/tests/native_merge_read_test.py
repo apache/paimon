@@ -24,8 +24,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_reader_available
-from pypaimon.write.native_commit import (
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_commit import (
     create_native_write_table, from_native_commit_messages)
 
 
@@ -49,7 +49,7 @@ def _table(tmp_path, options=None):
 
 
 @pytest.mark.native_plan
-@pytest.mark.skipif(not native_reader_available(), reason='native reader required')
+@pytest.mark.skipif(not native_runtime_available(), reason='native reader required')
 @pytest.mark.parametrize('options', [_ADVANCED, {
     'merge-engine': 'partial-update', 'ignore-delete': 'true',
 }])
@@ -71,7 +71,10 @@ def test_native_merge_reads_configurations_outside_python_subset(tmp_path, optio
     builder = table.new_read_builder()
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         if streaming:
             batches = read.to_arrow_batch_reader(splits)
             try:
@@ -112,9 +115,11 @@ def test_unsupported_python_merge_fails_before_raw_split_dispatch(
         failure = patch.dict(sys.modules, {
             'pypaimon_rust': None, 'pypaimon_rust.datafusion': None})
     else:
-        failure = patch('pypaimon.read.native_plan._prepare_native_read',
+        failure = patch('pypaimon.execution.native.read.table_read._prepare_native_read',
                         side_effect=RuntimeError('native setup failed'))
-    with failure, patch.object(read, '_create_split_read') as dispatch:
+    with failure, patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read'
+    ) as dispatch:
         with pytest.raises(NotImplementedError, match='sequence-group'):
             if api == 'arrow':
                 read.to_arrow(splits, parallelism=parallelism)

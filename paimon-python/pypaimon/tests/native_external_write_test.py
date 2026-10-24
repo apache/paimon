@@ -25,8 +25,8 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_plan
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.read.plan import (native_plan)
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 _SCHEMA = pa.schema([('id', pa.int32()), ('pt', pa.string()), ('value', pa.int32())])
@@ -96,8 +96,10 @@ def _read(table, planner, reader, snapshot=None):
     read = builder.new_read()
     with ExitStack() as stack:
         if reader:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         result = read.to_arrow(plan.splits())
     return sorted(result.to_pylist(), key=lambda row: row['id'])
 

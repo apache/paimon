@@ -73,6 +73,15 @@ public class RequestJacksonCompatibilityTest {
                             request -> assertThat(request.select()).containsExactly("id", "name"),
                             "select"),
                     requestCase(
+                            CommitLockRequest.class,
+                            "{\"tableId\":\"table-id\",\"commitUser\":\"morax-job\"}",
+                            request -> {
+                                assertThat(request.getTableId()).isEqualTo("table-id");
+                                assertThat(request.getCommitUser()).isEqualTo("morax-job");
+                            },
+                            "tableId",
+                            "commitUser"),
+                    requestCase(
                             CreateBranchRequest.class,
                             "{\"branch\":\"audit\",\"fromTag\":\"v1\"}",
                             request -> {
@@ -159,9 +168,42 @@ public class RequestJacksonCompatibilityTest {
                             request -> assertThat(request.getSchemaId()).isEqualTo(44L),
                             "schemaId"),
                     requestCase(
+                            GetLabelRequest.class,
+                            "{\"entityType\":\"COLUMN\",\"entityName\":\"db.t.`a.b`\","
+                                    + "\"key\":\"pii\"}",
+                            request -> {
+                                assertThat(request.getEntityType()).isEqualTo("COLUMN");
+                                assertThat(request.getEntityName()).isEqualTo("db.t.`a.b`");
+                                assertThat(request.getKey()).isEqualTo("pii");
+                            },
+                            "entityType",
+                            "entityName",
+                            "key"),
+                    requestCase(
+                            DeleteLabelRequest.class,
+                            "{\"entityType\":\"TABLE\",\"entityName\":\"db.t\","
+                                    + "\"key\":\"owner\"}",
+                            request -> {
+                                assertThat(request.getEntityType()).isEqualTo("TABLE");
+                                assertThat(request.getEntityName()).isEqualTo("db.t");
+                                assertThat(request.getKey()).isEqualTo("owner");
+                            },
+                            "entityType",
+                            "entityName",
+                            "key"),
+                    requestCase(
                             UpsertLabelRequest.class,
-                            "{\"value\":\"identifier\"}",
-                            request -> assertThat(request.getValue()).isEqualTo("identifier"),
+                            "{\"entityType\":\"TABLE\",\"entityName\":\"db.t\","
+                                    + "\"key\":\"owner\",\"value\":\"identifier\"}",
+                            request -> {
+                                assertThat(request.getEntityType()).isEqualTo("TABLE");
+                                assertThat(request.getEntityName()).isEqualTo("db.t");
+                                assertThat(request.getKey()).isEqualTo("owner");
+                                assertThat(request.getValue()).isEqualTo("identifier");
+                            },
+                            "entityType",
+                            "entityName",
+                            "key",
                             "value"));
 
     private static final Set<Class<? extends RESTRequest>> COMPLEX_REQUESTS =

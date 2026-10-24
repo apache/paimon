@@ -856,6 +856,60 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testLaterOrEqualWatermarkWithRepeatedWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // a plateau of identical watermarks: snapshots 1, 2, 3 all carry 1000. Repeated
+        // watermarks are normal because the commit watermark takes the maximum.
+        Map<Long, Long> watermarks = watermarkMap(0, 500, 1, 1000, 2, 1000, 3, 1000, 4, 2000);
+        for (long i = 0; i < 5; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // lower bound: the first snapshot of the plateau, not the binary-search midpoint
+        assertThat(snapshotManager.laterOrEqualWatermark(1000).id()).isEqualTo(1);
+        // a value inside the gap still resolves to the start of the next plateau
+        assertThat(snapshotManager.laterOrEqualWatermark(501).id()).isEqualTo(1);
+        // non-repeated watermarks are unaffected
+        assertThat(snapshotManager.laterOrEqualWatermark(2000).id()).isEqualTo(4);
+        assertThat(snapshotManager.laterOrEqualWatermark(500).id()).isEqualTo(0);
+    }
+
+    @Test
+    public void testLaterOrEqualWatermarkWithPlateauAtTheEarliestSnapshot() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // the plateau starts at the earliest snapshot, so the left walk must stop there
+        Map<Long, Long> watermarks = watermarkMap(0, 1000, 1, 1000, 2, 1000, 3, 2000);
+        for (long i = 0; i < 4; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.laterOrEqualWatermark(1000).id()).isEqualTo(0);
+    }
+
+    @Test
+    public void testLaterOrEqualWatermarkWithRepeatedWatermarksAndNullWatermarks()
+            throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // snapshots 2 and 4 carry no watermark and sit inside a plateau of 1000s
+        Map<Long, Long> watermarks = watermarkMap(0, 500, 1, 1000, 3, 1000, 5, 1000, 6, 2000);
+        for (long i = 0; i < 7; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // null-watermark snapshots must not shadow the real start of the plateau
+        assertThat(snapshotManager.laterOrEqualWatermark(1000).id()).isEqualTo(1);
+    }
+
+    @Test
     public void testEarlierOrEqualWatermarkBelowMinimum() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =

@@ -23,7 +23,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, ArrayType, DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 from pypaimon.tests.native_blob_write_test import _read, _physical_files
 
 pytestmark = pytest.mark.native_plan
@@ -226,7 +226,10 @@ def test_collection_commit_exception_preserves_files(
             proxy = Mock(wraps=native)
             publish = native.commit
         else:
-            publish = commit.file_store_commit.commit
+            from pypaimon.execution.python.write.table_commit import create_python_commit
+            if commit._python_commit is None:
+                commit._python_commit = create_python_commit(commit)
+            publish = commit._python_commit.file_store_commit.commit
 
         def fail_commit(*args, **kwargs):
             if published:
@@ -238,9 +241,13 @@ def test_collection_commit_exception_preserves_files(
             failing_commit = patch.object(
                 commit, '_prepare_native_commit', return_value=(proxy, native_messages))
         else:
-            failing_commit = patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit)
+            failing_commit = patch('pypaimon.execution.python.write.file_store_commit.'
+                                   'FileStoreCommit.commit',
+                                   side_effect=fail_commit)
         with failing_commit, \
-                patch.object(commit.file_store_commit, 'abort', side_effect=AssertionError('Unsafe abort')):
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.abort',
+                      side_effect=AssertionError('Unsafe abort')):
             with pytest.raises(OSError, match='Commit outcome is unknown'):
                 commit.commit(messages, 2) if stream else commit.commit(messages)
         if native_commit:
@@ -289,7 +296,10 @@ def test_native_collection_projection_keeps_selected_blob_keys(tmp_path, project
         read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         if native:
-            with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python fallback')
+            ):
                 result = read.to_arrow(splits)
         else:
             expected = read.to_arrow(splits)
@@ -300,14 +310,14 @@ def test_native_collection_projection_keeps_selected_blob_keys(tmp_path, project
 
 def test_collection_partial_partition_prepare_keeps_cleanup_ownership(tmp_path):
     from unittest.mock import patch
-    from pypaimon.write.writer.composite_data_writer import CompositeDataWriter
+    from pypaimon.execution.python.write.writer.composite_data_writer import CompositeDataWriter
 
     table = _table(tmp_path, False, partitioned=True)
     writer = table.new_batch_write_builder().new_write()
     try:
         data, _ = _data(table, tmp_path, False, 1)
         writer.write_arrow(data)
-        partitions = list(writer.file_store_write.data_writers.values())
+        partitions = list(writer._execution.file_store_write.data_writers.values())
         assert len(partitions) == 3 and all(isinstance(partition, CompositeDataWriter) for partition in partitions)
         with patch.object(partitions[1], 'prepare_commit', side_effect=RuntimeError('Second partition failed')):
             with pytest.raises(RuntimeError, match='Second partition failed'):

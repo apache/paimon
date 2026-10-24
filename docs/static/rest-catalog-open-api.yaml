@@ -595,6 +595,12 @@ paths:
           required: true
           schema:
             type: string
+      description: >-
+        Validate the table incarnation, branch and expected head atomically with publication.
+        Every writer must honor an active commit lease, including writers that do not request
+        one. snapshot.commitUser must exactly match the commitUser that owns the active lease.
+        Clear the lease only when a new snapshot is successfully published; rejected requests
+        and idempotent replays of an existing snapshot must not clear a newer lease.
       requestBody:
         content:
           application/json:
@@ -611,6 +617,113 @@ paths:
           $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock:
+    post:
+      tags:
+        - table
+      summary: Acquire a table commit lease
+      operationId: acquireCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the server-side table property rest.commit.lock-enabled=true and the same
+        permission as committing snapshots. Clients opt into acquisition separately using
+        rest.commit.acquire-lock=true; that client option does not enable the table capability.
+        Ownership is the exact commitUser: authorized callers that send the same commitUser
+        share the lease, so each logical writer must use a unique commitUser. Contention
+        returns HTTP 200 with acquired=false. A grant includes the authoritative snapshot head.
+        Renewal never revives an expired lease. Publication retains snapshot CAS validation
+        and atomically releases the lease on a new successful commit. A rejected publication
+        does not release the lease. A replay of an already-published snapshot must not release
+        a newer lease. The lease duration is fixed for each scope. There is no unlock RPC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew:
+    post:
+      tags:
+        - table
+      summary: Renew a table commit lease
+      operationId: renewCommitLock
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      description: >-
+        Requires the same permission as committing snapshots. Validate the table incarnation,
+        branch and exact commitUser against the unexpired lease.
+        Return acquired=false when ownership is lost or the lease has expired; renewal must
+        never acquire a new lease or revive an expired one. Keep leaseMillis fixed within
+        the scope. Each successful new snapshot publication ends its lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitLockRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLockResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
@@ -700,6 +813,130 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/replace:
+    post:
+      tags:
+        - table
+      summary: Replace table
+      operationId: replaceTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceTableRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas:
+    get:
+      tags:
+        - table
+      summary: List schemas
+      operationId: listSchemas
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSchemasResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/schemas/{version}:
+    get:
+      tags:
+        - table
+      summary: Get schema
+      operationId: getSchema
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSchemaResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description: Not Found - the table or the schema version does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
@@ -1318,49 +1555,6 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/BranchNotExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/rename:
-    post:
-      tags:
-        - branch
-      summary: rename branch
-      operationId: renameBranch
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: branch
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RenameBranchRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "404":
-          $ref: '#/components/responses/BranchNotExistErrorResponse'
-        "409":
-          description: Branch already exists
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
@@ -3499,6 +3693,39 @@ components:
           $ref: '#/components/schemas/Identifier'
         destination:
           $ref: '#/components/schemas/Identifier'
+    CommitLockRequest:
+      type: object
+      required: [tableId, commitUser]
+      properties:
+        tableId:
+          type: string
+          description: Stable resolved table or branch UUID; a recreated table cannot inherit a lease.
+        commitUser:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Exact commitUser that will appear in the submitted snapshot.
+    CommitLockResponse:
+      type: object
+      required: [acquired, expiresAtMillis, leaseMillis]
+      properties:
+        acquired:
+          type: boolean
+        commitUser:
+          type: [string, "null"]
+        expiresAtMillis:
+          type: integer
+          format: int64
+          description: Server database clock expiration; zero when acquired is false.
+        leaseMillis:
+          type: integer
+          format: int64
+          description: Lease duration in milliseconds, fixed within a scope; zero when acquired is false.
+        snapshot:
+          anyOf:
+            - $ref: '#/components/schemas/Snapshot'
+            - type: "null"
+          description: Authoritative head at grant time; null for an empty table.
     CommitTableRequest:
       type: object
       properties:
@@ -3514,12 +3741,24 @@ components:
             $ref: '#/components/schemas/PartitionStatistics'
     RollbackTableRequest:
       type: object
+      description: >-
+        tableId identifies the expected table incarnation; omit it only when its UUID is unavailable.
+        Automatic conflict rollback supplies fromSnapshot and targets its predecessor. Rollback
+        executes independently of commit leases and does not carry writer identity or a snapshot
+        UUID. The server must validate the table incarnation and expected snapshot ID atomically
+        with rollback, before partition changes or file cleanup. For automatic conflict rollback,
+        it should also check that the current head is still a COMPACT snapshot, since snapshot IDs
+        can be reused after rollback. Manual rollback may omit fromSnapshot.
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
           type: [ integer, "null" ]
           format: int64
+          description: Expected latest snapshot ID, required for automatic conflict rollback.
+        tableId:
+          type: [ string, "null" ]
+          description: Expected table or branch UUID.
     RollbackSchemaRequest:
       type: object
       required:
@@ -3528,6 +3767,58 @@ components:
         schemaId:
           type: integer
           format: int64
+    ReplaceTableRequest:
+      type: object
+      properties:
+        schema:
+          $ref: '#/components/schemas/Schema'
+    TableSchema:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int32
+        id:
+          type: integer
+          format: int64
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        highestFieldId:
+          type: integer
+          format: int32
+        partitionKeys:
+          type: array
+          items:
+            type: string
+        primaryKeys:
+          type: array
+          items:
+            type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        timeMillis:
+          type: integer
+          format: int64
+    ListSchemasResponse:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableSchema'
+        nextPageToken:
+          type: [ string, "null" ]
+    GetSchemaResponse:
+      type: object
+      properties:
+        schema:
+          $ref: '#/components/schemas/TableSchema'
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
@@ -3664,7 +3955,7 @@ components:
           items:
             $ref: '#/components/schemas/Snapshot'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     AuthTableQueryRequest:
       type: object
       properties:
@@ -3718,7 +4009,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetDatabaseResponse:
       type: object
       properties:
@@ -3753,7 +4044,7 @@ components:
             type: string
             description: table name of the table.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTableDetailsResponse:
       type: object
       properties:
@@ -3762,7 +4053,7 @@ components:
           items:
             $ref: '#/components/schemas/GetTableResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListTablesGloballyResponse:
       type: object
       properties:
@@ -3771,7 +4062,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ConfigResponse:
       type: object
       properties:
@@ -3791,7 +4082,7 @@ components:
           items:
             $ref: '#/components/schemas/Partition'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     CreateBranchRequest:
       type: object
       properties:
@@ -3799,11 +4090,6 @@ components:
           type: string
         fromTag:
           type: [ string, "null" ]
-    RenameBranchRequest:
-      type: object
-      properties:
-        toBranch:
-          type: string
     ForwardBranchRequest:
       type: object
       properties:
@@ -3854,7 +4140,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     TagInfo:
       type: object
       properties:
@@ -3898,7 +4184,7 @@ components:
             type: string
             description: view name of the view.
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewDetailsResponse:
       type: object
       properties:
@@ -3907,7 +4193,7 @@ components:
           items:
             $ref: '#/components/schemas/GetViewResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsGloballyResponse:
       type: object
       properties:
@@ -3916,7 +4202,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListViewsGloballyResponse:
       type: object
       properties:
@@ -3925,7 +4211,7 @@ components:
           items:
             $ref: '#/components/schemas/Identifier'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionsResponse:
       type: object
       properties:
@@ -3934,7 +4220,7 @@ components:
           items:
             type: string
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     ListFunctionDetailsResponse:
       type: object
       properties:
@@ -3943,7 +4229,7 @@ components:
           items:
             $ref: '#/components/schemas/GetFunctionResponse'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
     GetFunctionResponse:
       type: object
       properties:
@@ -4001,7 +4287,7 @@ components:
           items:
             $ref: '#/components/schemas/ConsumerInfo'
         nextPageToken:
-          type: string
+          type: [ string, "null" ]
           description: Token for the next page of results
     ResetConsumerRequest:
       type: object

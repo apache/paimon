@@ -39,6 +39,8 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -52,9 +54,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link FileIndexesTable}. */
 public class FileIndexesTableTest extends TableTestBase {
 
-    @Test
-    public void testEmbeddedFileIndexes() throws Exception {
-        FileIndexesTable fileIndexesTable = createTable("EmbeddedIndexes", "1 MB");
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testEmbeddedFileIndexes(int version) throws Exception {
+        FileIndexesTable fileIndexesTable = createTable("EmbeddedIndexes", "1 MB", version);
 
         List<InternalRow> rows = read(fileIndexesTable);
         assertIndexRows(rows, "EMBEDDED");
@@ -67,9 +70,10 @@ public class FileIndexesTableTest extends TableTestBase {
                                         && !row.getBoolean(12));
     }
 
-    @Test
-    public void testExternalFileIndexes() throws Exception {
-        FileIndexesTable fileIndexesTable = createTable("ExternalIndexes", "1 B");
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testExternalFileIndexes(int version) throws Exception {
+        FileIndexesTable fileIndexesTable = createTable("ExternalIndexes", "1 B", version);
 
         List<InternalRow> rows = read(fileIndexesTable);
         assertIndexRows(rows, "FILE");
@@ -213,8 +217,19 @@ public class FileIndexesTableTest extends TableTestBase {
         return createTable(tableName, inManifestThreshold, false);
     }
 
+    private FileIndexesTable createTable(String tableName, String inManifestThreshold, int version)
+            throws Exception {
+        return createTable(tableName, inManifestThreshold, false, version);
+    }
+
     private FileIndexesTable createTable(
             String tableName, String inManifestThreshold, boolean writeSeparateFiles)
+            throws Exception {
+        return createTable(tableName, inManifestThreshold, writeSeparateFiles, 1);
+    }
+
+    private FileIndexesTable createTable(
+            String tableName, String inManifestThreshold, boolean writeSeparateFiles, int version)
             throws Exception {
         Identifier identifier = identifier(tableName);
         catalog.createTable(
@@ -225,6 +240,9 @@ public class FileIndexesTableTest extends TableTestBase {
                         .partitionKeys("pt")
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.BUCKET_KEY.key(), "id")
+                        .option(
+                                CoreOptions.FILE_INDEX_FORMAT_VERSION.key(),
+                                Integer.toString(version))
                         .option("file-index.bitmap.columns", "id")
                         .option("file-index.bloom-filter.columns", "id")
                         .option(

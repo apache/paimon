@@ -28,7 +28,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.data_types import AtomicType, ArrayType, DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -103,7 +103,10 @@ def _table(tmp_path, kind, external=False, extra=None, payload_type=None):
 def _read(table):
     builder = table.new_read_builder()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         return sorted(read.to_arrow(builder.new_scan().plan().splits()).to_pylist(), key=lambda row: row['id'])
 
 
@@ -137,7 +140,7 @@ def test_blob_rows_mix_with_arrow_and_release_sources(tmp_path, kind, stream, ex
             writer.write_row(GenericRow([3, 'b', None], table.fields))
         assert blob.opened == 1
         assert all(source.closed and source.read_sizes for source in blob.streams)
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         assert writer._python_writer is None
         messages = writer.prepare_commit(7) if stream else writer.prepare_commit()
         _commit(builder, messages, stream)
@@ -158,7 +161,7 @@ def test_stream_blob_rows_keep_routing_after_multiple_prepares(tmp_path, kind):
             with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python writer fallback')):
                 writer.write_row(GenericRow([identifier, 'a', _value(kind, blob)], table.fields))
             assert blob.opened == 1 and all(source.closed for source in blob.streams)
-            assert writer._blob_rows.readers == {}
+            assert writer._execution._blob_rows.readers == {}
             _commit(builder, writer.prepare_commit(identifier), True, identifier)
             expected.append(dict(id=identifier, pt='a', payload=_value(kind, blob.payload)))
         assert _read(table) == expected
@@ -186,7 +189,7 @@ def test_blob_row_subset_uses_named_fields_without_opening_omitted_blobs(tmp_pat
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('blob_object', [False, True])
 def test_blob_row_map_preserves_java_null_keys(tmp_path, stream, blob_object):
-    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
     table = _table(tmp_path, 'map', extra={'blob.target-file-size': '1 MB'})
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     writer = builder.new_write()
@@ -218,7 +221,7 @@ def test_duplicate_blob_map_keys_are_rejected_before_opening_payloads(tmp_path):
             with pytest.raises(ValueError, match='unique'):
                 writer.write_row(GenericRow([1, 'a', [(None, first), (None, second)]], table.fields))
         assert first.opened == second.opened == 0
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         assert not list(tmp_path.rglob('*.blob'))
     finally:
         writer.close()
@@ -239,7 +242,7 @@ def test_blob_row_stream_error_preserves_prepared_files_and_exception(tmp_path, 
             with pytest.raises(OSError) as caught:
                 writer.write_row(GenericRow([1, 'a', _value(kind, bad)], table.fields))
         assert caught.value is error
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         writer.abort()
         assert all(path.exists() for path in prepared)
         _commit(builder, messages, True, 1)
@@ -259,7 +262,7 @@ def test_blob_object_stream_and_native_file_descriptor_share_one_writer(tmp_path
     try:
         writer.write_row(GenericRow([0, 'a', blob], table.fields))
         writer.write_row(GenericRow([1, 'a', reference], table.fields))
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         _commit(builder, writer.prepare_commit(), False)
         assert _read(table) == [dict(id=0, pt='a', payload=b'OBJECT'),
                                 dict(id=1, pt='a', payload=b'REFERENCED')]
@@ -362,7 +365,7 @@ def test_blob_map_rows_reject_non_pair_entries(tmp_path, operation, entry):
 ])
 def test_blob_map_row_decimal_keys_round_in_core(tmp_path, operation, type_name, key, expected):
     from pypaimon.tests.native_blob_update_test import _native_only
-    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
     table = _table(tmp_path, 'map', payload_type=MapType(True, AtomicType(type_name), AtomicType('BLOB')))
     builder = table.new_batch_write_builder()
     row = GenericRow([0, 'a', [(Decimal(key), StreamBlob(b'value'))]], table.fields)
@@ -408,7 +411,7 @@ def test_inline_blob_row_objects_keep_real_references(tmp_path, native_rest_cata
         with patch.object(writer, '_switch_to_python', side_effect=AssertionError('Python writer fallback')):
             with patch.object(value, 'new_input_stream', side_effect=AssertionError('Inline reference opened')):
                 writer.write_row(GenericRow([4, 'a', 14, value], table.fields))
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         messages = writer.prepare_commit(7) if stream else writer.prepare_commit()
         assert all(not file.file_name.endswith('.blob') for message in messages for file in message.new_files)
         _commit(builder, messages, stream)
@@ -427,7 +430,7 @@ def test_decimal_blob_map_overflow_is_rejected_before_opening_payload(tmp_path, 
         with pytest.raises(ValueError, match='precision'):
             writer.write_row(GenericRow([0, 'a', [(Decimal(key), blob)]], table.fields))
         assert blob.opened == 0
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         assert not list(tmp_path.rglob('*.blob'))
     finally:
         writer.close()
@@ -441,7 +444,7 @@ def test_decimal_blob_map_duplicate_keys_are_checked_after_rounding(tmp_path):
         with pytest.raises(ValueError, match='unique'):
             writer.write_row(GenericRow([0, 'a', [(Decimal('12.345'), blob), (Decimal('12.35'), blob)]], table.fields))
         assert blob.opened == 0
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
         assert not list(tmp_path.rglob('*.blob'))
     finally:
         writer.close()

@@ -49,8 +49,9 @@ from pypaimon.multimodal.lerobot.schema import (
     _schema_from_info,
     _validate_lerobot_schema,
 )
+from pypaimon.multimodal.lerobot.source import _info_dict
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
-from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.multimodal.video import VideoFrameCollator, _VideoDecodePool
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
@@ -274,6 +275,17 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS.default_value()
         )
+        self._video_decode_parallelism = (
+            table_options.read_video_decode_parallelism()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()
+        )
+        self._video_decoders_per_payload = (
+            table_options.read_video_decoders_per_payload()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD.default_value()
+        )
+        self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
                 access,
@@ -448,21 +460,35 @@ class PaimonDatasetReader(ABC):
         video_windows = {} if self.image_transforms is not None else _decode_video_windows(
             plans, rows, getattr(self, "_video_collators", ()),
             self._features, self.return_uint8,
-            return_batch=return_batch, share_memory=share_memory)
+            return_batch=return_batch, share_memory=share_memory,
+            decoders_per_payload=getattr(
+                self, "_video_decoders_per_payload",
+                CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD.default_value()),
+            decode_pool=getattr(self, "_video_decode_pool", None),
+            decode_parallelism=getattr(
+                self, "_video_decode_parallelism",
+                CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()))
         for group in row_groups:
             for row in group.values():
                 for key in video_windows:
                     row.pop(key, None)
         _decode_video_rows(
-            row_groups, getattr(self, "_video_collators", ()))
+            row_groups, getattr(self, "_video_collators", ()),
+            decode_pool=getattr(self, "_video_decode_pool", None),
+            decode_parallelism=getattr(
+                self, "_video_decode_parallelism",
+                CoreOptions.READ_VIDEO_DECODE_PARALLELISM.default_value()))
         converted = {
             position: _torch_row(
                 row, self._features, self.return_uint8)
             for position, row in base_rows.items()
         }
+        window_keys = {key for plan in plans for key in plan["windows"]}
         converted.update({
             position: _torch_row(
-                row, self._features, self.return_uint8)
+                {key: value for key, value in row.items()
+                 if key in window_keys},
+                self._features, self.return_uint8)
             for position, row in delta_rows.items()
         })
 
@@ -506,6 +532,9 @@ class PaimonDatasetReader(ABC):
         return self.get_items(indices)
 
     def close(self):
+        pool = getattr(self, "_video_decode_pool", None)
+        if pool is not None:
+            pool.close()
         first_error = None
         for collator in getattr(self, "_video_collators", ()):
             try:
@@ -857,10 +886,10 @@ class _PaimonLeRobotMetadata:
 
 def _reader_metadata(metadata):
     info = _metadata_member(metadata, "info")
-    if not isinstance(info, Mapping):
+    if not isinstance(info, Mapping) and not callable(getattr(info, "to_dict", None)):
         raise TypeError(
             "PaimonDatasetReader metadata must contain an info map.")
-    info = dict(info)
+    info = _info_dict(info)
     features = info.get("features")
     if isinstance(features, Mapping):
         info["features"] = {
@@ -1419,7 +1448,56 @@ def _attach_task_labels(rows, task_names, subtask_names):
 
 def _decode_video_windows(
         plans, rows, collators, features, return_uint8, *,
-        return_batch=False, share_memory=False):
+        return_batch=False, share_memory=False, decode_parallelism=1, decode_pool=None,
+        decoders_per_payload=1):
+    pool = decode_pool if decode_pool is not None else _VideoDecodePool()
+    try:
+        return _decode_video_windows_with_pool(
+            plans, rows, collators, features, return_uint8,
+            return_batch=return_batch, share_memory=share_memory,
+            decode_parallelism=decode_parallelism, executor=pool.get(decode_parallelism),
+            decoders_per_payload=decoders_per_payload)
+    finally:
+        if decode_pool is None:
+            pool.close()
+
+
+def _partition_video_windows(windows, count):
+    """Split windows while bounding duplicate frame requests across decoders."""
+    grouped = {}
+    for window in windows:
+        # Windows with the same requested frames should always share a decoder,
+        # even when their output order differs.
+        grouped.setdefault(tuple(sorted(set(window[1]))), []).append(window)
+    ordered = sorted(grouped.values(), key=lambda group: min(group[0][1]))
+    count = min(count, len(ordered))
+    serial_frames = len({
+        index for _, window in windows for index in window
+    })
+    while count > 1:
+        partitions = [
+            [
+                window
+                for group in ordered[len(ordered) * replica // count:
+                                     len(ordered) * (replica + 1) // count]
+                for window in group
+            ]
+            for replica in range(count)
+        ]
+        parallel_frames = sum(len({
+            index for _, window in partition for index in window
+        }) for partition in partitions)
+        # Bound additional frame requests to 50%. This retains parallelism for
+        # mostly independent windows without multiplying highly overlapping IO.
+        if 2 * parallel_frames <= 3 * serial_frames:
+            return partitions
+        count -= 1
+    return [windows]
+
+
+def _decode_video_windows_with_pool(
+        plans, rows, collators, features, return_uint8, *,
+        return_batch, share_memory, decode_parallelism, executor, decoders_per_payload):
     import torch
 
     tasks = [c for c in collators if c.video_column in plans[0]["windows"]]
@@ -1453,16 +1531,36 @@ def _decode_video_windows(
             requests.setdefault((payload, keyframe_index), []).append((
                 offset, [d.frame_index for d in window]))
 
+        if len(requests) == 1 and executor is not None:
+            request_key, windows = next(iter(requests.items()))
+            count = min(decoders_per_payload, decode_parallelism,
+                        collator.max_open_videos, len(windows))
+            if count > 1:
+                partitions = _partition_video_windows(windows, count)
+                if len(partitions) > 1:
+                    requests = {
+                        request_key + (replica,): partition
+                        for replica, partition in enumerate(partitions)
+                    }
+
+        def read_frames(decoder, windows):
+            get_frames = getattr(decoder, "get_frames_at", None)
+            if not callable(get_frames):
+                return None
+            indices = sorted({i for _, window in windows for i in window})
+            with torch.inference_mode(inference_enabled), \
+                    torch.set_grad_enabled(grad_enabled):
+                return windows, indices, get_frames(indices=indices).data
+
         output = None if return_batch else [None] * len(plans)
         with torch.inference_mode(inference_enabled), \
-                torch.set_grad_enabled(grad_enabled):
-            for (payload, keyframe_index), windows in requests.items():
-                decoder = collator._decoder(payload, keyframe_index)
-                get_frames = getattr(decoder, "get_frames_at", None)
-                if not callable(get_frames):
+                torch.set_grad_enabled(grad_enabled), \
+                collator._map_decoders(
+                    requests, read_frames, decode_parallelism, executor) as decoded:
+            for result in decoded:
+                if result is None:
                     return key, None
-                indices = sorted({i for _, window in windows for i in window})
-                frames = get_frames(indices=indices).data
+                windows, indices, frames = result
                 if (not torch.is_tensor(frames) or frames.ndim != 4
                         or len(frames) != len(indices)):
                     raise ValueError("Video decoder must return one frame per index.")
@@ -1483,10 +1581,20 @@ def _decode_video_windows(
                     shape = ((len(plans), window_size)
                              + tuple(frames.shape[1:]))
                     if output is None:
-                        output = torch.empty(
-                            shape, dtype=output_dtype, device=frames.device)
-                        if share_memory:
-                            output.share_memory_()
+                        if share_memory and frames.device.type == "cpu":
+                            empty = frames.new_empty(0, dtype=output_dtype)
+                            numel = 1
+                            for size in shape:
+                                numel *= size
+                            # Match DataLoader collation: allocate shared storage directly.
+                            storage = empty._typed_storage()._new_shared(
+                                numel, device=empty.device)
+                            output = empty.new(storage).resize_(shape)
+                        else:
+                            output = torch.empty(
+                                shape, dtype=output_dtype, device=frames.device)
+                            if share_memory:
+                                output.share_memory_()
                     elif tuple(output.shape) != shape \
                             or output.dtype != output_dtype:
                         raise ValueError(
@@ -1516,12 +1624,12 @@ def _decode_video_windows(
                             output[offset] = output[offset].float().div_(255)
         return key, output
 
-    if len(tasks) == 1:
-        decoded = [decode(tasks[0])]
+    if executor is None or len(tasks) == 1:
+        decoded = [decode(task) for task in tasks]
     else:
         with ThreadPoolExecutor(
-                max_workers=min(len(tasks), _MAX_VISUAL_WORKERS)) as executor:
-            decoded = list(executor.map(decode, tasks))
+                max_workers=min(len(tasks), _MAX_VISUAL_WORKERS)) as camera_executor:
+            decoded = list(camera_executor.map(decode, tasks))
     return {key: windows for key, windows in decoded if windows is not None}
 
 
@@ -2148,7 +2256,8 @@ def _identity(values):
     return values
 
 
-def _decode_video_rows(row_groups, collators):
+def _decode_video_rows(
+        row_groups, collators, decode_parallelism=_MAX_VISUAL_WORKERS, decode_pool=None):
     tasks = []
     for collator in collators:
         targets = []
@@ -2164,14 +2273,36 @@ def _decode_video_rows(row_groups, collators):
 
     if not tasks:
         return
-    if len(tasks) == 1:
-        decoded_groups = [tasks[0][0](tasks[0][2])]
+    if decode_parallelism == 1:
+        decoded_groups = [collator(rows) for collator, _, rows in tasks]
     else:
-        with ThreadPoolExecutor(
-                max_workers=min(
-                    len(tasks), _MAX_VISUAL_WORKERS)) as executor:
-            decoded_groups = list(executor.map(
-                lambda task: task[0](task[2]), tasks))
+        from concurrent.futures import wait
+
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            grad_enabled = torch.is_grad_enabled()
+            inference_enabled = torch.is_inference_mode_enabled()
+
+        def decode(collator, rows):
+            if torch is None:
+                return collator(rows)
+            with torch.inference_mode(inference_enabled), \
+                    torch.set_grad_enabled(grad_enabled):
+                return collator(rows)
+
+        pool = decode_pool if decode_pool is not None else _VideoDecodePool()
+        futures = []
+        try:
+            executor = pool.get(decode_parallelism)
+            for collator, _, rows in tasks:
+                futures.append(executor.submit(decode, collator, rows))
+            decoded_groups = [future.result() for future in futures]
+        finally:
+            for future in futures:
+                future.cancel()
+            wait(futures)
+            if decode_pool is None:
+                pool.close()
 
     for (collator, targets, _), decoded in zip(tasks, decoded_groups):
         for (rows, index), row in zip(targets, decoded):

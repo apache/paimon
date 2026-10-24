@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataTypes;
 import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDateTime;
@@ -72,6 +73,70 @@ class SchemaValidationTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Option 'primary-key.nullable' can only be enabled for a table with primary keys.");
+    }
+
+    @Test
+    public void testSequenceGroupSortOrderValidation() {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f2.sequence-group", "f3");
+        options.put("fields.f2.sequence-group.sort-order", "descending");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+        options.put("fields.f2.sequence-group.sort-order", "invalid");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("Could not parse value 'invalid'");
+        options.put("fields.f2.sequence-group.sort-order", "descending");
+        options.remove("fields.f2.sequence-group");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("without defining corresponding sequence group");
+        options.put("fields.f2.sequence-group", "f3");
+        options.put("merge-engine", "deduplicate");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "only supported by primary-key tables with the partial-update merge engine");
+        options.put("merge-engine", "partial-update");
+        TableSchema appendSchema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "f2", DataTypes.INT()),
+                                new DataField(1, "f3", DataTypes.STRING())),
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> validateTableSchema(appendSchema))
+                .hasMessageContaining(
+                        "only supported by primary-key tables with the partial-update merge engine");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "ascending", "descending"})
+    public void testRowSequenceGroupSortOrder(String sortOrder) {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "partial-update");
+        options.put("fields.seq.sequence-group", "payload");
+        if (!sortOrder.isEmpty()) {
+            options.put("fields.seq.sequence-group.sort-order", sortOrder);
+        }
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "payload", DataTypes.STRING()),
+                                new DataField(
+                                        2,
+                                        "seq",
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(3, "version", DataTypes.INT())))),
+                        3,
+                        emptyList(),
+                        singletonList("id"),
+                        options,
+                        "");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
     }
 
     private void validateTableSchemaExec(Map<String, String> options) {
@@ -701,6 +766,30 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testPartialUpdateRejectsOverlappingSequenceGroupOrderingFields() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "a", DataTypes.INT()),
+                        new DataField(2, "b", DataTypes.INT()),
+                        new DataField(3, "s", DataTypes.INT()),
+                        new DataField(4, "t", DataTypes.INT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put("fields.s.sequence-group", "a");
+        options.put("fields.t,s.sequence-group", "b");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Sequence field 's' is shared by sequence groups")
+                .hasMessageContaining("fields.s.sequence-group")
+                .hasMessageContaining("fields.t,s.sequence-group");
+    }
+
+    @Test
     public void testPrimaryKeyBlobViewCoexistsWithManagedBlob() {
         List<DataField> fields =
                 Arrays.asList(
@@ -880,8 +969,12 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 
-    @Test
-    public void testNestedRowAggregateOptionRejected() {
+    @ParameterizedTest
+    @CsvSource({
+        "aggregation, fields.data.num.aggregate-function, sum",
+        "partial-update, fields.data.num.sequence-group.sort-order, descending"
+    })
+    public void testNestedRowOptionRejected(String mergeEngine, String optionKey, String value) {
         // PAIMON-6471: nested-path agg config was silently ignored, leaving the parent ROW
         // on the default aggregator and producing wrong results without any error.
         List<DataField> fields =
@@ -895,8 +988,8 @@ class SchemaValidationTest {
                                         DataTypes.FIELD(3, "info", DataTypes.STRING()))));
 
         Map<String, String> options = new HashMap<>();
-        options.put("merge-engine", "aggregation");
-        options.put("fields.data.num.aggregate-function", "sum");
+        options.put("merge-engine", mergeEngine);
+        options.put(optionKey, value);
         options.put("fields.data.sequence-group", "data");
         options.put(BUCKET.key(), "1");
 
@@ -905,7 +998,7 @@ class SchemaValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("Nested-field path is not supported on ROW field 'data'")
-                .hasMessageContaining("fields.data.num.aggregate-function");
+                .hasMessageContaining(optionKey);
     }
 
     @Test
@@ -1750,35 +1843,18 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 new HashMap<>())));
 
-        Map<String, String> avroOptions = new HashMap<>();
-        avroOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields, emptyList(), emptyList(), avroOptions)))
-                .hasMessageContaining("require 'file.format'='parquet'");
-
-        Map<String, String> perLevelOptions = new HashMap<>();
-        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields, emptyList(), emptyList(), perLevelOptions)))
-                .hasMessageContaining("require parquet at every level");
-
-        Map<String, String> changelogOptions = new HashMap<>();
-        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields,
-                                                emptyList(),
-                                                emptyList(),
-                                                changelogOptions)))
-                .hasMessageContaining("require 'changelog-file.format' to be parquet");
+        for (String format : Arrays.asList("parquet", "row")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.FILE_FORMAT.key(), format);
+            options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc,1:avro");
+            options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
+            assertThatNoException()
+                    .isThrownBy(
+                            () ->
+                                    validateTableSchema(
+                                            geospatialSchema(
+                                                    fields, emptyList(), emptyList(), options)));
+        }
 
         Map<String, String> icebergV2Options = new HashMap<>();
         icebergV2Options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
@@ -1920,9 +1996,9 @@ class SchemaValidationTest {
                         "Geometry and geography columns cannot be clustering columns: [nested].");
     }
 
-    @Test
-    public void testVariantTypeValidation() {
-        // a top-level variant and one nested inside a struct
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "row"})
+    public void testVariantTypeValidation(String format) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "id", DataTypes.INT()),
@@ -1931,7 +2007,11 @@ class SchemaValidationTest {
                                 2,
                                 "nested",
                                 DataTypes.ROW(DataTypes.FIELD(3, "inner", DataTypes.VARIANT()))));
-
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), format);
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc,1:avro");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
         assertThatNoException()
                 .isThrownBy(
                         () ->
@@ -1939,48 +2019,8 @@ class SchemaValidationTest {
                                         geospatialSchema(
                                                 fields,
                                                 emptyList(),
-                                                emptyList(),
-                                                new HashMap<>())));
-
-        // the main format used to be caught by the format's own type converter, with a bare
-        // "Unsupported type: VARIANT" that named neither the column nor the option
-        Map<String, String> orcOptions = new HashMap<>();
-        orcOptions.put(CoreOptions.FILE_FORMAT.key(), "orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields, emptyList(), emptyList(), orcOptions)))
-                .hasMessageContaining(
-                        "Variant columns [v, nested] require 'file.format'='parquet', but was 'orc'");
-
-        // these two used to pass DDL and fail on the first row written with that format
-        Map<String, String> perLevelOptions = new HashMap<>();
-        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields,
-                                                emptyList(),
                                                 singletonList("id"),
-                                                perLevelOptions)))
-                .hasMessageContaining(
-                        "Variant columns [v, nested] require parquet at every level, but 'file.format.per.level' contains '0:orc'");
-
-        Map<String, String> changelogOptions = new HashMap<>();
-        changelogOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
-        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        geospatialSchema(
-                                                fields,
-                                                emptyList(),
-                                                singletonList("id"),
-                                                changelogOptions)))
-                .hasMessageContaining(
-                        "Variant columns [v, nested] require 'changelog-file.format' to be parquet, but was 'avro'");
+                                                options)));
     }
 
     private TableSchema geospatialSchema(
