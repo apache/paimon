@@ -208,8 +208,8 @@ def test_native_rest_reuses_python_data_token(
             assert load.call_count == 1
 
 
-@pytest.mark.parametrize('branch', [None, 'dev'])
-def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
+@pytest.mark.parametrize('branch,by_id', [(None, False), ('dev', False), (None, True)])
+def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch, by_id):
     from pypaimon.common.identifier import Identifier
     from pypaimon.tests.native_plan_resolved_schema_test import _assert_parity, _write
     catalog, server = rest_catalog
@@ -219,6 +219,8 @@ def test_rest_dotted_database_and_table_keep_identity(rest_catalog, branch):
         pa.schema([('id', pa.int64()), ('value', pa.string())])), False)
     table = catalog.get_table(identifier)
     _write(table, [{'id': 1, 'value': 'old'}])
+    if by_id:
+        table = catalog.get_table_by_id(table.catalog_environment.uuid)
     if branch:
         catalog.create_tag(identifier, 'first', 1)
         catalog.create_branch(identifier, branch, tag_name='first')

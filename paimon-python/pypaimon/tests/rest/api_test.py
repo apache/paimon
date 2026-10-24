@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import logging
 import unittest
 import uuid
@@ -156,6 +157,22 @@ class ApiTest(unittest.TestCase):
         self.assertFalse(vector_type.element.nullable)
         self.assertEqual(vector_type.length, 7)
 
+    def test_get_table_response_database(self):
+        from pypaimon.api.api_response import GetTableResponse
+        from pypaimon.schema.schema import Schema
+
+        # JSON as the Java server sends it
+        parsed = JSON.from_json(
+            '{"id": "id", "database": "db", "name": "t", "path": "path", "isExternal": false, '
+            '"schemaId": 0, "schema": {"fields": [], "partitionKeys": [], "primaryKeys": [], '
+            '"options": {}, "comment": null}}', GetTableResponse)
+        self.assertEqual(parsed.get_database(), 'db')
+        self.assertEqual(parsed.get_name(), 't')
+        self.assertEqual(json.loads(JSON.to_json(parsed))['database'], 'db')
+
+        response = GetTableResponse('id', 't', 'path', False, 0, Schema())
+        self.assertNotIn('database', json.loads(JSON.to_json(response)))
+
     def test_api(self):
         """Example usage of RESTCatalogServer"""
         # Setup logging
@@ -207,6 +224,10 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(rest_api.get_database('default'), test_databases.get('default'))
             table = rest_api.get_table(Identifier.from_string('default.user'))
             self.assertEqual(table.id, str(test_tables['default.user'].uuid))
+            self.assertEqual(table.get_database(), 'default')
+            table_by_id = rest_api.get_table_by_id(table.id)
+            self.assertEqual(table_by_id.get_database(), 'default')
+            self.assertEqual(table_by_id.get_name(), 'user')
 
         finally:
             # Shutdown server
@@ -292,6 +313,12 @@ class ApiTest(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             rest_api.get_database("   ")
         self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test get_table_by_id with empty id
+        for table_id in ("", "   "):
+            with self.assertRaises(ValueError) as context:
+                rest_api.get_table_by_id(table_id)
+            self.assertIn("Table id cannot be empty", str(context.exception))
 
         # Test drop_database with empty name
         with self.assertRaises(ValueError) as context:
