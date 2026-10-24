@@ -109,6 +109,52 @@ checkpoint completion waits for compaction. Tune it with checkpoint duration and
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
 
+### Preserve Fields on Retraction
+
+By setting `'changelog-producer.preserve-field-on-retract'` to a comma-separated list of top-level
+column names, retraction records (`-U`, `-D`) take those columns' values from the incoming event instead
+of the stored row. This is useful when delete or update events carry an event timestamp that downstream
+consumers need, such as external systems like Cassandra that rely on `WRITETIME` for conflict resolution.
+Complex columns are preserved as a whole. Nested paths such as `metadata.b` are rejected.
+This option is only supported by the `lookup` changelog producer with the `deduplicate` merge engine.
+Both `CREATE TABLE` and `ALTER TABLE ... SET` reject this option unless these requirements are met.
+A rejected `ALTER TABLE` leaves the existing table schema and options unchanged.
+
+Column renames automatically update this option. A column cannot be dropped while either this option
+or `sequence.field` still references it. Remove the column from the relevant options before dropping it.
+
+```sql
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT
+) WITH (
+    'changelog-producer' = 'lookup',
+    'merge-engine' = 'deduplicate',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.preserve-field-on-retract' = 'event_ts'
+);
+```
+
+:::warning
+Do not use the preserved fields in aggregation jobs or as a filtering key. Retraction records carry
+the preserved fields from the incoming event, so they no longer match the records they retract:
+
+- Aggregations on a preserved field (for example `SUM`, `COUNT`, or `GROUP BY event_ts`) retract
+  values that were never added, which produces incorrect results.
+- Filters on a preserved field (for example `WHERE event_ts > ...`) can keep a record but drop its
+  retraction, or the reverse, leaving stale rows downstream.
+
+When forwarding these changelogs to an external upsert sink, disable sink materialization in the
+Flink job reading from Paimon. It can leave stale rows when source and sink primary keys differ:
+
+```sql
+SET 'table.exec.sink.upsert-materialize' = 'NONE';
+```
+
+The sink must handle retractions by key, and updates must arrive in the correct order for each key.
+:::
+
 ## Full Compaction
 
 ```sql
