@@ -43,6 +43,8 @@ public class CloneActionFactory implements ActionFactory {
     private static final String CLONE_FROM = "clone_from";
     private static final String META_ONLY = "meta_only";
     private static final String CLONE_IF_EXISTS = "clone_if_exists";
+    private static final String COPY_FILES = "copy_files";
+    private static final String RECURSIVE_LISTING = "recursive_listing";
 
     @Override
     public String identifier() {
@@ -92,6 +94,9 @@ public class CloneActionFactory implements ActionFactory {
                 StringUtils.isNullOrWhitespaceOnly(cloneIfExistsStr)
                         || Boolean.parseBoolean(cloneIfExistsStr);
 
+        boolean copyFiles = Boolean.parseBoolean(params.get(COPY_FILES));
+        boolean recursiveListing = Boolean.parseBoolean(params.get(RECURSIVE_LISTING));
+
         CloneAction cloneAction =
                 new CloneAction(
                         params.get(DATABASE),
@@ -108,7 +113,9 @@ public class CloneActionFactory implements ActionFactory {
                         preferFileFormat,
                         cloneFrom,
                         metaOnly,
-                        cloneIfExists);
+                        cloneIfExists,
+                        copyFiles,
+                        recursiveListing);
 
         return Optional.of(cloneAction);
     }
@@ -121,5 +128,11 @@ public class CloneActionFactory implements ActionFactory {
         System.out.println(
                 "Use repeated '--target_table_conf <key=value>' options to override options "
                         + "when creating target tables.");
+        System.out.println();
+        System.out.println(
+                "Use '--copy_files true' to copy the ORC, Parquet or Avro files of Hive tables as "
+                        + "they are instead of rewriting their rows. Add '--recursive_listing true' "
+                        + "to also copy files in sub directories of the partitions, except in "
+                        + "directories whose names start with '_' or '.'.");
     }
 }

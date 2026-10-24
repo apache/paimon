@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.clone.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.hive.HiveCatalog;
@@ -29,6 +30,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.OpenContext;
@@ -41,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +68,7 @@ public class CloneHiveSchemaFunction
     protected final Map<String, String> targetCatalogConfig;
     @Nullable protected final String preferFileFormat;
     protected final boolean cloneIfExists;
+    protected final boolean copyFiles;
 
     protected transient HiveCatalog hiveCatalog;
     protected transient Catalog targetCatalog;
@@ -73,10 +78,20 @@ public class CloneHiveSchemaFunction
             Map<String, String> targetCatalogConfig,
             @Nullable String preferFileFormat,
             boolean cloneIfExists) {
+        this(sourceCatalogConfig, targetCatalogConfig, preferFileFormat, cloneIfExists, false);
+    }
+
+    public CloneHiveSchemaFunction(
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            @Nullable String preferFileFormat,
+            boolean cloneIfExists,
+            boolean copyFiles) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
         this.preferFileFormat = preferFileFormat;
         this.cloneIfExists = cloneIfExists;
+        this.copyFiles = copyFiles;
     }
 
     /**
@@ -109,7 +124,7 @@ public class CloneHiveSchemaFunction
                 HiveCloneUtils.getDatabaseOptions(hiveCatalog, tuple.f0.getDatabaseName());
         targetCatalog.createDatabase(tuple.f1.getDatabaseName(), true, databaseOptions);
 
-        Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
+        Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0, copyFiles);
         Map<String, String> options = schema.options();
 
         // check support clone splits
@@ -147,6 +162,12 @@ public class CloneHiveSchemaFunction
                             "existed paimon table '%s' is not a FileStoreTable, but a %s",
                             tuple.f1, existedTable.getClass().getName()));
             checkCompatible(schema, (FileStoreTable) existedTable);
+            if (copyFiles) {
+                checkReadableFields(
+                        schema.fields(),
+                        ((FileStoreTable) existedTable).schema().fields(),
+                        existedTable.fullName());
+            }
 
             LOG.info("paimon table '{}' already exists, use it as target table.", tuple.f1);
         } catch (Catalog.TableNotExistException e) {
@@ -157,6 +178,50 @@ public class CloneHiveSchemaFunction
 
         CloneSchemaInfo schemaInfo = new CloneSchemaInfo(tuple, supportCloneSplits);
         collector.collect(schemaInfo);
+    }
+
+    /**
+     * Copied files keep the columns they were written with, but are read with the latest schema of
+     * the target, which matches columns and nested fields by name and reads missing ones as null.
+     * So the target must have every source field with the same type, and all its fields, nested
+     * ones included, must be nullable as Hive columns are.
+     */
+    @VisibleForTesting
+    static void checkReadableFields(
+            List<DataField> sourceFields, List<DataField> existedFields, String existedTableName) {
+        checkState(
+                canReadFields(sourceFields, existedFields),
+                "Can not copy data files to existed paimon table %s because it does not have all "
+                        + "the fields of the source table with the same types, or has a NOT NULL "
+                        + "field. Source fields are %s, existed fields are %s.",
+                existedTableName,
+                sourceFields,
+                existedFields);
+    }
+
+    private static boolean canReadFields(
+            List<DataField> sourceFields, List<DataField> existedFields) {
+        Map<String, DataType> existedTypes = new HashMap<>();
+        for (DataField existed : existedFields) {
+            if (!existed.type().isNullable()) {
+                return false;
+            }
+            existedTypes.put(existed.name(), existed.type());
+        }
+        for (DataField source : sourceFields) {
+            DataType existed = existedTypes.get(source.name());
+            if (existed == null || !canRead(source.type(), existed)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean canRead(DataType source, DataType existed) {
+        if (source instanceof RowType && existed instanceof RowType) {
+            return canReadFields(((RowType) source).getFields(), ((RowType) existed).getFields());
+        }
+        return source.copy(true).equalsIgnoreFieldId(existed);
     }
 
     private void checkCompatible(Schema sourceSchema, FileStoreTable existedTable) {

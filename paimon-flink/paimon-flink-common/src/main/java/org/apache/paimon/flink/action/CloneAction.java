@@ -52,6 +52,8 @@ public class CloneAction extends ActionBase {
     private final String cloneFrom;
     private final boolean metaOnly;
     private final boolean cloneIfExists;
+    private final boolean copyFiles;
+    private final boolean recursiveListing;
 
     public CloneAction(
             String sourceDatabase,
@@ -69,7 +71,58 @@ public class CloneAction extends ActionBase {
             String cloneFrom,
             boolean metaOnly,
             boolean cloneIfExists) {
+        this(
+                sourceDatabase,
+                sourceTableName,
+                sourceCatalogConfig,
+                targetDatabase,
+                targetTableName,
+                targetCatalogConfig,
+                targetTableConfig,
+                parallelism,
+                whereSql,
+                includedTables,
+                excludedTables,
+                preferFileFormat,
+                cloneFrom,
+                metaOnly,
+                cloneIfExists,
+                false,
+                false);
+    }
+
+    public CloneAction(
+            String sourceDatabase,
+            String sourceTableName,
+            Map<String, String> sourceCatalogConfig,
+            String targetDatabase,
+            String targetTableName,
+            Map<String, String> targetCatalogConfig,
+            Map<String, String> targetTableConfig,
+            @Nullable Integer parallelism,
+            @Nullable String whereSql,
+            @Nullable List<String> includedTables,
+            @Nullable List<String> excludedTables,
+            @Nullable String preferFileFormat,
+            String cloneFrom,
+            boolean metaOnly,
+            boolean cloneIfExists,
+            boolean copyFiles,
+            boolean recursiveListing) {
         super(sourceCatalogConfig);
+
+        if ((copyFiles || recursiveListing) && !cloneFrom.equalsIgnoreCase("hive")) {
+            throw new UnsupportedOperationException(
+                    "Parameters 'copy_files' and 'recursive_listing' are only supported when clone_from is hive.");
+        }
+        if (recursiveListing && !copyFiles) {
+            throw new IllegalArgumentException(
+                    "Parameter 'recursive_listing' requires 'copy_files' to be true.");
+        }
+        if (copyFiles && !StringUtils.isNullOrWhitespaceOnly(preferFileFormat)) {
+            throw new IllegalArgumentException(
+                    "Parameter 'prefer_file_format' can not be used with 'copy_files', copied files keep their format.");
+        }
 
         if (cloneFrom.equalsIgnoreCase("hive")) {
             if (!targetTableConfig.isEmpty()) {
@@ -109,6 +162,8 @@ public class CloneAction extends ActionBase {
         this.cloneFrom = cloneFrom;
         this.metaOnly = metaOnly;
         this.cloneIfExists = cloneIfExists;
+        this.copyFiles = copyFiles;
+        this.recursiveListing = recursiveListing;
     }
 
     @Override
@@ -130,7 +185,9 @@ public class CloneAction extends ActionBase {
                         excludedTables,
                         preferFileFormat,
                         metaOnly,
-                        cloneIfExists);
+                        cloneIfExists,
+                        copyFiles,
+                        recursiveListing);
                 break;
             case "paimon":
                 ClonePaimonTableUtils.build(
