@@ -129,7 +129,9 @@ def test_native_explain_preserves_limit_stopping_without_row_filter(rest_catalog
     if limit is not None:
         reader.with_limit(limit)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.entries_after_stats is None
     assert stats.planning_counters['final_files'] == expected_files
@@ -186,7 +188,9 @@ def test_native_empty_incremental_window_has_zero_statistics(rest_catalog, windo
     if limit is not None:
         reader.with_limit(limit)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert plan.splits() == []
     assert plan.snapshot_id is None
@@ -314,7 +318,9 @@ def test_native_incremental_explain_reports_only_the_selected_window(rest_catalo
     assert result.snapshot_id == 3
     assert result.file_count == 2
     scan = selected.new_read_builder().new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
     assert stats.planning_counters['manifest_entries_read'] == stats.planning_counters['final_files'] == 2
@@ -343,7 +349,9 @@ def test_native_data_evolution_explain_tracks_projection_with_limit(rest_catalog
     if limit is not None:
         reader.with_limit(limit)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
     assert stats.entries_potential_total is None
@@ -365,7 +373,9 @@ def test_native_explain_preserves_the_authorized_plan_and_captured_policy(guarde
     reader = table.new_read_builder().with_projection(['id', 'value'])
     reader.with_filter(PredicateBuilder(table.fields).equal('value', 'ab')).with_limit(1)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
     assert plan.splits()

@@ -129,6 +129,11 @@ execution and rank fusion in Python. Explicit subclass and instance hooks retain
 their original owners; standalone public route and rank calls still select their
 own backend. Scan selection, including LeRobot's indexed-read preference, belongs
 to `read_dispatch`; public scans do not mirror private Native capability methods.
+Each scan retains its selected executor until its configuration changes. The
+Python executor owns its private file scanner and applies public file-level
+configuration. Installing, replacing or removing scanner execution hooks
+invalidates that executor; explicit instance and subclass hooks select Python
+before any Native capability probe and run after authorization.
 
 Postpone bucket metadata is writer state. Native obtains it from the Core write
 builder, preserving per-file layout validation and write authorization without
@@ -212,6 +217,8 @@ raw and primary-key splits keep their own fields and index metadata. The Native
 adapter translates ordinary Python plans into these values, including plans
 made by Python scans or sent to another process. Existing snapshot and index
 metadata codecs are private adapters, rather than a public JSON plan protocol.
+Native primary-key result conversion also stays in the Native adapter; shared
+scored results keep only their metadata, validation and ownership contract.
 Readers own the table, schema, query and filter. Native selection is retained
 after transport, and source subsets never add missing indexes or raw ranges.
 For Native, a plan without a captured snapshot must have no sources and never

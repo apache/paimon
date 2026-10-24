@@ -114,8 +114,9 @@ def _read(table, native, stream, case, projection, limit, compound):
         scan = builder.new_scan()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                                 side_effect=AssertionError('Python scan fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Python scan fallback')))
             splits = scan.plan().splits()
     read = builder.new_read()
     with ExitStack() as stack:
@@ -232,8 +233,9 @@ def test_nested_predicate_alias_collisions(
     scan, read = builder.new_scan(), builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python scan fallback')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python read fallback')
@@ -310,8 +312,9 @@ def test_nested_projection_keeps_physical_filter_only_inputs(
     schema_names = [field.name for field in builder._output_fields()]
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python scan fallback')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python read fallback')
@@ -353,8 +356,9 @@ def test_nested_projection_keeps_synthesized_row_id_filter_input(tmp_path, nativ
     read, scan = builder.new_read(), builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python scan fallback')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python read fallback')

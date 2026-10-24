@@ -80,7 +80,9 @@ def read(table, native, predicate=None, shard=None, limit=None, result=None, ran
     if ranges is not None:
         scan.with_row_ranges(ranges)
     if native:
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
     else:
         plan = scan.plan()

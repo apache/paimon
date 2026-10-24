@@ -44,10 +44,12 @@ def _selected(table, predicate, native, stats=True, partition_filter=None, limit
     scan = reader.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Native scan fell back')))
-            stack.enter_context(patch.object(scan.file_scanner, 'scan_with_stats',
-                                             side_effect=AssertionError('Native statistics fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Native scan fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+                side_effect=AssertionError('Native statistics fell back')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Native read fell back')

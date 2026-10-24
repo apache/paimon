@@ -20,12 +20,11 @@
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.globalindex.full_text_options import NativeFullTextIndexOptions
-from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.execution.native.table import (_native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.file_store_table import FileStoreTable
-from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
+from pypaimon.execution.native.read.native_search_plan import _result
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
 
 
@@ -76,6 +75,4 @@ def try_native_full_text_search(builder):
     primary_key = builder._primary_key_full_text_definition() is not None
     # Once execution starts, propagate errors instead of running a second search.
     result = native.execute()
-    if primary_key:
-        return PrimaryKeyScoredResult._from_native(table, result)
-    return DictBasedScoredIndexResult(result.row_ids())
+    return _result(table, result, primary_key)

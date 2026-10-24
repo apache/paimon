@@ -375,8 +375,9 @@ def test_incremental_reader_preserves_all_physical_row_kinds(catalog, native):
     batch_scan = builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(batch_scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('native fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')))
     plan = batch_scan.plan()
     # InternalRow views are reused by the iterator; capture values as it advances.
     rows = [(row.get_field(1), row.get_row_kind().value)

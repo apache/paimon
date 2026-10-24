@@ -60,8 +60,11 @@ def _resolve_incremental_snapshot_range(table):
 class PythonTableScan:
     """Plan with Python's file scanner and the public scan configuration."""
 
+    _is_native = False
+
     def __init__(self, scan):
         self._scan = scan
+        self._file_scanner_cache = None
 
     def _create_file_scanner(self) -> FileScanner:
         scan = self._scan
@@ -148,8 +151,13 @@ class PythonTableScan:
     def _file_scanner(self):
         """Return the private Python scanner without entering public dispatch."""
         scan = self._scan
-        scanner = getattr(scan, '_python_file_scanner', None)
+        scanner = self._file_scanner_cache
         if scanner is None:
+            public_scanner = getattr(scan, '_file_scanner', None)
+            from pypaimon.read.file_scanner import FileScanner as PublicFileScanner
+            if public_scanner is not None and not isinstance(public_scanner, PublicFileScanner):
+                self._file_scanner_cache = public_scanner
+                return public_scanner
             scanner = self._create_file_scanner()
             request = scan._scan_request()
             if request.idx_of_this_subtask is not None:
@@ -162,11 +170,25 @@ class PythonTableScan:
                 scanner.with_row_ranges([Range(start, end) for start, end in request.row_ranges])
             if request.chunk_shuffle is not None:
                 scanner.with_chunk_shuffle(*request.chunk_shuffle)
-            public_scanner = getattr(scan, '_file_scanner', None)
-            if getattr(type(public_scanner), '_is_dispatch_file_scanner', False) is True:
-                public_scanner._configure_python_scanner(scanner)
-            scan._python_file_scanner = scanner
+            if public_scanner is not None:
+                self._configure_file_scanner(scanner, public_scanner)
+            self._file_scanner_cache = scanner
         return scanner
+
+    @staticmethod
+    def _configure_file_scanner(scanner, configuration):
+        from pypaimon.read.file_scanner import FileScanner as PublicFileScanner
+        scanner._user_predicate = configuration._user_predicate
+        scanner._partition_predicate = configuration._partition_predicate
+        scanner._explicit_partition_filter = configuration._explicit_partition_filter
+        scanner._set_predicate(configuration.predicate)
+        scanner.partition_key_predicate = configuration.partition_key_predicate
+        for name in ('limit', 'skip_level0', 'only_read_real_buckets', 'is_streaming'):
+            setattr(scanner, name, getattr(configuration, name))
+        for name in ('scan', 'scan_with_stats', 'plan_files'):
+            if (name in vars(configuration)
+                    or getattr(type(configuration), name) is not getattr(PublicFileScanner, name)):
+                setattr(scanner, name, getattr(configuration, name))
 
     def _scanner(self, auth_result):
         scan = self._scan

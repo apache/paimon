@@ -127,7 +127,9 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
             if native:
                 # Make an implicit Python fallback fail the test, including
                 # empty plans for which a row comparison alone proves nothing.
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError(
                         'native planner fell back')):
                     plan = scan.plan()
             else:

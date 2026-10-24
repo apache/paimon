@@ -210,6 +210,11 @@ class NativePlanTest(unittest.TestCase):
         builder.with_projection.assert_not_called()
 
     def setUp(self):
+        # Capability/FFI tests use a stub scanner as configuration and fallback
+        # storage. Public hook selection is covered with real scanner facades.
+        selected = patch('pypaimon.read.read_dispatch._python_scan_selected', return_value=False)
+        selected.start()
+        self.addCleanup(selected.stop)
         # Model an installed companion extension. Individual tests supply the
         # API objects they call through this module.
         fake_df = ModuleType('pypaimon_rust.datafusion')

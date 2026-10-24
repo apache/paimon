@@ -130,7 +130,9 @@ def test_transformed_filter_fallback_retains_captured_policy(guarded_table, mode
     table = table.copy({'scan.native-plan.enabled': 'true', 'read.native.enabled': 'true'})
     builder = table.new_read_builder().with_projection(['id'])
     scan = builder.new_scan()
-    with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Native plan fell back')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+            side_effect=AssertionError('Native plan fell back')):
         splits = scan.plan().splits()
     assert splits and all(isinstance(split, QueryAuthSplit) for split in splits)
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse()

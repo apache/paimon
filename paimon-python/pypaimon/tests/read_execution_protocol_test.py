@@ -143,7 +143,7 @@ def test_python_bound_all_files_restores_scanner_configuration_on_success_or_fai
         return expected
 
     scanner.scan = scan
-    execution = PythonTableScan(SimpleNamespace(_python_file_scanner=scanner, _query_auth_fn=None))
+    execution = PythonTableScan(SimpleNamespace(_file_scanner=scanner, _query_auth_fn=None))
     if failure:
         with pytest.raises(OSError, match='planning failed'):
             execution.plan_all()
@@ -192,15 +192,9 @@ def test_native_bound_batches_preserve_the_requested_order_mode(table, ordered):
 def test_python_scanner_uses_private_cache_and_captured_configuration(table):
     request = ScanRequest(idx_of_this_subtask=1, number_of_para_subtasks=3,
                           row_ranges=((7, 9),))
-    configure = Mock(side_effect=lambda scanner: setattr(scanner, 'skip_level0', False))
-
-    class PublicScanner:
-        _is_dispatch_file_scanner = True
-        _configure_python_scanner = staticmethod(configure)
 
     class Scan:
-        _python_file_scanner = None
-        _file_scanner = PublicScanner()
+        _file_scanner = None
         _query_auth_fn = None
 
         @property
@@ -213,12 +207,13 @@ def test_python_scanner_uses_private_cache_and_captured_configuration(table):
     scan = Scan()
     scan.table = table
     scanner = Mock(skip_level0=True)
+    execution = PythonTableScan(scan)
     with patch.object(PythonTableScan, '_create_file_scanner', return_value=scanner) as create:
-        assert PythonTableScan(scan)._file_scanner() is scanner
-        assert PythonTableScan(scan)._scanner(None) is scanner
+        assert execution._file_scanner() is scanner
+        assert execution._scanner(None) is scanner
     create.assert_called_once()
-    configure.assert_called_once_with(scanner)
     scanner.with_shard.assert_called_once_with(1, 3)
     ranges, = scanner.with_row_ranges.call_args.args
     assert [(value.from_, value.to) for value in ranges] == [(7, 9)]
-    assert scan._python_file_scanner is scanner and not scanner.skip_level0
+    assert '_python_file_scanner' not in vars(scan)
+    assert execution._file_scanner_cache is scanner

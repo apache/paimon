@@ -163,6 +163,8 @@ def _from_native_plan(table, rust_plan) -> Plan:
 class NativeTableScan:
     """Adapt the public scan configuration to Core planning."""
 
+    _is_native = True
+
     def __init__(self, scan):
         self._scan = scan
 

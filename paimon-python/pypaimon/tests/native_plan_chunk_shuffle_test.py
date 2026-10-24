@@ -135,8 +135,12 @@ def _chunks(table, seed, chunk_size=3, shard=None, predicate=None, projection=No
         if shard is not None:
             scan.with_shard(*shard)
         if native_plan_enabled:
-            with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')), \
-                    patch.object(scan.file_scanner, 'plan_files', side_effect=AssertionError('Python manifest scan')):
+            with patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('native fallback')), \
+                    patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.plan_files',
+                        side_effect=AssertionError('Python manifest scan')):
                 plan = scan.plan()
         else:
             plan = scan.plan()

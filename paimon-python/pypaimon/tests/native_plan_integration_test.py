@@ -168,7 +168,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'scan.snapshot-id': None, 'scan.native-plan.enabled': 'true'})
         builder = native.new_read_builder()
         scan = builder.new_scan()
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
         self.assertEqual(plan.snapshot_id, 2)
         self.assertEqual(sorted(builder.new_read().to_arrow(plan.splits()).to_pylist(),
@@ -733,7 +735,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
             if slice_ is not None:
                 scan.with_slice(*slice_)
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native plan fell back')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native plan fell back')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -1327,8 +1331,9 @@ class NativePlanIntegrationTest(unittest.TestCase):
             GlobalIndexResult.from_range(Range(1, 1)))
 
         self.assertTrue(NativeTableScan(scan)._native_plan_supported())
-        with patch.object(
-                scan.file_scanner, 'scan', side_effect=AssertionError("fallback")):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError("fallback")):
             plan = scan.plan()
         rows = self._native_rows(builder, plan)
 
@@ -1341,8 +1346,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
 
         empty_scan = builder.new_scan().with_global_index_result(
             GlobalIndexResult.create_empty())
-        with patch.object(
-                empty_scan.file_scanner, 'scan',
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
                 side_effect=AssertionError("fallback")):
             empty_plan = empty_scan.plan()
         self.assertEqual(empty_plan.splits(), [])

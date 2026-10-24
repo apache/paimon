@@ -211,8 +211,9 @@ def test_combined_timestamp_events_apply_auth_and_masked_filter_before_limit(sou
         scan = builder.new_scan()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                                 side_effect=AssertionError('Native incremental plan fell back')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Native incremental plan fell back')))
             plan = scan.plan()
         reader = builder.new_read()
         with ExitStack() as stack:

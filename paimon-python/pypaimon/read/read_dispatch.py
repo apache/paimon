@@ -157,12 +157,34 @@ def to_arrow(
     return PythonTableRead(self)._materialize(splits, schema, parallelism, effective_bp)
 
 
+def _python_scan_selected(scan):
+    execution = vars(scan).get('_execution')
+    if execution is not None and not execution._is_native:
+        return True
+    scanner = vars(scan).get('_file_scanner')
+    if scanner is None:
+        return False
+    from pypaimon.read.file_scanner import FileScanner
+    return type(scanner) is not FileScanner or any(name in vars(scanner) for name in FileScanner._EXECUTION_HOOKS)
+
+
+def _python_scan_execution(scan):
+    execution = vars(scan).get('_execution')
+    if execution is None or execution._is_native:
+        from pypaimon.execution.python.read.table_scan import PythonTableScan
+        execution = scan._execution = PythonTableScan(scan)
+    return execution
+
+
 def _native_scan_execution(scan):
-    if not native_plan_requested(scan):
+    if _python_scan_selected(scan) or not native_plan_requested(scan):
         return None
     from pypaimon.execution.native.read.plan import NativeTableScan
-    execution = NativeTableScan(scan)
-    return execution if execution._native_plan_supported() else None
+    execution = vars(scan).get('_execution') or NativeTableScan(scan)
+    if execution._native_plan_supported():
+        scan._execution = execution
+        return execution
+    return None
 
 
 def plan_scan(self) -> Plan:
@@ -181,8 +203,7 @@ def plan_scan(self) -> Plan:
             plan = native.plan()
             if plan is not None:
                 return plan
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).plan(auth_result)
+    return _python_scan_execution(self).plan(auth_result)
 
 
 def configure_indexed_read(table):
@@ -216,8 +237,7 @@ def new_file_scanner(scan):
 
 def python_file_scanner(scan):
     """Enter the selected Python executor's internal file scanner."""
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(scan)._file_scanner()
+    return _python_scan_execution(scan)._file_scanner()
 
 
 def file_scan_has_bucket_pruning(scan):
@@ -229,7 +249,7 @@ def file_scan_has_bucket_pruning(scan):
 def plan_files(scanner):
     """Plan raw file metadata only with unrestricted whole-table permission."""
     scan = scanner._scan
-    if native_plan_requested(scan):
+    if not _python_scan_selected(scan) and native_plan_requested(scan):
         from pypaimon.execution.native.table import _native_query_auth_supported
         # Raw file metadata precedes query result transformations. Do not let
         # their capability checks (shuffle, global indexes or slices) select
@@ -250,9 +270,8 @@ def plan_files(scanner):
             return entries
     if native_auth and scan._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(scan.table.identifier)
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
     # Let the selected executor refresh cached rules for this unrestricted scope.
-    source = PythonTableScan(scan)._scanner(None)
+    source = _python_scan_execution(scan)._scanner(None)
     entries = source.plan_files()
     scanner._scanned_snapshot = source._scanned_snapshot
     scanner._scanned_snapshot_id = source._scanned_snapshot_id
@@ -262,7 +281,7 @@ def plan_files(scanner):
 def plan_all(self) -> Plan:
     """Plan complete splits only with unrestricted whole-table permission."""
     native = None
-    if native_plan_requested(self):
+    if not _python_scan_selected(self) and native_plan_requested(self):
         from pypaimon.execution.native.table import _native_query_auth_supported
         if _native_query_auth_supported(self.table):
             native = _native_scan_execution(self)
@@ -275,8 +294,7 @@ def plan_all(self) -> Plan:
             return plan
     if native_auth and self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).plan_all()
+    return _python_scan_execution(self).plan_all()
 
 
 def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
@@ -294,8 +312,7 @@ def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
             result = native.scan_with_stats()
             if result is not None:
                 return result
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).scan_with_stats(auth_result)
+    return _python_scan_execution(self).scan_with_stats(auth_result)
 
 
 def new_streaming_scan(self):

@@ -57,8 +57,9 @@ def _read(table, native, snapshot_id=None):
     scan = builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python plan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python plan fallback')))
         plan = scan.plan()
         if native:
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())

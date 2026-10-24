@@ -265,8 +265,9 @@ def test_rest_blob_view_limit_filters_before_resolving_unselected_view(rest_cata
     builder = views.new_read_builder().with_limit(1)
     builder.with_filter(builder.new_predicate_builder().equal('id', 11))
     scan = builder.new_scan()
-    with patch.object(scan.file_scanner, 'scan',
-                      side_effect=AssertionError('native view plan fell back')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+            side_effect=AssertionError('native view plan fell back')):
         plan = scan.plan()
     assert all(getattr(split, '_native_split', None) is not None
                for split in plan.splits())

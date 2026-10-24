@@ -50,7 +50,7 @@ class TableScan:
         self._query_auth_fn = self.table.catalog_environment.table_query_auth(
             self.table.options, self.table.identifier)
         self._file_scanner = None
-        self._python_file_scanner = None
+        self._execution = None
         validate_scan_options(self.table)
         self._scan_configuration = ScanRequest.for_table(
             table, predicate, limit, partition_predicate)
@@ -65,8 +65,7 @@ class TableScan:
     @file_scanner.setter
     def file_scanner(self, scanner):
         self._file_scanner = scanner
-        self._python_file_scanner = (
-            None if getattr(type(scanner), '_is_dispatch_file_scanner', False) is True else scanner)
+        self._execution = None
 
     def _scan_request(self) -> ScanRequest:
         """Capture current public scanner configuration for one preparation."""
@@ -140,7 +139,7 @@ class TableScan:
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         if self._file_scanner is None:
-            self._python_file_scanner = None
+            self._execution = None
             self._scan_configuration = self._scan_configuration.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         else:
             self._file_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
@@ -148,7 +147,7 @@ class TableScan:
 
     def with_slice(self, start_pos, end_pos) -> 'TableScan':
         if self._file_scanner is None:
-            self._python_file_scanner = None
+            self._execution = None
             self._scan_configuration = self._scan_configuration.with_slice(start_pos, end_pos)
         else:
             self._file_scanner.with_slice(start_pos, end_pos)
@@ -156,7 +155,7 @@ class TableScan:
 
     def with_global_index_result(self, result) -> 'TableScan':
         if self._file_scanner is None:
-            self._python_file_scanner = None
+            self._execution = None
             self._scan_configuration = self._scan_configuration.with_global_index_result(result)
         else:
             self._file_scanner.with_global_index_result(result)
@@ -164,7 +163,7 @@ class TableScan:
 
     def with_row_ranges(self, row_ranges) -> 'TableScan':
         if self._file_scanner is None:
-            self._python_file_scanner = None
+            self._execution = None
             self._scan_configuration = self._scan_configuration.with_row_ranges(row_ranges)
         else:
             self._file_scanner.with_row_ranges(row_ranges)
@@ -172,7 +171,7 @@ class TableScan:
 
     def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'TableScan':
         if self._file_scanner is None:
-            self._python_file_scanner = None
+            self._execution = None
             self._scan_configuration = self._scan_configuration.with_chunk_shuffle(seed, chunk_size)
         else:
             self._file_scanner.with_chunk_shuffle(seed, chunk_size)
