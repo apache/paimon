@@ -1303,6 +1303,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>The default deleted num of partition expiration.</td>
         </tr>
         <tr>
+            <td><h5>partition.expiration-retain-latest</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to retain the latest partition when all partitions are expired. The latest partition is determined by the parsed partition time for values-time or the last file creation time for update-time. Retains one partition for the whole table. Supported by the built-in expiration strategies on normal tables. Explicit partition deletion and truncation are not affected.</td>
+        </tr>
+        <tr>
             <td><h5>partition.expiration-strategy</h5></td>
             <td style="word-wrap: break-word;">"values-time"</td>
             <td>String</td>

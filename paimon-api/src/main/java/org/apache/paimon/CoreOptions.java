@@ -1466,6 +1466,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(100)
                     .withDescription("The default deleted num of partition expiration.");
 
+    public static final ConfigOption<Boolean> PARTITION_EXPIRATION_RETAIN_LATEST =
+            key("partition.expiration-retain-latest")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to retain the latest partition when all partitions are expired. "
+                                    + "The latest partition is determined by the parsed partition time for values-time "
+                                    + "or the last file creation time for update-time. Retains one partition for the whole table. "
+                                    + "Supported by the built-in expiration strategies on normal tables. "
+                                    + "Explicit partition deletion and truncation are not affected.");
+
     public static final ConfigOption<Integer> PARTITION_EXPIRATION_BATCH_SIZE =
             key("partition.expiration-batch-size")
                     .intType()
@@ -4303,6 +4314,10 @@ public class CoreOptions implements Serializable {
 
     public int partitionExpireMaxNum() {
         return options.get(PARTITION_EXPIRATION_MAX_NUM);
+    }
+
+    public boolean partitionExpireRetainLatest() {
+        return options.get(PARTITION_EXPIRATION_RETAIN_LATEST);
     }
 
     public int partitionExpireBatchSize() {
