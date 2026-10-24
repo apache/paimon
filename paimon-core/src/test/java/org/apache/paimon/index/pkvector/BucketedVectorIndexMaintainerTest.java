@@ -38,6 +38,8 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -138,13 +140,19 @@ class BucketedVectorIndexMaintainerTest {
         assertThat(fileCount()).isZero();
     }
 
-    @Test
-    void testNonBlockingPrepareCommitPublishesCompletedAnnLater() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testNonBlockingPrepareCommitPublishesCompletedAnnLater(boolean replaceExisting)
+            throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         DataFileMeta data = dataFile("data");
+        DataFileMeta oldData = dataFile("old-data");
+        IndexFileMeta oldAnn = payload("old-ann", oldData, 7, "test-vector-ann");
+        List<DataFileMeta> previousSources =
+                replaceExisting ? Collections.singletonList(oldData) : Collections.emptyList();
         PkVectorDataFileReader.Factory readerFactory = mock(PkVectorDataFileReader.Factory.class);
         CountDownLatch buildStarted = new CountDownLatch(1);
         CountDownLatch allowBuild = new CountDownLatch(1);
@@ -168,20 +176,29 @@ class BucketedVectorIndexMaintainerTest {
                             "l2",
                             "test-vector-ann",
                             readerFactory,
-                            Collections.emptyList(),
-                            Collections.emptyList(),
+                            previousSources,
+                            replaceExisting
+                                    ? Collections.singletonList(oldAnn)
+                                    : Collections.emptyList(),
                             executor);
 
             BucketedVectorIndexMaintainer.VectorIndexCommit firstCommit =
                     maintainer.prepareCommit(
                             DataIncrement.emptyIncrement(),
                             new CompactIncrement(
-                                    Collections.emptyList(),
+                                    previousSources,
                                     Collections.singletonList(data),
                                     Collections.emptyList()),
                             false);
 
-            assertThat(firstCommit.compactIncrement()).isEmpty();
+            if (replaceExisting) {
+                assertThat(firstCommit.compactIncrement().get().deletedIndexFiles())
+                        .containsExactly(oldAnn);
+                assertThat(firstCommit.compactIncrement().get().newIndexFiles()).isEmpty();
+                assertThat(maintainer.segments()).isEmpty();
+            } else {
+                assertThat(firstCommit.compactIncrement()).isEmpty();
+            }
             assertThat(buildStarted.await(30, TimeUnit.SECONDS)).isTrue();
             assertThat(buildThread.get()).isNotSameAs(callerThread);
             allowBuild.countDown();

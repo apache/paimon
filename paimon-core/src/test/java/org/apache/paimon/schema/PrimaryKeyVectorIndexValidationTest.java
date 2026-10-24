@@ -23,10 +23,15 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
@@ -48,16 +53,109 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
-    void testRejectsMultiplePrimaryKeyVectorIndexColumnsForFirstRelease() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.BUCKET.key(), "1");
-        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,other_embedding");
-        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+    void testSupportsMultiplePrimaryKeyVectorIndexColumns() {
+        Map<String, String> options = multipleIndexOptions();
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), "2");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), " embedding , other_embedding ");
+        options.put("fields.embedding.pk-vector.distance.metric", "cosine");
+        options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":64}");
+        options.put("fields.other_embedding.pk-vector.distance.metric", "l2");
+        options.put("fields.other_embedding.pk-vector.index.options", "{\"nlist\":128}");
+
+        assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,true", "-1,true", "0,false", "-1,false"})
+    void testRejectsNonPositiveIndexBuildParallelism(int parallelism, boolean vectorIndex) {
+        Map<String, String> options = multipleIndexOptions();
+        if (!vectorIndex) {
+            options.remove(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
+            options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "payload");
+        }
+        options.put(CoreOptions.PK_INDEX_BUILD_PARALLELISM.key(), String.valueOf(parallelism));
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("exactly one column")
-                .hasMessageContaining("pk-vector.index.columns");
+                .hasMessageContaining("pk-index.build.parallelism must be greater than zero");
+    }
+
+    @Test
+    void testRequiresIndexTypeForSecondVectorColumn() {
+        Map<String, String> options = multipleIndexOptions();
+        options.remove("fields.other_embedding.pk-vector.index.type");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("fields.other_embedding.pk-vector.index.type");
+    }
+
+    @Test
+    void testRequiresSecondColumnToReferenceVector() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,payload");
+        options.put("fields.payload.pk-vector.index.type", "ivf-flat");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("entry 'payload' must reference a VECTOR column");
+    }
+
+    @Test
+    void testRejectsUnknownSecondVectorColumn() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,missing");
+        options.put("fields.missing.pk-vector.index.type", "ivf-flat");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("Field missing can not be found in table schema");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "embedding,"})
+    void testRejectsEmptyVectorIndexColumn(String columns) {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), columns);
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("pk-vector.index.columns")
+                .hasMessageContaining("non-empty");
+    }
+
+    @Test
+    void testRequiresFloatElementsForSecondVectorColumn() {
+        List<DataField> fields = new ArrayList<>(fields());
+        fields.set(3, new DataField(3, "other_embedding", DataTypes.VECTOR(3, DataTypes.DOUBLE())));
+
+        assertThatThrownBy(() -> validateTableSchema(schema(multipleIndexOptions(), fields)))
+                .hasMessageContaining("entry 'other_embedding' must use FLOAT elements");
+    }
+
+    @Test
+    void testRejectsUnsupportedDistanceMetricForSecondVectorColumn() {
+        Map<String, String> options = multipleIndexOptions();
+        options.put("fields.other_embedding.pk-vector.distance.metric", "manhattan");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("fields.other_embedding.pk-vector.distance.metric")
+                .hasMessageContaining("l2, cosine, inner_product");
+    }
+
+    @Test
+    void testRejectsInvalidIndexOptionsForSecondVectorColumn() {
+        Map<String, String> options = multipleIndexOptions();
+        options.put("fields.other_embedding.pk-vector.index.options", "[1,2]");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("fields.other_embedding.pk-vector.index.options")
+                .hasMessageContaining("JSON object");
+    }
+
+    @Test
+    void testRejectsSecondVectorColumnInAnotherIndexFamily() {
+        Map<String, String> options = multipleIndexOptions();
+        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "other_embedding");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("other_embedding")
+                .hasMessageContaining("at most one primary-key index");
     }
 
     @Test
@@ -65,7 +163,7 @@ class PrimaryKeyVectorIndexValidationTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,embedding");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding, embedding ");
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining("pk-vector.index.columns")
@@ -253,9 +351,20 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     private static TableSchema schema(Map<String, String> options) {
+        return schema(options, fields());
+    }
+
+    private static Map<String, String> multipleIndexOptions() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding,other_embedding");
+        options.put("fields.other_embedding.pk-vector.index.type", "ivf-flat");
+        return options;
+    }
+
+    private static TableSchema schema(Map<String, String> options, List<DataField> fields) {
         return new TableSchema(
                 0,
-                fields(),
+                fields,
                 0,
                 Collections.emptyList(),
                 Collections.singletonList("id"),
@@ -263,10 +372,11 @@ class PrimaryKeyVectorIndexValidationTest {
                 "");
     }
 
-    private static java.util.List<DataField> fields() {
+    private static List<DataField> fields() {
         return Arrays.asList(
                 new DataField(0, "id", DataTypes.INT().notNull()),
                 new DataField(1, "embedding", DataTypes.VECTOR(8, DataTypes.FLOAT())),
-                new DataField(2, "payload", DataTypes.STRING()));
+                new DataField(2, "payload", DataTypes.STRING()),
+                new DataField(3, "other_embedding", DataTypes.VECTOR(3, DataTypes.FLOAT())));
     }
 }
