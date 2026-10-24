@@ -35,7 +35,6 @@ from pypaimon.common.json_util import JSON
 from pypaimon.common.options import Options
 from pypaimon.read.native_plan import _resolved_rest_table_response
 from pypaimon.table.instant import Instant
-from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.native_commit import _rest_catalog_supported
 
 
@@ -124,10 +123,8 @@ def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant,
     }
 
 
-def test_compact_rollback_transmits_uuid_and_expected_head(table, transport):
-    rollback = CommitRollback(table.catalog_environment.catalog_table_rollback())
-
-    assert rollback.try_to_rollback(SimpleNamespace(commit_kind='COMPACT', id=3))
+def test_conditional_rollback_transmits_uuid_and_expected_head(table, transport):
+    table.catalog_environment.catalog_table_rollback().rollback_to(Instant.snapshot(2), 3)
 
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
@@ -207,11 +204,10 @@ def test_replaced_table_does_not_refresh_retry_or_clean_locally(table, transport
     assert request_body(transport.requests[0])['tableId'] == 'loaded-table-uuid'
 
 
-def test_compact_rollback_rejection_preserves_identity(table, transport):
+def test_conditional_rollback_rejection_preserves_identity(table, transport):
     transport.status = 400
-    rollback = CommitRollback(table.catalog_environment.catalog_table_rollback())
-
-    assert not rollback.try_to_rollback(SimpleNamespace(commit_kind='COMPACT', id=3))
+    with pytest.raises(RuntimeError, match="Failed to rollback table"):
+        table.catalog_environment.catalog_table_rollback().rollback_to(Instant.snapshot(2), 3)
 
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0])['tableId'] == 'loaded-table-uuid'

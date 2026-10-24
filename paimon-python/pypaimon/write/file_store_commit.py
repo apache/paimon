@@ -36,7 +36,6 @@ from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
-from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import (
     ConflictDetection,
@@ -121,13 +120,6 @@ class CommitFailRetryResult(RetryResult):
     """Retry after an atomic snapshot commit failed, matching Java."""
 
 
-class RollbackRetryResult(RetryResult):
-    """Retry after a conflicting compaction was rolled back, matching Java."""
-
-    def __init__(self, exception: Optional[Exception] = None):
-        super().__init__(None, exception)
-
-
 class RewriteResult(CommitResult):
 
     def __init__(self, rewrite: RowIdRewriteResult):
@@ -177,9 +169,6 @@ class FileStoreCommit:
             table=table,
             commit_scanner=self.commit_scanner
         )
-
-        table_rollback = table.catalog_environment.catalog_table_rollback()
-        self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def _set_fixed_bucket_commit_check(self, messages):
         from pypaimon.write.commit.fixed_bucket_commit_check import FixedBucketCommitCheck
@@ -247,15 +236,12 @@ class FileStoreCommit:
 
         commit_kind = "APPEND"
         detect_conflicts = False
-        allow_rollback = False
         if self.conflict_detection.should_be_overwrite_commit(
                 commit_entries, index_adds + index_deletes):
             commit_kind = "OVERWRITE"
             detect_conflicts = True
-            allow_rollback = True
         if self.conflict_detection.has_row_id_check_from_snapshot():
             detect_conflicts = True
-            allow_rollback = True
         if self.conflict_detection.has_global_index_additions(index_adds):
             detect_conflicts = True
         if self.conflict_detection.has_hash_index_changes(
@@ -271,7 +257,6 @@ class FileStoreCommit:
                          commit_entries_plan=lambda snapshot: commit_entries,
                          changelog_entries=changelog_entries,
                          detect_conflicts=detect_conflicts,
-                         allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds,
                          snapshot_properties=snapshot_properties,
@@ -323,7 +308,6 @@ class FileStoreCommit:
                 commit_entries_plan=provider.provide,
                 changelog_entries=[],
                 detect_conflicts=True,
-                allow_rollback=False,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 snapshot_properties=snapshot_properties,
@@ -403,7 +387,6 @@ class FileStoreCommit:
             commit_identifier=commit_identifier,
             commit_entries_plan=provider.provide,
             detect_conflicts=True,
-            allow_rollback=False,
         )
 
     def truncate_table(self, commit_identifier: int) -> None:
@@ -414,11 +397,10 @@ class FileStoreCommit:
             commit_identifier=commit_identifier,
             commit_entries_plan=provider.provide,
             detect_conflicts=True,
-            allow_rollback=False,
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
-                    detect_conflicts=False, allow_rollback=False, index_deletes=None,
+                    detect_conflicts=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
                     snapshot_properties: Optional[Dict[str, str]] = None,
                     allow_empty_commit=False):
@@ -457,7 +439,6 @@ class FileStoreCommit:
                 commit_identifier=commit_identifier,
                 latest_snapshot=latest_snapshot,
                 detect_conflicts=detect_conflicts,
-                allow_rollback=allow_rollback,
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
@@ -536,7 +517,6 @@ class FileStoreCommit:
                          commit_identifier: int,
                          latest_snapshot: Optional[Snapshot],
                          detect_conflicts: bool = False,
-                         allow_rollback: bool = False,
                          index_deletes=None,
                          index_adds=None,
                          commit_result_may_be_uncertain: bool = False,
@@ -615,11 +595,7 @@ class FileStoreCommit:
                 )
                 if rewrite_result is not None:
                     return RewriteResult(rewrite_result)
-                if allow_rollback and self.rollback is not None:
-                    if self.rollback.try_to_rollback(latest_snapshot):
-                        # Rolled back: base/snapshot no longer valid; next attempt
-                        # re-scans from scratch (matches Java RollbackRetryResult).
-                        return RollbackRetryResult(conflict_exception)
+                # Automatic rollback can delete snapshots and tags already used by readers.
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
