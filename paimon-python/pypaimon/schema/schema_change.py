@@ -107,7 +107,9 @@ class SchemaChange(ABC):
             return UpdateColumnComment(field_name, comment)
 
     @staticmethod
-    def update_column_default_value(field_names: List[str], default_value: str) -> "UpdateColumnDefaultValue":
+    def update_column_default_value(field_names: List[str],
+                                    default_value: Optional[str]) -> "UpdateColumnDefaultValue":
+        """Set a column default, or clear it when ``default_value`` is None."""
         return UpdateColumnDefaultValue(field_names, default_value)
 
     @staticmethod
@@ -237,7 +239,7 @@ class UpdateColumnDefaultValue(SchemaChange):
     FIELD_FIELD_NAMES = "fieldNames"
     FIELD_NEW_DEFAULT_VALUE = "newDefaultValue"
     field_names: List[str] = json_field(FIELD_FIELD_NAMES)
-    new_default_value: str = json_field(FIELD_NEW_DEFAULT_VALUE)
+    new_default_value: Optional[str] = json_field(FIELD_NEW_DEFAULT_VALUE)
     action: str = json_field(Actions.FIELD_ACTION, default=Actions.UPDATE_COLUMN_DEFAULT_VALUE_ACTION)
 
     def __post_init__(self):
