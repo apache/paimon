@@ -108,6 +108,10 @@ By default, batch reads skip Level-0 files until lookup compaction publishes the
 for this compaction by default. Asynchronous compaction or a dedicated compaction job can delay
 visibility; see [Asynchronous Compaction](./compaction#asynchronous-compaction).
 
+When async compaction falls behind or data visibility latency is high, consider increasing
+`compaction.task-threads` to reduce visibility delay. See
+[Multi-thread async compaction](./compaction#multi-thread-async-compaction).
+
 For batch scans, `deletion-vectors.merge-on-read = true` includes uncompacted data by merging it
 at read time, with additional read cost. It does not change streaming changelog behavior.
 
