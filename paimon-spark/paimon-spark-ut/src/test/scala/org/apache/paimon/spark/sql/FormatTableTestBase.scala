@@ -220,6 +220,58 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  test("Format table: engine writes with the format options of the table") {
+    def dataFiles(name: String): Seq[String] = {
+      val table =
+        paimonCatalog.getTable(Identifier.create(hiveDbName, name)).asInstanceOf[FormatTable]
+      table
+        .fileIO()
+        .listStatus(new Path(table.location()))
+        .map(_.getPath.getName)
+        .filterNot(n => n.startsWith("_") || n.startsWith("."))
+        .toSeq
+    }
+
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      withTable("t") {
+        sql("CREATE TABLE t (v STRING) USING text TBLPROPERTIES ('file.compression' = 'gzip')")
+        sql("INSERT INTO t VALUES ('a')")
+        checkAnswer(sql("SELECT * FROM t"), Row("a"))
+        val files = dataFiles("t")
+        assert(files.nonEmpty && files.forall(_.endsWith(".txt.gz")), files)
+      }
+
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, data STRING) USING csv
+              |TBLPROPERTIES ('csv.field-delimiter' = ';', 'file.compression' = 'gzip')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'x,y')")
+        checkAnswer(sql("SELECT * FROM t"), Row(1, "x,y"))
+        val files = dataFiles("t")
+        assert(files.nonEmpty && files.forall(_.endsWith(".csv.gz")), files)
+      }
+
+      // zstd is no short codec name in Spark, which resolves the codec of a CSV or TEXT table
+      // whenever it reads or writes one
+      for (
+        (format, file, content, row) <- Seq(
+          ("csv", "part-00000-0-c000.csv", "1,a", Row(1, "a")),
+          ("text", "part-00000-0-c000.txt", "1", Row("1")))
+      ) {
+        withTable("t") {
+          val columns = if (format == "csv") "id INT, data STRING" else "v STRING"
+          sql(
+            s"CREATE TABLE t ($columns) USING $format TBLPROPERTIES ('file.compression' = 'zstd')")
+          val table =
+            paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
+          table.fileIO().writeFile(new Path(table.location(), file), content, false)
+          checkAnswer(sql("SELECT * FROM t"), row)
+        }
+      }
+    }
+  }
+
   test("Format table: engine retains Spark's V1 write path and LEGACY casts") {
     withSparkSQLConf(
       "spark.paimon.format-table.implementation" -> "engine",

@@ -44,6 +44,14 @@ import java.util
 
 import scala.collection.JavaConverters._
 
+/**
+ * The file index of an engine format table. It keeps the options of the table, which Spark drops
+ * when it writes an INSERT through the V1 path.
+ */
+trait FormatTableFileIndex {
+  def tableOptions: Map[String, String]
+}
+
 /** Format Table implementation with spark. */
 object SparkFormatTable {
 
@@ -125,7 +133,10 @@ object SparkFormatTable {
       userSpecifiedSchema,
       fileStatusCache,
       userSpecifiedPartitionSpec,
-      metadataOpsTimeNs) {
+      metadataOpsTimeNs)
+    with FormatTableFileIndex {
+
+    override val tableOptions: Map[String, String] = parameters
 
     override def partitionSpec(): PartitionSpec = {
       alignPartitionSpec(super.partitionSpec(), partitionSchema)
