@@ -614,11 +614,13 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
                 pa.field("episode", pa.string(), nullable=False),
                 pa.field("step", pa.int32(), nullable=False),
                 pa.field("values", pa.list_(pa.int32()), nullable=False),
+                pa.field("nested", pa.list_(pa.list_(pa.int32())), nullable=False),
             ]),
             options=_TABLE_OPTIONS,
         )
         table.add([
-            {"episode": "episode-a", "step": step, "values": [step]}
+            {"episode": "episode-a", "step": step,
+             "values": [step], "nested": [[step]]}
             for step in range(3)
         ])
 
@@ -627,21 +629,36 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
                 value.append(99)
             return values
 
+        def mutate_nested(values):
+            for value in values:
+                value[0].append(99)
+            return values
+
+        padding = {"values": [-1], "nested": [[-1]]}
         dataset = table.scan().to_contiguous_window_dataset(
-            window_size=2,
-            columns=["values"],
+            columns=["values", "nested"],
             group_key="episode",
             order_key="step",
-            column_transforms={"values": mutate},
+            frame_offsets={name: [0, 1, 1, 3, 3] for name in padding},
+            boundary="pad",
+            pad_values=padding,
+            column_transforms={"values": mutate, "nested": mutate_nested},
         )
 
         batched = dataset.__getitems__([0, 1, 0])
         singles = [dataset[index] for index in (0, 1, 0)]
-
-        self.assertEqual(
-            [sample["values"] for sample in singles],
-            [sample["values"] for sample in batched],
-        )
+        expected = [
+            [[0, 99], [1, 99], [1, 99], [-1, 99], [-1, 99]],
+            [[1, 99], [2, 99], [2, 99], [-1, 99], [-1, 99]],
+            [[0, 99], [1, 99], [1, 99], [-1, 99], [-1, 99]],
+        ]
+        for samples in (batched, singles):
+            self.assertEqual(expected, [sample["values"] for sample in samples])
+            self.assertEqual(
+                [[[value] for value in window] for window in expected],
+                [sample["nested"] for sample in samples],
+            )
+        self.assertEqual({"values": [-1], "nested": [[-1]]}, padding)
 
     def test_pad_tail_repeats_last_row_and_marks_real_padding(self):
         dataset = self._dataset(
