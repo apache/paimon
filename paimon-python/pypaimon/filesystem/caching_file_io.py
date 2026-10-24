@@ -34,7 +34,6 @@ from collections import OrderedDict
 from concurrent.futures import Future
 from typing import Optional
 
-from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
@@ -522,12 +521,6 @@ class CachingFileIO(FileIO):
 
     def write_mosaic(self, *args, **kwargs):
         return self._delegate.write_mosaic(*args, **kwargs)
-
-    @property
-    def uri_reader_factory(self):
-        # Descriptor payloads should retain this wrapper's cached, delegated
-        # input stream behavior rather than rebuilding a raw FileIO.
-        return UriReaderFactory.from_file_io(self)
 
     def __getattr__(self, name):
         delegate = self.__dict__.get('_delegate')

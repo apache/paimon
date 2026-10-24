@@ -38,6 +38,7 @@ class ResolvingFileIO(FileIO):
         opts_map.pop(CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(), None)
         self._options = Options(opts_map)
         self._fileio_cache: Dict[tuple, FileIO] = {}
+        self.uri_reader_factory = UriReaderFactory(self._options)
 
     def _cache_key(self, path: str) -> tuple:
         uri = urlparse(path)
@@ -54,12 +55,6 @@ class ResolvingFileIO(FileIO):
     @property
     def properties(self):
         return self._options
-
-    @property
-    def uri_reader_factory(self):
-        # Resolve each descriptor URI through this FileIO, independently of
-        # the destination format file's scheme and authority.
-        return UriReaderFactory.from_file_io(self)
 
     def is_object_store(self) -> bool:
         """Check if the warehouse path points to an object store (not local or HDFS)."""
@@ -139,6 +134,17 @@ class ResolvingFileIO(FileIO):
         return self._get_fileio(path).write_mosaic(path, data, **kwargs)
 
     def close(self):
+        first_error = None
+        try:
+            self.uri_reader_factory.close()
+        except Exception as error:
+            first_error = error
         for fileio in self._fileio_cache.values():
-            fileio.close()
+            try:
+                fileio.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
         self._fileio_cache.clear()
+        if first_error is not None:
+            raise first_error

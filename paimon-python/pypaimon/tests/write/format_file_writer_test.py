@@ -17,6 +17,7 @@
 
 import os
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pyarrow as pa
 import pytest
@@ -100,40 +101,70 @@ def test_python_format_closes_output_and_removes_failed_unpublished_file(tmp_pat
     assert not file_io.exists(path)
 
 
-@pytest.mark.parametrize('wrapper', ['local', 'resolving', 'cached-resolving'])
-def test_blob_descriptor_input_retains_file_io_reader_contract(tmp_path, wrapper):
+@pytest.mark.parametrize('wrapper', [
+    'plain', 'cached', 'resolving', 'cached-resolving', 'rest', 'cached-rest',
+])
+@pytest.mark.parametrize('destination_scheme', ['file', 'oss'])
+def test_blob_descriptor_input_routes_by_source_uri(tmp_path, wrapper, destination_scheme):
+    from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+    from pypaimon.common.file_io import FileIO
+    from pypaimon.common.identifier import Identifier
     from pypaimon.filesystem.caching_file_io import CachingFileIO, LocalMemoryCacheManager
+    from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
     from pypaimon.table.row.blob import BlobDescriptor
 
-    file_io = LocalFileIO() if wrapper == 'local' else ResolvingFileIO(Options({}))
-    if wrapper == 'cached-resolving':
-        file_io = CachingFileIO(file_io, LocalMemoryCacheManager(1024))
-    source = tmp_path / 'source.bin'
+    source = tmp_path / 'source-bucket' / 'shared' / 'source.bin'
+    source.parent.mkdir(parents=True)
     source.write_bytes(b'prefix-payload-suffix')
-    descriptor = BlobDescriptor(source.as_uri(), 7, 7)
+    destination = tmp_path / 'table-bucket'
+    (destination / 'table').mkdir(parents=True)
+    (destination / 'shared').mkdir()
+    # An authority-routing error must not silently copy this colliding key.
+    (destination / 'shared' / 'source.bin').write_bytes(b'prefix-incorrect-suffix')
+    descriptor = BlobDescriptor('oss://source-bucket/shared/source.bin', 7, 7)
     data = pa.table({'value': [descriptor.serialize(), None]},
                     schema=pa.schema([('value', pa.large_binary())]))
-    target = (tmp_path / 'result.blob').as_uri()
-    with patch.object(file_io, 'new_input_stream', wraps=file_io.new_input_stream) as source_reads:
+    target = ('oss://table-bucket/table/result.blob' if destination_scheme == 'oss'
+              else (destination / 'table' / 'result.blob').as_uri())
+
+    def local_bucket_filesystem(file_io, path):
+        file_io._use_jindo = True
+        bucket_dir = tmp_path / urlparse(path).netloc
+        return pa.fs.SubTreeFileSystem(os.fspath(bucket_dir), pa.fs.LocalFileSystem())
+
+    # Use ordinary FileIO URI resolution and path conversion, with each OSS
+    # bucket backed by a real, separate directory instead of a network service.
+    with patch('pypaimon.filesystem.pyarrow_file_io.JINDO_AVAILABLE', True), \
+            patch.object(PyArrowFileIO, '_initialize_jindo_fs', local_bucket_filesystem), \
+            patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+        options = Options({})
+        if 'resolving' in wrapper:
+            file_io = ResolvingFileIO(options)
+        elif 'rest' in wrapper:
+            file_io = RESTTokenFileIO(Identifier('db', 'table'), target, options)
+        else:
+            file_io = FileIO.get(target, options)
+        if wrapper.startswith('cached'):
+            file_io = CachingFileIO(file_io, LocalMemoryCacheManager(1024))
         write_blob_file(file_io, target, data)
-        if wrapper != 'local':
-            source_reads.assert_called_once_with(source.as_uri())
-    field = DataField(0, 'value', AtomicType('BLOB'))
-    reader = FormatBlobReader(file_io, target, ['value'], [field], None, False)
-    try:
-        assert reader.read_arrow_batch().column(0).to_pylist() == [b'payload', None]
-    finally:
-        reader.close()
-        file_io.close()
+        field = DataField(0, 'value', AtomicType('BLOB'))
+        reader = FormatBlobReader(file_io, target, ['value'], [field], None, False)
+        try:
+            assert reader.read_arrow_batch().column(0).to_pylist() == [b'payload', None]
+        finally:
+            reader.close()
+            file_io.close()
 
 
 @pytest.mark.parametrize('denied', [False, True])
-def test_blob_descriptor_input_preserves_rest_token_refresh_and_denial(tmp_path, denied):
+def test_explicit_source_file_io_preserves_token_refresh_and_denial(tmp_path, denied):
     from unittest.mock import Mock
 
     from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
     from pypaimon.common.file_io import FileIO
     from pypaimon.common.identifier import Identifier
+    from pypaimon.common.uri_reader import UriReaderFactory
+    from pypaimon.execution.python.write.writer.blob_file_writer import BlobFileWriter
     from pypaimon.table.row.blob import BlobDescriptor
 
     source = tmp_path / 'source.bin'
@@ -148,16 +179,23 @@ def test_blob_descriptor_input_preserves_rest_token_refresh_and_denial(tmp_path,
         refreshed.new_input_stream = Mock(side_effect=PermissionError('source access denied'))
     else:
         refreshed.new_input_stream = Mock(wraps=refreshed.new_input_stream)
-    file_io = RESTTokenFileIO(Identifier('db', 'table'), tmp_path.as_uri(), Options({}))
-    with patch.object(file_io, 'file_io', side_effect=[initial, refreshed, refreshed]) as resolve, \
+    source_io = RESTTokenFileIO(Identifier('db', 'source'), tmp_path.as_uri(), Options({}))
+    factory = UriReaderFactory.from_file_io(source_io)
+    with patch.object(source_io, 'file_io', side_effect=[initial, refreshed]) as resolve, \
             patch.object(FileIO, 'get', side_effect=AssertionError('token wrapper was bypassed')):
-        if denied:
-            with pytest.raises(RuntimeError, match='source access denied'):
-                write_blob_file(file_io, target, data)
-            assert not initial.exists(target)
-        else:
-            write_blob_file(file_io, target, data)
-        assert resolve.call_count == (3 if denied else 2)
+        # Prime source credentials before opening the lazy descriptor, as a
+        # configured source table does before handing its FileIO to a writer.
+        source_io.file_io()
+        writer = BlobFileWriter(LocalFileIO(), target, uri_reader_factory=factory)
+        try:
+            if denied:
+                with pytest.raises(IOError, match='source access denied'):
+                    writer.write_row(data)
+            else:
+                writer.write_row(data)
+        finally:
+            writer.close()
+        assert resolve.call_count == 2
     initial.new_input_stream.assert_not_called()
     refreshed.new_input_stream.assert_called_once_with(source.as_uri())
     if not denied:

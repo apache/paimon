@@ -291,9 +291,8 @@ class RESTTokenFileIO(FileIO):
     @property
     def uri_reader_factory(self):
         if self._uri_reader_factory_cache is None:
-            # Bind readers to the token-aware wrapper so opening a lazy
-            # descriptor refreshes credentials and preserves authorization.
-            self._uri_reader_factory_cache = UriReaderFactory.from_file_io(self)
+            catalog_options = self.catalog_options or Options({})
+            self._uri_reader_factory_cache = UriReaderFactory(catalog_options)
 
         return self._uri_reader_factory_cache
 
