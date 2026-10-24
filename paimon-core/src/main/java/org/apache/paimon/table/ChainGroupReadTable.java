@@ -319,6 +319,13 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         }
 
         @Override
+        public ChainTableBatchScan withInternalPartitionFilter(
+                PartitionPredicate partitionPredicate) {
+            super.withInternalPartitionFilter(partitionPredicate);
+            return this;
+        }
+
+        @Override
         public ChainTableBatchScan withPartitionFilter(Predicate partitionPredicate) {
             super.withPartitionFilter(partitionPredicate);
             return this;
@@ -376,8 +383,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             long targetSplitSize = options.splitTargetSize();
             long openFileCost = options.splitOpenFileCost();
 
-            DataTableScan deltaPartitionScan =
-                    newChainPartitionListingScan(false, getFallbackPartitionPredicate());
+            DataTableScan deltaPartitionScan = newChainPartitionListingScan(false);
             List<BinaryRow> deltaPartitions =
                     deltaPartitionScan.listPartitions().stream()
                             .filter(p -> !snapshotPartitions.contains(p))
@@ -425,9 +431,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     // List snapshot partitions for this group, sorted by chain dimension.
                     // The anchor of an admitted logical partition sits in an earlier one, which a
                     // rule on a chain partition key excludes.
+                    // This internal lookup must not add group or chain keys to user authorization.
                     List<BinaryRow> snapshotPartitionsInGroup =
-                            newChainPartitionListingScan(true, snapshotAnchorPredicate)
+                            newChainPartitionListingScan(true)
                                     .withoutAuthPartitionPushdown()
+                                    .withInternalPartitionFilter(snapshotAnchorPredicate)
                                     .listPartitions();
 
                     // Find delta → snapshot mapping (for each delta partition, find the nearest
@@ -449,6 +457,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                         DataTableScan snapshotScan = newFilteredScan(true);
                         DataTableScan deltaScan = newFilteredScan(false);
 
+                        // These internal ranges select the deltas needed to reconstruct the target
+                        // partition while preserving the user-filter authorization requirements.
                         if (snapshotPartition == null) {
                             List<Predicate> predicates = new ArrayList<>();
                             predicates.add(
@@ -461,7 +471,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             predicates.add(
                                     ChainTableUtils.createLinearPredicate(
                                             deltaPartition, partitionConverter, builder::equal));
-                            deltaScan.withPartitionFilter(PredicateBuilder.or(predicates));
+                            deltaScan.withInternalPartitionFilter(
+                                    PartitionPredicate.fromPredicate(
+                                            tableSchema.logicalPartitionType(),
+                                            PredicateBuilder.or(predicates)));
                         } else {
                             List<BinaryRow> selectedDeltaPartitions =
                                     ChainTableUtils.getDeltaPartitionsWithProjector(
@@ -470,15 +483,21 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                             options,
                                             chainPartitionComparator,
                                             partitionProjector);
-                            deltaScan.withPartitionFilter(selectedDeltaPartitions);
+                            deltaScan.withInternalPartitionFilter(
+                                    PartitionPredicate.fromMultiple(
+                                            tableSchema.logicalPartitionType(),
+                                            selectedDeltaPartitions));
                         }
 
                         ChainAuth auth = new ChainAuth();
                         List<DataSplit> deltaSubSplits = auth.unwrap(deltaScan.plan().splits());
                         List<DataSplit> snapshotSubSplits = new ArrayList<>();
                         if (partitionPairs.getValue() != null) {
-                            snapshotScan.withPartitionFilter(
-                                    Collections.singletonList(partitionPairs.getValue()));
+                            // Read the snapshot anchor selected for this delta partition.
+                            snapshotScan.withInternalPartitionFilter(
+                                    PartitionPredicate.fromMultiple(
+                                            tableSchema.logicalPartitionType(),
+                                            Collections.singletonList(partitionPairs.getValue())));
                             snapshotSubSplits = auth.unwrap(snapshotScan.plan().splits());
                         }
                         splits.addAll(
@@ -500,10 +519,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            DataTableScan snapshotScan =
-                    newChainPartitionListingScan(true, getMainPartitionPredicate());
-            DataTableScan deltaScan =
-                    newChainPartitionListingScan(false, getFallbackPartitionPredicate());
+            DataTableScan snapshotScan = newChainPartitionListingScan(true);
+            DataTableScan deltaScan = newChainPartitionListingScan(false);
             List<PartitionEntry> partitionEntries =
                     new ArrayList<>(snapshotScan.listPartitionEntries());
             Set<BinaryRow> partitions =
@@ -517,15 +534,12 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             return partitionEntries;
         }
 
-        private DataTableScan newChainPartitionListingScan(
-                boolean snapshot, PartitionPredicate scanPartitionPredicate) {
+        private DataTableScan newChainPartitionListingScan(boolean snapshot) {
             DataTableScan scan =
                     snapshot
                             ? chainGroupReadTable.newSnapshotScan(scanCreator)
                             : chainGroupReadTable.newDeltaScan(scanCreator);
-            if (scanPartitionPredicate != null) {
-                scan.withPartitionFilter(scanPartitionPredicate);
-            }
+            configureBranchScan(scan, snapshot);
             return scan;
         }
 
@@ -542,9 +556,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             }
             splits.addAll(auth.reapply(chainSplits));
 
-            snapshotPartitions.addAll(
-                    newChainPartitionListingScan(true, getMainPartitionPredicate())
-                            .listPartitions());
+            snapshotPartitions.addAll(newChainPartitionListingScan(true).listPartitions());
             return snapshotPartitions;
         }
 
@@ -554,6 +566,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                     ? chainGroupReadTable.newSnapshotScan(scanCreator)
                                     : chainGroupReadTable.newDeltaScan(scanCreator))
                             .withoutAuthPartitionPushdown();
+            configureBranchScan(scan, snapshot);
             if (keyPredicate != null) {
                 scan.withFilter(keyPredicate);
             }

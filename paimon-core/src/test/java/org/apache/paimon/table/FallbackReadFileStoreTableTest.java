@@ -45,6 +45,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.QueryAuthSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
@@ -59,12 +60,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
 import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -117,6 +120,179 @@ public class FallbackReadFileStoreTableTest {
         assertThat(scan.withReadType(readType)).isSameAs(scan);
         Mockito.verify(mainScan).withReadType(readType);
         Mockito.verify(fallbackScan).withReadType(readType);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "scan.fallback-branch,pt,false",
+        "scan.primary-branch,pt,false",
+        "scan.fallback-branch,a,false",
+        "scan.primary-branch,a,false",
+        "scan.fallback-branch,pt,true",
+        "scan.primary-branch,pt,true",
+        "scan.fallback-branch,a,true",
+        "scan.primary-branch,a,true"
+    })
+    void testQueryAuthWithProjectedColumns(
+            String branchOption, String projectedColumn, boolean dataEvolution) throws Exception {
+        FileStoreTable localTable = createTable(dataEvolution);
+        localTable.createBranch("backup");
+        writeDataIntoTable(localTable, 0, rowData(1, 10), rowData(3, 50));
+        writeDataIntoTable(
+                createTableFromBranch(localTable, "backup"),
+                0,
+                rowData(1, 20),
+                rowData(1, 30),
+                rowData(2, 40));
+
+        List<String> allowedColumns = new ArrayList<>(Collections.singletonList(projectedColumn));
+        Catalog catalog = Mockito.mock(Catalog.class);
+        Mockito.when(catalog.authTableQuery(Mockito.any(), Mockito.any()))
+                .thenAnswer(
+                        invocation -> {
+                            List<String> select = invocation.getArgument(1);
+                            if (select == null || !allowedColumns.containsAll(select)) {
+                                throw new SecurityException(
+                                        "No permission to read unselected columns");
+                            }
+                            return new TableQueryAuthResult(null, null);
+                        });
+        Mockito.when(catalog.loadSnapshot(Mockito.any(Identifier.class)))
+                .thenThrow(new UnsupportedOperationException());
+        CatalogEnvironment environment =
+                new CatalogEnvironment(
+                        Identifier.create("mydb", "mytable"),
+                        null,
+                        () -> catalog,
+                        null,
+                        null,
+                        null,
+                        false,
+                        false);
+        Options options = new Options();
+        options.set(CoreOptions.QUERY_AUTH_ENABLED, true);
+        options.set(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST, true);
+        options.set(branchOption, "backup");
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        fileIO, tablePath, localTable.schema(), options, environment);
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withReadType(table.rowType().project(projectedColumn));
+        List<Integer> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan().splits())) {
+            reader.forEachRemaining(row -> rows.add(row.getInt(0)));
+        }
+        List<Integer> expected;
+        if ("pt".equals(projectedColumn)) {
+            expected =
+                    "scan.primary-branch".equals(branchOption)
+                            ? Arrays.asList(1, 1, 2, 3)
+                            : Arrays.asList(1, 2, 3);
+        } else {
+            expected =
+                    "scan.primary-branch".equals(branchOption)
+                            ? Arrays.asList(20, 30, 40, 50)
+                            : Arrays.asList(10, 40, 50);
+        }
+        assertThat(rows).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(readBuilder.newScan().listPartitionEntries()).hasSize(3);
+
+        String deniedColumn = "pt".equals(projectedColumn) ? "a" : "pt";
+        assertThatThrownBy(
+                        () ->
+                                table.newReadBuilder()
+                                        .withReadType(table.rowType().project(deniedColumn))
+                                        .newScan()
+                                        .plan())
+                .hasMessageContaining("No permission");
+        readBuilder.withFilter(
+                new PredicateBuilder(table.rowType())
+                        .equal(table.rowType().getFieldIndex(deniedColumn), 1));
+        assertThatThrownBy(() -> readBuilder.newScan().plan())
+                .hasMessageContaining("No permission");
+        assertThatThrownBy(() -> readBuilder.newScan().listPartitionEntries())
+                .hasMessageContaining("No permission");
+        if ("a".equals(projectedColumn)) {
+            DataTableScan internalScan = table.newScan();
+            internalScan.withReadType(table.rowType().project("a"));
+            internalScan.withInternalPartitionFilter(
+                    PartitionPredicate.fromPredicate(
+                            table.schema().logicalPartitionType(),
+                            new PredicateBuilder(table.schema().logicalPartitionType())
+                                    .equal(0, 2)));
+            assertThat(internalScan.listPartitions())
+                    .extracting(partition -> partition.getInt(0))
+                    .containsExactly(2);
+            List<Integer> internalRows = new ArrayList<>();
+            try (RecordReader<InternalRow> reader =
+                    table.newReadBuilder()
+                            .withReadType(table.rowType().project("a"))
+                            .newRead()
+                            .createReader(internalScan.plan().splits())) {
+                reader.forEachRemaining(row -> internalRows.add(row.getInt(0)));
+            }
+            assertThat(internalRows).containsExactly(40);
+
+            ReadBuilder partitionFiltered =
+                    table.newReadBuilder()
+                            .withReadType(table.rowType().project("a"))
+                            .withPartitionFilter(Collections.singletonMap("pt", "1"));
+            assertThatThrownBy(() -> partitionFiltered.newScan().plan())
+                    .hasMessageContaining("No permission");
+            assertThatThrownBy(() -> partitionFiltered.newScan().listPartitionEntries())
+                    .hasMessageContaining("No permission");
+
+            // Preserve user operands in both the underlying scan and newly created wrapper scans.
+            FileStoreTable underlyingTable =
+                    FileStoreTableFactory.createWithoutFallbackBranch(
+                            fileIO, tablePath, localTable.schema(), options, environment);
+            for (DataTableScan scan : Arrays.asList(underlyingTable.newScan(), table.newScan())) {
+                scan.withReadType(table.rowType().project("a"));
+                scan.withPartitionFilter(Collections.singletonMap("pt", "1"));
+                scan.withInternalPartitionFilter(PartitionPredicate.ALWAYS_TRUE);
+                assertThatThrownBy(scan::plan).hasMessageContaining("No permission");
+                assertThatThrownBy(scan::listPartitionEntries)
+                        .hasMessageContaining("No permission");
+
+                // Unlike internal planning, a new user filter replaces the old user operands.
+                scan.withPartitionFilter(PartitionPredicate.ALWAYS_TRUE);
+                assertThat(scan.plan().splits()).isNotEmpty();
+                assertThat(scan.listPartitionEntries()).isNotEmpty();
+                scan.withPartitionFilter(
+                        PartitionPredicate.fromPredicate(
+                                table.schema().logicalPartitionType(),
+                                new PredicateBuilder(table.schema().logicalPartitionType())
+                                        .equal(0, 1)));
+                assertThatThrownBy(scan::plan).hasMessageContaining("No permission");
+                assertThatThrownBy(scan::listPartitionEntries)
+                        .hasMessageContaining("No permission");
+            }
+        }
+
+        if ("pt".equals(projectedColumn)) {
+            allowedColumns.add("a");
+            // A value filter must be authorized without affecting which branch owns a partition.
+            // In fallback mode, a = 20 in backup must not replace a = 10 in main's pt = 1.
+            ReadBuilder valueFiltered =
+                    table.newReadBuilder()
+                            .withReadType(table.rowType().project("pt"))
+                            .withFilter(new PredicateBuilder(table.rowType()).equal(1, 20));
+            assertThat(valueFiltered.newScan().listPartitionEntries()).hasSize(3);
+            List<Integer> filteredRows = new ArrayList<>();
+            try (RecordReader<InternalRow> reader =
+                    valueFiltered
+                            .newRead()
+                            .executeFilter()
+                            .createReader(valueFiltered.newScan().plan().splits())) {
+                reader.forEachRemaining(row -> filteredRows.add(row.getInt(0)));
+            }
+            assertThat(filteredRows)
+                    .containsExactlyElementsOf(
+                            "scan.primary-branch".equals(branchOption)
+                                    ? Collections.singletonList(1)
+                                    : Collections.emptyList());
+        }
     }
 
     @Test
@@ -611,6 +787,13 @@ public class FallbackReadFileStoreTableTest {
     }
 
     private AppendOnlyFileStoreTable createTable() throws Exception {
+        return createTable(false);
+    }
+
+    private AppendOnlyFileStoreTable createTable(boolean dataEvolution) throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, dataEvolution);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, dataEvolution);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
@@ -618,7 +801,7 @@ public class FallbackReadFileStoreTableTest {
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
                                 Collections.emptyList(),
-                                Collections.emptyMap(),
+                                options.toMap(),
                                 ""));
         return new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
     }
