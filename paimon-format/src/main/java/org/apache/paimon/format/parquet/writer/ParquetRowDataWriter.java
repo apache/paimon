@@ -117,10 +117,10 @@ public class ParquetRowDataWriter {
                     return new DoubleWriter();
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                     TimestampType timestampType = (TimestampType) t;
-                    return createTimestampWriter(timestampType.getPrecision());
+                    return createTimestampWriter(timestampType.getPrecision(), type);
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                     LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) t;
-                    return createTimestampWriter(localZonedTimestampType.getPrecision());
+                    return createTimestampWriter(localZonedTimestampType.getPrecision(), type);
                 default:
                     throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -155,7 +155,17 @@ public class ParquetRowDataWriter {
         }
     }
 
-    private FieldWriter createTimestampWriter(int precision) {
+    private FieldWriter createTimestampWriter(int precision, Type parquetType) {
+        LogicalTypeAnnotation annotation = parquetType.getLogicalTypeAnnotation();
+        if (annotation instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+            LogicalTypeAnnotation.TimeUnit unit =
+                    ((LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) annotation).getUnit();
+            if (unit == LogicalTypeAnnotation.TimeUnit.MILLIS) {
+                return new TimestampMillsWriter(precision);
+            } else if (unit == LogicalTypeAnnotation.TimeUnit.MICROS) {
+                return new TimestampMicrosWriter(precision);
+            }
+        }
         if (precision <= 3) {
             return new TimestampMillsWriter(precision);
         } else if (precision > 6) {
@@ -380,7 +390,6 @@ public class ParquetRowDataWriter {
         private final int precision;
 
         private TimestampMicrosWriter(int precision) {
-            checkArgument(precision > 3);
             checkArgument(precision <= 6);
             this.precision = precision;
         }

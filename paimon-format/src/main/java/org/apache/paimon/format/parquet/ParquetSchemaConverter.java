@@ -101,21 +101,41 @@ public class ParquetSchemaConverter {
 
     /** Convert paimon {@link RowType} to parquet {@link MessageType}. */
     public static MessageType convertToParquetMessageType(RowType rowType) {
-        return new MessageType(PAIMON_SCHEMA, convertToParquetTypes(rowType));
+        return convertToParquetMessageType(rowType, false);
+    }
+
+    public static MessageType convertToParquetMessageType(
+            RowType rowType, boolean timestampMillisAsMicros) {
+        return new MessageType(
+                PAIMON_SCHEMA, convertToParquetTypes(rowType, timestampMillisAsMicros));
     }
 
     public static Type[] convertToParquetTypes(RowType rowType) {
+        return convertToParquetTypes(rowType, false);
+    }
+
+    private static Type[] convertToParquetTypes(RowType rowType, boolean timestampMillisAsMicros) {
         return rowType.getFields().stream()
-                .map(ParquetSchemaConverter::convertToParquetType)
+                .map(field -> convertToParquetType(field, timestampMillisAsMicros))
                 .toArray(Type[]::new);
     }
 
     /** Convert paimon {@link DataField} to parquet {@link Type}. */
     public static Type convertToParquetType(DataField field) {
-        return convertToParquetType(field.name(), field.type(), field.id(), 0);
+        return convertToParquetType(field, false);
+    }
+
+    public static Type convertToParquetType(DataField field, boolean timestampMillisAsMicros) {
+        return convertToParquetType(
+                field.name(), field.type(), field.id(), 0, timestampMillisAsMicros);
     }
 
     public static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
+        return convertToParquetType(name, type, fieldId, depth, false);
+    }
+
+    private static Type convertToParquetType(
+            String name, DataType type, int fieldId, int depth, boolean timestampMillisAsMicros) {
         Type.Repetition repetition =
                 type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
         switch (type.getTypeRoot()) {
@@ -209,12 +229,20 @@ public class ParquetSchemaConverter {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return createTimestampWithLogicalType(
-                                name, timestampType.getPrecision(), repetition, false)
+                                name,
+                                timestampType.getPrecision(),
+                                repetition,
+                                false,
+                                timestampMillisAsMicros)
                         .withId(fieldId);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
                 return createTimestampWithLogicalType(
-                                name, localZonedTimestampType.getPrecision(), repetition, true)
+                                name,
+                                localZonedTimestampType.getPrecision(),
+                                repetition,
+                                true,
+                                timestampMillisAsMicros)
                         .withId(fieldId);
             case ARRAY:
             case VECTOR:
@@ -223,7 +251,12 @@ public class ParquetSchemaConverter {
                                 ? ((ArrayType) type).getElementType()
                                 : ((VectorType) type).getElementType();
                 Type elementParquetType =
-                        convertToParquetType(LIST_ELEMENT_NAME, listElementType, fieldId, depth + 1)
+                        convertToParquetType(
+                                        LIST_ELEMENT_NAME,
+                                        listElementType,
+                                        fieldId,
+                                        depth + 1,
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
                         .withId(fieldId);
@@ -236,11 +269,20 @@ public class ParquetSchemaConverter {
                     keyType = keyType.copy(false);
                 }
                 Type mapKeyParquetType =
-                        convertToParquetType(MAP_KEY_NAME, keyType, fieldId, depth + 1)
+                        convertToParquetType(
+                                        MAP_KEY_NAME,
+                                        keyType,
+                                        fieldId,
+                                        depth + 1,
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
                 Type mapValueParquetType =
                         convertToParquetType(
-                                        MAP_VALUE_NAME, mapType.getValueType(), fieldId, depth + 1)
+                                        MAP_VALUE_NAME,
+                                        mapType.getValueType(),
+                                        fieldId,
+                                        depth + 1,
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
                                 repetition,
@@ -258,10 +300,20 @@ public class ParquetSchemaConverter {
                     elementType = elementType.copy(false);
                 }
                 Type multisetKeyParquetType =
-                        convertToParquetType(MAP_KEY_NAME, elementType, fieldId, depth + 1)
+                        convertToParquetType(
+                                        MAP_KEY_NAME,
+                                        elementType,
+                                        fieldId,
+                                        depth + 1,
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
                 Type multisetValueParquetType =
-                        convertToParquetType(MAP_VALUE_NAME, new IntType(false), fieldId, depth + 1)
+                        convertToParquetType(
+                                        MAP_VALUE_NAME,
+                                        new IntType(false),
+                                        fieldId,
+                                        depth + 1,
+                                        timestampMillisAsMicros)
                                 .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
                                 repetition,
@@ -279,7 +331,7 @@ public class ParquetSchemaConverter {
                 //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
                 // }
                 return groupTypeBuilder
-                        .addFields(convertToParquetTypes(rowType))
+                        .addFields(convertToParquetTypes(rowType, timestampMillisAsMicros))
                         .named(name)
                         .withId(fieldId);
             case VARIANT:
@@ -307,7 +359,16 @@ public class ParquetSchemaConverter {
 
     public static Type createTimestampWithLogicalType(
             String name, int precision, Type.Repetition repetition, boolean isAdjustToUTC) {
-        if (precision <= 3) {
+        return createTimestampWithLogicalType(name, precision, repetition, isAdjustToUTC, false);
+    }
+
+    public static Type createTimestampWithLogicalType(
+            String name,
+            int precision,
+            Type.Repetition repetition,
+            boolean isAdjustToUTC,
+            boolean timestampMillisAsMicros) {
+        if (precision <= 3 && !timestampMillisAsMicros) {
             return Types.primitive(INT64, repetition)
                     .as(
                             LogicalTypeAnnotation.timestampType(
