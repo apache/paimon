@@ -163,6 +163,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(BucketFunctionType.DEFAULT)
                     .withDescription("The bucket function for paimon bucket.");
 
+    @Immutable
+    public static final ConfigOption<String> BUCKET_FUNCTION_PROVIDER =
+            key("bucket-function.provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional identifier of a BucketFunctionFactory discovered from the "
+                                    + "classpath. When configured, the provider is used by both "
+                                    + "writers and bucket predicate pruning and takes precedence "
+                                    + "over bucket-function.type.");
+
     /** Paimon bucket function type. */
     public enum BucketFunctionType implements DescribedEnum {
         DEFAULT(
@@ -3267,6 +3278,10 @@ public class CoreOptions implements Serializable {
 
     public BucketFunctionType bucketFunctionType() {
         return options.get(BUCKET_FUNCTION_TYPE);
+    }
+
+    public Optional<String> bucketFunctionProvider() {
+        return options.getOptional(BUCKET_FUNCTION_PROVIDER);
     }
 
     public Path path() {

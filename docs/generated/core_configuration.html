@@ -141,6 +141,12 @@ under the License.
             <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
         </tr>
         <tr>
+            <td><h5>bucket-function.provider</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Optional identifier of a BucketFunctionFactory discovered from the classpath. When configured, the provider is used by both writers and bucket predicate pruning and takes precedence over bucket-function.type.</td>
+        </tr>
+        <tr>
             <td><h5>bucket-function.type</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
