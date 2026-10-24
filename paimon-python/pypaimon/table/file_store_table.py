@@ -532,10 +532,6 @@ class FileStoreTable(Table):
             key in options for key in SCAN_KEYS + [
                 CoreOptions.SCAN_MODE.key(), CoreOptions.BRANCH.key(),
                 CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()])
-        if resolve_time_travel and not preserve_snapshot:
-            time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
-            if time_travel_schema is not None:
-                new_table_schema = time_travel_schema
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the
@@ -554,6 +550,13 @@ class FileStoreTable(Table):
 
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
+        if resolve_time_travel and not preserve_snapshot:
+            # Resolve snapshots, tags and schemas in the target branch.
+            time_travel_schema = new_table._try_time_travel(Options(new_options), set(applied_options))
+            if time_travel_schema is not None:
+                new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                           time_travel_schema, catalog_env)
+
         new_table._applied_dynamic_options = applied_options
         if preserve_snapshot:
             new_table._read_snapshot = self._read_snapshot
