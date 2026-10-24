@@ -21,7 +21,6 @@ requires = [
     "setuptools>=40.8,<60; python_version < '3.7'",
     "setuptools>=61; python_version >= '3.7'",
     "wheel",
-    "numpy>=1.19.5,<3",
     "packaging>=21",
     "tomli>=1.2.3; python_version < '3.11'",
 ]
