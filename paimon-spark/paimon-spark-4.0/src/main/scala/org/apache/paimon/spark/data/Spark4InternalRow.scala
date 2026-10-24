@@ -25,8 +25,8 @@ import org.apache.spark.unsafe.types.VariantVal
 
 /**
  * Spark 4.0-compatible override of the `paimon-spark4-common` `Spark4InternalRow`. See
- * `Spark4ArrayData` for the rationale; `getGeography` / `getGeometry` are 4.1-only API surface on
- * `SpecializedGetters` and must be absent from the bytecode we ship for 4.0 runtimes.
+ * `Spark4ArrayData` for the rationale: neither the 4.1 `getGeography` / `getGeometry` pair nor the
+ * 4.2 `getBinaryView` may appear in the bytecode we ship for 4.0 runtimes.
  */
 class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
 

@@ -19,12 +19,12 @@
 package org.apache.paimon.spark.catalyst
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.TableOutputResolver
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.execution.ui.SQLPlanMetric
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.DataType
 
 object Compatibility {
@@ -35,13 +35,9 @@ object Compatibility {
       query: LogicalPlan,
       byName: Boolean,
       conf: SQLConf): LogicalPlan = {
-    TableOutputResolver.resolveOutputColumns(
-      tableName,
-      expected,
-      query,
-      byName,
-      conf,
-      supportColDefaultValue = false)
+    // resolveOutputColumns' trailing argument changed type in Spark 4.2, so the version-specific
+    // call lives on the shim, which is compiled per Spark version.
+    SparkShimLoader.shim.resolveTableOutputColumns(tableName, expected, query, byName, conf)
   }
 
   def withNewQuery(o: V2WriteCommand, query: LogicalPlan): V2WriteCommand = {

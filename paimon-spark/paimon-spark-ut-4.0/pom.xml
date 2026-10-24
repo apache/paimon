@@ -42,14 +42,16 @@ under the License.
       dependency set, so producing two artifacts compiled against different Spark versions from one
       module is not expressible.
 
-      Why it is needed at all: `paimon-spark-4.0` used to consume `paimon-spark-ut`'s test-jar, which
-      is compiled against the baseline. Those classfiles reference Spark symbols that a 4.0 runtime
-      cannot resolve, which is what `StreamTestCheckAnswerWithTimeoutStub` stood in for. Compiling
-      the same sources against 4.0.3 cannot emit a reference to a symbol 4.0.3 does not have, so the
-      stub is deleted here.
+      Why it is needed at all: Spark 4.2 turned `QueryTest` from an abstract class into a trait
+      (SPARK-55910). `PaimonSparkTestBase extends QueryTest with SharedSparkSession`, so a
+      4.2-compiled `PaimonSparkTestBase` lists `QueryTest` among its interfaces and fails to load on
+      a 4.0 runtime with `IncompatibleClassChangeError`. Same-FQCN override files cannot fix it: they
+      only apply to `src/main`, and this is a test-jar. Classfiles compiled against 4.0.3 name only
+      what 4.0.3 has, which is also why `StreamTestCheckAnswerWithTimeoutStub` is deleted here.
 
-      Serves `paimon-spark-4.0` only: `paimon-spark-4.1` pins 4.1.2, which is the baseline, so the
-      baseline build already matches its runtime and it keeps consuming `paimon-spark-ut` directly.
+      Serves `paimon-spark-4.0` only. `paimon-spark-4.1` gets the same treatment from
+      `paimon-spark-ut-4.1/pom.xml`, because under this baseline neither version matches the build
+      `paimon-spark-ut` produces.
     -->
     <properties>
         <spark.version>4.0.3</spark.version>
@@ -84,7 +86,7 @@ under the License.
 
         <!--
           `${paimon-sparkx-common}` transitively pulls in `spark-sql-api` at the `spark4` profile
-          baseline (4.1.2), so every Spark artifact is pinned to ${spark.version} here to keep the
+          baseline (4.2.0), so every Spark artifact is pinned to ${spark.version} here to keep the
           whole compile classpath on 4.0. Same reasoning as `paimon-spark-4.0`, and the same
           `spark-connect-shims` exclusion on `spark-sql-api` and `spark-sql`: Spark 4.0.3's shims jar
           carries a stub `org.apache.spark.SparkConf` with only `getAll()`, which scalac resolves in

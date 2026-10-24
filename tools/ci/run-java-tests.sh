@@ -61,7 +61,7 @@ case "$suite" in
         ;;
     spark4)
         profiles=flink1,spark4
-        for version in ut 4.0 4.1; do
+        for version in ut 4.0 4.1 4.2; do
             modules+=("org.apache.paimon:paimon-spark-${version}_2.13")
         done
         ;;

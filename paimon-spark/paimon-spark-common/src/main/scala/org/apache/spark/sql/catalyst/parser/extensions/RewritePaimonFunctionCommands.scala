@@ -35,7 +35,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{GENERATOR, PLAN_EXPRESSION, TreePattern, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.CatalogManager
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.paimon.shims.{SparkShimLoader, SparkVersionCompat}
 import org.apache.spark.sql.types.{DataType, StructType}
 
 case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[LogicalPlan] {
@@ -143,7 +143,8 @@ case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[Logic
               .map(
                 database =>
                   Seq(
-                    name.catalog.getOrElse(catalogManager.currentCatalog.name()),
+                    name.catalog.getOrElse(
+                      SparkVersionCompat.currentCatalog(catalogManager).name()),
                     database,
                     name.funcName))
               .getOrElse(name.nameParts)
@@ -260,6 +261,13 @@ object UnResolvedPaimonV1Function {
       funcIdent: FunctionIdentifier,
       u: UnresolvedFunction,
       fun: Option[PaimonFunction]): UnResolvedPaimonV1Function = {
-    UnResolvedPaimonV1Function(funcIdent, u.arguments, u.isDistinct, u.filter, u.ignoreNulls, fun)
+    // Spark 4.2 widened `ignoreNulls` from Boolean to Option[Boolean].
+    UnResolvedPaimonV1Function(
+      funcIdent = funcIdent,
+      arguments = u.arguments,
+      isDistinct = u.isDistinct,
+      filter = u.filter,
+      ignoreNulls = SparkVersionCompat.ignoreNulls(u),
+      func = fun)
   }
 }
