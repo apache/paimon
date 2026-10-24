@@ -1180,6 +1180,15 @@ class CoreOptions:
             "PyPaimon LeRobot Dataset worker.")
     )
 
+    READ_VIDEO_CODEC_THREADS: ConfigOption[int] = (
+        ConfigOptions.key("read.video.codec-threads")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "FFmpeg threads per PyAV video decoder in a LeRobot worker. "
+            "0 keeps automatic selection; 1 avoids nested codec parallelism.")
+    )
+
     READ_VIDEO_DECODERS_PER_PAYLOAD: ConfigOption[int] = (
         ConfigOptions.key("read.video.decoders-per-payload")
         .int_type()
@@ -1961,6 +1970,18 @@ class CoreOptions:
 
     def read_video_decoders_per_payload(self) -> int:
         return self._positive_video_option(CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD)
+
+    def read_video_codec_threads(self) -> int:
+        option = CoreOptions.READ_VIDEO_CODEC_THREADS
+        raw = self.options.to_map().get(option.key())
+        try:
+            value = self.options.get(option)
+            if isinstance(raw, (bool, float)) or value < 0:
+                raise ValueError()
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "%s must be a non-negative integer." % option.key()) from error
+        return value
 
     def _positive_video_option(self, option) -> int:
         raw = self.options.to_map().get(option.key())

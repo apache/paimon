@@ -434,6 +434,68 @@ class VideoDecodeParallelismTest(unittest.TestCase):
             torch.set_default_device(original_device)
             collator.close()
 
+    def test_codec_thread_option(self):
+        self.assertEqual(1, CoreOptions(Options({})).read_video_codec_threads())
+        for value in (0, 1, 4, "1"):
+            self.assertEqual(int(value), CoreOptions(Options({
+                "read.video.codec-threads": value})).read_video_codec_threads())
+        for value in (-1, True, 1.5, "bad"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                CoreOptions(Options({"read.video.codec-threads": value})) \
+                    .read_video_codec_threads()
+
+    def test_codec_threads_preserve_real_indexed_and_scan_frames(self):
+        try:
+            import av
+            import numpy as np
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.lerobot.dataset import _open_video_decoder
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        target = io.BytesIO()
+        with av.open(target, mode="w", format="mp4") as container:
+            stream = container.add_stream("mpeg4", rate=30)
+            stream.width, stream.height = 16, 16
+            stream.pix_fmt = "yuv420p"
+            stream.codec_context.gop_size = 4
+            for value in range(12):
+                image = np.full((16, 16, 3), value * 15, dtype=np.uint8)
+                for packet in stream.encode(av.VideoFrame.from_ndarray(image, format="rgb24")):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        payload = target.getvalue()
+        index = VideoKeyframeIndex.inspect(io.BytesIO(payload), len(payload))
+        outputs = []
+        for indexed in (False, True):
+            for threads in (0, 1, 2):
+                source = io.BytesIO(payload)
+                if indexed:
+                    source.video_keyframe_index = index
+                    source.video_length = len(payload)
+                decoder = _open_video_decoder(source, backend="pyav", codec_threads=threads)
+                try:
+                    if indexed:
+                        decode_group = decoder._decode_indexed_group
+
+                        def checked_group(container, stream, *args):
+                            self.assertEqual(threads, stream.thread_count)
+                            return decode_group(container, stream, *args)
+
+                        with patch.object(decoder, '_decode_indexed_group', checked_group):
+                            frames = [decoder[i] for i in (9, 1, 7)]
+                    else:
+                        self.assertEqual(threads, decoder._stream.thread_count)
+                        frames = [decoder[i] for i in (9, 1, 7)]
+                    outputs.append(torch.stack(frames))
+                finally:
+                    decoder.close()
+                    source.close()
+        for output in outputs[1:]:
+            self.assertTrue(torch.equal(outputs[0], output))
+
     def test_real_pyav_payloads_match_serial(self):
         try:
             import av
