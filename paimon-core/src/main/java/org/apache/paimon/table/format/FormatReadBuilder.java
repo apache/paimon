@@ -26,6 +26,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.CatalogOptions;
@@ -35,6 +36,7 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -50,6 +52,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -72,6 +77,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class FormatReadBuilder implements ReadBuilder {
 
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(FormatReadBuilder.class);
 
     private final FormatTable table;
     private RowType readType;
@@ -265,13 +272,15 @@ public class FormatReadBuilder implements ReadBuilder {
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
                         fileIO, file.filePath(), file.fileSize(), null, readBatchSizer);
+        Long length = file.length();
+        if (length == null) {
+            checkArgument(file.offset() == 0, "Offset must be 0.");
+        }
         try {
             FileRecordReader<InternalRow> reader;
-            Long length = file.length();
             if (length != null) {
                 reader = readerFactory.createReader(formatReaderContext, file.offset(), length);
             } else {
-                checkArgument(file.offset() == 0, "Offset must be 0.");
                 reader = readerFactory.createReader(formatReaderContext);
             }
             return new DataFileRecordReader(
@@ -289,7 +298,15 @@ public class FormatReadBuilder implements ReadBuilder {
                     null,
                     formatReaderContext.filePath());
         } catch (Exception e) {
-            FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
+            Path filePath = formatReaderContext.filePath();
+            // A missing file is not corrupt: keep reporting it as not found.
+            FileUtils.checkExists(formatReaderContext.fileIO(), filePath);
+            // Text readers fill their first buffer while being constructed, so a small or empty
+            // compressed file can already fail here rather than in DataFileRecordReader.
+            if (options.scanIgnoreCorruptFile()) {
+                LOG.warn("Failed to create reader for file: {}, ignore exception", filePath, e);
+                return new EmptyRecordReader<>();
+            }
             // A split spans many files that a Format Table's writers may have written differently.
             // Naming the one that failed is the only way to tell them apart from the outside.
             throw new IOException(
