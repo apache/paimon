@@ -36,6 +36,8 @@ import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -129,17 +131,27 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     private StoreSinkWrite.Provider createWriteProvider() {
         // for now, no compaction for multiplexed sink
-        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
-                new StoreSinkWriteImpl(
-                        table,
-                        commitUser,
-                        state,
-                        ioManager,
-                        isOverwrite,
-                        table.coreOptions().prepareCommitWaitCompaction(),
-                        true,
-                        memoryPoolFactory,
-                        metricGroup);
+        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+            PartitionBucketMapping partitionBucketMapping =
+                    PartitionBucketMapping.loadFromTable(table);
+            return new StoreSinkWriteImpl(
+                    table,
+                    commitUser,
+                    state,
+                    ioManager,
+                    isOverwrite,
+                    table.coreOptions().prepareCommitWaitCompaction(),
+                    true,
+                    memoryPoolFactory,
+                    metricGroup,
+                    partitionBucketMapping,
+                    (t, user, writeId) ->
+                            t.newWrite(
+                                    user,
+                                    writeId,
+                                    new FixedBucketRowKeyExtractor(
+                                            t.schema(), partitionBucketMapping)));
+        };
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
