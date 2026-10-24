@@ -143,7 +143,6 @@ public abstract class FlinkSink<T> implements Serializable {
         writeProvider =
                 StoreSinkWrite.withBlobDescriptorReaderFactory(
                         writeProvider, blobDescriptorReaderFactory);
-
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
