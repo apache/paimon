@@ -308,6 +308,15 @@ class PaimonDatasetReader(ABC):
         _validate_component_metadata(
             self._features, self._total_tasks, tasks, subtasks)
         source_schema = _schema_from_info(info)
+        # Previously imported tensors use VECTOR at the innermost dimension.
+        legacy_schema = _schema_from_info(info, legacy_vectors=True)
+        source_schema = pa.schema([
+            legacy_schema.field(field.name)
+            if target_schema.get_field_index(field.name) >= 0
+            and target_schema.field(field.name).type == legacy_schema.field(field.name).type
+            else field
+            for field in source_schema
+        ])
         if validate_metadata:
             _validate_lerobot_schema(
                 source_schema, target_schema, self.repo_id)
