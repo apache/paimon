@@ -330,8 +330,9 @@ class GlobalIndexQuery {
         }
         List<IndexGroup> selectedGroups = new ArrayList<>();
         for (IndexGroup group : fieldGroups) {
-            // Scalar lookups use independent single-field index definitions.
-            if (group.extraFields.isEmpty()) {
+            // Composite-key indexes require their own planner, not independent field lookups.
+            if (group.extraFields.isEmpty()
+                    || GlobalIndexerFactoryUtils.supportsGroupedIndexScalarQueries(group.type)) {
                 selectedGroups.add(group.selectFiles(predicate));
             }
         }
@@ -356,6 +357,11 @@ class GlobalIndexQuery {
     boolean hasCompositeQuery() {
         return groups.stream().anyMatch(IndexGroup::isCompositeBTree)
                 || children.stream().anyMatch(GlobalIndexQuery::hasCompositeQuery);
+    }
+
+    boolean hasMultiFieldQuery() {
+        return groups.stream().anyMatch(group -> !group.extraFields.isEmpty())
+                || children.stream().anyMatch(GlobalIndexQuery::hasMultiFieldQuery);
     }
 
     boolean hasScalarQuery() {

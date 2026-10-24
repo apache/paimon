@@ -25,7 +25,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -62,6 +64,8 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 
 import javax.annotation.Nullable;
 
@@ -73,15 +77,51 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link FullTextSearchBuilder} using test-only brute-force full-text index. */
 public class FullTextSearchBuilderTest extends TableTestBase {
 
     private static final String TEXT_FIELD_NAME = "content";
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fast", "full", "detail"})
+    public void testDeclinedScalarShardUsesActualCoverage(String mode) throws Exception {
+        FileStoreTable table = createTable("declined_scalar_shard_" + mode, mode);
+        writeDocuments(table, RANKED_DOCUMENTS);
+        buildAndCommitIndex(table, RANKED_DOCUMENTS);
+        buildAndCommitIdBTreeIndex(table, RANKED_DOCUMENTS.length);
+        Predicate filter = new PredicateBuilder(table.rowType()).equal(0, 5);
+        GlobalIndexEvaluator.Evaluation evaluation = mock(GlobalIndexEvaluator.Evaluation.class);
+        when(evaluation.result()).thenReturn(GlobalIndexResult.createEmpty());
+        when(evaluation.contributingFieldIds()).thenReturn(Collections.singleton(0));
+        when(evaluation.coveredRanges()).thenReturn(Collections.singletonList(new Range(0, 4)));
+        DataEvolutionGlobalIndexScanner scanner = mock(DataEvolutionGlobalIndexScanner.class);
+        when(scanner.scanWithCoverage(filter)).thenReturn(Optional.of(evaluation));
+        try (MockedStatic<DataEvolutionGlobalIndexScanner> scanners =
+                mockStatic(DataEvolutionGlobalIndexScanner.class, CALLS_REAL_METHODS)) {
+            scanners.when(
+                            () ->
+                                    DataEvolutionGlobalIndexScanner.createForScalarFilters(
+                                            any(), any(), any(), any()))
+                    .thenReturn(Optional.of(scanner));
+            RoaringNavigableMap64 rows = searchWithFilter(table, filter, 1).results();
+            if (mode.equals("fast")) {
+                assertThat(rows).isEmpty();
+            } else {
+                assertThat(rows).containsExactly(5L);
+            }
+        }
+    }
 
     @Override
     protected Schema schemaDefault() {

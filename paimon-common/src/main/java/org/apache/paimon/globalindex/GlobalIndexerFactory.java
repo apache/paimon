@@ -35,6 +35,17 @@ public interface GlobalIndexerFactory {
     }
 
     /**
+     * Whether a grouped index definition can serve independent scalar lookups on its fields.
+     *
+     * <p>Grouped fields are queried independently, unlike the ordered columns of a composite key.
+     * Readers may still decline individual predicates; coverage must include only the shards that
+     * actually evaluated the predicate.
+     */
+    default boolean supportsGroupedIndexScalarQueries() {
+        return false;
+    }
+
+    /**
      * Select index files using metadata only. Implementations must retain every file that may
      * match; the default keeps all files when no safe pruning is available.
      */

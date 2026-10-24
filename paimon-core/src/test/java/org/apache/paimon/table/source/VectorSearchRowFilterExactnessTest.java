@@ -24,7 +24,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
@@ -52,12 +54,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /**
  * Vector search with a row filter must rank an exact match set: candidate-only scalar index answers
@@ -65,6 +74,40 @@ import static org.assertj.core.api.Assertions.assertThat;
  * slot, and the engine-side filter cannot recover the matching row afterwards.
  */
 public class VectorSearchRowFilterExactnessTest extends TableTestBase {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"full", "detail"})
+    public void testDeclinedScalarShardFallsBackBeforeVectorRanking(String mode) throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "declined_scalar_" + mode,
+                        schemaBuilder(true)
+                                .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), mode));
+        String[] names = {"alpha", "beta", "gamma"};
+        float[][] vectors = {{1.0f, 0.0f}, {0.6f, 0.8f}, {0.0f, 1.0f}};
+        write(table, names, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+        buildAndCommitNameBTreeIndex(table, names);
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("beta"));
+        GlobalIndexEvaluator.Evaluation evaluation = mock(GlobalIndexEvaluator.Evaluation.class);
+        when(evaluation.result()).thenReturn(GlobalIndexResult.createEmpty());
+        when(evaluation.contributingFieldIds()).thenReturn(Collections.singleton(1));
+        when(evaluation.coveredRanges()).thenReturn(Collections.singletonList(new Range(0, 0)));
+        DataEvolutionGlobalIndexScanner scanner = mock(DataEvolutionGlobalIndexScanner.class);
+        when(scanner.scanWithCoverage(filter)).thenReturn(Optional.of(evaluation));
+        when(scanner.unindexedRowsForEvaluation(evaluation))
+                .thenReturn(GlobalIndexResult.fromRange(new Range(1, 2)));
+        try (MockedStatic<DataEvolutionGlobalIndexScanner> scanners =
+                mockStatic(DataEvolutionGlobalIndexScanner.class, CALLS_REAL_METHODS)) {
+            scanners.when(
+                            () ->
+                                    DataEvolutionGlobalIndexScanner.createForScalarFilters(
+                                            any(), any(), any(), any()))
+                    .thenReturn(Optional.of(scanner));
+            assertThat(search(table, filter, 1)).containsExactly(1L);
+        }
+    }
 
     @Override
     protected Schema schemaDefault() {
