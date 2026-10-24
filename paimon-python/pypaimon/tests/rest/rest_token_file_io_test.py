@@ -40,6 +40,7 @@ from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import Op
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.vortex_utils import to_vortex_specified
 from pypaimon.table.row.blob import BlobDescriptor
 
 _FILE_IO_GET = 'pypaimon.catalog.rest.rest_token_file_io.FileIO.get'
@@ -1197,6 +1198,28 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self._IO_CACHE_TOKEN, {CatalogOptions.DLF_OSS_ENDPOINT.key(): override})
         self.assertNotIsInstance(resolved, IoCacheRoutingFileIO)
         self.assertEqual([override], [options[OssOptions.OSS_ENDPOINT.key()] for options in created])
+
+    def test_io_cache_routing_hands_vortex_the_origin(self):
+        # Vortex builds its own virtual-hosted client, so it reads the origin even with a path-style IP target.
+        token = dict(self._IO_CACHE_TOKEN, **{
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+            "io-cache.endpoint": "http://127.0.0.1:8080",
+            "io-cache.target.default.path-style-access": "true",
+        })
+        path = self._TABLE + "/bucket-0/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.vortex"
+        file_io = RESTTokenFileIO(self.identifier, self._TABLE, Options({}))
+        file_io.token = RESTToken(token, int(time.time() * 1000) + 7_200_000)
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            url, store_kwargs = to_vortex_specified(file_io, path)
+            routed = file_io.file_io()
+
+        self.assertIsInstance(routed, IoCacheRoutingFileIO)
+        self.assertEqual("default", routed._routing.route(Op.READ, path))
+        self.assertEqual({}, routed._targets)
+        self.assertEqual(path.replace("oss://", "s3://"), url)
+        self.assertEqual("https://bkt.oss-cn-hangzhou-internal.aliyuncs.com", store_kwargs['endpoint'])
+        self.assertEqual('true', store_kwargs['virtual_hosted_style_request'])
 
 
 if __name__ == '__main__':
