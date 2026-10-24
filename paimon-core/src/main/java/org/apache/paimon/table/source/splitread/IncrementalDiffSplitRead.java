@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.splitread;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -36,7 +37,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
-import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
@@ -76,6 +77,9 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withReadType(RowType readType) {
         this.readType = readType;
+        // Let the merge read add its internal dependencies, such as sequence fields and the
+        // source fields of event metadata, so the diff is computed on a consistent value layout.
+        mergeRead.withReadType(readType);
         return this;
     }
 
@@ -94,6 +98,9 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         IncrementalSplit split = (IncrementalSplit) s;
+        // Both merge readers already project their output to the requested read type, so the
+        // diff must compare and serialize values in that layout rather than the internal one.
+        RowType valueType = readType != null ? readType : mergeRead.actualReadType();
         RecordReader<KeyValue> reader =
                 readDiff(
                         mergeRead.createMergeReader(
@@ -109,15 +116,24 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                                 split.afterDeletionFiles(),
                                 forceKeepDelete),
                         mergeRead.keyComparator(),
-                        mergeRead.createUdsComparator(),
+                        udsComparator(valueType),
                         mergeRead.mergeSorter(),
+                        InternalSerializers.create(valueType),
                         forceKeepDelete);
-        if (readType != null) {
-            // project from the merge read's actual output, which may itself be projected
-            ProjectedRow projectedRow = ProjectedRow.from(readType, mergeRead.actualReadType());
-            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
-        }
         return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
+    }
+
+    /** The comparator only applies when every sequence field is part of the emitted values. */
+    @Nullable
+    private FieldsComparator udsComparator(RowType valueType) {
+        List<String> fieldNames = valueType.getFieldNames();
+        CoreOptions options = new CoreOptions(mergeRead.tableSchema().options());
+        List<String> sequenceFields = options.sequenceField();
+        if (sequenceFields.isEmpty() || !fieldNames.containsAll(sequenceFields)) {
+            return null;
+        }
+        return UserDefinedSeqComparator.create(
+                valueType, sequenceFields, options.sequenceFieldSortOrderIsAscending());
     }
 
     private static RecordReader<KeyValue> readDiff(
@@ -126,6 +142,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeSorter sorter,
+            InternalRowSerializer valueSerializer,
             boolean keepDelete)
             throws IOException {
         return sorter.mergeSortNoSpill(
@@ -134,7 +151,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
                 keyComparator,
                 userDefinedSeqComparator,
-                new DiffMerger(keepDelete, InternalSerializers.create(sorter.valueType())));
+                new DiffMerger(keepDelete, valueSerializer));
     }
 
     private static RecordReader<KeyValue> wrapLevelToReader(

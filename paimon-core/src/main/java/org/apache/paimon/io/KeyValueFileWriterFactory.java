@@ -67,6 +67,7 @@ public class KeyValueFileWriterFactory {
     private final RowType keyType;
     private final RowType valueType;
     private final FileWriterContextFactory formatContext;
+    @Nullable private final FileWriterContextFactory changelogFormatContext;
     private final long suggestedFileSize;
     private final CoreOptions options;
     private final FileIndexOptions fileIndexOptions;
@@ -77,6 +78,7 @@ public class KeyValueFileWriterFactory {
             FileIO fileIO,
             long schemaId,
             FileWriterContextFactory formatContext,
+            @Nullable FileWriterContextFactory changelogFormatContext,
             long suggestedFileSize,
             CoreOptions options) {
         this.fileIO = fileIO;
@@ -84,6 +86,7 @@ public class KeyValueFileWriterFactory {
         this.keyType = formatContext.keyType;
         this.valueType = formatContext.valueType;
         this.formatContext = formatContext;
+        this.changelogFormatContext = changelogFormatContext;
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
         this.fileIndexOptions = options.indexColumnsOptions();
@@ -156,16 +159,19 @@ public class KeyValueFileWriterFactory {
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         WriteFormatKey key = new WriteFormatKey(level, true);
-        FormatWriterFactory writerFactory = formatContext.createWriterFactory(key);
+        FileWriterContextFactory ctx =
+                changelogFormatContext != null ? changelogFormatContext : formatContext;
+        FormatWriterFactory writerFactory = ctx.createWriterFactory(key);
         return new RollingFileWriterImpl<>(
                 () -> {
-                    DataFilePathFactory pathFactory = formatContext.pathFactory(key);
+                    DataFilePathFactory pathFactory = ctx.pathFactory(key);
                     return createDataFileWriter(
                             pathFactory.newChangelogPath(),
                             key,
                             FileSource.APPEND,
                             pathFactory.isExternalPath(),
-                            writerFactory);
+                            writerFactory,
+                            ctx);
                 },
                 suggestedFileSize,
                 Long.MAX_VALUE);
@@ -212,18 +218,31 @@ public class KeyValueFileWriterFactory {
             FileSource fileSource,
             boolean isExternalPath,
             FormatWriterFactory writerFactory) {
+        return createDataFileWriter(
+                path, key, fileSource, isExternalPath, writerFactory, formatContext);
+    }
+
+    private KeyValueDataFileWriter createDataFileWriter(
+            Path path,
+            WriteFormatKey key,
+            FileSource fileSource,
+            boolean isExternalPath,
+            FormatWriterFactory writerFactory,
+            FileWriterContextFactory ctx) {
+        RowType writerKeyType = ctx.keyType;
+        RowType writerValueType = ctx.valueType;
         // Changelog is sequentially consumed, file index is unnecessary.
         FileIndexOptions indexOptions = key.isChangelog ? new FileIndexOptions() : fileIndexOptions;
         Set<String> dataFileManagedBlobFields =
                 key.isChangelog ? Collections.emptySet() : managedBlobFields;
-        return formatContext.thinModeEnabled
+        return ctx.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
-                        formatContext.fileWriterContext(key, writerFactory),
+                        ctx.fileWriterContext(key, writerFactory),
                         path,
-                        new KeyValueThinSerializer(keyType, valueType)::toRow,
-                        keyType,
-                        valueType,
+                        new KeyValueThinSerializer(writerKeyType, writerValueType)::toRow,
+                        writerKeyType,
+                        writerValueType,
                         schemaId,
                         key.level,
                         options,
@@ -233,11 +252,11 @@ public class KeyValueFileWriterFactory {
                         dataFileManagedBlobFields)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
-                        formatContext.fileWriterContext(key, writerFactory),
+                        ctx.fileWriterContext(key, writerFactory),
                         path,
-                        new KeyValueSerializer(keyType, valueType)::toRow,
-                        keyType,
-                        valueType,
+                        new KeyValueSerializer(writerKeyType, writerValueType)::toRow,
+                        writerKeyType,
+                        writerValueType,
                         schemaId,
                         key.level,
                         options,
@@ -295,6 +314,7 @@ public class KeyValueFileWriterFactory {
         private final FileFormat fileFormat;
         private final Function<String, FileStorePathFactory> format2PathFactory;
         private final long suggestedFileSize;
+        @Nullable private RowType changelogValueType;
 
         private Builder(
                 FileIO fileIO,
@@ -313,6 +333,11 @@ public class KeyValueFileWriterFactory {
             this.suggestedFileSize = suggestedFileSize;
         }
 
+        public Builder withChangelogValueType(@Nullable RowType changelogValueType) {
+            this.changelogValueType = changelogValueType;
+            return this;
+        }
+
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
             FileWriterContextFactory context =
@@ -324,8 +349,20 @@ public class KeyValueFileWriterFactory {
                             fileFormat,
                             format2PathFactory,
                             options);
+            FileWriterContextFactory changelogContext = null;
+            if (changelogValueType != null) {
+                changelogContext =
+                        new FileWriterContextFactory(
+                                partition,
+                                bucket,
+                                keyType,
+                                changelogValueType,
+                                fileFormat,
+                                format2PathFactory,
+                                options);
+            }
             return new KeyValueFileWriterFactory(
-                    fileIO, schemaId, context, suggestedFileSize, options);
+                    fileIO, schemaId, context, changelogContext, suggestedFileSize, options);
         }
     }
 

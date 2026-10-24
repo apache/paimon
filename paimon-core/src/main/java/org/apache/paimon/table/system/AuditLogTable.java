@@ -169,7 +169,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>(specialFields);
         fields.addAll(wrapped.rowType().getFields());
-        return new RowType(fields);
+        RowType baseType = new RowType(fields);
+        return ChangelogEventMetadataTable.computeExtendedRowType(wrapped, baseType);
     }
 
     @Override

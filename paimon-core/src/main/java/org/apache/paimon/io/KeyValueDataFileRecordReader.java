@@ -20,11 +20,14 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.casting.FallbackMappingRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -38,6 +41,8 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
     private final int level;
     private final boolean overrideSequenceWithSnapshotId;
     private final long snapshotId;
+    @Nullable private final FallbackMappingRow metadataFallbackRow;
+    @Nullable private final NestedProjectedRow metadataFallbackView;
 
     public KeyValueDataFileRecordReader(
             FileRecordReader<InternalRow> reader,
@@ -45,12 +50,22 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
             RowType valueType,
             int level,
             boolean overrideSequenceWithSnapshotId,
-            long snapshotId) {
+            long snapshotId,
+            @Nullable int[] metadataFallbackMapping,
+            boolean applyMetadataFallback) {
         this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.overrideSequenceWithSnapshotId = overrideSequenceWithSnapshotId;
         this.snapshotId = snapshotId;
+        boolean fallback = applyMetadataFallback && metadataFallbackMapping != null;
+        this.metadataFallbackRow =
+                fallback ? new FallbackMappingRow(metadataFallbackMapping) : null;
+        this.metadataFallbackView =
+                fallback
+                        ? ChangelogEventMetadata.createFallbackProjection(
+                                valueType, metadataFallbackMapping)
+                        : null;
     }
 
     @Nullable
@@ -67,6 +82,15 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
                         return null;
                     }
                     KeyValue kv = serializer.fromRow(internalRow).setLevel(level);
+                    if (metadataFallbackRow != null) {
+                        InternalRow value = kv.value();
+                        kv.replaceValue(
+                                metadataFallbackRow.replace(
+                                        value,
+                                        metadataFallbackView == null
+                                                ? value
+                                                : metadataFallbackView.replaceRow(value)));
+                    }
                     // In snapshot-ordering mode, an APPEND file's on-disk per-record sequence
                     // numbers are stale; we override them with the commit snapshot id so later
                     // snapshots win during merge. Any read path bypassing this override would
