@@ -9,6 +9,7 @@ import catalogConfigurationHtml from '@site/generated/catalog_configuration.html
 import hiveCatalogConfigurationHtml from '@site/generated/hive_catalog_configuration.html';
 import hiveConnectorConfigurationHtml from '@site/generated/hive_connector_configuration.html';
 import jdbcCatalogConfigurationHtml from '@site/generated/jdbc_catalog_configuration.html';
+import zooKeeperCatalogLockConfigurationHtml from '@site/generated/zoo_keeper_catalog_lock_configuration.html';
 import flinkCatalogConfigurationHtml from '@site/generated/flink_catalog_configuration.html';
 import flinkConnectorConfigurationHtml from '@site/generated/flink_connector_configuration.html';
 import sparkCatalogConfigurationHtml from '@site/generated/spark_catalog_configuration.html';
@@ -65,6 +66,14 @@ Hive connector options for paimon.
 Options for Jdbc catalog.
 
 <ConfigTable html={jdbcCatalogConfigurationHtml} />
+
+### ZooKeeperCatalogLockOptions
+
+Options for ZooKeeper catalog locks.
+
+Curator and ZooKeeper are `provided` dependencies of Paimon Core, so Paimon does not bundle them in engine artifacts. Spark 3.4.3's unshaded Curator 2.13.0 and ZooKeeper 3.6.3 classpath is tested with this lock. For engines without that classpath, install unshaded `curator-client`, `curator-framework`, and `curator-recipes` 5.6.0 plus `zookeeper` 3.8.4 on the driver and every worker, and ensure older unshaded versions do not take precedence. Flink's relocated Curator classes do not satisfy these dependencies.
+
+<ConfigTable html={zooKeeperCatalogLockConfigurationHtml} />
 
 ### FlinkCatalogOptions
 
