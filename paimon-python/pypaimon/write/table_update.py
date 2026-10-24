@@ -331,14 +331,14 @@ class ShardTableUpdator:
             raise ValueError('Shard update columns must not be empty')
         from pypaimon.write.backend_dispatch import create_shard_update_execution
         self._execution = create_shard_update_execution(
-            self, table, projection, write_cols, commit_user, shard_num, total_shard_count)
+            table, projection, write_cols, commit_user, shard_num, total_shard_count)
 
     @classmethod
     def _from_python(cls, table, projection, write_cols, commit_user, shard_num, total_shard_count):
         instance = cls.__new__(cls)
         from pypaimon.write.backend_dispatch import create_python_shard_updator
         instance._execution = create_python_shard_updator(
-            instance, table, projection, write_cols, commit_user, shard_num, total_shard_count)
+            table, projection, write_cols, commit_user, shard_num, total_shard_count)
         return instance
 
     @staticmethod

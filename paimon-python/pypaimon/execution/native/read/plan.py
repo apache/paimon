@@ -163,6 +163,8 @@ def _from_native_plan(table, rust_plan) -> Plan:
 class NativeTableScan:
     """Adapt the public scan configuration to Core planning."""
 
+    _is_native = True
+
     def __init__(self, scan):
         self._scan = scan
 
@@ -193,16 +195,14 @@ class NativeTableScan:
             return None
 
     def scan_with_stats(self, auth_result=None):
-        # Preserve explicit facade hooks while Core records counters as part
-        # of the ordinary planning pass.
-        plan = self._scan._try_native_plan()
+        # Core records counters in the same planning pass.
+        plan = self.plan()
         return None if plan is None else (plan, plan.stats())
 
     def _native_plan_supported(self) -> bool:
         # Any probe failure (e.g. a remote schema/metadata read) must fall back, not fail the scan.
-        scan = self._scan
         try:
-            return scan._native_plan_supported_impl()
+            return self._native_plan_supported_impl()
         except Exception as e:
             logger.warning("Native-plan capability probe failed, falling back: %s", e)
             return False
@@ -219,7 +219,7 @@ class NativeTableScan:
         if not runtime.native_runtime_available():
             return False
         request = scan._scan_request()
-        if not scan._native_global_index_result_supported(request):
+        if not self._native_global_index_result_supported(request):
             return False
         if request.chunk_shuffle is not None:
             request.validate_chunk_shuffle_compat()
@@ -273,11 +273,6 @@ class NativeTableScan:
             return False
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         return isinstance(result, GlobalIndexResult)
-
-    def _native_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
-        scan = self._scan
-        row_ranges = scan._scan_request().row_ranges
-        return list(row_ranges) if row_ranges is not None else None
 
     def _plan(self, all_files=False) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.

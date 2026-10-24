@@ -520,10 +520,7 @@ class _ShardBatchIterator:
 
 class ShardTableUpdator:
 
-    def __init__(self, context):
-        self._context = context
-
-    def initialize(
+    def __init__(
             self,
             table,
             projection: Optional[List[str]],
@@ -532,37 +529,36 @@ class ShardTableUpdator:
             shard_num: int,
             total_shard_count: int,
     ):
-        context = self._context
         from pypaimon.table.file_store_table import FileStoreTable
         snapshot = TimeTravelUtil.resolve_snapshot(table)
-        context.table: FileStoreTable = table.copy_without_time_travel({
+        self.table: FileStoreTable = table.copy_without_time_travel({
             CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): GlobalIndexSearchMode.FULL.value,
         })._copy_with_snapshot(snapshot)
-        context.projection = projection
-        context.write_cols = list(write_cols) if write_cols is not None else list(table.field_names)
-        context.commit_user = commit_user
-        context.total_shard_count = total_shard_count
-        context.shard_num = shard_num
-        scanner = context.table.new_read_builder().new_scan()
+        self.projection = projection
+        self.write_cols = list(write_cols) if write_cols is not None else list(table.field_names)
+        self.commit_user = commit_user
+        self.total_shard_count = total_shard_count
+        self.shard_num = shard_num
+        scanner = self.table.new_read_builder().new_scan()
         plan = scanner.plan_all()
-        context.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
-        context.splits = splits
-        context._files_info = RowIdFileIndex.from_splits(context.snapshot_id, splits)
-        context._write_schema = PyarrowFieldParser.from_paimon_schema(
-            [table.field_dict[name] for name in context.write_cols])
-        context.writer = None
-        context._pending_row_ids = deque()
-        context._group_batches = []
-        context._current_group = None
-        context._reader = None
-        context._reader_started = False
-        context._read_complete = not splits
-        context._read_failed = False
-        context._failed = False
-        context._closed = False
-        context._messages = None
+        self.splits = splits
+        self._files_info = RowIdFileIndex.from_splits(self.snapshot_id, splits)
+        self._write_schema = PyarrowFieldParser.from_paimon_schema(
+            [table.field_dict[name] for name in self.write_cols])
+        self.writer = None
+        self._pending_row_ids = deque()
+        self._group_batches = []
+        self._current_group = None
+        self._reader = None
+        self._reader_started = False
+        self._read_complete = not splits
+        self._read_failed = False
+        self._failed = False
+        self._closed = False
+        self._messages = None
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
@@ -570,12 +566,11 @@ class ShardTableUpdator:
         return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
-        context = self._context
         self._ensure_active()
-        if context._reader_started:
+        if self._reader_started:
             raise ValueError('Shard reader can only be opened once')
-        read_builder = context.table.new_read_builder()
-        read_builder.with_projection(context.projection)
+        read_builder = self.table.new_read_builder()
+        read_builder.with_projection(self.projection)
         requested_read = read_builder.new_read()
         output_schema = requested_read._output_arrow_schema()
         read_type = list(read_builder.read_type())
@@ -591,9 +586,9 @@ class ShardTableUpdator:
             row_id_column = len(projection.columns)
             projection = OutputProjection(
                 list(projection.columns) + [(name, [SpecialFields.ROW_ID.name])], projection.named)
-        read = TableRead(context.table, predicate=None, read_type=read_type, output_projection=projection)
-        source = read._to_managed_arrow_batch_reader(context.splits, parallelism=1)
-        context._reader_started = True
+        read = TableRead(self.table, predicate=None, read_type=read_type, output_projection=projection)
+        source = read._to_managed_arrow_batch_reader(self.splits, parallelism=1)
+        self._reader_started = True
 
         def batches():
             error = None
@@ -603,108 +598,102 @@ class ShardTableUpdator:
                     row_ids = batch.column(row_id_column)
                     if row_ids.null_count:
                         raise ValueError('Shard reader returned null _ROW_ID values')
-                    context._pending_row_ids.extend(row_ids.to_pylist())
+                    self._pending_row_ids.extend(row_ids.to_pylist())
                     arrays = [batch.column(i) for i in range(len(output_schema))]
                     yield (pa.RecordBatch.from_arrays(arrays, schema=output_schema) if arrays else
                            zero_column_batch(batch.num_rows, output_schema.metadata))
-                context._read_complete = True
+                self._read_complete = True
             except BaseException as failure:
                 error = failure
                 if not isinstance(failure, GeneratorExit):
-                    context._read_failed = True
+                    self._read_failed = True
                 raise
             finally:
                 try:
                     iterator.close_source(error)
                 except BaseException:
-                    context._read_failed = True
+                    self._read_failed = True
                     raise
 
         iterator = _ShardBatchIterator(batches(), source)
         reader = pa.ipc.RecordBatchReader.from_batches(output_schema, iterator)
-        context._reader = _ClosableArrowBatchReader(reader, iterator)
-        return context._reader
+        self._reader = _ClosableArrowBatchReader(reader, iterator)
+        return self._reader
 
     def prepare_commit(self) -> List[CommitMessage]:
-        context = self._context
-        if context._messages is not None:
-            return list(context._messages)
+        if self._messages is not None:
+            return list(self._messages)
         self._ensure_active()
-        if not context._read_complete or context._pending_row_ids:
+        if not self._read_complete or self._pending_row_ids:
             raise ValueError('Read and update exactly the same number of rows from this shard before preparing')
         self._flush_group()
-        context._messages = [] if context.writer is None else list(context.writer.commit_messages)
-        return list(context._messages)
+        self._messages = [] if self.writer is None else list(self.writer.commit_messages)
+        return list(self._messages)
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):
-        context = self._context
         from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 
         self._ensure_active()
-        if len(data.schema.names) != len(context.write_cols) or set(data.schema.names) != set(context.write_cols):
+        if len(data.schema.names) != len(self.write_cols) or set(data.schema.names) != set(self.write_cols):
             raise ValueError('Shard input must contain exactly the configured update columns')
         arrays = [PythonTableUpdateByRowId._coerce_column(data.column(name), field.type)
-                  for name, field in zip(context.write_cols, context._write_schema)]
-        normalized = normalize_arrow_write_nullability(pa.RecordBatch.from_arrays(arrays, schema=context._write_schema),
-                                                       context._write_schema)
-        for field, column in zip(context._write_schema, normalized.columns):
+                  for name, field in zip(self.write_cols, self._write_schema)]
+        normalized = normalize_arrow_write_nullability(pa.RecordBatch.from_arrays(arrays, schema=self._write_schema),
+                                                       self._write_schema)
+        for field, column in zip(self._write_schema, normalized.columns):
             if not field.nullable and column.null_count:
                 raise ValueError('Cannot write null to non-null column(%s)' % field.name)
-        if data.num_rows > len(context._pending_row_ids):
+        if data.num_rows > len(self._pending_row_ids):
             raise ValueError('Shard update contains more rows than have been read')
-        row_ids = list(islice(context._pending_row_ids, data.num_rows))
-        groups = [context._files_info.first_row_ids[bisect_right(context._files_info.first_row_ids, row_id) - 1]
+        row_ids = list(islice(self._pending_row_ids, data.num_rows))
+        groups = [self._files_info.first_row_ids[bisect_right(self._files_info.first_row_ids, row_id) - 1]
                   for row_id in row_ids]
         batch = pa.RecordBatch.from_arrays(
             [pa.array(row_ids, type=pa.int64())] + list(normalized.columns),
-            names=[SpecialFields.ROW_ID.name] + context.write_cols)
+            names=[SpecialFields.ROW_ID.name] + self.write_cols)
         try:
             start = 0
             while start < len(groups):
                 group = groups[start]
-                if context._current_group is not None and context._current_group != group:
+                if self._current_group is not None and self._current_group != group:
                     self._flush_group()
-                context._current_group = group
+                self._current_group = group
                 end = start + 1
                 while end < len(groups) and groups[end] == group:
                     end += 1
-                context._group_batches.append(batch.slice(start, end - start))
+                self._group_batches.append(batch.slice(start, end - start))
                 start = end
         except BaseException:
-            context._failed = True
+            self._failed = True
             raise
         for _ in row_ids:
-            context._pending_row_ids.popleft()
+            self._pending_row_ids.popleft()
 
     def _init_writer(self):
-        context = self._context
-        if context.writer is None:
+        if self.writer is None:
             from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-            context.writer = TableUpdateByRowId._from_python(
-                context.table, context.commit_user, BATCH_COMMIT_IDENTIFIER,
-                _precomputed_files_info=context._files_info)
+            self.writer = TableUpdateByRowId._from_python(
+                self.table, self.commit_user, BATCH_COMMIT_IDENTIFIER,
+                _precomputed_files_info=self._files_info)
 
     def _flush_group(self):
-        context = self._context
-        if context._group_batches:
+        if self._group_batches:
             self._init_writer()
             # Preserve staged messages if writing fails; they may already have
             # been published. A failed operation cannot later prepare success.
-            context._failed = True
-            context.writer.update_columns(pa.Table.from_batches(context._group_batches), context.write_cols)
-            context._failed = False
-            context._group_batches = []
-        context._current_group = None
+            self._failed = True
+            self.writer.update_columns(pa.Table.from_batches(self._group_batches), self.write_cols)
+            self._failed = False
+            self._group_batches = []
+        self._current_group = None
 
     def _ensure_active(self):
-        context = self._context
-        if context._closed or context._failed or context._read_failed or context._messages is not None:
+        if self._closed or self._failed or self._read_failed or self._messages is not None:
             raise ValueError('Shard updater is closed, failed or already prepared')
 
     def close(self):
-        context = self._context
-        context._closed = True
-        context._pending_row_ids.clear()
-        context._group_batches = []
-        if context._reader is not None:
-            context._reader.close()
+        self._closed = True
+        self._pending_row_ids.clear()
+        self._group_batches = []
+        if self._reader is not None:
+            self._reader.close()

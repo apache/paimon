@@ -31,12 +31,19 @@ from pypaimon.table.source.hybrid_search_builder import (
     HybridSearchRouteBuilder, HybridSearchRouteResult,
     WEIGHTED_SCORE_RANKER, MRR_RANKER,
 )
+from pypaimon.table.source.search_dispatch import _python_search_execution
 
 
 _MAX_ROUTE_WORKERS = 4
 _RRF_K = np.float32(60.0)
 
 
+@_python_search_execution()
+def _execute_route(route):
+    return route.execute_local()
+
+
+@_python_search_execution()
 def execute(self, executor=None):
     if executor is None:
         return execute_local(self)
@@ -46,6 +53,7 @@ def execute(self, executor=None):
     workers = min(executor.concurrency, len(routes))
     route_concurrency = executor.concurrency // max(1, workers)
 
+    @_python_search_execution()
     def execute_route(route):
         child = executor.with_concurrency(route_concurrency)
         builder = route.search_builder
@@ -80,23 +88,24 @@ def execute(self, executor=None):
     return self.rank(results)
 
 
+@_python_search_execution()
 def execute_local(self) -> ScoredGlobalIndexResult:
     """Execute hybrid index search locally."""
-    route_builders = self.route_builders()
-    if len(route_builders) <= 1:
+    routes = self.route_builders()
+    if len(routes) <= 1:
         return self.rank([
             self.to_route_result(
-                route_builder, route_builder.execute_local())
-            for route_builder in route_builders
+                route_builder, _execute_route(route_builder))
+            for route_builder in routes
         ])
 
-    workers = min(len(route_builders), _MAX_ROUTE_WORKERS)
+    workers = min(len(routes), _MAX_ROUTE_WORKERS)
     with ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix="paimon-hybrid-search") as executor:
         futures = [
-            executor.submit(route_builder.execute_local)
-            for route_builder in route_builders
+            executor.submit(_execute_route, route_builder)
+            for route_builder in routes
         ]
         done, pending = wait(futures, return_when=FIRST_EXCEPTION)
         failed = next(
@@ -111,7 +120,7 @@ def execute_local(self) -> ScoredGlobalIndexResult:
 
         route_results = [
             self.to_route_result(route_builder, future.result())
-            for route_builder, future in zip(route_builders, futures)
+            for route_builder, future in zip(routes, futures)
         ]
     return self.rank(route_results)
 

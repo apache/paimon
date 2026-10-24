@@ -18,6 +18,8 @@
 """Preparation selection for reading and planning; execution is never replayed."""
 
 import logging
+from contextlib import contextmanager
+from threading import local
 from typing import Iterator, List, Optional, Tuple
 
 import pyarrow
@@ -26,6 +28,46 @@ from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.read.scan_stats import ScanStats
+
+
+_file_scanner_calls = local()
+
+
+@contextmanager
+def file_scanner_execution(configuration, delegate):
+    """Keep a public hook's base calls inside its authorized Python operation."""
+    previous = getattr(_file_scanner_calls, 'delegates', ())
+    _file_scanner_calls.delegates = previous + ((configuration, delegate),)
+    try:
+        yield
+    finally:
+        _file_scanner_calls.delegates = previous
+
+
+@contextmanager
+def file_scanner_hook(configuration, method):
+    previous = getattr(_file_scanner_calls, 'hook', None)
+    _file_scanner_calls.hook = (configuration, method)
+    try:
+        yield
+    finally:
+        _file_scanner_calls.hook = previous
+
+
+def file_scanner_call(scanner, method):
+    """Delegate an explicit public base method without invoking its hook again."""
+    hook = getattr(_file_scanner_calls, 'hook', None)
+    if hook is not None and hook[0] is scanner and hook[1] == method:
+        for configuration, delegate in reversed(getattr(_file_scanner_calls, 'delegates', ())):
+            if configuration is scanner:
+                return delegate(method)
+    # Calling a different public operation is a new authorization boundary:
+    # a projected-row grant must never authorize an explicit raw-file request.
+    if method == 'scan':
+        return plan_scan(scanner._scan, _file_scanner_base=True)
+    if method == 'scan_with_stats':
+        return scan_with_stats(scanner._scan, _file_scanner_base=True)
+    return plan_files(scanner, _file_scanner_base=True)
 
 
 def validate_read_backend(read):
@@ -157,25 +199,79 @@ def to_arrow(
     return PythonTableRead(self)._materialize(splits, schema, parallelism, effective_bp)
 
 
-def plan_scan(self) -> Plan:
-    native_auth = (self.table.options.query_auth_enabled
-                   and self._native_requested() and self._native_plan_supported())
-    if native_auth:
-        # Rust asks the REST server and carries its complete response in
-        # QueryAuthSplit. Both readers then enforce that captured policy.
-        native = self._try_native_plan()
-        if native is not None:
-            return native
+def _python_scan_selected(scan):
+    execution = vars(scan).get('_execution')
+    if execution is not None and not execution._is_native:
+        return True
+    scanner = vars(scan).get('_file_scanner')
+    if scanner is None:
+        return False
+    from pypaimon.read.file_scanner import FileScanner
+    return type(scanner) is not FileScanner or any(name in vars(scanner) for name in FileScanner._EXECUTION_HOOKS)
+
+
+def _python_scan_execution(scan):
+    execution = vars(scan).get('_execution')
+    if execution is None or execution._is_native:
+        from pypaimon.execution.python.read.table_scan import PythonTableScan
+        execution = scan._execution = PythonTableScan(scan)
+    return execution
+
+
+def _native_scan_execution(scan):
+    if _python_scan_selected(scan) or not native_plan_requested(scan):
+        return None
+    from pypaimon.execution.native.read.plan import NativeTableScan
+    execution = vars(scan).get('_execution') or NativeTableScan(scan)
+    if execution._native_plan_supported():
+        scan._execution = execution
+        return execution
+    return None
+
+
+def plan_scan(self, *, _file_scanner_base=False) -> Plan:
+    # A catalog-issued grant travels with Core's plan. Other authorization
+    # callbacks run before discovering a planning backend.
+    native_auth = self.table.options.query_auth_enabled
+    native = _native_scan_execution(self) if native_auth else None
+    if native is not None:
+        plan = native.plan()
+        if plan is not None:
+            return plan
     auth_result = self._TableScan__auth_query()
-    # The native planner bypasses the auth-aware file scanner. Resolve auth
-    # before selecting a planning backend.
-    if (not native_auth and auth_result is None and self._native_requested()
-            and self._native_plan_supported()):
-        native = self._try_native_plan()
+    if not native_auth and auth_result is None:
+        native = _native_scan_execution(self)
         if native is not None:
-            return native
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).plan(auth_result)
+            plan = native.plan()
+            if plan is not None:
+                return plan
+    execution = _python_scan_execution(self)
+    if _file_scanner_base:
+        return execution._run_file_scan('scan', auth_result, base=True)
+    return execution.plan(auth_result)
+
+
+def configure_indexed_read(table):
+    """Keep explicit preferences; otherwise prefer the available Native reader."""
+    from pypaimon.common.options.core_options import CoreOptions
+    options = table.options.options
+    if not any(options.contains(option) for option in (
+            CoreOptions.READ_NATIVE_ENABLED, CoreOptions.SCAN_NATIVE_PLAN_ENABLED)):
+        from pypaimon.execution.native.runtime import native_runtime_available
+        if native_runtime_available():
+            return table.copy_without_time_travel({CoreOptions.READ_NATIVE_ENABLED.key(): 'true'})
+    return table
+
+
+def plan_indexed_read(scan):
+    """Try Core lookup planning before selecting the Python index locator."""
+    native = _native_scan_execution(scan)
+    if native is None:
+        return None
+    # Retain the complete public authorization path when a grant is required.
+    if scan._query_auth_fn is not None or scan.table.options.query_auth_enabled:
+        return scan.plan()
+    return native.plan()
 
 
 def new_file_scanner(scan):
@@ -186,8 +282,7 @@ def new_file_scanner(scan):
 
 def python_file_scanner(scan):
     """Enter the selected Python executor's internal file scanner."""
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(scan)._file_scanner()
+    return _python_scan_execution(scan)._file_scanner()
 
 
 def file_scan_has_bucket_pruning(scan):
@@ -196,10 +291,10 @@ def file_scan_has_bucket_pruning(scan):
     return scanner._bucket_selector is not None or scanner.only_read_real_buckets
 
 
-def plan_files(scanner):
+def plan_files(scanner, *, _file_scanner_base=False):
     """Plan raw file metadata only with unrestricted whole-table permission."""
     scan = scanner._scan
-    if scan._native_requested():
+    if not _python_scan_selected(scan) and native_plan_requested(scan):
         from pypaimon.execution.native.table import _native_query_auth_supported
         # Raw file metadata precedes query result transformations. Do not let
         # their capability checks (shuffle, global indexes or slices) select
@@ -220,62 +315,53 @@ def plan_files(scanner):
             return entries
     if native_auth and scan._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(scan.table.identifier)
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
     # Let the selected executor refresh cached rules for this unrestricted scope.
-    source = PythonTableScan(scan)._scanner(None)
-    entries = source.plan_files()
+    execution = _python_scan_execution(scan)
+    entries = execution._run_file_scan('plan_files', None, base=_file_scanner_base)
+    source = execution._file_scanner()
     scanner._scanned_snapshot = source._scanned_snapshot
     scanner._scanned_snapshot_id = source._scanned_snapshot_id
     return entries
 
 
 def plan_all(self) -> Plan:
-    """Plan splits including L0 and all matching data-evolution column files.
-
-    Existing filters and limits still apply. Query authorization must be
-    unrestricted, as required by writer restore, overwrite and indexing.
-    """
-    if self._native_requested():
+    """Plan complete splits only with unrestricted whole-table permission."""
+    native = None
+    if not _python_scan_selected(self) and native_plan_requested(self):
         from pypaimon.execution.native.table import _native_query_auth_supported
-        native_supported = _native_query_auth_supported(self.table) and self._native_plan_supported()
-    else:
-        native_supported = False
-    native_auth = native_supported and self.table.options.query_auth_enabled
+        if _native_query_auth_supported(self.table):
+            native = _native_scan_execution(self)
+    native_auth = native is not None and self.table.options.query_auth_enabled
     if not native_auth and self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
-    if native_supported:
-        plan = self._try_native_plan(all_files=True)
+    if native is not None:
+        plan = native.plan_all()
         if plan is not None:
             return plan
     if native_auth and self._TableScan__auth_query(all_columns=True) is not None:
         raise TableNoPermissionException(self.table.identifier)
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).plan_all()
+    return _python_scan_execution(self).plan_all()
 
 
-def scan_with_stats(self) -> Tuple[Plan, Optional[ScanStats]]:
-    """Run :meth:`plan` while recording manifest / pruning counters.
-
-    Only used by :meth:`ReadBuilder.explain`; the regular read path
-    keeps going through :meth:`plan`. Native scans always collect lightweight
-    counters in the same core planning pass, without opening data files.
-    """
-    native_auth = (self.table.options.query_auth_enabled
-                   and self._native_requested() and self._native_plan_supported())
-    if native_auth:
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        native = NativeTableScan(self).scan_with_stats()
-        if native is not None:
-            return native
+def scan_with_stats(self, *, _file_scanner_base=False) -> Tuple[Plan, Optional[ScanStats]]:
+    """Record pruning counters through the selected planner."""
+    native_auth = self.table.options.query_auth_enabled
+    native = _native_scan_execution(self) if native_auth else None
+    if native is not None:
+        result = native.scan_with_stats()
+        if result is not None:
+            return result
     auth_result = self._TableScan__auth_query()
-    if (not native_auth and auth_result is None and self._native_requested()
-            and self._native_plan_supported()):
-        from pypaimon.execution.native.read.plan import NativeTableScan
-        native = NativeTableScan(self).scan_with_stats()
+    if not native_auth and auth_result is None:
+        native = _native_scan_execution(self)
         if native is not None:
-            return native
-    from pypaimon.execution.python.read.table_scan import PythonTableScan
-    return PythonTableScan(self).scan_with_stats(auth_result)
+            result = native.scan_with_stats()
+            if result is not None:
+                return result
+    execution = _python_scan_execution(self)
+    if _file_scanner_base:
+        return execution._run_file_scan('scan_with_stats', auth_result, base=True)
+    return execution.scan_with_stats(auth_result)
 
 
 def new_streaming_scan(self):

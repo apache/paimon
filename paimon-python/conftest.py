@@ -94,9 +94,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "python_commit: keep Python committer assertions on the Python lane")
     if _native_plan_enabled():
-        from pypaimon.read.table_scan import TableScan
+        from pypaimon.execution.native.read.plan import NativeTableScan
 
-        original_plan = TableScan._try_native_plan
+        original_plan = NativeTableScan._plan
 
         def tracked_plan(self, *args, **kwargs):
             global _native_plan_count
@@ -105,7 +105,7 @@ def pytest_configure(config):
                 _native_plan_count += 1
             return plan
 
-        TableScan._try_native_plan = tracked_plan
+        NativeTableScan._plan = tracked_plan
 
         from pypaimon.execution.native.read.streaming_table_scan import StreamTableScan
 

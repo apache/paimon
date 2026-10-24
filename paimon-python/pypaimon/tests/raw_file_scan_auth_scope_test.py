@@ -78,18 +78,18 @@ def test_raw_scope_clears_cached_query_rules(table, restriction, native_fallback
 
     scan._query_auth_fn = authorize
     scan.plan()
-    source = scan._python_file_scanner
+    source = scan._execution._file_scanner()
     state['rules'] = None
-    with patch.object(scan, '_native_requested', return_value=native_fallback), \
+    with patch('pypaimon.read.read_dispatch.native_plan_requested', return_value=native_fallback), \
             patch.object(NativeTableScan, 'plan_files', return_value=None) as native:
         entries = scan.file_scanner.plan_files()
     assert {tuple(entry.partition.values) for entry in entries} == (
         {('a',)} if restriction == 'mask' else {('a',), ('b',)})
-    assert scan._python_file_scanner is source
+    assert scan._execution._file_scanner() is source
     assert source.auth_partition_predicate is None
     assert source.predicate == scan.predicate
     assert selects[-1] is None, 'Raw files require whole-table authorization'
-    assert native.call_count == int(native_fallback)
+    native.assert_not_called()
 
 
 @pytest.mark.parametrize('operation', ['raw-files', 'all-files'])
@@ -97,14 +97,14 @@ def test_restricted_raw_scope_does_not_clear_cached_rules(table, operation):
     scan = table.new_read_builder().new_scan()
     scan._query_auth_fn = lambda select: TableQueryAuthResult([_partition_filter()], None)
     scan.plan()
-    source = scan._python_file_scanner
+    source = scan._execution._file_scanner()
     prior_partition_filter = source.auth_partition_predicate
     assert prior_partition_filter is not None
     plan = scan.file_scanner.plan_files if operation == 'raw-files' else scan.plan_all
     with patch.object(source, 'plan_files', side_effect=AssertionError('Unauthorized file access')), \
             patch.object(NativeTableScan, 'plan_files',
                          side_effect=AssertionError('Unauthorized Native file access')) as native, \
-            patch.object(scan, '_try_native_plan',
+            patch.object(NativeTableScan, 'plan_all',
                          side_effect=AssertionError('Unauthorized Native planning')) as native_plan:
         with pytest.raises(TableNoPermissionException):
             plan()

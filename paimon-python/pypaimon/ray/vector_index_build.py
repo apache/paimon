@@ -35,19 +35,6 @@ def validate_build_options(builder, concurrency, ray_remote_args):
     return concurrency, options
 
 
-def build_vector_index(builder, splits, unindexed_ranges, index_field, table_read,
-                       index_path, concurrency, remote_args):
-    from pypaimon.globalindex.index_dispatch import build_python_vector_index
-    return build_python_vector_index(
-        builder, splits, unindexed_ranges, index_field, table_read,
-        index_path, concurrency, remote_args)
-
-
-def _build_shard(context, shard, file_name):
-    from pypaimon.globalindex.index_dispatch import build_python_vector_index_shard
-    return build_python_vector_index_shard(context, shard, file_name)
-
-
 def build_native_vector_index(table, plan, concurrency, remote_args):
     """Schedule immutable Core tasks; all publication remains with the caller."""
     import ray

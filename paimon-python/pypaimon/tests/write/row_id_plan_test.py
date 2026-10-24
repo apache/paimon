@@ -121,6 +121,7 @@ def test_native_captured_plan_does_not_construct_python_index(table):
     split = plan.splits()[0]
     native_plan = Mock()
     native_plan.groups.return_value = [(0, 1, split)]
+    table = table.copy_without_time_travel({'write.native.enabled': 'true'})
     with patch('pypaimon.execution.native.write.row_id_plan.create_native_row_id_plan', return_value=native_plan), \
             patch('pypaimon.execution.native.write.row_id_plan.python_groups',
                   return_value=[(0, 1, split)]) as core_groups, \
@@ -202,6 +203,7 @@ def test_capture_normalizes_index_selection_before_core_mutation_routing(table):
     original = plan.splits()[0]
     indexed = Plan([IndexedSplit(original, [Range(1, 1)])], plan.snapshot_id)
     native = object()
+    table = table.copy_without_time_travel({'write.native.enabled': 'true'})
 
     def prepare(table, routing):
         assert routing.snapshot_id == plan.snapshot_id
@@ -231,6 +233,7 @@ def test_capture_keeps_query_auth_rules_when_normalizing_and_grouping(table, nat
     original = plan.splits()[0]
     grant = TableQueryAuthResult(['restricted-row-filter'], {})
     indexed = Plan([QueryAuthSplit(IndexedSplit(original, [Range(1, 1)]), grant)], plan.snapshot_id)
+    table = table.copy_without_time_travel({'write.native.enabled': 'true'})
     with patch('pypaimon.execution.native.write.row_id_plan.create_native_row_id_plan',
                return_value=object() if native else None) as prepare, \
             patch('pypaimon.execution.native.write.row_id_plan.python_groups',

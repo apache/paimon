@@ -82,7 +82,9 @@ def _read(table, native, predicate=None):
         builder.with_filter(predicate)
     scan = builder.new_scan()
     if native:
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('native fallback')):
             plan = scan.plan()
     else:
         plan = scan.plan()

@@ -22,6 +22,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 import pyarrow
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
 from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
@@ -209,6 +210,11 @@ class NativePlanTest(unittest.TestCase):
         builder.with_projection.assert_not_called()
 
     def setUp(self):
+        # Capability/FFI tests use a stub scanner as configuration and fallback
+        # storage. Public hook selection is covered with real scanner facades.
+        selected = patch('pypaimon.read.read_dispatch._python_scan_selected', return_value=False)
+        selected.start()
+        self.addCleanup(selected.stop)
         # Model an installed companion extension. Individual tests supply the
         # API objects they call through this module.
         fake_df = ModuleType('pypaimon_rust.datafusion')
@@ -514,7 +520,7 @@ class NativePlanTest(unittest.TestCase):
             fs = Mock(partition_key_predicate=None)
             scan = _scan(True, fs)
             setattr(scan.table.catalog_environment.catalog_loader.context(), attr, object())
-            self.assertTrue(scan._native_plan_supported())
+            self.assertTrue(NativeTableScan(scan)._native_plan_supported())
 
     def test_plan_native_empty_preserves_snapshot_without_fallback(self):
         for snapshot_id in (None, 7):

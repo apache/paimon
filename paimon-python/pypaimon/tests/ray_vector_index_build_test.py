@@ -31,7 +31,6 @@ pytest.importorskip("paimon_vindex")
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.index.index_file_handler import IndexFileHandler
-from pypaimon.ray import vector_index_build
 from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
 from pypaimon.tests import ray_vector_search_test as fixtures
 from pypaimon.tests.ray_vector_search_test import add_rows, VECTORS
@@ -89,7 +88,8 @@ def test_build_messages_do_not_publish_or_include_later_appends(table, ray_clust
 def _write_then_fail(context, shard, name):
     if shard[1].from_:
         time.sleep(0.3)
-    message = vector_index_build._build_shard(context, shard, name)
+    from pypaimon.execution.python.globalindex.ray_index_build import _build_shard
+    message = _build_shard(context, shard, name)
     if not shard[1].from_:
         raise RuntimeError("failed after writing an index file")
     return message

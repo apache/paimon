@@ -106,7 +106,9 @@ def test_calendar_fallback_keeps_hidden_dependency_and_captured_rule(calendar_ta
     builder = (table.new_read_builder().with_projection(['id']).with_limit(1)
                .with_filter(PredicateBuilder(table.fields).equal('n', 2025)))
     scan = builder.new_scan()
-    with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Native plan fell back')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+            side_effect=AssertionError('Native plan fell back')):
         splits = scan.plan().splits()
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse()
     if mode == 'wire':

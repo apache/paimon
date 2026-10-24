@@ -97,7 +97,9 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
                 builder.with_filter(predicate)
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native fallback')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -129,7 +131,9 @@ def test_clustered_materialized_dv_files_use_native_raw_splits(tmp_path, engine,
             writer.close()
             commit.close()
         scan = table.copy({'scan.native-plan.enabled': 'true'}).new_read_builder().new_scan()
-        with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Native plan fell back')):
+        with patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Native plan fell back')):
             plan = scan.plan()
         assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
         assert any(file.level == 0 for split in plan.splits() for file in split.files)
@@ -195,7 +199,9 @@ def test_first_row_level_zero_merges_before_filtering(tmp_path, target_size, com
                 builder.with_filter(predicate)
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native fallback')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()
@@ -278,8 +284,9 @@ def test_pk_merge_engines_read_deletion_vectors_natively(tmp_path, engine, merge
                 builder.with_filter(predicates.equal('value', predicate_value))
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan',
-                                  side_effect=AssertionError('native plan fell back')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native plan fell back')):
                     plan = scan.plan()
                 assert all(getattr(split, '_native_split', None) is not None
                            for split in plan.splits())
@@ -330,8 +337,9 @@ def test_first_row_sorted_materialized_and_l0_merge_natively(tmp_path, batch_siz
         scan = builder.new_scan()
         with ExitStack() as guards:
             if native:
-                guards.enter_context(patch.object(scan.file_scanner, 'scan',
-                                                  side_effect=AssertionError('Native plan fell back')))
+                guards.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Native plan fell back')))
                 guards.enter_context(patch(
                     'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError('Native read fell back')))

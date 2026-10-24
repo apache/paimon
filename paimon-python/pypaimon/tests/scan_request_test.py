@@ -90,11 +90,11 @@ def test_request_recaptures_external_configuration_and_authorization_changes():
 def test_native_prepare_observes_the_latest_public_scanner_configuration():
     scan = _scan()
     with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([], 7)) as native:
-        assert scan._try_native_plan().snapshot_id == 7
+        assert NativeTableScan(scan).plan().snapshot_id == 7
         assert native.call_args[1]['row_ranges'] == [(1, 3)]
         scan.file_scanner._row_ranges = []
         scan.file_scanner.idx_of_this_subtask, scan.file_scanner.number_of_para_subtasks = 1, 3
-        assert scan._try_native_plan().snapshot_id == 7
+        assert NativeTableScan(scan).plan().snapshot_id == 7
         assert native.call_args[1]['row_ranges'] == []
         assert native.call_args[1]['row_position_shard'] == (1, 3)
 

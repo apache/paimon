@@ -91,7 +91,7 @@ def test_direct_public_mutation_constructors_select_native(native_rest_catalog, 
             messages = TableDeleteByRowId(table).delete([0, 0])
         expected = dict(p=['a'], id=[2], value=[20])
     else:
-        with patch('pypaimon.execution.python.write.table_update.ShardTableUpdator.initialize',
+        with patch('pypaimon.execution.python.write.table_update.ShardTableUpdator.__init__',
                    side_effect=AssertionError('Direct shard initialized Python')):
             update = ShardTableUpdator(table, ['id'], ['value'], builder.commit_user, 0, 1)
             try:

@@ -79,8 +79,9 @@ def _read(table, native, predicate=None, projection=None):
     scan = builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Native plan fell back')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Native plan fell back')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Native read fell back')

@@ -90,7 +90,9 @@ def _read(table, native, null_field=None, all_files=False):
     with ExitStack() as stack:
         if native:
             if not all_files:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Python scan')))
             stack.enter_context(patch(
                 'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError('Python read')
@@ -206,7 +208,9 @@ def test_nullable_scalar_key_distinguishes_null_from_default_value(rest_catalog,
         scan, read = builder.new_scan(), builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Python scan')))
                 stack.enter_context(patch(
                     'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError('Python read')

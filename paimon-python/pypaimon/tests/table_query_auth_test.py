@@ -22,6 +22,8 @@ from unittest.mock import patch
 
 import pyarrow as pa
 
+from types import SimpleNamespace
+
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.catalog.table_query_auth import (
     TableQueryAuthResult,
@@ -67,6 +69,8 @@ class _FakeSplit:
 class _FakeTable:
     def __init__(self, identifier=None):
         self.identifier = identifier or Identifier("db", "table")
+        self.options = SimpleNamespace(
+            native_plan_enabled=lambda: False, native_read_enabled=lambda: False, query_auth_enabled=False)
 
 
 class _FakeScan(TableScan):
@@ -79,9 +83,6 @@ class _FakeScan(TableScan):
 
     def plan(self):
         return self._plan
-
-    def _native_requested(self):
-        return False
 
     def _TableScan__auth_query(self, all_columns=False):
         return self._auth_result

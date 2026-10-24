@@ -132,25 +132,25 @@ class NativeShardTableUpdator:
     """Transport Arrow batches and commit messages for a core shard updater."""
 
     def __init__(self, table, read, writer):
-        self.table = table
-        self.writer = writer
-        self.read = read
+        self._table = table
+        self._writer = writer
+        self._read = read
 
     def arrow_reader(self):
         from pypaimon.execution.native.read.table_read import NativeTableRead
         from pypaimon.read.read_support import _ClosableArrowBatchReader
-        schema = self.read._output_arrow_schema()
-        batches = NativeTableRead(self.read).convert_batches(self.writer.arrow_reader(), schema)
+        schema = self._read._output_arrow_schema()
+        batches = NativeTableRead(self._read).convert_batches(self._writer.arrow_reader(), schema)
         return _ClosableArrowBatchReader(pa.ipc.RecordBatchReader.from_batches(schema, batches), batches)
 
     def update_by_arrow_batch(self, data):
-        self.writer.update_by_arrow_batch(data)
+        self._writer.update_by_arrow_batch(data)
 
     def prepare_commit(self):
-        return from_native_commit_messages(self.table, self.writer.prepare_commit())
+        return from_native_commit_messages(self._table, self._writer.prepare_commit())
 
     def close(self):
-        self.writer.close()
+        self._writer.close()
 
 
 def _supported_upsert_key_type(data_type):

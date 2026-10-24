@@ -313,12 +313,10 @@ def create_python_row_id_delete(table, precomputed=None):
     return PythonTableDeleteByRowId().initialize(table, precomputed)
 
 
-def create_python_shard_updator(owner, table, projection, columns, commit_user, shard, shard_count):
+def create_python_shard_updator(table, projection, columns, commit_user, shard, shard_count):
     """Initialize the Python shard resources only after backend selection."""
     from pypaimon.execution.python.write.table_update import ShardTableUpdator
-    execution = ShardTableUpdator(owner)
-    execution.initialize(table, projection, columns, commit_user, shard, shard_count)
-    return execution
+    return ShardTableUpdator(table, projection, columns, commit_user, shard, shard_count)
 
 
 def create_python_update_operation(context, commit_identifier, predicate=None, *, has_callable=False, has_array=False):
@@ -339,7 +337,7 @@ def create_python_merge_into_operation(
         commit_user=commit_user, commit_identifier=commit_identifier)
 
 
-def create_shard_update_execution(owner, table, projection, columns, commit_user, shard, shard_count):
+def create_shard_update_execution(table, projection, columns, commit_user, shard, shard_count):
     """Select the direct shard constructor's backend before capturing files."""
     from pypaimon.write.update_validation import _authorize_update
     _authorize_update(table)
@@ -347,15 +345,17 @@ def create_shard_update_execution(owner, table, projection, columns, commit_user
         'shard_update', table, commit_user, projection, columns, shard, shard_count)
     if native is not None:
         return native
-    return create_python_shard_updator(owner, table, projection, columns, commit_user, shard, shard_count)
+    return create_python_shard_updator(table, projection, columns, commit_user, shard, shard_count)
 
 
 def create_row_id_plan_execution(table, plan):
     """Select pure routing once; execution errors never replay another backend."""
-    from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
-    native = create_native_row_id_plan(table, plan)
-    if native is not None:
-        return NativeRowIdPlan(table, plan, native=native)
+    if (table.options.native_write_enabled() or table.options.native_read_enabled()
+            or table.options.native_plan_enabled()):
+        from pypaimon.execution.native.write.row_id_plan import create_native_row_id_plan, NativeRowIdPlan
+        native = create_native_row_id_plan(table, plan)
+        if native is not None:
+            return NativeRowIdPlan(table, plan, native=native)
     from pypaimon.execution.python.write.row_id_plan import PythonRowIdPlan
     return PythonRowIdPlan(plan)
 
@@ -409,9 +409,10 @@ def _validate_captured_row_id_plan(table, captured):
 
 
 def native_row_id_update_selected(worker):
-    from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
+    native = sys.modules.get('pypaimon.execution.native.write.native_update')
+    native_type = getattr(native, 'NativeTableUpdateByRowId', None)
     execution = vars(worker).get('_execution', worker)
-    return isinstance(execution, NativeTableUpdateByRowId)
+    return native_type is not None and isinstance(execution, native_type)
 
 
 def validate_row_id_update_rows(worker, captured_plan, first_row_id, row_ids):

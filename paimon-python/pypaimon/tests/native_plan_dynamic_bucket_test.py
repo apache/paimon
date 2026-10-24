@@ -60,7 +60,9 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         if shard is not None:
             scan.with_shard(*shard)
         if native:
-            with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+            with patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('native fallback')):
                 plan = scan.plan()
         else:
             plan = scan.plan()
@@ -136,7 +138,9 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
                 builder.with_filter(pb.equal('p', partition))
             scan = builder.new_scan()
             if native:
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError('native fallback')):
                     plan = scan.plan()
             else:
                 plan = scan.plan()

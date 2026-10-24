@@ -30,6 +30,7 @@ class FileScanner:
     """
 
     _is_dispatch_file_scanner = True
+    _EXECUTION_HOOKS = frozenset(('scan', 'scan_with_stats', 'plan_files'))
     _CONFIGURATION_FIELDS = frozenset((
         'predicate', '_user_predicate', '_partition_predicate',
         'partition_key_predicate', '_explicit_partition_filter', 'limit',
@@ -80,7 +81,7 @@ class FileScanner:
                 object.__setattr__(self, '_partition_predicate', None)
                 value = scan_partition_predicate(self.table, self.predicate, None)
         object.__setattr__(self, name, value)
-        if initialized and name in self._CONFIGURATION_FIELDS:
+        if initialized and name in self._CONFIGURATION_FIELDS | self._EXECUTION_HOOKS:
             if name == 'predicate':
                 object.__setattr__(self, '_user_predicate', value)
                 if not self._explicit_partition_filter:
@@ -88,42 +89,33 @@ class FileScanner:
                         self.table, value, self._partition_predicate))
             if name in ('skip_level0', 'only_read_real_buckets'):
                 self._policy_overrides.add(name)
-            self._invalidate_python_scanner()
+            self._invalidate_execution()
 
-    def _invalidate_python_scanner(self):
+    def __delattr__(self, name):
+        object.__delattr__(self, name)
+        if name in self._EXECUTION_HOOKS:
+            self._invalidate_execution()
+
+    def _invalidate_execution(self):
         if getattr(self._scan, '_file_scanner', None) is self:
-            self._scan._python_file_scanner = None
-
-    def _configure_python_scanner(self, scanner):
-        scanner._user_predicate = self._user_predicate
-        scanner._partition_predicate = self._partition_predicate
-        scanner._explicit_partition_filter = self._explicit_partition_filter
-        scanner._set_predicate(self.predicate)
-        scanner.partition_key_predicate = self.partition_key_predicate
-        for name in ('limit', 'skip_level0', 'only_read_real_buckets', 'is_streaming'):
-            setattr(scanner, name, getattr(self, name))
-        # Preserve explicit caller overrides without routing Python execution
-        # through the public facade again.
-        for name in ('scan', 'scan_with_stats', 'plan_files'):
-            if name in self.__dict__:
-                setattr(scanner, name, self.__dict__[name])
+            self._scan._execution = None
 
     def _request(self):
         return self._scan._scan_request()
 
     def scan(self):
-        from pypaimon.read.read_dispatch import plan_scan
-        return plan_scan(self._scan)
+        from pypaimon.read.read_dispatch import file_scanner_call
+        return file_scanner_call(self, 'scan')
 
     def scan_with_stats(self):
-        from pypaimon.read.read_dispatch import scan_with_stats
-        plan, stats = scan_with_stats(self._scan)
+        from pypaimon.read.read_dispatch import file_scanner_call
+        plan, stats = file_scanner_call(self, 'scan_with_stats')
         self.scan_stats = stats
         return plan, stats
 
     def plan_files(self):
-        from pypaimon.read.read_dispatch import plan_files
-        return plan_files(self)
+        from pypaimon.read.read_dispatch import file_scanner_call
+        return file_scanner_call(self, 'plan_files')
 
     def with_all_buckets(self):
         self.only_read_real_buckets = False
