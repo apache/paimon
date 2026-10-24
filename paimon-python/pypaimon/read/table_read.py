@@ -105,6 +105,9 @@ class TableRead:
         Rows retain their kind separately from projected fields. Like the
         Python split reader, the iterator reuses its row view and visits splits
         in order. Close the iterator when stopping before exhaustion.
+
+        Named columns and nested paths retain their projection order. Named
+        VARIANT extraction expressions require the Arrow APIs.
         """
         from pypaimon.read.read_dispatch import to_iterator
         return to_iterator(self, splits)
