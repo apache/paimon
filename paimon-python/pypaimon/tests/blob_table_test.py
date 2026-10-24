@@ -5811,6 +5811,219 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         )
         self.assertFalse(BlobViewStruct.is_blob_view_struct(picture_bytes))
 
+    def test_primary_key_blob_descriptor_field_write_and_upsert(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        from pypaimon.table.row.generic_row import GenericRow
+
+        blob_file = os.path.join(self.temp_dir, 'pk_descriptor_payloads.bin')
+        with open(blob_file, 'wb') as f:
+            f.write(b'payload-v1payload-v2payload-row-3')
+
+        desc_v1 = BlobDescriptor(blob_file, 0, 10)
+        desc_v2 = BlobDescriptor(blob_file, 10, 10)
+        desc_row3 = BlobDescriptor(blob_file, 20, 13)
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('name', pa.string()),
+            pa.field('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '1',
+                'blob-descriptor-field': 'picture',
+            },
+        )
+        self.catalog.create_table('test_db.pk_blob_descriptor_table', schema, False)
+        table = self.catalog.get_table('test_db.pk_blob_descriptor_table')
+
+        # 1. Invalid descriptor payload is rejected by the PK writer
+        write_builder = table.new_batch_write_builder()
+        bad_writer = write_builder.new_write()
+        with self.assertRaisesRegex(
+            ValueError,
+            "blob-descriptor-field requires blob field value to be a serialized BlobDescriptor.",
+        ):
+            bad_writer.write_arrow(pa.Table.from_pydict({
+                'id': [1],
+                'name': ['bad'],
+                'picture': [b'not-a-descriptor'],
+            }, schema=pa_schema))
+        bad_writer.close()
+
+        # 2. Initial commit via write_arrow + write_row
+        writer1 = write_builder.new_write()
+        writer1.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['alice-v1', 'bob'],
+            'picture': [desc_v1.serialize(), None],
+        }, schema=pa_schema))
+        writer1.write_row(GenericRow(
+            [
+                3,
+                'charlie',
+                Blob.from_descriptor_bytes(
+                    desc_row3.serialize(), file_io=table.file_io
+                ),
+            ],
+            table.fields,
+        ))
+        write_builder.new_commit().commit(writer1.prepare_commit())
+        writer1.close()
+
+        # 3. Second commit upserting id=1 with desc_v2
+        writer2 = write_builder.new_write()
+        writer2.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['alice-v2'],
+            'picture': [desc_v2.serialize()],
+        }, schema=pa_schema))
+        write_builder.new_commit().commit(writer2.prepare_commit())
+        writer2.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            result.column('name').to_pylist(),
+            ['alice-v2', 'bob', 'charlie'],
+        )
+        self.assertEqual(
+            result.column('picture').to_pylist(),
+            [b'payload-v2', None, b'payload-row-3'],
+        )
+
+    def test_primary_key_blob_view_field_write_and_upsert(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import Blob, BlobViewStruct
+        from pypaimon.table.row.generic_row import GenericRow
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        self.catalog.create_table('test_db.pk_blob_view_source', source, False)
+        source_table = self.catalog.get_table('test_db.pk_blob_view_source')
+
+        src_wb = source_table.new_batch_write_builder()
+        src_writer = src_wb.new_write()
+        src_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 20, 30],
+            'picture': [b'upstream-0', b'upstream-1', b'upstream-2'],
+        }, schema=source_schema))
+        src_wb.new_commit().commit(src_writer.prepare_commit())
+        src_writer.close()
+
+        target_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('label', pa.string()),
+            pa.field('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '1',
+                'blob-view-field': 'picture',
+            },
+        )
+        self.catalog.create_table('test_db.pk_blob_view_target', target, False)
+        target_table = self.catalog.get_table('test_db.pk_blob_view_target')
+
+        view_0 = BlobViewStruct.of('test_db.pk_blob_view_source', source_table, 'picture', 0)
+        view_1 = BlobViewStruct.of('test_db.pk_blob_view_source', source_table, 'picture', 1)
+        view_2 = BlobViewStruct.of('test_db.pk_blob_view_source', source_table, 'picture', 2)
+
+        # 1. Invalid BlobViewStruct bytes are rejected by the PK writer
+        target_wb = target_table.new_batch_write_builder()
+        bad_writer = target_wb.new_write()
+        with self.assertRaisesRegex(
+            ValueError,
+            "blob-view-field requires blob field value to be a serialized BlobViewStruct.",
+        ):
+            bad_writer.write_arrow(pa.Table.from_pydict({
+                'id': [1],
+                'label': ['bad'],
+                'picture': [b'invalid-view-bytes'],
+            }, schema=target_schema))
+        bad_writer.close()
+
+        # 2. First commit via write_arrow + write_row
+        writer1 = target_wb.new_write()
+        writer1.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'label': ['row1-v1', 'row2'],
+            'picture': [view_0.serialize(), None],
+        }, schema=target_schema))
+        writer1.write_row(GenericRow(
+            [3, 'row3', Blob.from_view(view_2)],
+            target_table.fields,
+        ))
+        target_wb.new_commit().commit(writer1.prepare_commit())
+        writer1.close()
+
+        # 3. Second commit upserting id=1 to point to upstream row 1
+        writer2 = target_wb.new_write()
+        writer2.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'label': ['row1-v2'],
+            'picture': [view_1.serialize()],
+        }, schema=target_schema))
+        target_wb.new_commit().commit(writer2.prepare_commit())
+        writer2.close()
+
+        read_builder = target_table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            result.column('label').to_pylist(),
+            ['row1-v2', 'row2', 'row3'],
+        )
+        self.assertEqual(
+            result.column('picture').to_pylist(),
+            [b'upstream-1', None, b'upstream-2'],
+        )
+
+    def test_primary_key_managed_blob_requires_native_writer(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={'bucket': '1'},
+        )
+        self.catalog.create_table('test_db.pk_managed_blob_table', schema, False)
+        table = self.catalog.get_table('test_db.pk_managed_blob_table')
+
+        writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "Primary-key Blob writes require the native writer",
+        ):
+            writer.write_arrow(pa.Table.from_pydict({
+                'id': [1],
+                'picture': [b'raw-blob-bytes'],
+            }, schema=pa_schema))
+        writer.close()
+
 
 class GetBlobTest(unittest.TestCase):
 

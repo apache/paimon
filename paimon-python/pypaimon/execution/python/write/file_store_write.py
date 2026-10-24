@@ -22,9 +22,13 @@ from typing import Dict, List, Tuple
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.schema.data_types import is_blob_file_field
+from pypaimon.schema.data_types import is_blob_file_field, is_blob_type
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.row_utils import inline_blob_value, require_columns, row_values_to_arrow_table
+from pypaimon.write.row_utils import (
+    inline_blob_value,
+    require_columns,
+    row_values_to_arrow_table,
+)
 from pypaimon.schema.arrow_schema import project_arrow_batch
 from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
@@ -163,6 +167,24 @@ class FileStoreWrite:
             self._written_buckets.add(key)
             return
 
+        descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
+        view_fields = CoreOptions.blob_view_fields(self.options)
+        if descriptor_fields or view_fields:
+            values_by_name = {
+                name: inline_blob_value(
+                    val,
+                    name in descriptor_fields,
+                    name in view_fields,
+                )
+                for name, val in values_by_name.items()
+            }
+        data = row_values_to_arrow_table(
+            values_by_name,
+            self.table.table_schema.fields,
+            column_names,
+        )
+        from pypaimon.write.row_kind import with_row_kind
+        data = with_row_kind(self.table, data, row)
         writer.write(data.to_batches()[0])
         self._written_buckets.add(key)
 
@@ -220,13 +242,12 @@ class FileStoreWrite:
             default = -1 if self.table.is_primary_key_table else 1
             return self._seq_number_stats(partition).get(bucket, default)
 
-        # Dedicated Blob files are an append-table layout. PK tables require
-        # managed packs and references attached to their key-value Parquet files.
-        if self._has_blob_columns():
-            if self.table.is_primary_key_table:
-                raise NotImplementedError(
-                    'Primary-key Blob writes require the native writer; '
-                    'enable write.native.enabled and write Arrow batches')
+        # Dedicated Blob files are an append-table layout. PK tables with
+        # managed BLOB columns require packs and references attached to their
+        # key-value Parquet files, whereas inline BLOB fields
+        # (blob-descriptor-field and blob-view-field) are stored directly in
+        # the normal key-value data files.
+        if self._has_blob_columns() and not self.table.is_primary_key_table:
             return DedicatedFormatWriter(
                 table=self.table,
                 partition=partition,
@@ -238,6 +259,10 @@ class FileStoreWrite:
                 changelog_producer=self.changelog_producer,
                 blob_uri_reader_factory=self.blob_uri_reader_factory,
             )
+        elif self._has_managed_blob_columns() and self.table.is_primary_key_table:
+            raise NotImplementedError(
+                'Primary-key Blob writes require the native writer; '
+                'enable write.native.enabled and write Arrow batches')
         elif self._has_vector_columns() and options.with_vector_format():
             return DataVectorWriter(
                 table=self.table,
@@ -363,6 +388,18 @@ class FileStoreWrite:
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""
         return any(is_blob_file_field(field) for field in self.table.table_schema.fields)
+
+    def _has_managed_blob_columns(self) -> bool:
+        """Check if the table schema contains non-inline (managed) blob columns."""
+        inline_fields = (
+            CoreOptions.blob_descriptor_fields(self.options)
+            | CoreOptions.blob_view_fields(self.options)
+        )
+        return any(
+            is_blob_file_field(field)
+            and not (is_blob_type(field.type) and field.name in inline_fields)
+            for field in self.table.table_schema.fields
+        )
 
     def _has_vector_columns(self) -> bool:
         from pypaimon.schema.data_types import VectorType
