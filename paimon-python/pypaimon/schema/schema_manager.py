@@ -442,6 +442,8 @@ def _validate_blob_fields(
             f"'{CoreOptions.VIDEO_FRAME_FIELD.key()}' only supports append-only tables."
         )
 
+    _validate_sequence_group_ordering_fields(fields, options, core_options, primary_keys)
+
     if blob_field_names:
         if blob_field_names.intersection(partition_keys):
             raise ValueError(
@@ -479,6 +481,54 @@ def _validate_blob_fields(
             )
 
 
+def _validate_sequence_group_ordering_fields(
+    fields: List[DataField],
+    options: dict,
+    core_options: CoreOptions,
+    primary_keys: List[str],
+):
+    """Mirror Java SchemaValidation#validateSequenceGroupOrderingFields and the
+    primary-key checks in PartialUpdateMergeFunction.Factory."""
+    from pypaimon.common.options.core_options import MergeEngine
+
+    if core_options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
+        return
+
+    field_map = {field.name: field for field in fields}
+    for option_key, option_val in options.items():
+        if not (
+            option_key.startswith("fields.")
+            and option_key.endswith(".sequence-group")
+            and len(option_key) > len("fields..sequence-group")
+        ):
+            continue
+
+        ordering_fields_str = option_key[len("fields."): -len(".sequence-group")]
+        for field_name in ordering_fields_str.split(","):
+            field_name = field_name.strip()
+            field = field_map.get(field_name)
+            if field is not None and _contains_blob_type(field.type):
+                raise ValueError(
+                    f"Field '{field_name}' with type {field.type} cannot be used as a "
+                    f"sequence-group ordering field in option '{option_key}'."
+                )
+            if field_name in primary_keys:
+                raise ValueError(
+                    f"The sequence-group '{option_key}' contains primary key field "
+                    f"'{field_name}', which is not allowed. Primary key columns "
+                    f"cannot be put in sequence-group."
+                )
+
+        for protected_field in str(option_val or "").split(","):
+            protected_field = protected_field.strip()
+            if protected_field and protected_field in primary_keys:
+                raise ValueError(
+                    f"The sequence-group '{option_key}' contains primary key field "
+                    f"'{protected_field}', which is not allowed. Primary key columns "
+                    f"cannot be put in sequence-group."
+                )
+
+
 def _validate_primary_key_blob_fields(
     fields: List[DataField],
     options: dict,
@@ -491,6 +541,7 @@ def _validate_primary_key_blob_fields(
     """Mirror Java SchemaValidation#validatePrimaryKeyBlobKeyConfiguration and
     validatePrimaryKeyBlobConfiguration."""
     from pypaimon.common.options.core_options import ChangelogProducer, MergeEngine
+    from pypaimon.common.options.options_utils import OptionsUtils
 
     managed_blob_fields = [
         field.name
@@ -545,6 +596,46 @@ def _validate_primary_key_blob_fields(
             raise ValueError(
                 "Primary-key managed BLOB tables do not support 'pk-clustering-override'."
             )
+
+        if (
+            core_options.merge_engine() == MergeEngine.PARTIAL_UPDATE
+            and not core_options.ignore_delete()
+        ):
+            fields_protected_by_sequence_group = set()
+            for key, val in options.items():
+                if (
+                    key.startswith("fields.")
+                    and key.endswith(".sequence-group")
+                    and len(key) > len("fields..sequence-group")
+                ):
+                    for protected_field in str(val or "").split(","):
+                        protected_field = protected_field.strip()
+                        if protected_field:
+                            fields_protected_by_sequence_group.add(protected_field)
+
+            for field in managed_blob_fields:
+                if field not in fields_protected_by_sequence_group:
+                    continue
+                agg_func = options.get(f"fields.{field}.aggregate-function")
+                if agg_func is None:
+                    agg_func = options.get("fields.default-aggregate-function")
+
+                ignore_retract_raw = options.get(f"fields.{field}.ignore-retract")
+                ignore_retract = (
+                    OptionsUtils.convert_to_boolean(ignore_retract_raw)
+                    if ignore_retract_raw is not None
+                    else False
+                )
+                if (
+                    agg_func is not None
+                    and agg_func != "last_value"
+                    and not ignore_retract
+                ):
+                    raise ValueError(
+                        f"Managed BLOB field '{field}' cannot use aggregate function '{agg_func}' "
+                        f"because managed BLOB payloads are not retained in retract messages. "
+                        f"Set 'fields.{field}.ignore-retract' to true to ignore retract messages."
+                    )
 
     if blob_field_names.intersection(primary_keys):
         raise ValueError(

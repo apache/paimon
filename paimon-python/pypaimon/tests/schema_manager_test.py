@@ -235,6 +235,45 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 AtomicType("BLOB"),
                 {"blob-view-field": "payload", "changelog-producer": "input"},
             ),
+            (
+                "partial_update_ignore_retract",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                    "fields.payload.ignore-retract": "true",
+                },
+            ),
+            (
+                "partial_update_ignore_delete",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                    "partial-update.ignore-delete": "true",
+                },
+            ),
+            (
+                "partial_update_last_value",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_value",
+                },
+            ),
+            (
+                "partial_update_inline_blob_agg",
+                AtomicType("BLOB"),
+                {
+                    "merge-engine": "partial-update",
+                    "blob-descriptor-field": "payload",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                },
+            ),
         ]
         for suffix, blob_type, extra_options in blob_types:
             with self.subTest(kind=suffix):
@@ -245,14 +284,15 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 schema = Schema(
                     fields=[
                         DataField(0, "id", AtomicType("INT", False)),
-                        DataField(1, "payload", blob_type),
+                        DataField(1, "ts", AtomicType("INT", False)),
+                        DataField(2, "payload", blob_type),
                     ],
                     primary_keys=["id"],
                     options=extra_options,
                 )
                 table_schema = manager.create_table(schema)
                 self.assertEqual(table_schema.primary_keys, ["id"])
-                self.assertEqual(table_schema.fields[1].type, blob_type)
+                self.assertEqual(table_schema.fields[2].type, blob_type)
 
     def test_create_primary_key_blob_table_validation(self):
         cases = [
@@ -369,6 +409,103 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 ["id"],
                 {"pk-clustering-override": "true"},
                 "Primary-key managed BLOB tables do not support 'pk-clustering-override'.",
+            ),
+            (
+                "managed_blob_partial_update_retract_agg",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.payload.aggregate-function": "last_non_null_value",
+                },
+                r"Managed BLOB field 'payload' cannot use aggregate function 'last_non_null_value' "
+                r"because managed BLOB payloads are not retained in retract messages\. "
+                r"Set 'fields\.payload\.ignore-retract' to true to ignore retract messages\.",
+            ),
+            (
+                "managed_blob_partial_update_default_agg",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "payload",
+                    "fields.default-aggregate-function": "last_non_null_value",
+                },
+                r"Managed BLOB field 'payload' cannot use aggregate function 'last_non_null_value' "
+                r"because managed BLOB payloads are not retained in retract messages\. "
+                r"Set 'fields\.payload\.ignore-retract' to true to ignore retract messages\.",
+            ),
+            (
+                "managed_blob_as_sequence_group_ordering_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.payload.sequence-group": "ts",
+                },
+                r"Field 'payload' with type BLOB cannot be used as a sequence-group ordering "
+                r"field in option 'fields\.payload\.sequence-group'\.",
+            ),
+            (
+                "inline_blob_as_sequence_group_ordering_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "blob-descriptor-field": "payload",
+                    "fields.payload.sequence-group": "ts",
+                },
+                r"Field 'payload' with type BLOB cannot be used as a sequence-group ordering "
+                r"field in option 'fields\.payload\.sequence-group'\.",
+            ),
+            (
+                "pk_as_sequence_group_ordering_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.id.sequence-group": "payload",
+                },
+                r"The sequence-group 'fields\.id\.sequence-group' contains primary key field "
+                r"'id', which is not allowed\. Primary key columns cannot be put in "
+                r"sequence-group\.",
+            ),
+            (
+                "pk_as_sequence_group_protected_field",
+                [
+                    DataField(0, "id", AtomicType("INT", False)),
+                    DataField(1, "ts", AtomicType("INT", False)),
+                    DataField(2, "payload", AtomicType("BLOB")),
+                ],
+                ["id"],
+                {
+                    "merge-engine": "partial-update",
+                    "fields.ts.sequence-group": "id,payload",
+                },
+                r"The sequence-group 'fields\.ts\.sequence-group' contains primary key field "
+                r"'id', which is not allowed\. Primary key columns cannot be put in "
+                r"sequence-group\.",
             ),
         ]
 
