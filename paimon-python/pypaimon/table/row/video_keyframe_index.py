@@ -262,6 +262,7 @@ class VideoKeyframeIndex:
                 or decoder.unused_data or decoder.unconsumed_tail):
             raise ValueError("Invalid video keyframe index entries.")
 
+        # ENTRY '<qqq': ordinal, PTS and packet position are little-endian int64.
         entries = np.frombuffer(raw, dtype='<i8').reshape(keyframe_count, 3)
         if entries[0, 0] != 0:
             raise ValueError("Video keyframe index requires an initial keyframe.")
