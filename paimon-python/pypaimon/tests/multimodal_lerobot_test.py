@@ -730,7 +730,8 @@ class LeRobotValidationTest(unittest.TestCase):
 
         for configured, expected in ((None, 16), ("2", 2)):
             with self.subTest(configured=configured):
-                options = {} if configured is None else {option: configured}
+                options = {} if configured is None else {
+                    option: configured, "read.video.codec-threads": configured}
                 frames = SimpleNamespace(
                     options=CoreOptions(Options(options)))
                 rows = SimpleNamespace(
@@ -745,6 +746,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 try:
                     self.assertEqual([expected, expected], [
                         c.max_open_videos for c in dataset.reader._video_collators])
+                    self.assertEqual([0 if configured is None else 2] * 2, [
+                        c.decoder_factory.keywords["codec_threads"]
+                        for c in dataset.reader._video_collators])
                 finally:
                     dataset.reader.close()
 
