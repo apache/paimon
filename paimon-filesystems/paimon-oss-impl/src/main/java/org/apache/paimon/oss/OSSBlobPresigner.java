@@ -25,6 +25,7 @@ import org.apache.paimon.utils.BlobDescriptorUtils;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.OSSException;
+import com.aliyun.oss.common.auth.CredentialsProvider;
 import com.aliyun.oss.model.AbortMultipartUploadRequest;
 import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadRequest;
@@ -45,6 +46,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 /** Materializes blob ranges and creates OSS presigned URLs. */
 public final class OSSBlobPresigner {
@@ -88,12 +90,7 @@ public final class OSSBlobPresigner {
                 }
             }
 
-            URL url =
-                    client.generatePresignedUrl(
-                            bucket,
-                            targetKey,
-                            Date.from(Instant.now().plus(validity)),
-                            HttpMethod.GET);
+            URL url = presign(client, bucket, targetKey, validity);
             validatePresignedUrl(client, url, bucket, targetKey);
             return url.toString();
         } catch (IOException e) {
@@ -101,6 +98,23 @@ public final class OSSBlobPresigner {
         } catch (Exception e) {
             throw new IOException("Failed to create blob presigned URL.", e);
         }
+    }
+
+    private static URL presign(OSSClient client, String bucket, String key, Duration validity)
+            throws Exception {
+        Callable<URL> signing =
+                () ->
+                        client.generatePresignedUrl(
+                                bucket,
+                                key,
+                                Date.from(Instant.now().plus(validity)),
+                                HttpMethod.GET);
+        CredentialsProvider provider = client.getCredentialsProvider();
+        if (provider instanceof RESTTokenCredentialsProvider) {
+            // Its current token may expire before the URL, so sign with one that outlives it.
+            return ((RESTTokenCredentialsProvider) provider).signValidFor(validity, signing);
+        }
+        return signing.call();
     }
 
     private static void materialize(
