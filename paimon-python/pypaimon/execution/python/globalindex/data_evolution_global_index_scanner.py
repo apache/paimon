@@ -18,6 +18,7 @@
 """Scanner for shard-based global indexes on data-evolution tables."""
 
 from concurrent.futures import ThreadPoolExecutor
+import threading
 from typing import Collection, List, Optional
 
 from pypaimon.execution.python.globalindex.global_index_evaluator import (
@@ -39,6 +40,10 @@ from pypaimon.utils.range import Range
 _SUPPORTED_SCALAR_INDEX_TYPES = frozenset(('btree', 'bitmap'))
 
 
+class CompositeIndexReadError(RuntimeError):
+    """A selected composite index is unreadable; falling back may hide corruption."""
+
+
 class DataEvolutionGlobalIndexScanner:
     """Scanner for shard-based global indexes."""
 
@@ -53,6 +58,7 @@ class DataEvolutionGlobalIndexScanner:
         table=None,
         snapshot=None,
         partition_filter=None,
+        composite_files=None,
     ):
         index_files = _supported_scalar_index_files(index_files)
         self._options = options or CoreOptions(Options.from_none())
@@ -60,6 +66,11 @@ class DataEvolutionGlobalIndexScanner:
             max_workers=thread_num or 32
         )
         self._fields = fields
+        self._file_io = file_io
+        self._index_path = index_path
+        self._composite_groups = _group_composite_files(composite_files or [])
+        self._composite_readers = {}
+        self._composite_reader_lock = threading.Lock()
         self._coverage = (
             DataEvolutionGlobalIndexCoverage(table, snapshot, partition_filter, index_files)
             if table is not None
@@ -139,7 +150,7 @@ class DataEvolutionGlobalIndexScanner:
 
     @staticmethod
     def create(table, index_files=None, partition_filter=None, predicate=None,
-               snapshot=None) -> Optional['DataEvolutionGlobalIndexScanner']:
+               snapshot=None, allow_composite=False) -> Optional['DataEvolutionGlobalIndexScanner']:
         """Create a DataEvolutionGlobalIndexScanner.
 
         Can be called in two ways:
@@ -180,7 +191,8 @@ class DataEvolutionGlobalIndexScanner:
             if partition_filter is not None:
                 if not partition_filter.test(entry.partition):
                     return False
-            if not is_supported_scalar_index(entry.index_file):
+            if not (is_supported_scalar_index(entry.index_file)
+                    or allow_composite and _is_composite_btree(entry.index_file)):
                 return False
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
@@ -208,6 +220,8 @@ class DataEvolutionGlobalIndexScanner:
             file_io=table.file_io,
             index_path=table.path_factory().global_index_path_factory().index_path(),
             index_files=scanned_index_files,
+            composite_files=[file for file in scanned_index_files
+                             if allow_composite and _is_composite_btree(file)],
             thread_num=core_options.global_index_thread_num(),
             options=core_options,
             table=table,
@@ -217,29 +231,166 @@ class DataEvolutionGlobalIndexScanner:
 
     def scan(self, predicate: Optional[Predicate]) -> Optional[GlobalIndexResult]:
         """Scan the global index with the given predicate."""
-        return self._evaluator.evaluate(predicate)
+        evaluation = self.scan_with_coverage(predicate)
+        return evaluation.result if evaluation is not None else None
 
     def scan_with_coverage(
         self, predicate: Optional[Predicate]
     ) -> Optional[GlobalIndexEvaluation]:
+        if not self._composite_groups or predicate is None:
+            return self._evaluator.evaluate_with_contributing_fields(predicate)
+        return self._evaluate(predicate)
+
+    def _evaluate(self, predicate):
+        from pypaimon.execution.python.globalindex.btree.composite_btree import (
+            plan_composite,
+        )
+
+        fields_by_id = {field.id: field for field in self._fields}
+        candidates = []
+        for field_ids, files in self._composite_groups.items():
+            if any(field_id not in fields_by_id for field_id in field_ids):
+                continue
+            fields = [fields_by_id[field_id] for field_id in field_ids]
+            plan = plan_composite(fields, predicate)
+            if plan is None:
+                continue
+            if plan.bound_columns == 1 and self._coverage is not None:
+                composite_ranges = Range.sort_and_merge_overlap(list(files), True)
+                scalar_ranges = self._coverage.indexed_ranges([field_ids[0]])
+                if Range.and_(composite_ranges, scalar_ranges) == composite_ranges:
+                    continue
+            try:
+                selected = self._select_composite_files(files, fields, plan)
+            except Exception as error:
+                raise CompositeIndexReadError("Cannot read composite index metadata") from error
+            if selected is None:
+                continue
+            candidates.append((plan.bound_columns, plan.equal_columns,
+                               -len(field_ids), field_ids, fields, files, selected, plan))
+        if candidates:
+            _, _, _, field_ids, fields, files, selected, plan = max(
+                candidates, key=lambda candidate: candidate[:3])
+            return self._read_composite(field_ids, fields, files, selected, plan)
+
+        if predicate.method in ('and', 'or'):
+            evaluations = [self._evaluate(child) for child in predicate.literals]
+            if predicate.method == 'or' and any(item is None for item in evaluations):
+                return None
+            present = [item for item in evaluations if item is not None]
+            if not present:
+                return None
+            result = present[0].result
+            ranges = self._evaluation_ranges(present[0])
+            field_ids = set(present[0].contributing_field_ids)
+            for item in present[1:]:
+                result = (result.or_(item.result) if predicate.method == 'or'
+                          else result.and_(item.result))
+                ranges = Range.and_(ranges, self._evaluation_ranges(item))
+                field_ids.update(item.contributing_field_ids)
+            if len(present) != len(evaluations):
+                result = GlobalIndexResult.create(result.results(), is_exact=False)
+            return GlobalIndexEvaluation(result, frozenset(field_ids), tuple(ranges))
         return self._evaluator.evaluate_with_contributing_fields(predicate)
+
+    def _evaluation_ranges(self, evaluation):
+        if evaluation.indexed_ranges is not None:
+            return list(evaluation.indexed_ranges)
+        if self._coverage is None:
+            return []
+        return self._coverage.indexed_ranges(evaluation.contributing_field_ids)
+
+    def _select_composite_files(self, files, fields, plan):
+        from pypaimon.execution.python.globalindex.btree.composite_btree import (
+            compare_key_bound,
+        )
+        from pypaimon.execution.python.globalindex.btree.composite_key import (
+            CompositeKeySerializer,
+        )
+        from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
+
+        if not plan.intervals:
+            return []
+        serializer = CompositeKeySerializer(fields)
+        selected = []
+        budget = self._options.btree_index_fallback_scan_max_size()
+        for row_range, metas in files.items():
+            shard = []
+            for meta in metas:
+                if meta.metadata is None:
+                    return None
+                index_meta = SortedIndexFileMeta.deserialize(meta.metadata)
+                if index_meta.first_key is not None and plan.intervals:
+                    first = serializer.deserialize(index_meta.first_key)
+                    last = serializer.deserialize(index_meta.last_key)
+                    if not any(compare_key_bound(last, lower, serializer._comparators) > 0
+                               and compare_key_bound(first, upper,
+                                                     serializer._comparators) < 0
+                               for lower, upper in plan.intervals):
+                        continue
+                if plan.intervals:
+                    shard.append((row_range, meta))
+            if not plan.point_lookup and sum(meta.file_size for _, meta in shard) > budget:
+                return None
+            selected.extend(shard)
+        return selected
+
+    def _read_composite(self, field_ids, fields, files, selected, plan):
+        from pypaimon.execution.python.globalindex.btree.composite_btree import (
+            CompositeBTreeIndexReader,
+        )
+        from pypaimon.execution.python.globalindex.btree.composite_key import (
+            CompositeKeySerializer,
+        )
+
+        serializer = CompositeKeySerializer(fields)
+        futures = []
+        for row_range, meta in selected:
+            def read(range_=row_range, io_meta=meta):
+                key = (field_ids, io_meta.external_path or io_meta.file_name)
+                with self._composite_reader_lock:
+                    reader = self._composite_readers.get(key)
+                    if reader is None:
+                        reader = CompositeBTreeIndexReader(
+                            serializer, self._file_io, self._index_path, io_meta)
+                        self._composite_readers[key] = reader
+                return reader.query(plan).offset(range_.from_)
+            futures.append(self._executor.submit(read))
+        result = GlobalIndexResult.create_empty()
+        failure = None
+        for future in futures:
+            try:
+                result = result.or_(future.result())
+            except Exception as error:
+                if failure is None:
+                    failure = error
+        if failure is not None:
+            raise CompositeIndexReadError("Cannot read composite BTree file") from failure
+        result = GlobalIndexResult.create(result.results(), is_exact=False)
+        return GlobalIndexEvaluation(
+            result, frozenset(field_ids),
+            tuple(Range.sort_and_merge_overlap(list(files), True)))
 
     def unindexed_rows(self, predicate: Optional[Predicate],
                        search_mode=None,
-                       contributing_field_ids=None) -> GlobalIndexResult:
+                       contributing_field_ids=None, indexed_ranges=None) -> GlobalIndexResult:
         """Return coarse row ids not covered by global indexes."""
         return GlobalIndexResult.from_ranges(self.unindexed_ranges(
             predicate,
             search_mode=search_mode,
             contributing_field_ids=contributing_field_ids,
+            indexed_ranges=indexed_ranges,
         ))
 
     def unindexed_ranges(self, predicate: Optional[Predicate],
                          search_mode=None,
-                         contributing_field_ids=None) -> List[Range]:
+                         contributing_field_ids=None, indexed_ranges=None) -> List[Range]:
         """Return row ranges not covered by global indexes."""
         if self._coverage is None:
             return []
+        if indexed_ranges is not None:
+            return self._coverage.unindexed_ranges_from_indexed(
+                indexed_ranges, search_mode=search_mode)
         if contributing_field_ids is not None:
             return self._coverage.unindexed_ranges(
                 contributing_field_ids, search_mode=search_mode)
@@ -249,6 +400,8 @@ class DataEvolutionGlobalIndexScanner:
     def close(self):
         """Close the scanner and release resources."""
         self._evaluator.close()
+        for reader in self._composite_readers.values():
+            reader.close()
         self._executor.shutdown(wait=False)
 
     def __enter__(self) -> 'DataEvolutionGlobalIndexScanner':
@@ -309,6 +462,32 @@ def is_supported_scalar_index(index_file):
 def _supported_scalar_index_files(index_files):
     return [index_file for index_file in index_files
             if is_supported_scalar_index(index_file)]
+
+
+def _is_composite_btree(index_file):
+    meta = index_file.global_index_meta
+    return (index_file.index_type == 'btree' and meta is not None
+            and bool(meta.extra_field_ids)
+            and len(set((meta.index_field_id,) + tuple(meta.extra_field_ids)))
+            == 1 + len(meta.extra_field_ids))
+
+
+def _group_composite_files(index_files):
+    groups = {}
+    for index_file in index_files:
+        if not _is_composite_btree(index_file):
+            continue
+        meta = index_file.global_index_meta
+        field_ids = (meta.index_field_id,) + tuple(meta.extra_field_ids)
+        row_range = Range(meta.row_range_start, meta.row_range_end)
+        io_meta = GlobalIndexIOMeta(
+            file_name=index_file.file_name,
+            file_size=index_file.file_size,
+            metadata=meta.index_meta,
+            external_path=index_file.external_path,
+        )
+        groups.setdefault(field_ids, {}).setdefault(row_range, []).append(io_meta)
+    return groups
 
 
 def _core_options(table):

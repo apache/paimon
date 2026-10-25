@@ -201,7 +201,7 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
             coverage.unindexed_ranges(table.fields, predicate),
         )
 
-    def test_extra_fields_count_as_index_coverage(self):
+    def test_composite_fields_do_not_count_as_scalar_coverage(self):
         from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
             DataEvolutionGlobalIndexCoverage,
         )
@@ -214,7 +214,7 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
             [_coverage_index_file(0, 0, 9, extra_field_ids=[1])],
         )
 
-        self.assertEqual([], coverage.unindexed_ranges(1))
+        self.assertEqual([Range(0, 9)], coverage.unindexed_ranges(1))
 
     def test_detail_mode_uses_table_data_ranges(self):
         from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (

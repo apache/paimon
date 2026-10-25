@@ -17,9 +17,10 @@
 
 """Global index evaluation result shared with scan planning."""
 
-from typing import FrozenSet, NamedTuple
+from typing import FrozenSet, NamedTuple, Optional, Tuple
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.utils.range import Range
 
 
 class GlobalIndexEvaluation(NamedTuple):
@@ -27,3 +28,4 @@ class GlobalIndexEvaluation(NamedTuple):
 
     result: GlobalIndexResult
     contributing_field_ids: FrozenSet[int]
+    indexed_ranges: Optional[Tuple[Range, ...]] = None

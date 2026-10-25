@@ -19,17 +19,24 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.CompositeKeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.LongArrayList;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -157,5 +164,103 @@ public final class BTreeFixtureGenerator {
                 }
             }
         }
+        writeComposite(directory, "java-v2-composite-int.btree", false);
+        writeComposite(directory, "java-v2-composite-ac.btree", false);
+        writeComposite(directory, "java-v2-composite-reversed.btree", true);
+        writeCompositeKeys(directory);
+    }
+
+    private static void writeComposite(Path directory, String name, boolean reversed)
+            throws Exception {
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        GlobalIndexFileWriter files =
+                new GlobalIndexFileWriter() {
+                    @Override
+                    public String newFileName(String prefix) {
+                        return name;
+                    }
+
+                    @Override
+                    public PositionOutputStream newOutputStream(String fileName) {
+                        return new PositionOutputStream() {
+                            @Override
+                            public long getPos() {
+                                return bytes.size();
+                            }
+
+                            @Override
+                            public void write(int value) {
+                                bytes.write(value);
+                            }
+
+                            @Override
+                            public void write(byte[] value) {
+                                bytes.write(value, 0, value.length);
+                            }
+
+                            @Override
+                            public void write(byte[] value, int offset, int length) {
+                                bytes.write(value, offset, length);
+                            }
+
+                            @Override
+                            public void flush() {}
+
+                            @Override
+                            public void close() {}
+                        };
+                    }
+                };
+        BTreeIndexWriter writer =
+                new BTreeIndexWriter(
+                        files,
+                        new CompositeKeySerializer(RowType.of(DataTypes.INT(), DataTypes.INT())),
+                        32,
+                        null,
+                        null,
+                        2);
+        Integer[][] keys = {
+            {null, null}, {null, 2}, {1, null}, {1, 1}, {1, 2}, {1, 2}, {2, 1}
+        };
+        int[] order = reversed ? new int[] {0, 2, 3, 6, 1, 4, 5} : new int[] {0, 1, 2, 3, 4, 5, 6};
+        for (int rowId : order) {
+            Integer[] key = keys[rowId];
+            writer.write(GenericRow.of(
+                    reversed ? key[1] : key[0], reversed ? key[0] : key[1]), rowId);
+        }
+        ResultEntry entry = writer.finish().get(0);
+        Files.write(directory.resolve(name), bytes.toByteArray());
+        Files.write(directory.resolve(name + ".meta"), entry.meta());
+    }
+
+    private static void writeCompositeKeys(Path directory) throws Exception {
+        KeySerializer serializer =
+                new CompositeKeySerializer(
+                        RowType.of(
+                                DataTypes.STRING(), DataTypes.DECIMAL(38, 18),
+                                DataTypes.TIMESTAMP(9)));
+        GenericRow[] rows = {
+            GenericRow.of(null, null, null),
+            GenericRow.of(
+                    BinaryString.fromString("a"),
+                    Decimal.fromBigDecimal(new BigDecimal("1.230000000000000000"), 38, 18),
+                    Timestamp.fromEpochMillis(0, 1000)),
+            GenericRow.of(
+                    BinaryString.fromString(new String(new char[130]).replace('\0', 'x')),
+                    Decimal.fromBigDecimal(
+                            new BigDecimal("-99999999999999999999.999999999999999999"),
+                            38, 18),
+                    Timestamp.fromEpochMillis(-1, 999999)),
+        };
+        StringBuilder result = new StringBuilder();
+        for (GenericRow row : rows) {
+            for (byte value : serializer.serialize(row)) {
+                result.append(String.format("%02x", value & 0xff));
+            }
+            result.append('\n');
+        }
+        Files.write(
+                directory.resolve("java-v2-composite-keys.txt"),
+                result.toString().getBytes(StandardCharsets.UTF_8));
     }
 }
