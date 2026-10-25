@@ -315,6 +315,80 @@ class CompositeBTreeFallbackTest(
         self.assertIn('java-v2-composite-ac.btree', reads)
         self.assertIn('java-v2-composite-reversed.btree', reads)
 
+    @pytest.mark.python_plan
+    def test_explicit_composite_files_and_remaining_scalar_predicate(self):
+        schema = pa.schema([('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32())])
+        table = self._create_table(pa_schema=schema)
+        self._write_arrow(table, pa.table({
+            'a': [None, None, 1, 1, 1, 1, 2],
+            'b': [None, 2, None, 1, 2, 2, 1],
+            'c': [0, 0, 0, 0, 0, 1, 0],
+        }, schema=schema))
+        composite = _java_composite_file()
+        builder = table.new_read_builder().new_predicate_builder()
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+
+        self.assertIsNone(DataEvolutionGlobalIndexScanner.create(
+            table, index_files=[composite], snapshot=snapshot))
+        with DataEvolutionGlobalIndexScanner.create(
+                table, index_files=[composite], snapshot=snapshot,
+                allow_composite=True) as scanner:
+            evaluation = scanner.scan_with_coverage(builder.equal('a', 1))
+            self.assertEqual([2, 3, 4, 5], evaluation.result.results().to_list())
+            self.assertEqual((Range(0, 6),), evaluation.indexed_ranges)
+
+        table.create_global_index('c')
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        scalar_files = [entry.index_file for entry in IndexFileHandler(table).scan(snapshot)]
+        predicate = PredicateBuilder.and_predicates([
+            builder.equal('a', 1), builder.equal('c', 1),
+        ])
+        with DataEvolutionGlobalIndexScanner.create(
+                table, index_files=[composite] + scalar_files, snapshot=snapshot,
+                allow_composite=True) as scanner:
+            evaluation = scanner.scan_with_coverage(predicate)
+            self.assertEqual([5], evaluation.result.results().to_list())
+            self.assertEqual(frozenset([0, 2]), evaluation.contributing_field_ids)
+            self.assertEqual((Range(0, 6),), evaluation.indexed_ranges)
+
+    @pytest.mark.python_plan
+    def test_composite_and_scalar_use_intersected_coverage(self):
+        schema = pa.schema([('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32())])
+        table = self._create_table(pa_schema=schema)
+        self._write_arrow(table, pa.table({
+            'a': [None, None, 1, 1], 'b': [None, 2, None, 1],
+            'c': [0, 0, 0, 1],
+        }, schema=schema))
+        table.create_global_index('c')
+        self._write_arrow(table, pa.table({
+            'a': [1, 1, 2], 'b': [2, 2, 1], 'c': [0, 1, 0],
+        }, schema=schema))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        scalar_entries = IndexFileHandler(table).scan(snapshot)
+        composite = _java_composite_file()
+        predicate = PredicateBuilder.and_predicates([
+            table.new_read_builder().new_predicate_builder().equal('a', 1),
+            table.new_read_builder().new_predicate_builder().equal('c', 1),
+        ])
+
+        with DataEvolutionGlobalIndexScanner.create(
+                table, index_files=[composite] + [e.index_file for e in scalar_entries],
+                snapshot=snapshot, allow_composite=True) as scanner:
+            evaluation = scanner.scan_with_coverage(predicate)
+            self.assertEqual([3], evaluation.result.results().to_list())
+            self.assertEqual((Range(0, 3),), evaluation.indexed_ranges)
+            self.assertEqual([Range(4, 6)], scanner.unindexed_ranges(
+                predicate, indexed_ranges=evaluation.indexed_ranges,
+                search_mode=table.copy({
+                    'scalar-index.search-mode': 'full'
+                }).options.scalar_index_search_mode()))
+
+        entries = [IndexManifestEntry(0, GenericRow([], []), 0, composite)] + scalar_entries
+        with patch.object(IndexFileHandler, 'scan', return_value=entries):
+            actual = self._rows(table.copy({'scalar-index.search-mode': 'full'}), predicate)
+        expected = self._rows(table.copy({'global-index.enabled': 'false'}), predicate)
+        self.assertEqual(expected, actual)
+
     def test_composite_plan_requires_left_prefix_and_bounded_in(self):
         fields = [
             DataField(0, 'a', AtomicType('INT')),

@@ -50,6 +50,7 @@ class CompositePlan:
     bound_columns: int
     equal_columns: int
     field_count: int
+    covered_predicates: tuple
 
     @property
     def point_lookup(self):
@@ -166,14 +167,17 @@ def plan_composite(fields, predicate):
     prefixes = [()]
     equal_columns = 0
     range_predicates = []
+    covered_predicates = []
     for field, comparator, scalar in zip(
             fields, comparators, serializer._serializers):
         column = []
+        sources = []
         for child in conjuncts:
             leaf = _as_leaf(child)
             if leaf is not None and leaf.field == field.name and (
                     leaf.method in _POINT or leaf.method in _RANGE):
                 column.append(leaf)
+                sources.append(child)
         if not column:
             break
         for leaf in column:
@@ -191,6 +195,7 @@ def plan_composite(fields, predicate):
         point = [leaf for leaf in column if leaf.method in _POINT]
         if not point:
             range_predicates = column
+            covered_predicates.extend(sources)
             break
         selected = min(point, key=lambda leaf: len(leaf.literals or [None]))
         candidates = ([None] if selected.method == 'isNull'
@@ -203,8 +208,10 @@ def plan_composite(fields, predicate):
                 if not any(compare_nullable(value, old, comparator) == 0 for old in values):
                     values.append(value)
         equal_columns += 1
+        covered_predicates.extend(sources)
         if not values:
-            return CompositePlan([], equal_columns, equal_columns, len(fields))
+            return CompositePlan([], equal_columns, equal_columns, len(fields),
+                                 tuple(covered_predicates))
         if len(prefixes) * len(values) > MAX_INTERVALS:
             return None
         prefixes = [prefix + (value,) for prefix in prefixes for value in values]
@@ -237,7 +244,8 @@ def plan_composite(fields, predicate):
                 continue
         if compare_bounds(lower, upper, comparators) < 0:
             intervals.append((lower, upper))
-    return CompositePlan(intervals, bound_columns, equal_columns, len(fields))
+    return CompositePlan(intervals, bound_columns, equal_columns, len(fields),
+                         tuple(covered_predicates))
 
 
 class CompositeBTreeIndexReader(BTreeIndexReader):

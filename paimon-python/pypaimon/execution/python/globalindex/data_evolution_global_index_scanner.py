@@ -163,15 +163,19 @@ class DataEvolutionGlobalIndexScanner:
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         if index_files is not None:
-            index_files = _supported_scalar_index_files(index_files)
-            if len(index_files) == 0:
+            index_files = list(index_files)
+            scalar_files = _supported_scalar_index_files(index_files)
+            composite_files = [file for file in index_files
+                               if allow_composite and _is_composite_btree(file)]
+            if not scalar_files and not composite_files:
                 return None
             core_options = _core_options(table)
             return DataEvolutionGlobalIndexScanner(
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path=table.path_factory().global_index_path_factory().index_path(),
-                index_files=index_files,
+                index_files=scalar_files,
+                composite_files=composite_files,
                 thread_num=core_options.global_index_thread_num(),
                 options=core_options,
                 table=table,
@@ -243,6 +247,7 @@ class DataEvolutionGlobalIndexScanner:
 
     def _evaluate(self, predicate):
         from pypaimon.execution.python.globalindex.btree.composite_btree import (
+            _conjuncts,
             plan_composite,
         )
 
@@ -271,27 +276,39 @@ class DataEvolutionGlobalIndexScanner:
         if candidates:
             _, _, _, field_ids, fields, files, selected, plan = max(
                 candidates, key=lambda candidate: candidate[:3])
-            return self._read_composite(field_ids, fields, files, selected, plan)
+            composite = self._read_composite(field_ids, fields, files, selected, plan)
+            if predicate.method == 'and':
+                remaining = [child for child in _conjuncts(predicate)
+                             if not any(child is used for used in plan.covered_predicates)]
+                if remaining:
+                    rest = (remaining[0] if len(remaining) == 1
+                            else Predicate('and', None, None, remaining))
+                    return self._combine_evaluations(
+                        [composite, self._evaluate(rest)], 'and')
+            return composite
 
         if predicate.method in ('and', 'or'):
             evaluations = [self._evaluate(child) for child in predicate.literals]
-            if predicate.method == 'or' and any(item is None for item in evaluations):
-                return None
-            present = [item for item in evaluations if item is not None]
-            if not present:
-                return None
-            result = present[0].result
-            ranges = self._evaluation_ranges(present[0])
-            field_ids = set(present[0].contributing_field_ids)
-            for item in present[1:]:
-                result = (result.or_(item.result) if predicate.method == 'or'
-                          else result.and_(item.result))
-                ranges = Range.and_(ranges, self._evaluation_ranges(item))
-                field_ids.update(item.contributing_field_ids)
-            if len(present) != len(evaluations):
-                result = GlobalIndexResult.create(result.results(), is_exact=False)
-            return GlobalIndexEvaluation(result, frozenset(field_ids), tuple(ranges))
+            return self._combine_evaluations(evaluations, predicate.method)
         return self._evaluator.evaluate_with_contributing_fields(predicate)
+
+    def _combine_evaluations(self, evaluations, method):
+        if method == 'or' and any(item is None for item in evaluations):
+            return None
+        present = [item for item in evaluations if item is not None]
+        if not present:
+            return None
+        result = present[0].result
+        ranges = self._evaluation_ranges(present[0])
+        field_ids = set(present[0].contributing_field_ids)
+        for item in present[1:]:
+            result = (result.or_(item.result) if method == 'or'
+                      else result.and_(item.result))
+            ranges = Range.and_(ranges, self._evaluation_ranges(item))
+            field_ids.update(item.contributing_field_ids)
+        if len(present) != len(evaluations):
+            result = GlobalIndexResult.create(result.results(), is_exact=False)
+        return GlobalIndexEvaluation(result, frozenset(field_ids), tuple(ranges))
 
     def _evaluation_ranges(self, evaluation):
         if evaluation.indexed_ranges is not None:
@@ -368,7 +385,7 @@ class DataEvolutionGlobalIndexScanner:
             raise CompositeIndexReadError("Cannot read composite BTree file") from failure
         result = GlobalIndexResult.create(result.results(), is_exact=False)
         return GlobalIndexEvaluation(
-            result, frozenset(field_ids),
+            result, frozenset(field_ids[:plan.bound_columns]),
             tuple(Range.sort_and_merge_overlap(list(files), True)))
 
     def unindexed_rows(self, predicate: Optional[Predicate],
