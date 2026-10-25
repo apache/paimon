@@ -91,7 +91,13 @@ public interface ObjectTable extends Table {
         }
 
         public ObjectTable build() {
-            return new ObjectTableImpl(identifier, fileIO, location, options, comment);
+            // other writers manage the objects, so they may change under the same name
+            return new ObjectTableImpl(
+                    identifier,
+                    fileIO == null ? null : fileIO.originOnly(),
+                    location,
+                    options,
+                    comment);
         }
     }
 }

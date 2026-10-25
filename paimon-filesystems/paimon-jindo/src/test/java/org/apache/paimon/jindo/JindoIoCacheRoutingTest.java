@@ -19,9 +19,13 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FilePrefixHistory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 
 import com.aliyun.jindodata.api.spec.JdoException;
@@ -41,6 +45,8 @@ import java.io.UncheckedIOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -255,6 +261,49 @@ public class JindoIoCacheRoutingTest {
     }
 
     @Test
+    public void testOriginOnlyViewSendsEveryRequestToOss() throws IOException {
+        JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
+        FileIO view = fileIO.originOnly();
+        assertThat(view).isInstanceOf(JindoFileIO.class).isNotSameAs(fileIO);
+        assertThat(view.originOnly()).isSameAs(view);
+        assertThat(view.withTableView(view("custom-"))).isSameAs(view);
+
+        view.newInputStream(DATA).close();
+        view.getFileStatus(MANIFEST);
+        view.exists(DATA);
+        verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
+        verify(ossFs).getFileStatus(any());
+        verify(ossFs).exists(any());
+        Options oss = fileIO.routedHadoopOptions(DATA, "write");
+        assertThat(((JindoFileIO) view).routedHadoopOptions(DATA, "read")).isSameAs(oss);
+        assertThat(((JindoFileIO) view).routedHadoopOptions(MANIFEST, "meta")).isSameAs(oss);
+
+        // the base keeps its routes
+        fileIO.newInputStream(DATA).close();
+        verify(clusterFs).open(any(org.apache.hadoop.fs.Path.class));
+        verify(accelFs, never()).getFileStatus(any());
+    }
+
+    @Test
+    public void testFilePrefixViewRoutesDataFilesNamedWithThem() throws IOException {
+        JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
+        Path custom = new Path(TABLE + "/dt=1/bucket-0/custom-" + UUID + "-1.orc");
+        assertThat(fileIO.withTableView(TableFileIOView.NONE)).isSameAs(fileIO);
+
+        fileIO.newInputStream(custom).close();
+        verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
+
+        FileIO view = fileIO.withTableView(view("custom-"));
+        assertThat(view.withTableView(view("custom-"))).isSameAs(view);
+        view.newInputStream(custom).close();
+        view.newInputStream(DATA).close();
+        view.getFileStatus(MANIFEST);
+        verify(clusterFs, times(2)).open(any(org.apache.hadoop.fs.Path.class));
+        verify(accelFs).getFileStatus(any());
+        verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
+    }
+
+    @Test
     public void testPostponeFilesAndBlobPacksUseTheirTarget() throws IOException {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
         String postpone = "/bucket-postpone/data--u-user-s-7-w-" + UUID + "-0.avro";
@@ -263,6 +312,80 @@ public class JindoIoCacheRoutingTest {
                 .close();
         verify(clusterFs, times(2)).open(any(org.apache.hadoop.fs.Path.class));
         verify(ossFs, never()).open(any(org.apache.hadoop.fs.Path.class));
+    }
+
+    @Test
+    public void testTableViewSendsWhatItsRowsPointAtOutsideTheTableToOss() throws IOException {
+        JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
+        // a BLOB descriptor in a row of the table, named like a data file
+        Path imported = new Path("oss://bkt/import/data-" + UUID + "-1.png");
+        FileIO view = fileIO.withTableView(view());
+
+        view.newInputStream(imported).close();
+        view.getFileStatus(imported);
+        verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
+        verify(ossFs).getFileStatus(any());
+        view.newInputStream(DATA).close();
+        verify(clusterFs).open(any(org.apache.hadoop.fs.Path.class));
+        assertThat(((JindoFileIO) view).routedHadoopOptions(imported, "read"))
+                .isSameAs(fileIO.routedHadoopOptions(DATA, "write"));
+    }
+
+    @Test
+    public void testPrefixesOfOlderSchemasAreReadFromOss() throws IOException {
+        JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
+        Path older = new Path(TABLE + "/dt=1/bucket-0/older-" + UUID + "-1.orc");
+        List<FileIO> readers = new ArrayList<>();
+        FilePrefixHistory history =
+                reader -> {
+                    readers.add(reader);
+                    reader.exists(new Path(TABLE + "/schema"));
+                    return Collections.singletonList("older-");
+                };
+        FileIO view =
+                fileIO.withTableView(
+                        TableFileIOView.of(
+                                Collections.singletonList(new Path(TABLE)),
+                                Collections.emptyList(),
+                                history));
+
+        view.newInputStream(DATA).close();
+        assertThat(readers).isEmpty();
+        view.newInputStream(older).close();
+        view.newInputStream(older).close();
+        assertThat(readers).hasSize(1);
+        // the schemas are listed on OSS, the data file is read from its target
+        verify(ossFs).exists(any());
+        verify(clusterFs, times(3)).open(any(org.apache.hadoop.fs.Path.class));
+        verify(ossFs, never()).open(any(org.apache.hadoop.fs.Path.class));
+    }
+
+    @Test
+    public void testViewsUseTheFileSystemsOfTheirBase() throws Exception {
+        Options options = cacheTargetOptions();
+        options.set(FILE_IO_ALLOW_CACHE, false);
+        JindoFileIO fileIO = configuredFileIO(options);
+        FileIO view = fileIO.withTableView(view("custom-")).originOnly();
+
+        view.newInputStream(DATA).close();
+        assertThat(fileIO.fsMap).hasSize(1);
+        view.close();
+        verify(ossFs, never()).close();
+        fileIO.close();
+        verify(ossFs).close();
+
+        // a serialized view keeps its routes
+        JindoFileIO plain = new JindoFileIO();
+        plain.configure(CatalogContext.create(cacheTargetOptions()));
+        Path custom = new Path(TABLE + "/dt=1/bucket-0/custom-" + UUID + "-1.orc");
+        JindoFileIO copy =
+                InstantiationUtil.clone(
+                        (JindoFileIO) plain.withTableView(view("custom-")),
+                        getClass().getClassLoader());
+        assertThat(copy.routedHadoopOptions(custom, "read").get("fs.oss.endpoint"))
+                .isEqualTo(CLUSTER_HOST);
+        assertThat(plain.routedHadoopOptions(custom, "read").get("fs.oss.endpoint"))
+                .isEqualTo(OSS_HOST);
     }
 
     @Test
@@ -313,6 +436,8 @@ public class JindoIoCacheRoutingTest {
             JindoFileIO fileIO = new JindoFileIO();
             fileIO.configure(CatalogContext.create(options));
             assertThat(fileIO.cacheRouting).isNull();
+            assertThat(fileIO.originOnly()).isSameAs(fileIO);
+            assertThat(fileIO.withTableView(view("custom-"))).isSameAs(fileIO);
             for (String op : new String[] {"read", "meta", "write"}) {
                 Options hadoopOptions = fileIO.routedHadoopOptions(DATA, op);
                 assertThat(hadoopOptions.get("fs.oss.endpoint"))
@@ -426,6 +551,11 @@ public class JindoIoCacheRoutingTest {
         options.set("io-cache.routes", "meta=accel;data,bucket-index=cluster");
         options.set("io-cache.policy", "meta,read,exists");
         return options;
+    }
+
+    private static TableFileIOView view(String... prefixes) {
+        return TableFileIOView.of(
+                Collections.singletonList(new Path(TABLE)), Arrays.asList(prefixes), null);
     }
 
     private JindoFileIO configuredFileIO(Options options) {

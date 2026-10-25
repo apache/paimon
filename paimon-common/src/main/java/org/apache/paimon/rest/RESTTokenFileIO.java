@@ -27,12 +27,14 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -43,6 +45,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -112,12 +116,57 @@ public class RESTTokenFileIO implements FileIO {
     // Server again after serialization
     private volatile RESTToken token;
 
+    // applied to the FileIO of each token
+    private final TableFileIOView view;
+    private transient volatile Pair<FileIO, FileIO> lastView;
+
     public RESTTokenFileIO(
             CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
+        this(catalogContext, apiInstance, identifier, path, TableFileIOView.NONE, null);
+    }
+
+    private RESTTokenFileIO(
+            CatalogContext catalogContext,
+            RESTApi apiInstance,
+            Identifier identifier,
+            Path path,
+            TableFileIOView view,
+            @Nullable RESTToken token) {
         this.catalogContext = catalogContext;
         this.apiInstance = apiInstance;
         this.identifier = identifier;
         this.path = path;
+        this.view = view;
+        this.token = token;
+    }
+
+    @Override
+    public FileIO originOnly() {
+        return withView(view.originOnly());
+    }
+
+    @Override
+    public FileIO withTableView(TableFileIOView tableView) {
+        return withView(view.merge(tableView));
+    }
+
+    private FileIO withView(TableFileIOView newView) {
+        return newView == view
+                ? this
+                : new RESTTokenFileIO(
+                        catalogContext, apiInstance, identifier, path, newView, token);
+    }
+
+    private FileIO viewOf(FileIO fileIO) {
+        if (view.isNone()) {
+            return fileIO;
+        }
+        Pair<FileIO, FileIO> last = lastView;
+        if (last == null || last.getLeft() != fileIO) {
+            last = Pair.of(fileIO, view.apply(fileIO));
+            lastView = last;
+        }
+        return last.getRight();
     }
 
     @Override
@@ -247,13 +296,13 @@ public class RESTTokenFileIO implements FileIO {
 
         FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
         if (fileIO != null) {
-            return new FileIOWithToken(fileIO, currentToken);
+            return new FileIOWithToken(viewOf(fileIO), currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
             fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
             if (fileIO != null) {
-                return new FileIOWithToken(fileIO, currentToken);
+                return new FileIOWithToken(viewOf(fileIO), currentToken);
             }
 
             Options options = catalogContext.options();
@@ -267,7 +316,7 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.fallbackIO());
             fileIO = FileIO.get(path, context);
             FILE_IO_CACHE.put(currentToken, fileIO);
-            return new FileIOWithToken(fileIO, currentToken);
+            return new FileIOWithToken(viewOf(fileIO), currentToken);
         }
     }
 

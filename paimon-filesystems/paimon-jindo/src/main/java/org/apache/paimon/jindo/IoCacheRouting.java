@@ -18,13 +18,20 @@
 
 package org.apache.paimon.jindo;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FilePrefixHistory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.StringUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,6 +63,8 @@ final class IoCacheRouting implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final Logger LOG = LoggerFactory.getLogger(IoCacheRouting.class);
+
     private static final String META_CACHE_ENABLED_TAG = "meta";
     private static final String READ_CACHE_ENABLED_TAG = "read";
     private static final String WRITE_CACHE_ENABLED_TAG = "write";
@@ -72,6 +81,9 @@ final class IoCacheRouting implements Serializable {
     private static final Pattern DATA_FILE_SUFFIX =
             Pattern.compile(
                     "(?:-u-.+-s-[0-9]+-w-)?" + UUID + "-[0-9]+\\..+|" + UUID + "\\.managed\\.blob");
+    // The name of a data file or its file index, whatever its prefix.
+    private static final Pattern ANY_PREFIX_DATA_FILE =
+            Pattern.compile(".*(?:" + UUID + "-[0-9]+\\..+|" + UUID + "\\.managed\\.blob)");
 
     // Other types are routed only under the names Paimon writes (paimon-rust adds -changelog to
     // changelog manifests); Format Table files may be replaced in place.
@@ -92,6 +104,9 @@ final class IoCacheRouting implements Serializable {
     private final List<CacheTarget> targets;
     private final Map<FileType, CacheTarget> targetByType;
     private final List<String> dataFilePrefixes;
+    // Locations of the table a view serves; empty when this routing serves any table.
+    private final List<String> roots;
+    @Nullable private final PrefixHistory history;
     private final boolean metaCacheEnabled;
     private final boolean readCacheEnabled;
     private final boolean writeCacheEnabled;
@@ -102,6 +117,8 @@ final class IoCacheRouting implements Serializable {
             List<CacheTarget> targets,
             Map<FileType, CacheTarget> targetByType,
             List<String> dataFilePrefixes,
+            List<String> roots,
+            @Nullable PrefixHistory history,
             boolean metaCacheEnabled,
             boolean readCacheEnabled,
             boolean writeCacheEnabled,
@@ -110,6 +127,8 @@ final class IoCacheRouting implements Serializable {
         this.targets = targets;
         this.targetByType = targetByType;
         this.dataFilePrefixes = dataFilePrefixes;
+        this.roots = roots;
+        this.history = history;
         this.metaCacheEnabled = metaCacheEnabled;
         this.readCacheEnabled = readCacheEnabled;
         this.writeCacheEnabled = writeCacheEnabled;
@@ -170,10 +189,68 @@ final class IoCacheRouting implements Serializable {
                 new ArrayList<>(byName.values()),
                 targetByType,
                 dataFilePrefixes(options),
+                Collections.emptyList(),
+                null,
                 metaCache,
                 readCache,
                 writeCache,
                 existsCache);
+    }
+
+    /** This routing with no request on a cache target. */
+    IoCacheRouting originOnly() {
+        return targetByType.isEmpty()
+                ? this
+                : new IoCacheRouting(
+                        ossEndpoint,
+                        targets,
+                        new EnumMap<>(FileType.class),
+                        dataFilePrefixes,
+                        roots,
+                        null,
+                        metaCacheEnabled,
+                        readCacheEnabled,
+                        writeCacheEnabled,
+                        existsCacheEnabled);
+    }
+
+    /**
+     * This routing for the table of {@code view}: only files under its roots may use a cache
+     * target, also when named with its prefixes or those of its older schemas.
+     */
+    IoCacheRouting withTableView(TableFileIOView view) {
+        if (view.isOriginOnly()) {
+            return originOnly();
+        }
+        if (targetByType.isEmpty() || view.isNone()) {
+            return this;
+        }
+        List<String> mergedPrefixes = new ArrayList<>(dataFilePrefixes);
+        view.filePrefixes().forEach(prefix -> addIfAbsent(mergedPrefixes, prefix));
+        List<String> mergedRoots = new ArrayList<>(roots);
+        view.roots().forEach(root -> addIfAbsent(mergedRoots, root));
+        PrefixHistory mergedHistory =
+                view.history() == null
+                        ? history
+                        : history != null && history.source.equals(view.history())
+                                ? history
+                                : new PrefixHistory(view.history());
+        if (mergedPrefixes.equals(dataFilePrefixes)
+                && mergedRoots.equals(roots)
+                && mergedHistory == history) {
+            return this;
+        }
+        return new IoCacheRouting(
+                ossEndpoint,
+                targets,
+                targetByType,
+                mergedPrefixes,
+                mergedRoots,
+                mergedHistory,
+                metaCacheEnabled,
+                readCacheEnabled,
+                writeCacheEnabled,
+                existsCacheEnabled);
     }
 
     private static Set<String> parsePolicy(@Nullable String value) {
@@ -213,12 +290,51 @@ final class IoCacheRouting implements Serializable {
     /** The cache target selected for a file, or null when it does not use a cache target. */
     @Nullable
     CacheTarget targetOf(Path path) {
-        // Only OSS paths can use cache targets.
-        if (!"oss".equals(path.toUri().getScheme())) {
+        // Only OSS paths can use cache targets, and a table view only its own files.
+        if (!"oss".equals(path.toUri().getScheme())
+                || (!roots.isEmpty() && !TableFileIOView.isUnder(roots, path))) {
             return null;
         }
-        FileType type = cacheableType(path, dataFilePrefixes);
+        FileType type = cacheableType(path, filePrefixes());
         return type == null ? null : targetByType.get(type);
+    }
+
+    /** Whether only the prefixes of older schemas, not loaded yet, may route {@code path}. */
+    boolean awaitsHistory(Path path) {
+        if (history == null
+                || history.loaded != null
+                || !(targetByType.containsKey(FileType.DATA)
+                        || targetByType.containsKey(FileType.FILE_INDEX))
+                || (!roots.isEmpty() && !TableFileIOView.isUnder(roots, path))) {
+            return false;
+        }
+        String name = path.getName();
+        return !name.endsWith(MANIFEST_SIDECAR_SUFFIX)
+                && ANY_PREFIX_DATA_FILE.matcher(name).matches()
+                && !isDataFileName(name, dataFilePrefixes);
+    }
+
+    /** Loads the prefixes of older schemas once, through a FileIO that only uses OSS. */
+    void loadHistory(FileIO originOnly) {
+        if (history != null) {
+            history.load(originOnly);
+        }
+    }
+
+    private List<String> filePrefixes() {
+        List<String> loaded = history == null ? null : history.loaded;
+        if (loaded == null || loaded.isEmpty()) {
+            return dataFilePrefixes;
+        }
+        List<String> prefixes = new ArrayList<>(dataFilePrefixes);
+        loaded.forEach(prefix -> addIfAbsent(prefixes, prefix));
+        return prefixes;
+    }
+
+    private static void addIfAbsent(List<String> list, String value) {
+        if (!StringUtils.isNullOrWhitespaceOnly(value) && !list.contains(value)) {
+            list.add(value);
+        }
     }
 
     /** The type of a file a cache may serve, or null when it must be read from OSS. */
@@ -345,6 +461,32 @@ final class IoCacheRouting implements Serializable {
     @Override
     public String toString() {
         return "IoCacheRouting{" + targetByType + ", oss=" + ossEndpoint + "}";
+    }
+
+    /** The prefixes of older schemas, loaded at most once and shared by derived routings. */
+    private static final class PrefixHistory implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final FilePrefixHistory source;
+        @Nullable private transient volatile List<String> loaded;
+
+        private PrefixHistory(FilePrefixHistory source) {
+            this.source = source;
+        }
+
+        private synchronized void load(FileIO originOnly) {
+            if (loaded != null) {
+                return;
+            }
+            try {
+                loaded = new ArrayList<>(source.filePrefixes(originOnly));
+            } catch (IOException | RuntimeException e) {
+                // files with a prefix missed here are read from OSS, which only loses the cache
+                LOG.warn("Failed to load the file prefixes of older schemas for io-cache.", e);
+                loaded = Collections.emptyList();
+            }
+        }
     }
 
     /** A named cache target with its endpoint and addressing settings. */

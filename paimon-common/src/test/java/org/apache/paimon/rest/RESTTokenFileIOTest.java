@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RemoteIterator;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
@@ -254,6 +255,53 @@ class RESTTokenFileIOTest {
         // FileIO operations declare IOException; failing to create the inner FileIO must
         // surface the same way instead of bypassing callers as UncheckedIOException
         assertThatThrownBy(() -> fileIO.exists(tableRoot)).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void testTableViewsApplyToTheFileIOOfTheToken() throws IOException {
+        Path tableRoot = new Path("oss://bucket/table");
+        FileIO delegate = mock(FileIO.class);
+        FileIO originOnly = mock(FileIO.class);
+        FileIO prefixed = mock(FileIO.class);
+        TableFileIOView tableView =
+                TableFileIOView.of(
+                        Collections.singletonList(tableRoot),
+                        Collections.singletonList("custom-"),
+                        null);
+        when(delegate.originOnly()).thenReturn(originOnly);
+        when(delegate.withTableView(tableView)).thenReturn(prefixed);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                Long.MAX_VALUE));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null),
+                        api,
+                        identifier,
+                        tableRoot);
+
+        FileIO prefixView = fileIO.withTableView(tableView);
+        assertThat(prefixView).isInstanceOf(RESTTokenFileIO.class).isNotSameAs(fileIO);
+        assertThat(prefixView.withTableView(tableView)).isSameAs(prefixView);
+        assertThat(((RESTTokenFileIO) prefixView).fileIO()).isSameAs(prefixed);
+        assertThat(((RESTTokenFileIO) prefixView).fileIO()).isSameAs(prefixed);
+        // the view of the token's FileIO is built once
+        verify(delegate, times(1)).withTableView(any());
+
+        FileIO originView = fileIO.originOnly();
+        assertThat(originView.originOnly()).isSameAs(originView);
+        Path data = new Path("oss://bucket/table/bucket-0/data-1.orc");
+        originView.exists(data);
+        verify(originOnly).exists(data);
+        verify(delegate, never()).exists(data);
+        assertThat(fileIO.fileIO()).isSameAs(delegate);
     }
 
     @Test

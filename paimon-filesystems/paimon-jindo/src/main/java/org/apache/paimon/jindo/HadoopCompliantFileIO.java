@@ -85,7 +85,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     boolean shouldCache(Path path) {
         if (cacheRouting != null) {
-            return cacheRouting.targetOf(path) != null;
+            return cacheTargetOf(path) != null;
         }
         if (cacheWhitelistPaths.isEmpty()) {
             return true;
@@ -251,6 +251,19 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopSrc = path(src);
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
         return getFileSystem(hadoopSrc, false).rename(hadoopSrc, hadoopDst);
+    }
+
+    /**
+     * The cache target of a file, loading the prefixes of older schemas if only they may route it.
+     */
+    @Nullable
+    IoCacheRouting.CacheTarget cacheTargetOf(Path path) {
+        IoCacheRouting.CacheTarget target = cacheRouting.targetOf(path);
+        if (target == null && cacheRouting.awaitsHistory(path)) {
+            cacheRouting.loadHistory(originOnly());
+            target = cacheRouting.targetOf(path);
+        }
+        return target;
     }
 
     protected org.apache.hadoop.fs.Path path(Path path) {

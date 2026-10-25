@@ -23,6 +23,8 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.time.Duration;
@@ -43,6 +45,31 @@ public class ResolvingFileIO implements FileIO {
     private final Map<CacheKey, FileIO> fileIOMap = new ConcurrentHashMap<>();
 
     private CatalogContext context;
+
+    // a table view resolves through its base and applies the view to each FileIO
+    @Nullable private ResolvingFileIO base;
+    private TableFileIOView view = TableFileIOView.NONE;
+
+    @Override
+    public FileIO originOnly() {
+        return withView(view.originOnly());
+    }
+
+    @Override
+    public FileIO withTableView(TableFileIOView tableView) {
+        return withView(view.merge(tableView));
+    }
+
+    private FileIO withView(TableFileIOView newView) {
+        if (newView == view) {
+            return this;
+        }
+        ResolvingFileIO result = new ResolvingFileIO();
+        result.context = context;
+        result.base = base == null ? this : base;
+        result.view = newView;
+        return result;
+    }
 
     // TODO, how to decide the real fileio is object store or not?
     @Override
@@ -143,6 +170,10 @@ public class ResolvingFileIO implements FileIO {
 
     public FileIO fileIO(Path path) throws IOException {
         CacheKey cacheKey = new CacheKey(path.toUri().getScheme(), path.toUri().getAuthority());
+        if (base != null) {
+            FileIO resolved = base.fileIO(path);
+            return fileIOMap.computeIfAbsent(cacheKey, k -> view.apply(resolved));
+        }
         return fileIOMap.computeIfAbsent(
                 cacheKey,
                 k -> {

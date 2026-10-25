@@ -23,6 +23,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
@@ -105,6 +106,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     transient volatile Map<String, Pair<JindoHadoopSystem, String>> cacheTargetFsMap;
     private boolean allowCache = true;
     private transient BlobPresigner blobPresigner;
+    // the FileIO a table view was made from; a view uses its file systems
+    @Nullable private JindoFileIO base;
 
     public JindoFileIO() {}
 
@@ -192,6 +195,34 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         }
     }
 
+    @Override
+    public FileIO originOnly() {
+        return cacheRouting == null ? this : withRouting(cacheRouting.originOnly());
+    }
+
+    @Override
+    public FileIO withTableView(TableFileIOView view) {
+        return cacheRouting == null ? this : withRouting(cacheRouting.withTableView(view));
+    }
+
+    private JindoFileIO withRouting(IoCacheRouting routing) {
+        if (routing == cacheRouting) {
+            return this;
+        }
+        JindoFileIO view = new JindoFileIO();
+        view.base = base == null ? this : base;
+        view.cacheRouting = routing;
+        view.metaCacheEnabled = metaCacheEnabled;
+        view.readCacheEnabled = readCacheEnabled;
+        view.writeCacheEnabled = writeCacheEnabled;
+        view.existsCacheEnabled = existsCacheEnabled;
+        view.allowCache = allowCache;
+        view.hadoopOptions = hadoopOptions;
+        view.hadoopOptionsWithCache = hadoopOptionsWithCache;
+        view.cacheTargetOptions = cacheTargetOptions;
+        return view;
+    }
+
     /** Copies the options with an endpoint: its host[:port], and https from its scheme if any. */
     static Options withEndpoint(Options base, @Nullable String endpoint) {
         Options options = new Options(base.toMap());
@@ -237,7 +268,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         if (!shouldCache) {
             return hadoopOptions;
         } else if (cacheRouting != null) {
-            return cacheTargetOptions.get(cacheRouting.targetOf(path).name);
+            return cacheTargetOptions.get(cacheTargetOf(path).name);
         } else {
             return hadoopOptionsWithCache;
         }
@@ -285,6 +316,9 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     }
 
     private synchronized BlobPresigner blobPresigner() {
+        if (base != null) {
+            return base.blobPresigner();
+        }
         if (blobPresigner == null) {
             PluginLoader loader = BlobPlugin.getLoader();
             Thread thread = Thread.currentThread();
@@ -328,13 +362,21 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     @Override
     protected Pair<JindoHadoopSystem, String> getFileSystemPair(
             org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException {
-        if (!enableCache || cacheRouting == null) {
-            return super.getFileSystemPair(path, enableCache);
+        CacheTarget target =
+                enableCache && cacheRouting != null ? cacheTargetOf(new Path(path.toUri())) : null;
+        if (base != null) {
+            return target == null
+                    ? base.getFileSystemPair(path, false)
+                    : base.targetFileSystemPair(path, target);
         }
-        CacheTarget target = cacheRouting.targetOf(new Path(path.toUri()));
         if (target == null) {
-            return super.getFileSystemPair(path, false);
+            return super.getFileSystemPair(path, enableCache && cacheRouting == null);
         }
+        return targetFileSystemPair(path, target);
+    }
+
+    private Pair<JindoHadoopSystem, String> targetFileSystemPair(
+            org.apache.hadoop.fs.Path path, CacheTarget target) throws IOException {
         if (cacheTargetFsMap == null) {
             synchronized (this) {
                 if (cacheTargetFsMap == null) {
@@ -398,6 +440,10 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
 
     @Override
     public synchronized void close() {
+        if (base != null) {
+            // the file systems and the presigner belong to the base
+            return;
+        }
         if (blobPresigner != null) {
             Thread thread = Thread.currentThread();
             ClassLoader previous = thread.getContextClassLoader();

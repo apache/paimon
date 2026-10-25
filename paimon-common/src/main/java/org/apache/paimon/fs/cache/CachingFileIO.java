@@ -26,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -214,6 +215,28 @@ public class CachingFileIO implements FileIO {
     @Override
     public void setRuntimeContext(Map<String, String> options) {
         delegate.setRuntimeContext(options);
+    }
+
+    @Override
+    public FileIO originOnly() {
+        return withDelegate(delegate.originOnly());
+    }
+
+    @Override
+    public FileIO withTableView(TableFileIOView view) {
+        return withDelegate(delegate.withTableView(view));
+    }
+
+    // a view shares this wrapper's cache
+    private FileIO withDelegate(FileIO view) {
+        return view == delegate
+                ? this
+                : new CachingFileIO(
+                        view,
+                        getOrCreateCacheManager(),
+                        whitelist,
+                        cacheConfiguration,
+                        cacheNamespace);
     }
 
     @Override

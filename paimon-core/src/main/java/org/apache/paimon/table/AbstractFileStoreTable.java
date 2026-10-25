@@ -117,7 +117,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Path path,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        this.fileIO = fileIO;
+        // every copy, branch and time travel comes through here with its own schema
+        this.fileIO = TableFileIOViews.forTable(fileIO, path, tableSchema.options());
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
