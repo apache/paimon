@@ -81,7 +81,7 @@ public final class TableFileIOView implements Serializable {
                 history);
     }
 
-    /** See {@link FileIO#originOnly()}. */
+    /** See {@link IoCacheViewableFileIO#originOnly()}. */
     public TableFileIOView originOnly() {
         return ORIGIN_ONLY;
     }
@@ -142,9 +142,9 @@ public final class TableFileIOView implements Serializable {
 
     public FileIO apply(FileIO fileIO) {
         if (originOnly) {
-            return fileIO.originOnly();
+            return IoCacheViews.originOnly(fileIO);
         }
-        return isNone() ? fileIO : fileIO.withTableView(this);
+        return isNone() ? fileIO : IoCacheViews.withTableView(fileIO, this);
     }
 
     private static String normalizeRoot(Path path) {

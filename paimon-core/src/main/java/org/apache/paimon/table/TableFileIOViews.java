@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FilePrefixHistory;
+import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -47,7 +48,8 @@ final class TableFileIOViews {
         prefixes.add(options.get(DATA_FILE_PREFIX.key()));
         prefixes.add(options.get(CHANGELOG_FILE_PREFIX.key()));
         // only files under the table's location use io-cache, not those under external paths
-        return fileIO.withTableView(
+        return IoCacheViews.withTableView(
+                fileIO,
                 TableFileIOView.of(
                         Collections.singletonList(path),
                         prefixes,

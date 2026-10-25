@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
@@ -58,7 +59,8 @@ import java.util.function.Supplier;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 
 /** Jindo {@link FileIO}. */
-public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsProvider {
+public class JindoFileIO extends HadoopCompliantFileIO
+        implements HadoopOptionsProvider, IoCacheViewableFileIO {
 
     private static final long serialVersionUID = 2L;
 

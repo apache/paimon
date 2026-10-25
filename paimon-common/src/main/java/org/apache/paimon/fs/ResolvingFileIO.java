@@ -38,7 +38,7 @@ import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED
  * An implementation of {@link FileIO} that supports multiple file system schemas. It dynamically
  * selects the appropriate {@link FileIO} based on the URI scheme of the given path.
  */
-public class ResolvingFileIO implements FileIO {
+public class ResolvingFileIO implements IoCacheViewableFileIO {
 
     private static final long serialVersionUID = 1L;
 

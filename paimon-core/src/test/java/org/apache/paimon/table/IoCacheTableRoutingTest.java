@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TableFileIOView;
@@ -271,7 +272,8 @@ class IoCacheTableRoutingTest {
      * Local files whose reads of Paimon data files go to a target that keeps its first copy, routed
      * with the table view the way JindoFileIO routes them.
      */
-    private static class TargetRetainingFileIO extends LocalFileIO {
+    private static class TargetRetainingFileIO extends LocalFileIO
+            implements IoCacheViewableFileIO {
 
         private static final long serialVersionUID = 1L;
 

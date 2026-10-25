@@ -21,6 +21,7 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FilePrefixHistory;
+import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
@@ -265,8 +266,8 @@ public class JindoIoCacheRoutingTest {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
         FileIO view = fileIO.originOnly();
         assertThat(view).isInstanceOf(JindoFileIO.class).isNotSameAs(fileIO);
-        assertThat(view.originOnly()).isSameAs(view);
-        assertThat(view.withTableView(view("custom-"))).isSameAs(view);
+        assertThat(IoCacheViews.originOnly(view)).isSameAs(view);
+        assertThat(IoCacheViews.withTableView(view, view("custom-"))).isSameAs(view);
 
         view.newInputStream(DATA).close();
         view.getFileStatus(MANIFEST);
@@ -294,7 +295,7 @@ public class JindoIoCacheRoutingTest {
         verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
 
         FileIO view = fileIO.withTableView(view("custom-"));
-        assertThat(view.withTableView(view("custom-"))).isSameAs(view);
+        assertThat(IoCacheViews.withTableView(view, view("custom-"))).isSameAs(view);
         view.newInputStream(custom).close();
         view.newInputStream(DATA).close();
         view.getFileStatus(MANIFEST);
@@ -365,7 +366,7 @@ public class JindoIoCacheRoutingTest {
         Options options = cacheTargetOptions();
         options.set(FILE_IO_ALLOW_CACHE, false);
         JindoFileIO fileIO = configuredFileIO(options);
-        FileIO view = fileIO.withTableView(view("custom-")).originOnly();
+        FileIO view = IoCacheViews.originOnly(fileIO.withTableView(view("custom-")));
 
         view.newInputStream(DATA).close();
         assertThat(fileIO.fsMap).hasSize(1);

@@ -60,7 +60,7 @@ public class ResolvingFileIOTest {
 
     @Test
     public void testTableViewsApplyToEachResolvedFileIO() throws IOException {
-        FileIO oss = mock(FileIO.class);
+        IoCacheViewableFileIO oss = mock(IoCacheViewableFileIO.class);
         FileIO originOnly = mock(FileIO.class);
         when(oss.originOnly()).thenReturn(originOnly);
         FileIOLoader loader = mock(FileIOLoader.class);
@@ -72,7 +72,7 @@ public class ResolvingFileIOTest {
 
         FileIO view = fileIO.originOnly();
         assertInstanceOf(ResolvingFileIO.class, view);
-        assertSame(view, view.originOnly());
+        assertSame(view, IoCacheViews.originOnly(view));
         assertSame(originOnly, ((ResolvingFileIO) view).fileIO(data));
         assertSame(oss, fileIO.fileIO(data));
         // loading a FileIO checks access with exists
