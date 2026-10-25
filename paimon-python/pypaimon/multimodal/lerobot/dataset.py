@@ -1025,6 +1025,13 @@ def _metadata_member(metadata, name, default=None):
 
 def _episode_rows(episodes, columns):
     if hasattr(episodes, "select_columns"):
+        dataset_format = getattr(episodes, "format", None)
+        if isinstance(dataset_format, Mapping) and \
+                dataset_format.get("columns") != episodes.column_names:
+            # Projection can reveal columns hidden by Dataset.with_format().
+            for ordinal in range(len(episodes)):
+                yield episodes[ordinal]
+            return
         columns = [name for name in columns if name in episodes.column_names]
         if columns:
             # Avoid formatting wide statistics columns for every episode.

@@ -196,6 +196,21 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual((None,) * 2050, _episode_tasks({
             "episodes": episodes.remove_columns("tasks"),
         }))
+        formatted = episodes.select(range(2)).with_format(
+            "numpy",
+            columns=["episode_index", "dataset_from_index",
+                     "dataset_to_index", "length"],
+        )
+        self.assertNotIn("tasks", formatted[0])
+        self.assertEqual([(0, 2), (2, 4)], _episode_ranges(
+            {"episodes": formatted}, 4, 2))
+        self.assertEqual((None, None), _episode_tasks(
+            {"episodes": formatted}))
+        visible = formatted.with_format(
+            "numpy", columns=formatted.format["columns"],
+            output_all_columns=True)
+        self.assertEqual((("pick", "place"),) * 2, _episode_tasks(
+            {"episodes": visible}))
         # Preserve a selected Dataset's logical row order and range validation.
         with self.assertRaisesRegex(ValueError, "episode_index=1"):
             _episode_ranges({"episodes": episodes.select([1, 0])}, 4, 2)
@@ -1098,6 +1113,19 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
         self.assertEqual(0, dataset.meta.get_task_index("pick"))
         self.assertEqual("pick", sample["task"])
+        try:
+            from datasets import Dataset
+        except ImportError:
+            pass
+        else:
+            formatted_metadata = dict(metadata)
+            formatted_metadata["episodes"] = Dataset.from_list(
+                metadata["episodes"]).with_format(
+                    "numpy", columns=["episode_index", "dataset_from_index",
+                                      "dataset_to_index", "length"])
+            formatted_reader = Reader(formatted_metadata)
+            self.assertEqual("pick", formatted_reader[1]["task"])
+            formatted_reader.close()
         torch.testing.assert_close(
             sample["observation.state"], torch.tensor([1.0, 2.0]))
         torch.testing.assert_close(
