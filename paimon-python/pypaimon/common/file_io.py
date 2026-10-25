@@ -404,8 +404,11 @@ class FileIO(ABC):
                 close_error = error
             return read_error, close_error
 
-        with ThreadPoolExecutor(len(lanes)) as pool:
-            outcomes = list(pool.map(_run_lane, lanes))
+        if len(lanes) == 1:
+            outcomes = [_run_lane(lanes[0])]
+        else:
+            with ThreadPoolExecutor(len(lanes)) as pool:
+                outcomes = list(pool.map(_run_lane, lanes))
         read_error = next(
             (error for error, _ in outcomes if error is not None), None)
         close_error = next(
