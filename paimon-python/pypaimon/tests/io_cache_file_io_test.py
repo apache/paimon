@@ -494,11 +494,14 @@ class IoCacheRoutingFileIOTest(unittest.TestCase):
         self.assertEqual([], self.created)
 
     def test_table_views_share_the_targets_and_close_nothing(self):
+        external = "oss://bkt/import/data-" + UUID + "-0.parquet"
         custom = PARTITION + "/custom-" + UUID + "-0.parquet"
-        self._put_all(DATA, custom)
+        self._put_all(DATA, external, custom)
         view = self.file_io.for_table(TABLE, ["custom-"], "main")
         self.assertIs(view, self.file_io.for_table(TABLE, ["custom-"], "main"))
         self.assertEqual(b"cluster", view.new_input_stream(custom).read())
+        self.assertEqual(b"origin", view.new_input_stream(external).read())
+        self.assertEqual(b"cluster", self.file_io.new_input_stream(external).read())
         self.assertEqual(b"origin", self.file_io.new_input_stream(custom).read())
         self.assertEqual(["cluster"], self.created)
         # A copy of the table keeps the prefixes of the view it was made from.

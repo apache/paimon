@@ -490,6 +490,21 @@ class IoCacheRoutingTest(unittest.TestCase):
             routing = IoCacheRouting.create(self._options(**{key: "part-"}))
             self.assertEqual("default", routing.route(Op.READ, path))
 
+    def test_table_view_routes_only_files_under_the_table(self):
+        external = "oss://bkt/import/data-" + UUID + "-0.parquet"
+        sibling = "oss://bkt/db1.db/t10/bucket-0/data-" + UUID + "-0.parquet"
+        routing = IoCacheRouting.create(self._options())
+        self.assertEqual("default", routing.route(Op.READ, external))
+        for view in (IoCacheRouting.create(self._options(), root=self.TABLE),
+                     routing.for_table(self.TABLE + "/", [])):
+            with self.subTest(view=view):
+                self.assertEqual("default", view.route(Op.READ, self.DATA))
+                self.assertEqual("default", view.route(Op.META, self.MANIFEST))
+                branch_file = self.TABLE + "/branch/branch-dev/bucket-0/data-" + UUID + "-0.orc"
+                self.assertEqual("default", view.route(Op.READ, branch_file))
+                self.assertIsNone(view.route(Op.READ, external))
+                self.assertIsNone(view.route(Op.READ, sibling))
+
     def test_table_view_asks_the_schema_history_only_for_unknown_data_file_names(self):
         asked = []
 
@@ -497,7 +512,7 @@ class IoCacheRoutingTest(unittest.TestCase):
             asked.append(1)
             return ["older-", ""]
 
-        view = IoCacheRouting.create(self._options()).for_table(["newer-"], history)
+        view = IoCacheRouting.create(self._options()).for_table(self.TABLE, ["newer-"], history)
         uuid_count = UUID + "-0"
         for path in (self.DATA, self.MANIFEST, self.TABLE + "/bucket-0/newer-" + uuid_count + ".parquet"):
             self.assertEqual("default", view.route(Op.READ, path), path)

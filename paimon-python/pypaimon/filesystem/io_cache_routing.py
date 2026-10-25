@@ -128,6 +128,10 @@ def _new_prefixes(prefixes: Iterable[str], known: Tuple[str, ...]) -> Tuple[str,
     return tuple(p for p in dict.fromkeys(prefixes) if p and p.strip() and p not in known)
 
 
+def _table_root(path: Optional[str]) -> Optional[str]:
+    return path.rstrip("/") + "/" if path else None
+
+
 def routable_type(path: str, prefixes: Tuple[str, ...]) -> Optional[FileType]:
     """The type a cache may serve, or None when the file must be read from the origin."""
     path = path.rstrip("/")
@@ -183,7 +187,7 @@ class IoCacheRouting:
     """Per-request choice between the io-cache targets and the origin endpoint."""
 
     def __init__(self, options: Mapping[str, str], policy: FrozenSet[Op],
-                 endpoints: Dict[str, Optional[str]]):
+                 endpoints: Dict[str, Optional[str]], root: Optional[str] = None):
         origin = options.get("io-cache.origin.endpoint")
         self._origin = origin if origin and origin.strip() else options.get(FS_OSS_ENDPOINT)
         self._policy = policy
@@ -198,22 +202,25 @@ class IoCacheRouting:
         routes = options.get("io-cache.routes")
         self._routes = None if routes is None else _parse_routes(str(routes))
         self._prefixes = data_prefixes(options)
+        # Only files under the table's own location can use a target; None allows any OSS path.
+        self._root = _table_root(root)
         self._history: Optional[Callable[[], Iterable[str]]] = None
 
     @staticmethod
-    def create(options: Mapping[str, str]) -> Optional['IoCacheRouting']:
+    def create(options: Mapping[str, str], root: Optional[str] = None) -> Optional['IoCacheRouting']:
         """The routing of the options, or None when requests keep using fs.oss.endpoint."""
         if str(options.get(DLF_OSS_ENDPOINT) or "").strip() or not _flag(options.get(IO_CACHE_ENABLED)):
             return None
         policy = _parse_policy(options.get("io-cache.policy"))
         endpoints = _declared_targets(options)
-        return IoCacheRouting(options, policy, endpoints) if policy and endpoints else None
+        return IoCacheRouting(options, policy, endpoints, root) if policy and endpoints else None
 
-    def for_table(self, prefixes: Iterable[str],
+    def for_table(self, root: str, prefixes: Iterable[str],
                   history: Optional[Callable[[], Iterable[str]]] = None) -> 'IoCacheRouting':
-        """This routing for the files of one table, also named with these prefixes, and with those
-        history() returns once a name that may be a data file matches no other."""
+        """This routing for the files of the table at root, also named with these prefixes, and with
+        those history() returns once a name that may be a data file matches no other."""
         routing = copy.copy(self)
+        routing._root = _table_root(root)
         routing._prefixes = self._prefixes + _new_prefixes(prefixes, self._prefixes)
         routing._history = history
         return routing
@@ -232,6 +239,9 @@ class IoCacheRouting:
             op = Op.WRITE
         # Only OSS paths can use cache targets.
         if op not in self._policy or not path.startswith("oss://"):
+            return None
+        # Row data may reference objects elsewhere, which other writers own and may replace.
+        if self._root is not None and not path.startswith(self._root):
             return None
         file_type = routable_type(path, self._prefixes)
         if file_type is None and self._history is not None and _DATA_FILE_NAME.fullmatch(

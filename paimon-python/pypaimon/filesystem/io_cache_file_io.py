@@ -67,7 +67,7 @@ class IoCacheRoutingFileIO(FileIO):
                 history = _SchemaPrefixHistory(self._origin, table_path, branches, catalog_prefixes)
                 # The view takes its targets from this FileIO.
                 view = IoCacheRoutingFileIO(
-                    self._routing.for_table(prefixes, history), self._origin, self._file_io)
+                    self._routing.for_table(table_path, prefixes, history), self._origin, self._file_io)
                 view._base, view._table = self, table
                 self._views[table] = view
             return view

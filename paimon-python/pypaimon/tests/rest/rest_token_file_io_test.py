@@ -1164,6 +1164,12 @@ class RESTTokenFileIOTest(unittest.TestCase):
         return patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get',
                      side_effect=lambda location, options: MagicMock(name=location))
 
+    def test_io_cache_routing_serves_only_the_table_of_the_token(self):
+        external = "oss://bkt/import/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"
+        resolved, _ = self._resolve_file_io(self._IO_CACHE_TOKEN)
+        self.assertEqual("default", resolved._routing.route(Op.READ, self._DATA))
+        self.assertIsNone(resolved._routing.route(Op.READ, external))
+
     def test_table_views_of_the_token_file_io(self):
         file_io = self._token_file_io()
         custom = self._TABLE + "/bucket-0/custom-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"

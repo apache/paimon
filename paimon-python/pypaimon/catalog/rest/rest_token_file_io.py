@@ -249,7 +249,7 @@ class RESTTokenFileIO(FileIO):
 
     def _create_file_io(self, options: Options) -> FileIO:
         properties = options.to_map()
-        routing = IoCacheRouting.create(properties)
+        routing = IoCacheRouting.create(properties, root=self.path)
         if routing is None or urlparse(self.path).scheme != "oss":
             return FileIO.get(self.path, options)
         self.log.info(

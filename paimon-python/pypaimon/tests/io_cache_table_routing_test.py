@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlparse
@@ -32,6 +33,7 @@ from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.row.blob import BlobDescriptor
 
 WAREHOUSE = "oss://bkt/warehouse"
 
@@ -116,6 +118,26 @@ class IoCacheTableRoutingTest(unittest.TestCase):
     def _read(table):
         read_builder = table.new_read_builder()
         return read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+
+    def _external_descriptor(self):
+        # Named like a Paimon data file, outside every table, and replaced on origin after the cache kept it.
+        uri = "oss://bkt/import/data-" + str(uuid.uuid4()) + "-1.png"
+        self._put(uri, b"NEW")
+        self._put(uri, b"OLD", retained=True)
+        return uri, BlobDescriptor(uri, 0, 3).serialize()
+
+    def test_descriptor_fields_are_read_from_origin(self):
+        pa_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            "row-tracking.enabled": "true", "data-evolution.enabled": "true",
+            "blob-descriptor-field": "payload"})
+        self.catalog.create_table("db.descriptors", schema, False)
+        table = self.catalog.get_table("db.descriptors")
+        uri, descriptor = self._external_descriptor()
+        self._write(table, pa.Table.from_pydict({"id": [1], "payload": [descriptor]}, schema=pa_schema))
+
+        self.assertEqual([b"NEW"], self._read(table).column("payload").to_pylist())
+        self.assertEqual([], self._target_reads("/import/"))
 
     def test_data_files_of_older_schema_prefixes_use_the_target(self):
         pa_schema = pa.schema([("id", pa.int32())])
