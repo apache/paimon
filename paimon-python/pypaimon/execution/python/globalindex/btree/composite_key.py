@@ -43,8 +43,11 @@ class CompositeKeySerializer(KeySerializer):
     def __init__(self, fields):
         self._types = [field.type.type.upper() for field in fields]
         self._serializers = [create_serializer(field.type) for field in fields]
-        self._comparators = [serializer.create_comparator()
-                             for serializer in self._serializers]
+        self._comparators = [
+            _java_float_compare if type_name in ('FLOAT', 'DOUBLE')
+            else serializer.create_comparator()
+            for type_name, serializer in zip(self._types, self._serializers)
+        ]
         self._header_size = (len(fields) + 15) // 8
 
     def serialize(self, key):
@@ -95,7 +98,8 @@ class CompositeKeySerializer(KeySerializer):
                 nanos = (_read_var_len_int(encoded, 8)[0]
                          if len(encoded) > 8 else 0)
                 result.append(_TimestampKey(milliseconds, nanos))
-            elif type_name in ('DATE', 'TIME'):
+            elif type_name == 'DATE' or (type_name.startswith('TIME')
+                                         and not type_name.startswith('TIMESTAMP')):
                 result.append(struct.unpack('<i', encoded)[0])
             else:
                 result.append(serializer.deserialize(encoded))
@@ -130,7 +134,8 @@ def _fixed_length(type_name):
         return 1
     if type_name == 'SMALLINT':
         return 2
-    if type_name in ('INT', 'INTEGER', 'DATE', 'TIME', 'FLOAT'):
+    if type_name in ('INT', 'INTEGER', 'DATE', 'FLOAT') or (
+            type_name.startswith('TIME') and not type_name.startswith('TIMESTAMP')):
         return 4
     if type_name in ('BIGINT', 'DOUBLE') or type_name.startswith(('DECIMAL', 'NUMERIC')):
         return 8
@@ -146,3 +151,15 @@ def compare_nullable(left, right, comparator):
     if right is None:
         return 1
     return comparator(left, right)
+
+
+def _java_float_compare(left, right):
+    left, right = float(left), float(right)
+    if math.isnan(left):
+        return 0 if math.isnan(right) else 1
+    if math.isnan(right):
+        return -1
+    if left == right == 0:
+        return (math.copysign(1, left) > math.copysign(1, right)) - (
+            math.copysign(1, left) < math.copysign(1, right))
+    return (left > right) - (left < right)

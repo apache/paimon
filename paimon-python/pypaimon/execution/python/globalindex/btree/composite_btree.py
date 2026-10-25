@@ -108,10 +108,13 @@ def _matches(value, predicate, comparator):
         return value is None
     if method == 'isNotNull':
         return value is not None
-    if value is None or any(literal is None for literal in values):
+    if value is None:
         return False
     if method == 'in':
-        return any(comparator(value, literal) == 0 for literal in values)
+        return any(literal is not None and comparator(value, literal) == 0
+                   for literal in values)
+    if any(literal is None for literal in values):
+        return False
     if method == 'equal':
         return comparator(value, values[0]) == 0
     if method == 'between':
@@ -132,13 +135,20 @@ def _literal_supported(type_name, literal):
     if type_name.startswith(('CHAR', 'VARCHAR', 'STRING')):
         return isinstance(literal, str)
     if type_name in ('FLOAT', 'DOUBLE'):
-        return isinstance(literal, numbers.Real) and not isinstance(literal, bool)
+        # Java orders signed zeros separately, while Python row filtering does not.
+        return (isinstance(literal, numbers.Real)
+                and not isinstance(literal, bool) and literal != 0)
     if type_name.startswith(('DECIMAL', 'NUMERIC')):
         return isinstance(literal, (Decimal, numbers.Integral)) and not isinstance(literal, bool)
     if type_name == 'DATE':
-        return isinstance(literal, (datetime.date, numbers.Integral))
-    if type_name == 'TIME':
-        return isinstance(literal, (datetime.time, numbers.Integral))
+        return ((isinstance(literal, datetime.date)
+                 and not isinstance(literal, datetime.datetime))
+                or isinstance(literal, numbers.Integral)
+                and not isinstance(literal, bool))
+    if type_name.startswith('TIME') and not type_name.startswith('TIMESTAMP'):
+        return (isinstance(literal, datetime.time)
+                or isinstance(literal, numbers.Integral)
+                and not isinstance(literal, bool))
     if type_name.startswith('TIMESTAMP'):
         return (isinstance(literal, datetime.datetime)
                 and not getattr(literal, 'nanosecond', 0))

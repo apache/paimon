@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from datetime import time
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -245,6 +246,8 @@ class CompositeBTreeFallbackTest(
                 builder.equal('a', 1), builder.equal('b', 1),
                 builder.equal('c', 2)]),
             builder.is_in('a', [1, 2]),
+            PredicateBuilder.and_predicates([
+                builder.equal('a', 1), builder.is_in('b', [2, None])]),
             builder.greater_than('a', 1),
             builder.is_not_null('b'),
             builder.less_than('b', 1.5),
@@ -322,6 +325,8 @@ class CompositeBTreeFallbackTest(
             fields, builder.is_in('a', list(range(257)))))
         self.assertEqual(256, len(plan_composite(
             fields, builder.is_in('a', list(range(256)))).intervals))
+        self.assertEqual(1, len(plan_composite(
+            fields, builder.is_in('a', [1, None])).intervals))
         self.assertIsNone(plan_composite(fields, builder.less_than('a', 1.5)))
         self.assertIsNone(plan_composite(fields, builder.equal('a', True)))
         unsupported = [DataField(0, 'a', AtomicType('BINARY')), fields[1]]
@@ -345,6 +350,30 @@ class CompositeBTreeFallbackTest(
             with self.subTest(row=row):
                 self.assertEqual(row, serializer.deserialize(bytes.fromhex(encoded)))
                 self.assertEqual(encoded, serializer.serialize(row).hex())
+
+    def test_float_keys_keep_java_order_and_zero_predicates_fall_back(self):
+        fields = [
+            DataField(0, 'a', AtomicType('FLOAT')),
+            DataField(1, 'b', AtomicType('INT')),
+        ]
+        serializer = CompositeKeySerializer(fields)
+        self.assertLess(serializer.create_comparator()((-0.0, 1), (0.0, 1)), 0)
+        builder = PredicateBuilder(fields)
+        self.assertIsNone(plan_composite(fields, builder.equal('a', 0.0)))
+        self.assertIsNone(plan_composite(fields, builder.greater_or_equal('a', -0.0)))
+
+    def test_time_precision_does_not_break_prefix_reads(self):
+        fields = [
+            DataField(0, 'a', AtomicType('INT')),
+            DataField(1, 't', AtomicType('TIME(3)')),
+        ]
+        serializer = CompositeKeySerializer(fields)
+        self.assertEqual((1, 123), serializer.deserialize(
+            serializer.serialize((1, time(0, 0, 0, 123000)))))
+        builder = PredicateBuilder(fields)
+        self.assertIsNotNone(plan_composite(fields, builder.equal('a', 1)))
+        self.assertIsNotNone(plan_composite(fields, PredicateBuilder.and_predicates([
+            builder.equal('a', 1), builder.equal('t', time(0, 0, 0, 123000))])))
 
     @pytest.mark.python_plan
     def test_corrupt_selected_composite_metadata_is_not_hidden(self):
