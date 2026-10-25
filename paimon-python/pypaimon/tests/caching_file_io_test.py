@@ -659,6 +659,24 @@ class CachingFileIOTest(unittest.TestCase):
         self.assertTrue(os.path.exists(out_path))
         self.assertEqual(table, pa.parquet.read_table(out_path))
 
+    def test_table_views_wrap_the_view_of_the_delegate(self):
+        from pypaimon.utils.file_type import FileType
+        delegate = MagicMock()
+        origin, table_view = MagicMock(), MagicMock()
+        delegate.origin_only.return_value = origin
+        delegate.for_table.side_effect = lambda path, prefixes, branch: table_view if prefixes else delegate
+        cache = LocalMemoryCacheManager(128, 64)
+        caching_io = CachingFileIO(delegate, cache, {FileType.DATA})
+
+        for view, expected in ((caching_io.origin_only(), origin),
+                               (caching_io.for_table("oss://bkt/t", ["custom-"], "main"), table_view)):
+            self.assertIsInstance(view, CachingFileIO)
+            self.assertIs(expected, view._delegate)
+            self.assertIs(cache, view._cache)
+            self.assertEqual({FileType.DATA}, view._whitelist)
+        # A delegate without anything to narrow keeps the wrapper.
+        self.assertIs(caching_io, caching_io.for_table("oss://bkt/t", [], "main"))
+
     def test_file_io_for_data_wraps_cache_when_data_token_enabled(self):
         from pypaimon.catalog.rest.rest_catalog import RESTCatalog
         from pypaimon.common.identifier import Identifier

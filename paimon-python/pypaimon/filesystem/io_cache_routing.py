@@ -17,10 +17,11 @@
 
 """Chooses the endpoint of each FileIO request from the io-cache.* keys of a table token."""
 
+import copy
 import os
 import re
 from enum import Enum
-from typing import Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, Iterable, List, Mapping, NamedTuple, Optional, Tuple
 
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.utils.file_type import FileType
@@ -38,6 +39,8 @@ _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 # What follows a data file prefix: {uuid}-{count}.{extension}, also after the postpone writer's
 # -u-{commit user}-s-{write id}-w-, or a paimon-rust BLOB pack {uuid}.managed.blob.
 _DATA_FILE_SUFFIX = re.compile(r"(?:-u-.+-s-[0-9]+-w-)?" + _UUID + r"-[0-9]+\..+|" + _UUID + r"\.managed\.blob")
+# A name that may be a data file under a prefix this routing has not seen yet.
+_DATA_FILE_NAME = re.compile(r".+?(?:" + _DATA_FILE_SUFFIX.pattern + r")")
 # Other types are routed only under the names Paimon writes (paimon-rust adds -changelog to changelog
 # manifests); Format Table files may be replaced in place.
 _PAIMON_FILE_NAMES = {
@@ -105,6 +108,12 @@ def _declared_targets(options: Mapping[str, str]) -> Dict[str, Optional[str]]:
     return endpoints
 
 
+def schema_file_prefixes(options) -> List[str]:
+    """The data-file.prefix and changelog-file.prefix a table schema sets."""
+    values = [options.get(key) for key in ("data-file.prefix", "changelog-file.prefix")]
+    return [value for value in values if value and value.strip()]
+
+
 def data_prefixes(options: Mapping[str, str]) -> Tuple[str, ...]:
     """Data file name prefixes: data- and changelog-, plus the table's own prefixes."""
     prefixes = ["data-", "changelog-"]
@@ -113,6 +122,10 @@ def data_prefixes(options: Mapping[str, str]) -> Tuple[str, ...]:
         if value and value.strip() and value not in prefixes:
             prefixes.append(value)
     return tuple(prefixes)
+
+
+def _new_prefixes(prefixes: Iterable[str], known: Tuple[str, ...]) -> Tuple[str, ...]:
+    return tuple(p for p in dict.fromkeys(prefixes) if p and p.strip() and p not in known)
 
 
 def routable_type(path: str, prefixes: Tuple[str, ...]) -> Optional[FileType]:
@@ -185,6 +198,7 @@ class IoCacheRouting:
         routes = options.get("io-cache.routes")
         self._routes = None if routes is None else _parse_routes(str(routes))
         self._prefixes = data_prefixes(options)
+        self._history: Optional[Callable[[], Iterable[str]]] = None
 
     @staticmethod
     def create(options: Mapping[str, str]) -> Optional['IoCacheRouting']:
@@ -194,6 +208,15 @@ class IoCacheRouting:
         policy = _parse_policy(options.get("io-cache.policy"))
         endpoints = _declared_targets(options)
         return IoCacheRouting(options, policy, endpoints) if policy and endpoints else None
+
+    def for_table(self, prefixes: Iterable[str],
+                  history: Optional[Callable[[], Iterable[str]]] = None) -> 'IoCacheRouting':
+        """This routing for the files of one table, also named with these prefixes, and with those
+        history() returns once a name that may be a data file matches no other."""
+        routing = copy.copy(self)
+        routing._prefixes = self._prefixes + _new_prefixes(prefixes, self._prefixes)
+        routing._history = history
+        return routing
 
     def targets(self) -> Dict[str, str]:
         """Endpoints of the targets that have one, by name, in declaration order."""
@@ -211,6 +234,11 @@ class IoCacheRouting:
         if op not in self._policy or not path.startswith("oss://"):
             return None
         file_type = routable_type(path, self._prefixes)
+        if file_type is None and self._history is not None and _DATA_FILE_NAME.fullmatch(
+                os.path.basename(path.rstrip("/"))):
+            # Files written before a prefix option changed keep their names.
+            known = self._prefixes
+            file_type = routable_type(path, known + _new_prefixes(self._history(), known))
         if file_type is None or file_type not in self._whitelist:
             return None
         if self._routes is None:

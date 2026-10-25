@@ -36,8 +36,10 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
-from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
-from pypaimon.filesystem.io_cache_routing import IoCacheRouting
+from pypaimon.filesystem.io_cache_file_io import (IoCacheRoutingFileIO,
+                                                  table_view_spec)
+from pypaimon.filesystem.io_cache_routing import (IoCacheRouting,
+                                                  schema_file_prefixes)
 
 
 class RESTTokenFileIO(FileIO):
@@ -67,6 +69,10 @@ class RESTTokenFileIO(FileIO):
     _FILE_IO_STATS = {"created": 0, "evicted": 0, "warned": False, "next_log": 0.0,
                       "fds": None, "next_scan": 0.0}
     _SHORT_TOKEN_STATS = {"count": 0, "next_log": 0.0}
+
+    # The table view each FileIO is built for, see FileIO.origin_only and for_table.
+    _origin_only = False
+    _table: Optional[tuple] = None
 
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Union[dict, Options]] = None):
@@ -129,8 +135,42 @@ class RESTTokenFileIO(FileIO):
         for file_io in list(cls._INSTANCES):
             file_io._token_lock = threading.Lock()
 
+    def origin_only(self) -> FileIO:
+        return self if self._origin_only else self._with_view(True, None)
+
+    def for_table(self, table_path: str, file_prefixes, branch: str) -> FileIO:
+        if self._origin_only:
+            return self
+        table = table_view_spec(self._table, table_path, file_prefixes, branch)
+        return self if table == self._table else self._with_view(False, table)
+
+    def _with_view(self, origin_only: bool, table) -> 'RESTTokenFileIO':
+        # Same token and caches; each FileIO it returns is the view of the cached one.
+        view = RESTTokenFileIO.__new__(RESTTokenFileIO)
+        view.__setstate__(self.__getstate__())
+        view.api_instance = self.api_instance
+        view._origin_only = origin_only
+        view._table = table
+        return view
+
+    def _table_view(self, file_io: FileIO) -> FileIO:
+        if self._origin_only:
+            return file_io.origin_only()
+        if self._table is None or not isinstance(file_io, IoCacheRoutingFileIO):
+            return file_io
+        return file_io.table_view(self._table, self._catalog_schema_prefixes)
+
+    def _catalog_schema_prefixes(self, branch: str):
+        # A REST catalog may keep a branch's schema without a schema directory in storage.
+        if self.api_instance is None:
+            self.api_instance = RESTApi(self.properties, False)
+        identifier = Identifier.create(self.identifier.get_database_name(), self.identifier.get_table_name(),
+                                       branch=None if branch == "main" else branch)
+        schema = self.api_instance.get_table(identifier).schema
+        return schema_file_prefixes(schema.options) if schema is not None else []
+
     def file_io(self) -> FileIO:
-        return self._file_io_with_token()[0]
+        return self._table_view(self._file_io_with_token()[0])
 
     def _file_io_with_token(self, minimum_validity_millis: int = 0):
         with self._token_lock:

@@ -17,15 +17,16 @@
 
 """FileIO that sends each request to an io-cache target or the origin endpoint."""
 
+import logging
 import os
 import threading
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import pyarrow.fs as pafs
 from pyarrow._fs import FileSystemHandler
 
 from pypaimon.common.file_io import FileIO
-from pypaimon.filesystem.io_cache_routing import IoCacheRouting, Op
+from pypaimon.filesystem.io_cache_routing import IoCacheRouting, Op, schema_file_prefixes
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
@@ -42,6 +43,41 @@ class IoCacheRoutingFileIO(FileIO):
         self._targets_lock = threading.Lock()
         self._pid = os.getpid()
         self._filesystem = pafs.PyFileSystem(_IoCacheRoutingHandler(self))
+        self._base = self
+        self._table: Optional[Tuple[str, Tuple[str, ...], Tuple[str, ...]]] = None
+        self._views: Dict[tuple, 'IoCacheRoutingFileIO'] = {}
+
+    def origin_only(self) -> FileIO:
+        return self._origin
+
+    def for_table(self, table_path: str, file_prefixes: Iterable[str], branch: str) -> FileIO:
+        return self._base.table_view(table_view_spec(self._table, table_path, file_prefixes, branch))
+
+    def table_view(self, table, catalog_prefixes=None) -> 'IoCacheRoutingFileIO':
+        """The view of this FileIO for table = (path, prefixes, branches), see table_view_spec;
+        catalog_prefixes(branch) adds the prefixes a catalog keeps outside the schema directory."""
+        view = self._views.get(table)
+        if view is not None:
+            return view
+        self._check_pid()
+        with self._targets_lock:
+            view = self._views.get(table)
+            if view is None:
+                table_path, prefixes, branches = table
+                history = _SchemaPrefixHistory(self._origin, table_path, branches, catalog_prefixes)
+                # The view takes its targets from this FileIO.
+                view = IoCacheRoutingFileIO(
+                    self._routing.for_table(prefixes, history), self._origin, self._file_io)
+                view._base, view._table = self, table
+                self._views[table] = view
+            return view
+
+    def _check_pid(self):
+        if self._pid != os.getpid():
+            # A forked child inherits the lock in whatever state a parent thread left it.
+            self._targets = {}
+            self._targets_lock = threading.Lock()
+            self._pid = os.getpid()
 
     @property
     def properties(self):
@@ -59,11 +95,7 @@ class IoCacheRoutingFileIO(FileIO):
         """Origin, or the FileIO of a target, created on first use."""
         if name is None:
             return self._origin
-        if self._pid != os.getpid():
-            # A forked child inherits the lock in whatever state a parent thread left it.
-            self._targets = {}
-            self._targets_lock = threading.Lock()
-            self._pid = os.getpid()
+        self._check_pid()
         file_io = self._targets.get(name)
         if file_io is not None:
             return file_io
@@ -201,6 +233,9 @@ class IoCacheRoutingFileIO(FileIO):
             path, data, avro_schema, compression, zstd_level, **kwargs))
 
     def close(self):
+        if self._base is not self:
+            # A table view shares the FileIOs of its base, which closes them.
+            return
         with self._targets_lock:
             targets = list(self._targets.values())
             self._targets.clear()
@@ -215,6 +250,63 @@ class IoCacheRoutingFileIO(FileIO):
         if origin is None:
             raise AttributeError(name)
         return getattr(origin, name)
+
+
+class _SchemaPrefixHistory:
+    """Data file prefixes of every schema of a table's branches, read from origin at most once."""
+
+    def __init__(self, origin: FileIO, table_path: str, branches: Tuple[str, ...],
+                 catalog_prefixes: Optional[Callable[[str], Iterable[str]]] = None):
+        self._origin = origin
+        self._table_path = table_path
+        self._branches = branches
+        self._catalog_prefixes = catalog_prefixes
+        self._prefixes: Optional[Tuple[str, ...]] = None
+        self._lock = threading.Lock()
+        self._pid = os.getpid()
+
+    def __call__(self) -> Tuple[str, ...]:
+        if self._prefixes is not None:
+            return self._prefixes
+        if self._pid != os.getpid():
+            self._lock = threading.Lock()
+            self._pid = os.getpid()
+        with self._lock:
+            if self._prefixes is None:
+                self._prefixes = self._load()
+            return self._prefixes
+
+    def _load(self) -> Tuple[str, ...]:
+        prefixes = []
+        for branch in self._branches:
+            prefixes += self._quietly(self._schema_directory_prefixes, branch)
+            if self._catalog_prefixes is not None:
+                prefixes += self._quietly(self._catalog_prefixes, branch)
+        return tuple(dict.fromkeys(prefixes))
+
+    def _schema_directory_prefixes(self, branch: str) -> List[str]:
+        from pypaimon.schema.schema_manager import SchemaManager
+        schemas = SchemaManager(self._origin, self._table_path, branch).list_all()
+        return [prefix for schema in schemas for prefix in schema_file_prefixes(schema.options)]
+
+    def _quietly(self, load: Callable[[str], Iterable[str]], branch: str) -> List[str]:
+        try:
+            return list(load(branch))
+        except Exception:
+            # Files with a prefix missed here are read from origin, which only loses io-cache.
+            logging.getLogger(__name__).warning(
+                "Failed to load schema file prefixes of %s (branch %s) for io-cache routing",
+                self._table_path, branch, exc_info=True)
+            return []
+
+
+def table_view_spec(table, table_path: str, file_prefixes: Iterable[str], branch: str):
+    """(path, prefixes, branches) of a table view; a copy of the same table keeps those it had."""
+    prefixes, branches = tuple(dict.fromkeys(file_prefixes)), (branch,)
+    if table is not None and table[0] == table_path:
+        prefixes = table[1] + tuple(p for p in prefixes if p not in table[1])
+        branches = table[2] + tuple(b for b in branches if b not in table[2])
+    return table_path, prefixes, branches
 
 
 class _IoCacheRoutingHandler(FileSystemHandler):

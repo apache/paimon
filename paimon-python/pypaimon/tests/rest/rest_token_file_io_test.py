@@ -1153,6 +1153,55 @@ class RESTTokenFileIOTest(unittest.TestCase):
             cluster[OssOptions.OSS_ENDPOINT.key()], cluster["fs.oss.second.level.domain.enable"],
             cluster[OssOptions.OSS_REGION.key()]))
 
+    def _token_file_io(self):
+        file_io = RESTTokenFileIO(self.identifier, self._TABLE, Options({}))
+        file_io.token = RESTToken(self._IO_CACHE_TOKEN, int(time.time() * 1000) + 7_200_000)
+        RESTTokenFileIO._FILE_IO_CACHE.clear()
+        return file_io
+
+    @staticmethod
+    def _patched_file_io_get():
+        return patch('pypaimon.catalog.rest.rest_token_file_io.FileIO.get',
+                     side_effect=lambda location, options: MagicMock(name=location))
+
+    def test_table_views_of_the_token_file_io(self):
+        file_io = self._token_file_io()
+        custom = self._TABLE + "/bucket-0/custom-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.parquet"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), self._patched_file_io_get():
+            base = file_io.file_io()
+            origin_only = file_io.origin_only()
+            self.assertIsInstance(origin_only, RESTTokenFileIO)
+            self.assertIs(base._origin, origin_only.file_io())
+            self.assertIs(origin_only, origin_only.for_table(self._TABLE, ["custom-"], "main"))
+
+            view = file_io.for_table(self._TABLE, ["custom-"], "main")
+            self.assertIsInstance(view, RESTTokenFileIO)
+            self.assertIs(view, view.for_table(self._TABLE, ["custom-"], "main"))
+            routed = view.file_io()
+            self.assertIs(routed, view.file_io())
+            self.assertEqual("default", routed._routing.route(Op.READ, custom))
+            self.assertIsNone(base._routing.route(Op.READ, custom))
+        restored = pickle.loads(pickle.dumps(view))
+        self.assertEqual((False, (self._TABLE, ("custom-",), ("main",))), (restored._origin_only, restored._table))
+        self.assertTrue(pickle.loads(pickle.dumps(origin_only))._origin_only)
+
+    def test_branch_views_take_the_prefixes_the_catalog_keeps_for_the_branch(self):
+        branch_file = self._TABLE + "/branch/branch-dev/bucket-0/dev-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-0.orc"
+        view = self._token_file_io().for_table(self._TABLE, [], "dev")
+        api = MagicMock()
+        api.get_table.return_value = MagicMock(schema=MagicMock(options={"data-file.prefix": "dev-"}))
+        view.api_instance = api
+        # No schema directory in storage: the REST catalog keeps the branch's schema.
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'), self._patched_file_io_get(), \
+                patch('pypaimon.schema.schema_manager.SchemaManager.list_all', return_value=[]):
+            routing = view.file_io()._routing
+            self.assertEqual("default", routing.route(Op.READ, branch_file))
+            self.assertEqual("default", routing.route(Op.READ, branch_file))
+        branch = api.get_table.call_args[0][0]
+        self.assertEqual(("default", "test_table", "dev"), (
+            branch.get_database_name(), branch.get_table_name(), branch.get_branch_name()))
+        api.get_table.assert_called_once()
+
     def test_io_cache_routing_off_without_target(self):
         token = dict(self._IO_CACHE_TOKEN)
         del token["io-cache.endpoint"]

@@ -490,6 +490,24 @@ class IoCacheRoutingTest(unittest.TestCase):
             routing = IoCacheRouting.create(self._options(**{key: "part-"}))
             self.assertEqual("default", routing.route(Op.READ, path))
 
+    def test_table_view_asks_the_schema_history_only_for_unknown_data_file_names(self):
+        asked = []
+
+        def history():
+            asked.append(1)
+            return ["older-", ""]
+
+        view = IoCacheRouting.create(self._options()).for_table(["newer-"], history)
+        uuid_count = UUID + "-0"
+        for path in (self.DATA, self.MANIFEST, self.TABLE + "/bucket-0/newer-" + uuid_count + ".parquet"):
+            self.assertEqual("default", view.route(Op.READ, path), path)
+        for path in (self.TABLE + "/snapshot/snapshot-3", self.TABLE + "/README"):
+            self.assertIsNone(view.route(Op.READ, path), path)
+        self.assertEqual([], asked)
+        self.assertEqual("default", view.route(Op.READ, self.TABLE + "/bucket-0/older-" + uuid_count + ".orc"))
+        self.assertIsNone(view.route(Op.READ, self.TABLE + "/bucket-0/other-" + uuid_count + ".orc"))
+        self.assertEqual(2, len(asked))
+
     def test_origin_options(self):
         options = self._options(**{
             "fs.oss.dlf-cache.consistent-hash.enabled": "true",

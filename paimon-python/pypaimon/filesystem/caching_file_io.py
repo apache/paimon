@@ -414,6 +414,16 @@ class CachingFileIO(FileIO):
         # Python 3.10 otherwise finds the delegate's hook through __getattr__.
         return self.__dict__.copy()
 
+    def origin_only(self) -> FileIO:
+        return self._with_delegate(self._delegate.origin_only())
+
+    def for_table(self, table_path: str, file_prefixes, branch: str) -> FileIO:
+        return self._with_delegate(self._delegate.for_table(table_path, file_prefixes, branch))
+
+    def _with_delegate(self, view: FileIO) -> FileIO:
+        # A view shares this wrapper's cache.
+        return self if view is self._delegate else CachingFileIO(view, self._cache, self._whitelist)
+
     # Fallback caps when local-cache.max-size is unset (memory shares the heap).
     _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
     _DEFAULT_DISK_CACHE_MAX_SIZE = 10 * 1024 * 1024 * 1024

@@ -92,6 +92,15 @@ class FileIO(ABC):
     File IO interface to read and write files.
     """
 
+    def origin_only(self) -> 'FileIO':
+        """A view that sends no request to an io-cache target, for files other writers may replace."""
+        return self
+
+    def for_table(self, table_path: str, file_prefixes: List[str], branch: str) -> 'FileIO':
+        """A view for one Paimon table: io-cache targets serve only its files under table_path, named
+        with these prefixes or those of the branch's schemas."""
+        return self
+
     @abstractmethod
     def new_input_stream(self, path: str):
         pass

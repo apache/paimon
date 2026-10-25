@@ -231,6 +231,37 @@ class IoCacheRoutingFileIOTest(unittest.TestCase):
             release.set()
             parent.join(10)
 
+    def test_forked_child_does_not_wait_on_the_parents_schema_history(self):
+        older = PARTITION + "/older-" + UUID + "-0.parquet"
+        self._put_all(older)
+        parent_pid = os.getpid()
+        listing, release = threading.Event(), threading.Event()
+
+        def list_all(manager):
+            # the parent stays inside the history lock until released; a forked child must not wait for it
+            if os.getpid() == parent_pid:
+                listing.set()
+                release.wait(30)
+            return [mock.Mock(options={"data-file.prefix": "older-"})]
+
+        with mock.patch("pypaimon.schema.schema_manager.SchemaManager.list_all", list_all):
+            view = self.file_io.for_table(TABLE, [], "main")
+            parent = threading.Thread(target=lambda: view.new_input_stream(older).read())
+            parent.start()
+            try:
+                self.assertTrue(listing.wait(10))
+                child = multiprocessing.get_context("fork").Process(
+                    target=lambda: os._exit(0 if view.new_input_stream(older).read() == b"cluster" else 1))
+                child.start()
+                child.join(10)
+                if child.exitcode is None:
+                    child.kill()
+                    child.join()
+                self.assertEqual(0, child.exitcode)
+            finally:
+                release.set()
+                parent.join(10)
+
     def test_reads_without_read_policy_use_origin(self):
         self._put_all(DATA)
         file_io = self._file_io(_routing(policy="meta"))
@@ -455,6 +486,52 @@ class IoCacheRoutingFileIOTest(unittest.TestCase):
         self.assertIs(self.origin.properties, self.file_io.properties)
         self.assertIs(self.origin.uri_reader_factory, self.file_io.uri_reader_factory)
         self.assertFalse(hasattr(self.file_io, "file_io"))
+
+    def test_origin_only_view_is_the_origin(self):
+        self._put_all(DATA, MANIFEST)
+        self.assertIs(self.origin, self.file_io.origin_only())
+        self.assertEqual(b"origin", self.file_io.origin_only().new_input_stream(DATA).read())
+        self.assertEqual([], self.created)
+
+    def test_table_views_share_the_targets_and_close_nothing(self):
+        custom = PARTITION + "/custom-" + UUID + "-0.parquet"
+        self._put_all(DATA, custom)
+        view = self.file_io.for_table(TABLE, ["custom-"], "main")
+        self.assertIs(view, self.file_io.for_table(TABLE, ["custom-"], "main"))
+        self.assertEqual(b"cluster", view.new_input_stream(custom).read())
+        self.assertEqual(b"origin", self.file_io.new_input_stream(custom).read())
+        self.assertEqual(["cluster"], self.created)
+        # A copy of the table keeps the prefixes of the view it was made from.
+        copy = view.for_table(TABLE, ["dynamic-"], "dev")
+        self.assertEqual((TABLE, ("custom-", "dynamic-"), ("main", "dev")), copy._table)
+        view.close()
+        copy.close()
+        self.assertEqual((False, False), (self.origin.closed, self.cluster.closed))
+
+    def test_schema_history_is_read_from_origin_once(self):
+        older = PARTITION + "/older-" + UUID + "-0.parquet"
+        self._put_all(older)
+        listed = []
+        schema = mock.Mock(options={"data-file.prefix": "older-"})
+
+        def list_all(manager):
+            listed.append((manager.file_io, manager.branch))
+            return [schema]
+
+        with mock.patch("pypaimon.schema.schema_manager.SchemaManager.list_all", list_all):
+            view = self.file_io.for_table(TABLE, [], "dev")
+            for _ in range(3):
+                self.assertEqual(b"cluster", view.new_input_stream(older).read())
+        self.assertEqual([(self.origin, "dev")], listed)
+
+    def test_schema_history_that_cannot_be_read_leaves_files_on_origin(self):
+        older = PARTITION + "/older-" + UUID + "-0.parquet"
+        self._put_all(older)
+        with mock.patch("pypaimon.schema.schema_manager.SchemaManager.list_all", side_effect=OSError("denied")), \
+                self.assertLogs("pypaimon.filesystem.io_cache_file_io", "WARNING"):
+            view = self.file_io.for_table(TABLE, [], "main")
+            self.assertEqual(b"origin", view.new_input_stream(older).read())
+            self.assertEqual(b"origin", view.new_input_stream(older).read())
 
 
 class _RecordingHandler(FileSystemHandler):
