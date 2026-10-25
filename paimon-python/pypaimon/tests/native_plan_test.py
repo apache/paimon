@@ -1199,6 +1199,35 @@ class NativePlanTest(unittest.TestCase):
             fake_df.Table.from_rest_response.assert_called_once_with(
                 'response', database='default', table='t', rest_options={})
 
+    def test_native_rest_cache_gives_the_core_the_origin_under_io_cache_routing(self):
+        import time
+
+        from pypaimon.catalog.rest.rest_token import RESTToken
+        from pypaimon.execution.native.table import _NativeRestTableCache
+
+        token = RESTToken({
+            'fs.oss.endpoint': 'http://cache.example.com',
+            'io-cache.enabled': 'true',
+            'io-cache.endpoint': 'http://cache.example.com',
+            'io-cache.origin.endpoint': 'https://origin.example.com',
+            'io-cache.policy': 'meta,read',
+            'fs.oss.dlf-cache.consistent-hash.enabled': 'true',
+        }, int(time.time() * 1000) + 7_200_000)
+        fake_df = ModuleType('pypaimon_rust.datafusion')
+        fake_df.Table = Mock()
+        with patch.dict(sys.modules, {'pypaimon_rust.datafusion': fake_df}):
+            _NativeRestTableCache().get('response', 'default', 't', {}, token_loader=lambda: token)
+            data_token = fake_df.Table.from_rest_response_with_token.call_args[1]['data_token']
+            self.assertEqual(('https://origin.example.com', 'true'),
+                             (data_token['fs.oss.endpoint'], data_token['fs.oss.https.enable']))
+            self.assertNotIn('fs.oss.dlf-cache.consistent-hash.enabled', data_token)
+
+            # dlf.oss-endpoint turns routing off, so the token keeps the endpoint it was given.
+            fake_df.Table.reset_mock()
+            options = {'dlf.oss-endpoint': 'oss-cn-test.example.com'}
+            _NativeRestTableCache().get('response', 'default', 't', options, token_loader=lambda: token)
+            self.assertEqual(token.token, fake_df.Table.from_rest_response_with_token.call_args[1]['data_token'])
+
     def test_native_rest_cache_retries_failed_construction(self):
         from pypaimon.execution.native.table import _NativeRestTableCache
 

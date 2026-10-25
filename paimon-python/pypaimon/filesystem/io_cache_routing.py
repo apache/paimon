@@ -175,9 +175,11 @@ def _with_endpoint(options: Dict[str, str], endpoint: Optional[str]) -> Dict[str
     return options
 
 
-def single_endpoint_options(options: Mapping[str, str]) -> Dict[str, str]:
-    """Options for a client that sends every request to one endpoint: the origin's under io-cache routing."""
-    routing = IoCacheRouting.create(options)
+def single_endpoint_options(options: Mapping[str, str],
+                            catalog_options: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """Options for a client that sends every request to one endpoint: the origin's under io-cache routing,
+    unless catalog_options turn routing off (dlf.oss-endpoint)."""
+    routing = IoCacheRouting.create({**(catalog_options or {}), **options})
     return dict(options) if routing is None else routing.origin_options(options)
 
 

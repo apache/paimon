@@ -25,6 +25,7 @@ from typing import Optional
 
 from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptions
 from pypaimon.common.options.options_utils import OptionsUtils
+from pypaimon.filesystem.io_cache_routing import single_endpoint_options
 
 
 def _native_blob_view_supported(table, read_names) -> bool:
@@ -201,9 +202,11 @@ class _NativeRestTableCache:
             if token is None:
                 return Table.from_rest_response(
                     response, database=database, table=table, rest_options=options)
+            # The native core cannot use io-cache targets per request, and fs.oss.endpoint may name the cache.
             return Table.from_rest_response_with_token(
                 response, database=database, table=table, rest_options=options,
-                data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
+                data_token=single_endpoint_options(token.token, options),
+                expires_at_millis=token.expire_at_millis)
 
         key = (response, database, table, tuple(sorted(options.items())))
         return self.get_or_create(key, create)
