@@ -2073,9 +2073,9 @@ class LeRobotValidationTest(unittest.TestCase):
             schema.names,
         )
         self.assertEqual(pa.int32(), schema.field("scalar").type)
-        self.assertEqual(pa.list_(pa.float32(), 3), schema.field("vector").type)
+        self.assertEqual(pa.list_(pa.float32()), schema.field("vector").type)
         self.assertEqual(
-            pa.list_(pa.list_(pa.float64(), 3)),
+            pa.list_(pa.list_(pa.float64())),
             schema.field("tensor").type,
         )
         self.assertEqual(pa.large_binary(), schema.field("image").type)
@@ -2094,6 +2094,20 @@ class LeRobotValidationTest(unittest.TestCase):
             pa.large_binary(),
             _schema_from_info(info).field("camera").type,
         )
+
+    def test_tensor_schema_uses_arrays_and_preserves_shape(self):
+        for shape in ([3], [2, 3], [2, 1, 3]):
+            with self.subTest(shape=shape):
+                field = _schema_from_info({"features": {
+                    "state": {"dtype": "float32", "shape": shape}
+                }}).field("state")
+                expected = pa.float32()
+                for unused_size in shape:
+                    expected = pa.list_(expected)
+                self.assertEqual(expected, field.type)
+                self.assertIn(
+                    "shape=" + json.dumps(shape, separators=(",", ":")),
+                    field.metadata[b"description"].decode("utf-8"))
 
     def test_existing_schema_preserves_lerobot_feature_contract(self):
         source = _schema_from_info({
@@ -2139,7 +2153,7 @@ class LeRobotValidationTest(unittest.TestCase):
             ),
             "array": pa.field(
                 "vector",
-                pa.list_(pa.float32()),
+                pa.list_(pa.float64()),
                 nullable=False,
                 metadata=source.field("vector").metadata,
             ),
@@ -2803,7 +2817,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 for field in table.raw_table.fields
             }
             self.assertEqual(
-                "VECTOR<FLOAT, 3> NOT NULL",
+                "ARRAY<FLOAT> NOT NULL",
                 field_types["observation.state"],
             )
             rows = table.scan().select([
@@ -2919,13 +2933,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     and ".vector." not in file.file_name
                 ),
             )
-            self.assertEqual(
-                [2, 3],
-                sorted(
-                    file.row_count for file in files
-                    if ".vector." in file.file_name
-                ),
-            )
+            self.assertFalse(any(".vector." in file.file_name for file in files))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -3682,6 +3690,26 @@ class LeRobotImportTest(unittest.TestCase):
                 else:
                     self.assertEqual(original[key], reread[key])
 
+    def test_training_reads_previously_imported_vector_features(self):
+        import torch
+
+        with patch("pypaimon.multimodal.lerobot.api._schema_from_info",
+                   side_effect=lambda info: _schema_from_info(info, legacy_vectors=True)):
+            self.connection.load_from_lerobot(
+                "legacy_vectors", self.image_source, batch_size=2)
+        table = self.connection.get_table("legacy_vectors")
+        self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", str(next(
+            field.type for field in table.raw_table.fields
+            if field.name == "observation.state")))
+        dataset = pmm.PaimonLeRobotDataset(table)
+        try:
+            row = dataset[0]
+            self.assertEqual((3,), tuple(row["observation.state"].shape))
+            self.assertEqual((2, 2), tuple(row["observation.matrix"].shape))
+            self.assertTrue(torch.equal(row["action"], torch.tensor([0.0, 0.0])))
+        finally:
+            dataset.close()
+
     def test_import_infers_schema_and_preserves_episodes(self):
         import pandas as pd
 
@@ -3693,12 +3721,12 @@ class LeRobotImportTest(unittest.TestCase):
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
         types = {field.name: str(field.type) for field in schema}
-        self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", types["observation.state"])
+        self.assertEqual("ARRAY<FLOAT> NOT NULL", types["observation.state"])
         self.assertEqual(
-            "ARRAY<VECTOR<FLOAT, 2>> NOT NULL",
+            "ARRAY<ARRAY<FLOAT>> NOT NULL",
             types["observation.matrix"],
         )
-        self.assertEqual("VECTOR<FLOAT, 2> NOT NULL", types["action"])
+        self.assertEqual("ARRAY<FLOAT> NOT NULL", types["action"])
         self.assertEqual("FLOAT NOT NULL", types["timestamp"])
         self.assertEqual("BIGINT NOT NULL", types["episode_index"])
         self.assertEqual("BLOB NOT NULL", types["observation.image"])

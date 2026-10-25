@@ -402,7 +402,7 @@ class LeRobotRayImportTest(unittest.TestCase):
                             table_name, self.source, parallelism=2)
                 before = json.loads(trace.read_text())
                 self.assertTrue(any(name.endswith(".parquet") for name in before), before)
-                self.assertTrue(any(".vector." in name for name in before), before)
+                self.assertFalse(any(".vector." in name for name in before), before)
                 self.assertTrue(any(name.endswith(".blob") for name in before), before)
                 table = self.conn.get_table(table_name).raw_table
                 self.assertIsNone(table.snapshot_manager().get_latest_snapshot())

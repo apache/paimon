@@ -121,8 +121,9 @@ unchanged snapshots, or choose a new name after repairing the group. Existing
 tags are never moved to different snapshots. Retain or delete component tags
 together, and keep writers paused until the call returns.
 
-Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
-`ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
+Scalars map to scalar types, numeric tensors to `ARRAY` (nested for higher ranks),
+and images to `BLOB`. Tensor shapes remain in the feature metadata; images keep
+their compressed bytes. Previously imported `VECTOR` features remain readable.
 
 Video features map to `BLOB`. Each MP4 is copied once per aligned file group and indexed for range
 reads. Imports require a bucket-unaware table and check rolling before each Episode. Use
