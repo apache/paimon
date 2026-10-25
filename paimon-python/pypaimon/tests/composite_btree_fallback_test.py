@@ -389,6 +389,41 @@ class CompositeBTreeFallbackTest(
         expected = self._rows(table.copy({'global-index.enabled': 'false'}), predicate)
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_plan
+    def test_composite_key_residual_keeps_fast_coverage(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table({
+            'a': [None, None, 1, 1], 'b': [None, 2, None, 1],
+        }, schema=self.pa_schema))
+        table.create_global_index('b')
+        self._write_arrow(table, pa.table({
+            'a': [1, 1, 2], 'b': [2, 2, 1],
+        }, schema=self.pa_schema))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        scalar_entries = IndexFileHandler(table).scan(snapshot)
+        composite = _java_composite_file()
+        entries = [IndexManifestEntry(0, GenericRow([], []), 0, composite)] + scalar_entries
+        builder = table.new_read_builder().new_predicate_builder()
+        predicate = PredicateBuilder.and_predicates([
+            builder.equal('a', 1), builder.not_equal('b', 1),
+        ])
+        expected = self._rows(table.copy({'global-index.enabled': 'false'}), predicate)
+        self.assertEqual([{'a': 1, 'b': 2}] * 2, expected)
+
+        with DataEvolutionGlobalIndexScanner.create(
+                table, index_files=[composite] + [entry.index_file for entry in scalar_entries],
+                snapshot=snapshot, allow_composite=True) as scanner:
+            evaluation = scanner.scan_with_coverage(predicate)
+            self.assertEqual([2, 3, 4, 5], evaluation.result.results().to_list())
+            self.assertEqual((Range(0, 6),), evaluation.indexed_ranges)
+
+        with patch.object(IndexFileHandler, 'scan', return_value=entries):
+            for mode in ('full', 'fast'):
+                with self.subTest(mode=mode):
+                    actual = self._rows(
+                        table.copy({'scalar-index.search-mode': mode}), predicate)
+                    self.assertEqual(expected, actual)
+
     def test_composite_plan_requires_left_prefix_and_bounded_in(self):
         fields = [
             DataField(0, 'a', AtomicType('INT')),

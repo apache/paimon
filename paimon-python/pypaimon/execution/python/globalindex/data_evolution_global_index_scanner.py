@@ -278,8 +278,16 @@ class DataEvolutionGlobalIndexScanner:
                 candidates, key=lambda candidate: candidate[:3])
             composite = self._read_composite(field_ids, fields, files, selected, plan)
             if predicate.method == 'and':
-                remaining = [child for child in _conjuncts(predicate)
-                             if not any(child is used for used in plan.covered_predicates)]
+                key_fields = {field.name for field in fields}
+                remaining = []
+                for child in _conjuncts(predicate):
+                    if any(child is used for used in plan.covered_predicates):
+                        continue
+                    referenced_fields = _get_all_fields(child)
+                    # Key residuals stay in the final row filter.
+                    if referenced_fields and referenced_fields <= key_fields:
+                        continue
+                    remaining.append(child)
                 if remaining:
                     rest = (remaining[0] if len(remaining) == 1
                             else Predicate('and', None, None, remaining))
