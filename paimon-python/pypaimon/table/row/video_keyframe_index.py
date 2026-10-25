@@ -234,12 +234,58 @@ class VideoKeyframeIndex:
 
     @classmethod
     def deserialize(cls, data, payload_length=None):
+        import numpy as np
+
         metadata_count, keyframe_count, entries_offset = cls._read_header(data)
-        return cls(
-            cls._iter_metadata_ranges(data, metadata_count, payload_length),
-            cls._iter_keyframes(
-                data, entries_offset, keyframe_count, payload_length),
-        )
+        metadata_ranges = []
+        for start, length in cls._iter_metadata_ranges(
+                data, metadata_count, payload_length):
+            if (metadata_ranges
+                    and sum(metadata_ranges[-1]) == start):
+                previous_start, previous_length = metadata_ranges[-1]
+                metadata_ranges[-1] = (previous_start, previous_length + length)
+            else:
+                metadata_ranges.append((start, length))
+
+        # The header caps this buffer at 1.5 MiB. One extra byte detects
+        # excess output without expanding an untrusted compressed stream.
+        expected_size = keyframe_count * cls.ENTRY.size
+        decoder = zlib.decompressobj()
+        try:
+            raw = decoder.decompress(
+                memoryview(data)[entries_offset:], expected_size + 1)
+        except zlib.error as error:
+            raise ValueError(
+                "Invalid video keyframe index payload."
+            ) from error
+        if (len(raw) != expected_size or not decoder.eof
+                or decoder.unused_data or decoder.unconsumed_tail):
+            raise ValueError("Invalid video keyframe index entries.")
+
+        # ENTRY '<qqq': ordinal, PTS and packet position are little-endian int64.
+        entries = np.frombuffer(raw, dtype='<i8').reshape(keyframe_count, 3)
+        if entries[0, 0] != 0:
+            raise ValueError("Video keyframe index requires an initial keyframe.")
+        # Compare directly: subtraction can overflow for signed PTS values.
+        if np.any(entries[1:, 0] <= entries[:-1, 0]):
+            raise ValueError("Keyframe ordinals must be strictly increasing.")
+        if np.any(entries[1:, 1] <= entries[:-1, 1]):
+            raise ValueError("Keyframe timestamps must be strictly increasing.")
+        if (entries[0, 2] < 0
+                or np.any(entries[1:, 2] <= entries[:-1, 2])
+                or (payload_length is not None
+                    and int(entries[-1, 2]) >= payload_length)):
+            raise ValueError(
+                "Keyframe packet positions must be within the "
+                "video payload and strictly increasing."
+            )
+
+        # Both sections have already been validated. Preserve Python tuples
+        # without repeating per-entry normalization and validation in __init__.
+        result = cls.__new__(cls)
+        result.metadata_ranges = tuple(metadata_ranges)
+        result.keyframes = tuple(cls.ENTRY.iter_unpack(raw))
+        return result
 
     @classmethod
     def _read_header(cls, data):
