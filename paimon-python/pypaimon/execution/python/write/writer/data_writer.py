@@ -604,8 +604,9 @@ class DataWriter(ABC):
                 "null_counts": column_array.null_count,
             }
         
-        min_values = pc.min(column_array).as_py()
-        max_values = pc.max(column_array).as_py()
+        minmax = pc.min_max(column_array)
+        min_values = minmax["min"].as_py()
+        max_values = minmax["max"].as_py()
         null_counts = column_array.null_count
         return {
             "min_values": min_values,
