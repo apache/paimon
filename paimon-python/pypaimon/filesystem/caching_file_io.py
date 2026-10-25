@@ -303,9 +303,10 @@ class CachingInputStream:
         if size <= 0 or self._pos >= self._get_file_size():
             return b''
 
-        end = min(self._pos + size, self._get_file_size())
-        result = self.read_at(end - self._pos, self._pos)
-        self._pos = end
+        position = self._pos
+        end = min(position + size, self._get_file_size())
+        result = self.read_at(end - position, position)
+        self._pos = position + len(result)
         return result
 
     def read_at(self, nbytes: int, offset: int) -> bytes:
@@ -348,13 +349,19 @@ class CachingInputStream:
                 offset = (batch_start + begin) * block_size
                 end = min((batch_start + i) * block_size, self._get_file_size())
                 data = self._read_remote(offset, end - offset)
-                if len(data) != end - offset:
-                    raise OSError("Incomplete cache range read")
+                if len(data) > end - offset:
+                    raise OSError("Cache range read exceeded request")
+                complete = len(data) == end - offset
                 for j in range(begin, i):
                     lo = (j - begin) * block_size
                     block = data[lo:lo + block_size]
-                    self._cache.put_block(self._file_path, batch_start + j, block)
+                    if not block:
+                        break
+                    if complete:
+                        self._cache.put_block(self._file_path, batch_start + j, block)
                     yield batch_start + j, block
+                if not complete:
+                    return
 
     def _read_remote(self, offset: int, size: int) -> bytes:
         stream = self._get_remote_stream()

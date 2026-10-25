@@ -323,17 +323,28 @@ class CachingInputStreamTest(unittest.TestCase):
                     for call in remote.call_args_list:
                         self.assertLessEqual(call.args[1], max(block_size, 8 * 1024 * 1024))
 
-    def test_coalesced_short_response_does_not_populate_cache(self):
+    def test_coalesced_short_response_returns_uncached_prefix(self):
         data = b"abcdefghijkl"
         cache = LocalMemoryCacheManager(1024, block_size=4)
         stream = CachingInputStream(self._make_file_io(data), "test", cache)
         with patch.object(stream, '_read_remote', return_value=data[:-1]):
-            with self.assertRaisesRegex(OSError, "Incomplete cache range read"):
-                stream.read()
-        self.assertEqual(0, stream.tell())
+            self.assertEqual(data[:-1], stream.read())
+        self.assertEqual(len(data) - 1, stream.tell())
         for i in range(3):
             self.assertIsNone(cache.get_block("test", i))
+        self.assertEqual(data[-1:], stream.read())
+        stream.seek(0)
         self.assertEqual(data, stream.read())
+
+    def test_coalesced_short_response_stops_before_cached_hole(self):
+        data = b"abcdefghijkl"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        cache.put_block("test", 2, data[8:12])
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        with patch.object(stream, '_read_remote', return_value=b"abc"):
+            self.assertEqual(b"abc", stream.read_at(12, 0))
+        self.assertEqual(0, stream.tell())
+        self.assertIsNone(cache.get_block("test", 0))
 
     def test_coalesced_positioned_source(self):
         data = b"abcdefghijkl"
