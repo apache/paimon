@@ -16,6 +16,9 @@
 # under the License.
 
 import unittest
+import shutil
+import tempfile
+import threading
 from datetime import time
 from dataclasses import replace
 from decimal import Decimal
@@ -37,14 +40,17 @@ from pypaimon.execution.python.globalindex.btree.composite_btree import (
     plan_composite,
 )
 from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.execution.python.globalindex.btree.btree_index_reader import BTreeIndexReader
 from pypaimon.execution.python.globalindex.btree.composite_key import (
     CompositeKeySerializer,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.execution.python.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 from pypaimon.table.row.generic_row import GenericRow
@@ -538,6 +544,90 @@ class CompositeBTreeFallbackTest(
         with patch.object(IndexFileHandler, 'scan', return_value=[entry]):
             with self.assertRaises(CompositeIndexReadError):
                 self._rows(table, predicate)
+
+    def test_unused_composite_preserves_scalar_read_parallelism(self):
+        fields = [DataField(i, name, AtomicType('INT'))
+                  for i, name in enumerate(('a', 'b', 'x', 'y'))]
+        builder = PredicateBuilder(fields)
+        predicate = PredicateBuilder.and_predicates([
+            builder.equal('b', 1), builder.equal('x', 1), builder.equal('y', 1),
+        ])
+        file_io = LocalFileIO()
+        with tempfile.TemporaryDirectory() as index_path:
+            scalar_files = []
+            for field in fields[1:]:
+                writer = BTreeIndexWriter(
+                    file_io, index_path, create_serializer(field.type))
+                writer.write(1, 0)
+                written = writer.finish()[0]
+                scalar_files.append(IndexFileMeta(
+                    index_type='btree', file_name=written.file_name,
+                    file_size=file_io.get_file_size(index_path + '/' + written.file_name),
+                    row_count=7,
+                    global_index_meta=GlobalIndexMeta(
+                        0, 6, field.id, None, written.meta),
+                ))
+
+            gate = threading.Barrier(3, timeout=3)
+            original = BTreeIndexReader.__init__
+
+            def concurrent_init(reader, *args, **kwargs):
+                gate.wait()
+                original(reader, *args, **kwargs)
+
+            with patch.object(BTreeIndexReader, '__init__', concurrent_init):
+                with DataEvolutionGlobalIndexScanner(
+                        fields, file_io, index_path, scalar_files,
+                        thread_num=3, composite_files=[_java_composite_file()]) as scanner:
+                    evaluation = scanner.scan_with_coverage(predicate)
+            self.assertEqual([0], evaluation.result.results().to_list())
+            self.assertEqual(frozenset((1, 2, 3)), evaluation.contributing_field_ids)
+
+    def test_distinct_composite_files_initialize_concurrently(self):
+        fields = [DataField(i, name, AtomicType('INT'))
+                  for i, name in enumerate(('a', 'b'))]
+        builder = PredicateBuilder(fields)
+        predicate = PredicateBuilder.and_predicates([
+            builder.equal('a', 1), builder.equal('b', 2),
+        ])
+        source = _java_composite_file()
+        file_io = LocalFileIO()
+        with tempfile.TemporaryDirectory() as index_path:
+            files = []
+            for i in range(8):
+                path = str(Path(index_path) / ('shard-%d.btree' % i))
+                shutil.copyfile(source.external_path, path)
+                files.append(replace(
+                    source, file_name=Path(path).name, external_path=path,
+                    global_index_meta=replace(
+                        source.global_index_meta,
+                        row_range_start=i * 7, row_range_end=i * 7 + 6)))
+            files.append(replace(
+                files[0], global_index_meta=replace(
+                    files[0].global_index_meta,
+                    row_range_start=56, row_range_end=62)))
+
+            gate = threading.Barrier(8, timeout=3)
+            opened = []
+            lock = threading.Lock()
+            original = CompositeBTreeIndexReader.__init__
+
+            def concurrent_init(reader, *args, **kwargs):
+                with lock:
+                    opened.append(args[-1].external_path)
+                gate.wait()
+                original(reader, *args, **kwargs)
+
+            with patch.object(CompositeBTreeIndexReader, '__init__', concurrent_init):
+                with DataEvolutionGlobalIndexScanner(
+                        fields, file_io, index_path, [], thread_num=8,
+                        composite_files=files) as scanner:
+                    evaluation = scanner.scan_with_coverage(predicate)
+            self.assertEqual(8, len(opened))
+            self.assertEqual(8, len(set(opened)))
+            self.assertEqual(sorted([offset + row for offset in range(0, 63, 7)
+                                     for row in (4, 5)]),
+                             evaluation.result.results().to_list())
 
     @staticmethod
     def _rows(table, predicate):

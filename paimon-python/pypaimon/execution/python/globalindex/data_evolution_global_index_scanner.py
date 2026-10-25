@@ -71,6 +71,7 @@ class DataEvolutionGlobalIndexScanner:
         self._composite_groups = _group_composite_files(composite_files or [])
         self._composite_readers = {}
         self._composite_reader_lock = threading.Lock()
+        self._composite_reader_locks = {}
         self._coverage = (
             DataEvolutionGlobalIndexCoverage(table, snapshot, partition_filter, index_files)
             if table is not None
@@ -296,9 +297,39 @@ class DataEvolutionGlobalIndexScanner:
             return composite
 
         if predicate.method in ('and', 'or'):
-            evaluations = [self._evaluate(child) for child in predicate.literals]
+            scalar_children = []
+            composite_children = []
+            for child in predicate.literals:
+                if self._may_use_composite(child):
+                    composite_children.append(child)
+                else:
+                    scalar_children.append(child)
+            if not composite_children:
+                return self._evaluator.evaluate_with_contributing_fields(predicate)
+            scalar_future = None
+            if scalar_children:
+                scalar = (scalar_children[0] if len(scalar_children) == 1
+                          else Predicate(predicate.method, None, None, scalar_children))
+                scalar_future = self._evaluator._visit_async(scalar)
+            evaluations = [self._evaluate(child) for child in composite_children]
+            if scalar_future is not None:
+                evaluations.append(scalar_future.result())
             return self._combine_evaluations(evaluations, predicate.method)
         return self._evaluator.evaluate_with_contributing_fields(predicate)
+
+    def _may_use_composite(self, predicate):
+        from pypaimon.execution.python.globalindex.btree.composite_btree import plan_composite
+
+        fields_by_id = {field.id: field for field in self._fields}
+        predicate_fields = _get_all_fields(predicate)
+        for field_ids in self._composite_groups:
+            if (all(field_id in fields_by_id for field_id in field_ids)
+                    and fields_by_id[field_ids[0]].name in predicate_fields):
+                fields = [fields_by_id[field_id] for field_id in field_ids]
+                if plan_composite(fields, predicate) is not None:
+                    return True
+        return (predicate.method in ('and', 'or')
+                and any(self._may_use_composite(child) for child in predicate.literals))
 
     def _combine_evaluations(self, evaluations, method):
         if method == 'or' and any(item is None for item in evaluations):
@@ -375,10 +406,17 @@ class DataEvolutionGlobalIndexScanner:
                 key = (field_ids, io_meta.external_path or io_meta.file_name)
                 with self._composite_reader_lock:
                     reader = self._composite_readers.get(key)
-                    if reader is None:
-                        reader = CompositeBTreeIndexReader(
-                            serializer, self._file_io, self._index_path, io_meta)
-                        self._composite_readers[key] = reader
+                    reader_lock = (self._composite_reader_locks.setdefault(
+                        key, threading.Lock()) if reader is None else None)
+                if reader is None:
+                    with reader_lock:
+                        with self._composite_reader_lock:
+                            reader = self._composite_readers.get(key)
+                        if reader is None:
+                            reader = CompositeBTreeIndexReader(
+                                serializer, self._file_io, self._index_path, io_meta)
+                            with self._composite_reader_lock:
+                                self._composite_readers[key] = reader
                 return reader.query(plan).offset(range_.from_)
             futures.append(self._executor.submit(read))
         result = GlobalIndexResult.create_empty()
