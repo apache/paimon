@@ -49,6 +49,7 @@ from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.filesystem.oss_file_io import OssFileIO
+from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.file_type import FileType
@@ -789,6 +790,30 @@ def test_routed_writes_create_parent_directories_on_origin(write):
     targets = {"accel": _legacy_oss_file_io([]), "cluster": _legacy_oss_file_io(target)}
     write(IoCacheRoutingFileIO(_routing(policy="meta,read,write"), _legacy_oss_file_io(origin),
                                targets.__getitem__), DATA)
+    assert "create_dir" in unrouted
+    assert target == ["open_output_stream"]
+    assert origin == [call for call in unrouted if call != "open_output_stream"]
+
+
+@pytest.mark.parametrize("write", [
+    lambda f, p: f.new_output_stream(p).close(),
+    lambda f, p: f.write_parquet(p, pa.table({"a": [1]})),
+    lambda f, p: f.write_file(p, "x"),
+], ids=["new_output_stream", "write_parquet", "write_file"])
+def test_routed_writes_through_resolving_file_ios_create_parent_directories_on_origin(write):
+    # With resolving-file-io.enabled, origin and targets are ResolvingFileIOs over the OSS FileIOs.
+    unrouted, origin, target = [], [], []
+    write(_legacy_oss_file_io(unrouted), DATA)
+    calls = {"origin": origin, "accel": [], "cluster": target}
+
+    def resolving(name):
+        return ResolvingFileIO(Options({"endpoint": name}))
+
+    def resolve(path, options):
+        return _legacy_oss_file_io(calls[options.to_map()["endpoint"]])
+
+    with mock.patch.object(FileIO, "get", side_effect=resolve):
+        write(IoCacheRoutingFileIO(_routing(policy="meta,read,write"), resolving("origin"), resolving), DATA)
     assert "create_dir" in unrouted
     assert target == ["open_output_stream"]
     assert origin == [call for call in unrouted if call != "open_output_stream"]

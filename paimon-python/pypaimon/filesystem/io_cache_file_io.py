@@ -28,6 +28,7 @@ from pyarrow._fs import FileSystemHandler
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting, Op, schema_file_prefixes
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
 
 
 class IoCacheRoutingFileIO(FileIO):
@@ -103,7 +104,7 @@ class IoCacheRoutingFileIO(FileIO):
             file_io = self._targets.get(name)
             if file_io is None:
                 file_io = self._create_target(name)
-                if isinstance(file_io, PyArrowFileIO):
+                if isinstance(file_io, (PyArrowFileIO, ResolvingFileIO)):
                     file_io.creates_parent_dirs = False
                     file_io.cleans_up_failed_writes = False
                 self._targets[name] = file_io

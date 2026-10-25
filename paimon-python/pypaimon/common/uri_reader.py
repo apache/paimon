@@ -179,7 +179,8 @@ class UriReaderFactory:
             uri_string = parsed_uri.geturl()
             file_io = FileIO.get(uri_string, self.catalog_options)
             self._owned_file_ios.append(file_io)
-            return UriReader.from_file(file_io)
+            # This FileIO serves no table, so the URIs of row data it reads come from origin.
+            return UriReader.from_file(file_io.origin_only())
         except Exception as e:
             raise RuntimeError(f"Failed to create reader for URI {parsed_uri.geturl()}") from e
 

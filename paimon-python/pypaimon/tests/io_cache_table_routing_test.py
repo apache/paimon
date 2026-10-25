@@ -26,13 +26,22 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlparse
 
+import io
+
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.format.format_table import Format, FormatTable
 from pypaimon.table.row.blob import BlobDescriptor
 
 WAREHOUSE = "oss://bkt/warehouse"
@@ -56,6 +65,16 @@ class _Endpoint(LocalFileIO):
             return Path(self.retained, key)
         return Path(self.root, key)
 
+    def list_status(self, path):
+        # Children keep the oss:// form of the listed path, as an OSS listing returns them.
+        statuses = super().list_status(path)
+        if urlparse(path).scheme != "oss":
+            return statuses
+        children = [self.get_file_status(path.rstrip("/") + "/" + Path(status.path).name) for status in statuses]
+        for child in children:
+            child.path = child.original_path
+        return children
+
     def new_input_stream(self, path):
         self.requests.append(path)
         return super().new_input_stream(path)
@@ -69,6 +88,8 @@ class _Endpoint(LocalFileIO):
 class IoCacheTableRoutingTest(unittest.TestCase):
     """Origin holds the current objects; the target serves what it retained, as a stale cache would."""
 
+    CATALOG_OPTIONS = {}
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="io_cache_table_routing_test_")
         storage = os.path.join(self.temp_dir, "storage")
@@ -78,7 +99,7 @@ class IoCacheTableRoutingTest(unittest.TestCase):
         patcher = mock.patch("pypaimon.catalog.filesystem_catalog.FileIO.get", side_effect=self._file_io)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.catalog = CatalogFactory.create({"warehouse": WAREHOUSE})
+        self.catalog = CatalogFactory.create(dict(self.CATALOG_OPTIONS, warehouse=WAREHOUSE))
         self.catalog.create_database("db", False)
 
     def tearDown(self):
@@ -170,6 +191,32 @@ class IoCacheTableRoutingTest(unittest.TestCase):
         self.assertEqual([1], self._read(copy).column("id").to_pylist())
         self.assertTrue(self._target_reads("/dev-"))
 
+    def test_format_table_files_replaced_on_origin_are_read_from_origin(self):
+        pa_schema = pa.schema([("id", pa.int32())])
+        self.catalog.create_table("db.format_schema", Schema.from_pyarrow_schema(pa_schema), False)
+        source = self.catalog.get_table("db.format_schema")
+        location = WAREHOUSE + "/db.db/format_files"
+        # Another writer replaced a file named like a Paimon data file after the cache kept it.
+        path = location + "/data-" + str(uuid.uuid4()) + "-1.parquet"
+        for value, retained in ((2, False), (1, True)):
+            buffer = io.BytesIO()
+            pq.write_table(pa.Table.from_pydict({"id": [value]}, schema=pa_schema), buffer)
+            self._put(path, buffer.getvalue(), retained)
+        # Rooted at the Format Table's own location, as the FileIO a REST catalog builds for it.
+        file_io = self.catalog.file_io.for_table(location, [], "main")
+        table = FormatTable(file_io, source.identifier, source.table_schema, location, Format.parse("parquet"))
+
+        self.assertEqual([2], self._read(table).column("id").to_pylist())
+        self.assertEqual([], self._target_reads("/format_files/"))
+
+    def test_uri_readers_that_serve_no_table_read_from_origin(self):
+        uri, _ = self._external_descriptor()
+        # Factories and source readers built from catalog options create FileIOs for no table.
+        self.assertEqual(b"NEW", UriReaderFactory(Options({})).create(uri).new_input_stream(uri).read())
+        with _SourceFileIO(Options({})).new_input_stream(uri) as stream:
+            self.assertEqual(b"NEW", stream.read())
+        self.assertEqual([], self._target_reads("/import/"))
+
     def test_table_files_named_like_external_objects_still_use_the_target(self):
         pa_schema = pa.schema([("id", pa.int32())])
         self.catalog.create_table("db.plain", Schema.from_pyarrow_schema(pa_schema), False)
@@ -179,6 +226,21 @@ class IoCacheTableRoutingTest(unittest.TestCase):
 
         self.assertEqual([7], self._read(table).column("id").to_pylist())
         self.assertTrue(self._target_reads("/db.db/plain/bucket-0/data-"))
+
+
+class IoCacheResolvingTableRoutingTest(IoCacheTableRoutingTest):
+    """The same tables through a ResolvingFileIO, which resolves the routing FileIO of each path."""
+
+    CATALOG_OPTIONS = {CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(): "true"}
+
+    def _file_io(self, path, options=None):
+        if options is not None and options.get(CatalogOptions.RESOLVING_FILE_IO_ENABLED):
+            return ResolvingFileIO(options)
+        return super()._file_io(path, options)
+
+    def test_tables_take_views_of_the_resolving_file_io(self):
+        self.catalog.create_table("db.resolved", Schema.from_pyarrow_schema(pa.schema([("id", pa.int32())])), False)
+        self.assertIsInstance(self.catalog.get_table("db.resolved").file_io, ResolvingFileIO)
 
 
 if __name__ == "__main__":
