@@ -54,6 +54,8 @@ from pypaimon.multimodal.lerobot.dataset import (
     _decode_video_frames,
     _decode_video_rows,
     _decode_video_windows,
+    _episode_ranges,
+    _episode_tasks,
     _image_tensor,
     _index_names,
     _open_video_decoder,
@@ -1005,6 +1007,35 @@ class LeRobotValidationTest(unittest.TestCase):
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
         finally:
             collator.close()
+
+    def test_custom_episode_transform_keeps_cross_column_inputs(self):
+        try:
+            from datasets import Dataset
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        episodes = Dataset.from_dict({
+            "episode_index": [0, 1],
+            "dataset_from_index": [0, 1],
+            "dataset_to_index": [1, 3],
+            "length": [0, 0],
+            "stats": [1, 2],
+        })
+
+        def transform(batch):
+            return dict(batch, length=batch["stats"], tasks=[
+                ["pick" if index == 0 else "place"]
+                for index in batch["episode_index"]
+            ])
+
+        for source in (episodes, episodes.add_column(
+                "tasks", [["old"], ["old"]])):
+            with self.subTest(physical_tasks="tasks" in source.column_names):
+                metadata = {"episodes": source.with_transform(transform)}
+                self.assertEqual([(0, 1), (1, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), ("place",)),
+                                 _episode_tasks(metadata))
 
     def test_dataset_requires_supported_python(self):
         with patch(

@@ -1026,9 +1026,10 @@ def _metadata_member(metadata, name, default=None):
 def _episode_rows(episodes, columns):
     if hasattr(episodes, "select_columns"):
         dataset_format = getattr(episodes, "format", None)
-        if isinstance(dataset_format, Mapping) and \
-                dataset_format.get("columns") != episodes.column_names:
-            # Projection can reveal columns hidden by Dataset.with_format().
+        if isinstance(dataset_format, Mapping) and (
+                dataset_format.get("type") == "custom"
+                or dataset_format.get("columns") != episodes.column_names):
+            # Custom transforms can read or create columns.
             for ordinal in range(len(episodes)):
                 yield episodes[ordinal]
             return
