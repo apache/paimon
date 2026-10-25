@@ -23,6 +23,7 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -38,6 +39,8 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -172,7 +175,52 @@ class TableFileIOViewTest {
             assertThat(
                             new TableFileIOViews.SchemaFilePrefixHistory(table.location(), "dev")
                                     .filePrefixes(LocalFileIO.create()))
-                    .containsExactly("main-", "branch-");
+                    .containsExactlyInAnyOrder("main-", "branch-");
+        }
+    }
+
+    @Test
+    void testFileIOsWithoutViewsStayTheSameInstance() throws Exception {
+        // a decorator that forwards every FileIO method, default ones included
+        LocalFileIO local = LocalFileIO.create();
+        FileIO forwarding =
+                (FileIO)
+                        Proxy.newProxyInstance(
+                                FileIO.class.getClassLoader(),
+                                new Class<?>[] {FileIO.class},
+                                (proxy, method, args) -> {
+                                    try {
+                                        return method.invoke(local, args);
+                                    } catch (InvocationTargetException e) {
+                                        throw e.getCause();
+                                    }
+                                });
+        FormatTable formatTable =
+                FormatTable.builder()
+                        .fileIO(forwarding)
+                        .identifier(Identifier.create("db", "format"))
+                        .rowType(RowType.of(DataTypes.INT()))
+                        .partitionKeys(Collections.emptyList())
+                        .location(tempDir.resolve("format").toUri().toString())
+                        .format(FormatTable.Format.PARQUET)
+                        .options(Collections.emptyMap())
+                        .build();
+        assertThat(formatTable.fileIO()).isSameAs(forwarding);
+        ObjectTable objectTable =
+                ObjectTable.builder()
+                        .fileIO(forwarding)
+                        .identifier(Identifier.create("db", "objects"))
+                        .location(tempDir.resolve("objects").toUri().toString())
+                        .options(Collections.emptyMap())
+                        .build();
+        assertThat(objectTable.fileIO()).isSameAs(forwarding);
+        try (FileSystemCatalog catalog =
+                new FileSystemCatalog(forwarding, new Path(tempDir.toUri().toString()))) {
+            catalog.createDatabase("db", false);
+            Identifier identifier = Identifier.create("db", "t");
+            catalog.createTable(
+                    identifier, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
+            assertThat(catalog.getTable(identifier).fileIO()).isSameAs(forwarding);
         }
     }
 
@@ -187,7 +235,7 @@ class TableFileIOViewTest {
     }
 
     /** A FileIO that records the views tables take. */
-    private static class ViewFileIO extends LocalFileIO {
+    private static class ViewFileIO extends LocalFileIO implements IoCacheViewableFileIO {
 
         private static final long serialVersionUID = 1L;
 

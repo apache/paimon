@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -76,7 +77,7 @@ public class UriReaderFactoryTest {
     @Test
     public void testFilesOfDescriptorsAreReadFromTheOriginOfTheCreatedFileIO() throws Exception {
         // a descriptor may name a file another writer replaces, and no table owns it here
-        FileIO created = mock(FileIO.class);
+        IoCacheViewableFileIO created = mock(IoCacheViewableFileIO.class);
         FileIO originOnly = mock(FileIO.class);
         when(created.originOnly()).thenReturn(originOnly);
         FileIOLoader loader = mock(FileIOLoader.class);

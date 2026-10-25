@@ -20,6 +20,7 @@ package org.apache.paimon.table.object;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -94,7 +95,7 @@ public interface ObjectTable extends Table {
             // other writers manage the objects, so they may change under the same name
             return new ObjectTableImpl(
                     identifier,
-                    fileIO == null ? null : fileIO.originOnly(),
+                    fileIO == null ? null : IoCacheViews.originOnly(fileIO),
                     location,
                     options,
                     comment);

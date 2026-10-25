@@ -23,6 +23,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
@@ -220,7 +221,7 @@ class CachingFileIOTest {
 
     @Test
     void testTableViewsWrapTheViewOfTheDelegate() throws IOException {
-        FileIO delegate = mock(FileIO.class);
+        IoCacheViewableFileIO delegate = mock(IoCacheViewableFileIO.class);
         FileIO originOnly = mock(FileIO.class);
         when(delegate.originOnly()).thenReturn(originOnly);
         when(delegate.withTableView(any())).thenReturn(delegate);
@@ -243,6 +244,13 @@ class CachingFileIOTest {
                         Collections.singletonList("custom-"),
                         null);
         assertThat(cachingIO.withTableView(tableView)).isSameAs(cachingIO);
+        CachingFileIO plain =
+                new CachingFileIO(
+                        mock(FileIO.class),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META));
+        assertThat(plain.originOnly()).isSameAs(plain);
+        assertThat(plain.withTableView(tableView)).isSameAs(plain);
     }
 
     @Test

@@ -22,6 +22,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
+import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
@@ -54,7 +56,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>After deserialization, copies of the same catalog-created wrapper lazily reuse a JVM-local
  * cache manager.
  */
-public class CachingFileIO implements FileIO {
+public class CachingFileIO implements IoCacheViewableFileIO {
 
     private static final long serialVersionUID = 1L;
 
@@ -219,12 +221,12 @@ public class CachingFileIO implements FileIO {
 
     @Override
     public FileIO originOnly() {
-        return withDelegate(delegate.originOnly());
+        return withDelegate(IoCacheViews.originOnly(delegate));
     }
 
     @Override
     public FileIO withTableView(TableFileIOView view) {
-        return withDelegate(delegate.withTableView(view));
+        return withDelegate(IoCacheViews.withTableView(delegate, view));
     }
 
     // a view shares this wrapper's cache

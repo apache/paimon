@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
@@ -61,7 +62,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
-public class RESTTokenFileIO implements FileIO {
+public class RESTTokenFileIO implements IoCacheViewableFileIO {
 
     private static final long serialVersionUID = 2L;
 
