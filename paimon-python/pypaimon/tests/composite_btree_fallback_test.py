@@ -26,6 +26,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import (
     CompositeIndexReadError,
     DataEvolutionGlobalIndexScanner,
@@ -36,7 +37,7 @@ from pypaimon.execution.python.globalindex.btree.composite_btree import (
     plan_composite,
 )
 from pypaimon.execution.python.globalindex.btree.composite_key import (
-    CompositeKeySerializer, _TimestampKey,
+    CompositeKeySerializer,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
@@ -341,9 +342,9 @@ class CompositeBTreeFallbackTest(
         serializer = CompositeKeySerializer(fields)
         expected = [
             (None, None, None),
-            ('a', Decimal('1.230000000000000000'), _TimestampKey(0, 1000)),
+            ('a', Decimal('1.230000000000000000'), Timestamp(0, 1000)),
             ('x' * 130, Decimal('-99999999999999999999.999999999999999999'),
-             _TimestampKey(-1, 999999)),
+             Timestamp(-1, 999999)),
         ]
         path = Path(__file__).parent / 'resources/btree/java-v2-composite-keys.txt'
         encoded_keys = [line for line in path.read_text().splitlines()

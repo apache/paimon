@@ -19,24 +19,12 @@
 
 import math
 import struct
-from dataclasses import dataclass
 
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.execution.python.globalindex.key_serializer import (
     KeySerializer, create_serializer, _read_var_len_int, _write_var_len_int,
     _parse_precision,
 )
-
-
-@dataclass(frozen=True)
-class _TimestampKey:
-    milliseconds: int
-    nanos_of_millisecond: int
-
-    def get_millisecond(self):
-        return self.milliseconds
-
-    def get_nano_of_millisecond(self):
-        return self.nanos_of_millisecond
 
 
 class CompositeKeySerializer(KeySerializer):
@@ -97,7 +85,7 @@ class CompositeKeySerializer(KeySerializer):
                 milliseconds = struct.unpack('<q', encoded[:8])[0]
                 nanos = (_read_var_len_int(encoded, 8)[0]
                          if len(encoded) > 8 else 0)
-                result.append(_TimestampKey(milliseconds, nanos))
+                result.append(Timestamp.from_epoch_millis(milliseconds, nanos))
             elif type_name == 'DATE' or (type_name.startswith('TIME')
                                          and not type_name.startswith('TIMESTAMP')):
                 result.append(struct.unpack('<i', encoded)[0])
