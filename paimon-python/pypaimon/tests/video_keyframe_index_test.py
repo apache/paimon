@@ -16,6 +16,7 @@
 # under the License.
 
 import io
+import pickle
 from fractions import Fraction
 import struct
 import sys
@@ -29,6 +30,31 @@ from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 class VideoKeyframeIndexTest(unittest.TestCase):
+
+    def test_deserialize_materializes_keyframes_only_when_used(self):
+        index = VideoKeyframeIndex([(0, 10)], [(0, -100, 20), (12, 120, 200)])
+        data = index.serialize()
+        entry = VideoKeyframeIndex.ENTRY
+        with mock.patch.object(VideoKeyframeIndex, 'ENTRY', mock.Mock(
+                size=entry.size, iter_unpack=mock.Mock(wraps=entry.iter_unpack))):
+            restored = VideoKeyframeIndex.deserialize(data, 1000)
+            self.assertEqual(index.metadata_ranges, restored.metadata_ranges)
+            restored = pickle.loads(pickle.dumps(restored))
+            VideoKeyframeIndex.ENTRY.iter_unpack.assert_not_called()
+
+            self.assertEqual(index.keyframes, restored.keyframes)
+            self.assertIs(restored.keyframes, restored.keyframes)
+            VideoKeyframeIndex.ENTRY.iter_unpack.assert_called_once()
+        self.assertEqual(data, restored.serialize())
+
+    def test_replace_unmaterialized_keyframes(self):
+        index = VideoKeyframeIndex([(0, 10)], [(0, 0, 20), (12, 120, 200)])
+        restored = VideoKeyframeIndex.deserialize(index.serialize(), 1000)
+        restored.keyframes = ((0, 100, 30),)
+        self.assertEqual(
+            restored.keyframes,
+            VideoKeyframeIndex.deserialize(restored.serialize()).keyframes,
+        )
 
     def test_iso_bmff_metadata_ranges_exclude_padding_bodies(self):
         def box(box_type, body):

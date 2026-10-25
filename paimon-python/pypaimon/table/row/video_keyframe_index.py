@@ -90,6 +90,18 @@ class VideoKeyframeIndex:
             previous_ordinal, previous_pts, previous_position = (
                 ordinal, pts, position)
 
+    @property
+    def keyframes(self):
+        entries = self._keyframes
+        if isinstance(entries, bytes):
+            entries = tuple(self.ENTRY.iter_unpack(entries))
+            self._keyframes = entries
+        return entries
+
+    @keyframes.setter
+    def keyframes(self, entries):
+        self._keyframes = entries
+
     def serialize(self):
         entries = b''.join(self.ENTRY.pack(*entry) for entry in self.keyframes)
         return self.HEADER.pack(
@@ -280,11 +292,11 @@ class VideoKeyframeIndex:
                 "video payload and strictly increasing."
             )
 
-        # Both sections have already been validated. Preserve Python tuples
-        # without repeating per-entry normalization and validation in __init__.
+        # Validation is eager, but decoders that do not consume keyframes need
+        # not allocate Python tuples and integers for every entry.
         result = cls.__new__(cls)
         result.metadata_ranges = tuple(metadata_ranges)
-        result.keyframes = tuple(cls.ENTRY.iter_unpack(raw))
+        result._keyframes = raw
         return result
 
     @classmethod
