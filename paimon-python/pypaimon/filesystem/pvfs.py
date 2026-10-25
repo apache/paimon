@@ -43,6 +43,7 @@ from pypaimon.filesystem.jindo_file_system_handler import (
     JINDO_OSSFS_AVAILABLE,
     create_jindo_oss_filesystem,
 )
+from pypaimon.filesystem.io_cache_routing import single_endpoint_options
 from pypaimon.schema.schema import Schema
 
 logger = logging.getLogger(__name__)
@@ -887,7 +888,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         dlf_oss_endpoint = self.options.get(CatalogOptions.DLF_OSS_ENDPOINT)
         if dlf_oss_endpoint and dlf_oss_endpoint.strip():
             merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-        return merged_token
+            return merged_token
+        if self.options.contains(CatalogOptions.IO_CACHE_ENABLED):
+            merged_token[CatalogOptions.IO_CACHE_ENABLED.key()] = str(
+                self.options.get(CatalogOptions.IO_CACHE_ENABLED)).lower()
+        # The OSS filesystem sends every request to one endpoint, so it cannot use io-cache targets.
+        return single_endpoint_options(merged_token)
 
     @staticmethod
     def _get_storage_type(path: str):

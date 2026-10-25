@@ -175,6 +175,12 @@ def _with_endpoint(options: Dict[str, str], endpoint: Optional[str]) -> Dict[str
     return options
 
 
+def single_endpoint_options(options: Mapping[str, str]) -> Dict[str, str]:
+    """Options for a client that sends every request to one endpoint: the origin's under io-cache routing."""
+    routing = IoCacheRouting.create(options)
+    return dict(options) if routing is None else routing.origin_options(options)
+
+
 class CacheTarget(NamedTuple):
     """A named cache target with its endpoint and addressing settings."""
     name: str

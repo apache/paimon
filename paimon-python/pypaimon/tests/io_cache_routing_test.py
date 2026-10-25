@@ -17,9 +17,10 @@
 
 """Tests for the io-cache routing decision."""
 
+import sys
 import unittest
 
-from pypaimon.filesystem.io_cache_routing import (IoCacheRouting, Op,
+from pypaimon.filesystem.io_cache_routing import (IoCacheRouting, Op, single_endpoint_options,
                                                   data_prefixes, routable_type)
 from pypaimon.utils.file_type import FileType
 
@@ -592,3 +593,37 @@ class IoCacheRoutingTest(unittest.TestCase):
         options = self._options(**{"fs.oss.retry.count": "5"})
         target = IoCacheRouting.create(options).target_options(options, "default")
         self.assertEqual("5", target["fs.oss.retry.count"])
+
+    _ROUTED_TOKEN_ORIGIN = {"fs.oss.endpoint": "https://origin.example.com", "fs.oss.https.enable": "true"}
+
+    def _assert_origin_options(self, options):
+        self.assertEqual(self._ROUTED_TOKEN_ORIGIN, {key: options[key] for key in self._ROUTED_TOKEN_ORIGIN})
+        self.assertNotIn("fs.oss.dlf-cache.consistent-hash.enabled", options)
+
+    def _routed_token(self):
+        return self._options(**{"fs.oss.dlf-cache.consistent-hash.enabled": "true"})
+
+    def test_single_endpoint_clients_get_the_origin_options(self):
+        from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+
+        token = self._routed_token()
+        self._assert_origin_options(single_endpoint_options(token))
+        pvfs = PaimonVirtualFileSystem({}, skip_instance_cache=True)
+        self._assert_origin_options(pvfs._merge_token_with_catalog_options(token))
+
+        # Without routing, or with routing turned off by the catalog, they keep fs.oss.endpoint.
+        unrouted = dict(token, **{"io-cache.enabled": "false"})
+        self.assertEqual("http://legacy.example.com", single_endpoint_options(unrouted)["fs.oss.endpoint"])
+        for catalog_options, expected in (({"io-cache.enabled": "false"}, "http://legacy.example.com"),
+                                          ({"dlf.oss-endpoint": "oss-cn-test.example.com"}, "oss-cn-test.example.com")):
+            pvfs = PaimonVirtualFileSystem(catalog_options, skip_instance_cache=True)
+            self.assertEqual(expected, pvfs._merge_token_with_catalog_options(token)["fs.oss.endpoint"])
+
+    @unittest.skipIf(sys.version_info < (3, 7), "pypaimon.daft needs Python 3.7+")
+    def test_daft_gets_the_origin_options(self):
+        from unittest.mock import MagicMock
+
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+
+        table = MagicMock(file_io=MagicMock(token=MagicMock(token=self._routed_token())), table_path=self.TABLE)
+        self._assert_origin_options(_enrich_options_with_rest_token({"metastore": "rest"}, table))
