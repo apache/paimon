@@ -54,6 +54,8 @@ from pypaimon.multimodal.lerobot.dataset import (
     _decode_video_frames,
     _decode_video_rows,
     _decode_video_windows,
+    _episode_ranges,
+    _episode_tasks,
     _image_tensor,
     _index_names,
     _open_video_decoder,
@@ -164,6 +166,81 @@ def _configure_uint8_transform_worker(unused_worker_id):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_episode_validation_projects_batched_hf_metadata(self):
+        try:
+            from datasets import Dataset
+        except ImportError:
+            self.skipTest("datasets is not installed")
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+
+        rows = [{
+            "episode_index": index,
+            "dataset_from_index": index * 2,
+            "dataset_to_index": index * 2 + 2,
+            "length": 2,
+            "tasks": ["place", "pick"],
+            "stats/camera/mean": [0.5] * 32,
+        } for index in range(2050)]
+        episodes = Dataset.from_list(rows)
+        expected = [(index * 2, index * 2 + 2) for index in range(2050)]
+        with patch.object(
+                Dataset, "__getitem__",
+                side_effect=AssertionError("Do not format individual rows")):
+            self.assertEqual(expected, _episode_ranges(
+                {"episodes": episodes}, 4100, 2050))
+            self.assertEqual((("pick", "place"),) * 2050,
+                             _episode_tasks({"episodes": episodes}))
+        self.assertIn("stats/camera/mean", episodes.column_names)
+        self.assertEqual(rows[0], episodes[0])
+        self.assertEqual((None,) * 2050, _episode_tasks({
+            "episodes": episodes.remove_columns("tasks"),
+        }))
+        formatted = episodes.select(range(2)).with_format(
+            "numpy",
+            columns=["episode_index", "dataset_from_index",
+                     "dataset_to_index", "length"],
+        )
+        self.assertNotIn("tasks", formatted[0])
+        self.assertEqual([(0, 2), (2, 4)], _episode_ranges(
+            {"episodes": formatted}, 4, 2))
+        self.assertEqual((None, None), _episode_tasks(
+            {"episodes": formatted}))
+        visible = formatted.with_format(
+            "numpy", columns=formatted.format["columns"],
+            output_all_columns=True)
+        self.assertEqual((("pick", "place"),) * 2, _episode_tasks(
+            {"episodes": visible}))
+        # Preserve a selected Dataset's logical row order and range validation.
+        with self.assertRaisesRegex(ValueError, "episode_index=1"):
+            _episode_ranges({"episodes": episodes.select([1, 0])}, 4, 2)
+        with self.assertRaisesRegex(ValueError, "integer controls"):
+            _episode_ranges({"episodes": episodes.remove_columns("length")},
+                            4100, 2050)
+
+    def test_episode_validation_preserves_metadata_representations(self):
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+        import pandas as pd
+
+        rows = [{
+            "episode_index": 0, "dataset_from_index": 0,
+            "dataset_to_index": 2, "length": 2, "tasks": "pick",
+        }, {
+            "episode_index": 1, "dataset_from_index": 2,
+            "dataset_to_index": 3, "length": 1, "tasks": None,
+        }]
+        for episodes in (rows, pd.DataFrame(rows)):
+            with self.subTest(type=type(episodes).__name__):
+                metadata = {"episodes": episodes}
+                self.assertEqual([(0, 2), (2, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), None), _episode_tasks(metadata))
+                with self.assertRaisesRegex(ValueError, "expected 4"):
+                    _episode_ranges(metadata, 4, 2)
 
     def test_episode_metadata_pickle_stays_small_and_usable(self):
         try:
@@ -931,6 +1008,35 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             collator.close()
 
+    def test_custom_episode_transform_keeps_cross_column_inputs(self):
+        try:
+            from datasets import Dataset
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        episodes = Dataset.from_dict({
+            "episode_index": [0, 1],
+            "dataset_from_index": [0, 1],
+            "dataset_to_index": [1, 3],
+            "length": [0, 0],
+            "stats": [1, 2],
+        })
+
+        def transform(batch):
+            return dict(batch, length=batch["stats"], tasks=[
+                ["pick" if index == 0 else "place"]
+                for index in batch["episode_index"]
+            ])
+
+        for source in (episodes, episodes.add_column(
+                "tasks", [["old"], ["old"]])):
+            with self.subTest(physical_tasks="tasks" in source.column_names):
+                metadata = {"episodes": source.with_transform(transform)}
+                self.assertEqual([(0, 1), (1, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), ("place",)),
+                                 _episode_tasks(metadata))
+
     def test_dataset_requires_supported_python(self):
         with patch(
                 "pypaimon.multimodal.lerobot.dataset.sys.version_info",
@@ -1038,6 +1144,19 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
         self.assertEqual(0, dataset.meta.get_task_index("pick"))
         self.assertEqual("pick", sample["task"])
+        try:
+            from datasets import Dataset
+        except ImportError:
+            pass
+        else:
+            formatted_metadata = dict(metadata)
+            formatted_metadata["episodes"] = Dataset.from_list(
+                metadata["episodes"]).with_format(
+                    "numpy", columns=["episode_index", "dataset_from_index",
+                                      "dataset_to_index", "length"])
+            formatted_reader = Reader(formatted_metadata)
+            self.assertEqual("pick", formatted_reader[1]["task"])
+            formatted_reader.close()
         torch.testing.assert_close(
             sample["observation.state"], torch.tensor([1.0, 2.0]))
         torch.testing.assert_close(
