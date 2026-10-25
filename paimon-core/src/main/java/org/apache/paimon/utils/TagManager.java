@@ -51,7 +51,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -69,6 +71,14 @@ public class TagManager {
     public static final String TAG_PREFIX = "tag-";
 
     /**
+     * How long an {@code ignoreIfExists} creation waits for another writer's provisional tag of the
+     * same name to be validated or rolled back.
+     */
+    private static final long DEFAULT_PENDING_TAG_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(60);
+
+    private static final long PENDING_TAG_POLL_MILLIS = 50;
+
+    /**
      * One reentrant lock per table and branch, shared by every {@link TagManager} for that key so
      * tag creation and snapshot expiration cannot interleave.
      */
@@ -80,6 +90,7 @@ public class TagManager {
     private final String branch;
     @Nullable private final TagPeriodHandler tagPeriodHandler;
     @Nullable private volatile Runnable beforeTagCommit;
+    private volatile long pendingTagTimeoutMillis = DEFAULT_PENDING_TAG_TIMEOUT_MILLIS;
 
     public TagManager(FileIO fileIO, Path tablePath) {
         this(fileIO, tablePath, DEFAULT_MAIN_BRANCH, (TagPeriodHandler) null);
@@ -168,17 +179,94 @@ public class TagManager {
         try {
             if (tagExists(tagName)) {
                 checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
-                return;
+                if (awaitSettledTag(tagName)) {
+                    return;
+                }
             }
             Runnable beforeCommit = beforeTagCommit;
             if (beforeCommit != null) {
                 beforeCommit.run();
             }
             ensureSnapshotRetained(snapshot, tagName, false);
-            createOrReplaceTag(snapshot, tagName, timeRetained, callbacks, true);
+            String owner = UUID.randomUUID().toString();
+            createPendingTagMarker(tagName, owner);
+            try {
+                createOrReplaceTag(snapshot, tagName, timeRetained, callbacks, true);
+            } finally {
+                fileIO.deleteQuietly(pendingTagMarkerPath(tagName, owner));
+            }
         } finally {
             coordinationLock.unlock();
         }
+    }
+
+    @VisibleForTesting
+    public void setPendingTagTimeout(Duration timeout) {
+        this.pendingTagTimeoutMillis = timeout.toMillis();
+    }
+
+    /**
+     * A tag file published by {@link #createTag} is provisional until that creator's post-write
+     * validation passes, because a failed validation deletes it again. The creator holds a pending
+     * marker from before publication until after validation, so a caller that finds the tag with
+     * {@code ignoreIfExists} waits for every pending marker to clear before acknowledging it.
+     *
+     * @return true if the tag exists and no creator can still roll it back, false if it was rolled
+     *     back and the caller should create it
+     */
+    private boolean awaitSettledTag(String tagName) {
+        long deadline = System.currentTimeMillis() + pendingTagTimeoutMillis;
+        while (pendingTagMarkerExists(tagName)) {
+            if (System.currentTimeMillis() >= deadline) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Tag '%s' is still being created by another writer. "
+                                        + "Retry once it is committed or rolled back, or remove "
+                                        + "%s if that writer is gone.",
+                                tagName, pendingTagMarkerDir(tagName)));
+            }
+            try {
+                Thread.sleep(PENDING_TAG_POLL_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }
+        return tagExists(tagName);
+    }
+
+    private void createPendingTagMarker(String tagName, String owner) {
+        try {
+            Path path = pendingTagMarkerPath(tagName, owner);
+            if (!fileIO.tryToWriteAtomic(path, "1") && !fileIO.exists(path)) {
+                throw new IOException("Failed to write pending tag marker " + path);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private boolean pendingTagMarkerExists(String tagName) {
+        Path dir = pendingTagMarkerDir(tagName);
+        try {
+            if (!fileIO.exists(dir)) {
+                return false;
+            }
+            FileStatus[] statuses = fileIO.listStatus(dir);
+            return statuses != null && statuses.length > 0;
+        } catch (FileNotFoundException e) {
+            return false;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private Path pendingTagMarkerDir(String tagName) {
+        return new Path(branchPath(tablePath, branch) + "/tag-pending/" + tagName);
+    }
+
+    private Path pendingTagMarkerPath(String tagName, String owner) {
+        return new Path(pendingTagMarkerDir(tagName), owner);
     }
 
     private String coordinationKey() {
