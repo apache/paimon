@@ -285,13 +285,19 @@ class PaimonDatasetReader(ABC):
             if isinstance(table_options, CoreOptions)
             else CoreOptions.READ_VIDEO_DECODERS_PER_PAYLOAD.default_value()
         )
+        codec_threads = (
+            table_options.read_video_codec_threads()
+            if isinstance(table_options, CoreOptions)
+            else CoreOptions.READ_VIDEO_CODEC_THREADS.default_value()
+        )
         self._video_decode_pool = _VideoDecodePool()
         self._video_collators = [
             VideoFrameCollator(
                 access,
                 video_column=key,
                 decoder_factory=partial(
-                    _open_video_decoder, backend=self.video_backend),
+                    _open_video_decoder, backend=self.video_backend,
+                    codec_threads=codec_threads),
                 decode_batch_fn=_decode_video_frames,
                 output_column=key,
                 collate_fn=_identity,
@@ -1742,13 +1748,14 @@ def _video_decoder_fallback_errors():
     return errors if ffmpeg_error is None else errors + (ffmpeg_error,)
 
 
-def _open_video_decoder(stream, backend=None):
+def _open_video_decoder(stream, backend=None, codec_threads=0):
+    pyav_options = {"thread_count": codec_threads} if codec_threads else {}
     keyframe_index = getattr(stream, "video_keyframe_index", None)
     if not isinstance(keyframe_index, VideoKeyframeIndex):
         keyframe_index = None
     if backend is None and keyframe_index is not None:
         try:
-            decoder = _PyAVVideoDecoder(stream, keyframe_index)
+            decoder = _PyAVVideoDecoder(stream, keyframe_index, **pyav_options)
         except _video_decoder_fallback_errors():
             stream.seek(0)
         else:
@@ -1760,8 +1767,8 @@ def _open_video_decoder(stream, backend=None):
             if backend == "torchcodec":
                 raise
             stream.seek(0)
-    return _PyAVVideoDecoder(stream) if keyframe_index is None \
-        else _PyAVVideoDecoder(stream, keyframe_index)
+    return _PyAVVideoDecoder(stream, **pyav_options) if keyframe_index is None \
+        else _PyAVVideoDecoder(stream, keyframe_index, **pyav_options)
 
 
 def _open_torchcodec_decoder(stream):
@@ -1958,7 +1965,7 @@ class _PyAVVideoDecoder:
     # Reuse common overlapping delta windows without retaining a whole video.
     _FRAME_CACHE_SIZE = 8
 
-    def __init__(self, stream, keyframe_index=None):
+    def __init__(self, stream, keyframe_index=None, thread_count=0):
         try:
             import av
         except ImportError as error:
@@ -1968,6 +1975,7 @@ class _PyAVVideoDecoder:
             ) from error
         self._source = stream
         self._keyframe_index = keyframe_index
+        self._thread_count = thread_count
         self._anchor_ordinals = (
             [entry[0] for entry in keyframe_index.keyframes]
             if keyframe_index is not None else [])
@@ -1981,6 +1989,7 @@ class _PyAVVideoDecoder:
         if keyframe_index is None:
             self._container = av.open(stream)
             self._stream = self._container.streams.video[0]
+            self._stream.thread_count = self._thread_count
             self._frames = iter(self._container.decode(self._stream))
 
     def __getitem__(self, index):
@@ -2076,6 +2085,7 @@ class _PyAVVideoDecoder:
             source.prefetch(self._keyframe_index.metadata_ranges)
             with av.open(source) as container:
                 stream = container.streams.video[0]
+                stream.thread_count = self._thread_count
                 for anchor, targets in sorted(groups.items()):
                     unused_groups, ranges = self._indexed_plan(targets)
                     source.prefetch(ranges)
