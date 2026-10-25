@@ -57,6 +57,9 @@ class LegacyOssDirectoryListingError(RuntimeError):
 
 
 class PyArrowFileIO(FileIO):
+    # False on an io-cache target, whose writes get their parent directories on origin.
+    creates_parent_dirs = True
+
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
@@ -450,6 +453,11 @@ class PyArrowFileIO(FileIO):
         return self.filesystem.open_input_file(path_str)
 
     def new_output_stream(self, path: str):
+        if self.creates_parent_dirs:
+            self.create_parent_dirs(path)
+        return self.filesystem.open_output_stream(self.to_filesystem_path(path))
+
+    def create_parent_dirs(self, path: str):
         path_str = self.to_filesystem_path(path)
 
         if self._use_jindo:
@@ -467,8 +475,6 @@ class PyArrowFileIO(FileIO):
             parent_dir = PurePosixPath(path_str).parent
             if str(parent_dir) and not self.exists(str(parent_dir)):
                 self.mkdirs(str(parent_dir))
-
-        return self.filesystem.open_output_stream(path_str)
 
     def _get_file_info(self, path_str: str):
         try:

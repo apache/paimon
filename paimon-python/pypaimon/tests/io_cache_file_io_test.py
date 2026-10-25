@@ -29,6 +29,7 @@ import threading
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 from urllib.parse import urlparse
 
 import pyarrow as pa
@@ -39,6 +40,7 @@ import pytest
 from pyarrow._fs import FileSystemHandler
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options import Options
 from pypaimon.execution.python.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.execution.python.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.filesystem.caching_file_io import (CachingFileIO,
@@ -46,6 +48,7 @@ from pypaimon.filesystem.caching_file_io import (CachingFileIO,
 from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.file_type import FileType
@@ -676,6 +679,39 @@ def test_each_file_io_call_reaches_its_endpoint(policy, op, name, call):
         call(IoCacheRoutingFileIO(routing, file_ios["origin"], file_ios.__getitem__), path)
         called = {key for key, recorder in file_ios.items() if recorder.calls}
         assert called == {target if op in routed else "origin"}, path
+
+
+class _MissingPathsHandler(_RecordingHandler):
+    """Every path is missing, so a writer probes and creates the parent directory."""
+
+    def get_file_info(self, paths):
+        return self._record("get_file_info", [pafs.FileInfo(path, pafs.FileType.NotFound) for path in paths])
+
+
+def _legacy_oss_file_io(calls):
+    options = Options({"fs.oss.impl": "legacy", "fs.oss.endpoint": "oss-cn-test.example.com"})
+    with mock.patch.object(OssFileIO, "_initialize_oss_fs",
+                           return_value=pafs.PyFileSystem(_MissingPathsHandler(calls))):
+        return OssFileIO(TABLE, options)
+
+
+@pytest.mark.parametrize("write", [
+    lambda f, p: f.new_output_stream(p).close(),
+    lambda f, p: f.write_parquet(p, pa.table({"a": [1]})),
+    lambda f, p: f.write_orc(p, pa.table({"a": [1]})),
+    lambda f, p: f.write_avro(p, pa.table({"a": [1]})),
+    lambda f, p: f.write_file(p, "x"),
+    lambda f, p: f.overwrite_file_utf8(p, "x"),
+], ids=["new_output_stream", "write_parquet", "write_orc", "write_avro", "write_file", "overwrite_file_utf8"])
+def test_routed_writes_create_parent_directories_on_origin(write):
+    unrouted, origin, target = [], [], []
+    write(_legacy_oss_file_io(unrouted), DATA)
+    targets = {"accel": _legacy_oss_file_io([]), "cluster": _legacy_oss_file_io(target)}
+    write(IoCacheRoutingFileIO(_routing(policy="meta,read,write"), _legacy_oss_file_io(origin),
+                               targets.__getitem__), DATA)
+    assert "create_dir" in unrouted
+    assert target == ["open_output_stream"]
+    assert origin == [call for call in unrouted if call != "open_output_stream"]
 
 
 if __name__ == "__main__":

@@ -100,6 +100,10 @@ class FileIO(ABC):
     def new_output_stream(self, path: str):
         pass
 
+    def create_parent_dirs(self, path: str):
+        """Runs only the parent directory step of new_output_stream(path); a no-op unless a FileIO splits it out."""
+        pass
+
     @abstractmethod
     def get_file_status(self, path: str):
         pass

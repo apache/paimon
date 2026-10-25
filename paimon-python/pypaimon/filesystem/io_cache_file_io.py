@@ -26,6 +26,7 @@ from pyarrow._fs import FileSystemHandler
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting, Op
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
 class IoCacheRoutingFileIO(FileIO):
@@ -70,11 +71,20 @@ class IoCacheRoutingFileIO(FileIO):
             file_io = self._targets.get(name)
             if file_io is None:
                 file_io = self._create_target(name)
+                if isinstance(file_io, PyArrowFileIO):
+                    file_io.creates_parent_dirs = False
                 self._targets[name] = file_io
             return file_io
 
     def _call(self, op: Op, path: str, action):
         return action(self._file_io(self._route(op, path)))
+
+    def _write(self, path: str, action):
+        name = self._route(Op.WRITE, path)
+        if name is not None:
+            # A target takes only the object; its parent directories are created on origin, as unrouted.
+            self._origin.create_parent_dirs(path)
+        return action(self._file_io(name))
 
     def _call_batch(self, op: Op, paths: List[str], action) -> list:
         """Runs action(file_io, paths) once per routed group; results follow the order of paths."""
@@ -99,7 +109,10 @@ class IoCacheRoutingFileIO(FileIO):
         return self._call(Op.META, path, lambda io: io.get_file_size(path))
 
     def new_output_stream(self, path: str):
-        return self._call(Op.WRITE, path, lambda io: io.new_output_stream(path))
+        return self._write(path, lambda io: io.new_output_stream(path))
+
+    def create_parent_dirs(self, path: str):
+        return self._origin.create_parent_dirs(path)
 
     def exists(self, path: str) -> bool:
         return self._call(Op.EXISTS, path, lambda io: io.exists(path))
@@ -135,10 +148,10 @@ class IoCacheRoutingFileIO(FileIO):
         # The existence check before a write runs on origin, so no cache sees the file before it exists.
         if not overwrite and self._origin.exists(path):
             raise FileExistsError(f"File {path} already exists and overwrite=False")
-        return self._call(Op.WRITE, path, lambda io: io.write_file(path, content, True))
+        return self._write(path, lambda io: io.write_file(path, content, True))
 
     def overwrite_file_utf8(self, path: str, content: str):
-        return self._call(Op.WRITE, path, lambda io: io.overwrite_file_utf8(path, content))
+        return self._write(path, lambda io: io.overwrite_file_utf8(path, content))
 
     # Helpers that delete, or check right after a delete, run on origin, probes included.
 
@@ -166,15 +179,15 @@ class IoCacheRoutingFileIO(FileIO):
 
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_parquet(path, data, compression, zstd_level, **kwargs))
+        return self._write(path, lambda io: io.write_parquet(path, data, compression, zstd_level, **kwargs))
 
     def write_orc(self, path: str, data, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_orc(path, data, compression, zstd_level, **kwargs))
+        return self._write(path, lambda io: io.write_orc(path, data, compression, zstd_level, **kwargs))
 
     def write_avro(self, path: str, data, avro_schema=None,
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
-        return self._call(Op.WRITE, path, lambda io: io.write_avro(
+        return self._write(path, lambda io: io.write_avro(
             path, data, avro_schema, compression, zstd_level, **kwargs))
 
     def close(self):
