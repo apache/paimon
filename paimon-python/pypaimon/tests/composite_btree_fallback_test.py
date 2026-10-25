@@ -346,7 +346,10 @@ class CompositeBTreeFallbackTest(
              _TimestampKey(-1, 999999)),
         ]
         path = Path(__file__).parent / 'resources/btree/java-v2-composite-keys.txt'
-        for row, encoded in zip(expected, path.read_text().splitlines()):
+        encoded_keys = [line for line in path.read_text().splitlines()
+                        if line and not line.startswith('#')]
+        self.assertEqual(len(expected), len(encoded_keys))
+        for row, encoded in zip(expected, encoded_keys):
             with self.subTest(row=row):
                 self.assertEqual(row, serializer.deserialize(bytes.fromhex(encoded)))
                 self.assertEqual(encoded, serializer.serialize(row).hex())
