@@ -96,7 +96,8 @@ public class UriReaderFactory implements Serializable {
 
         try {
             FileIO createdFileIO = FileIO.get(new Path(uri), Objects.requireNonNull(context));
-            return UriReader.fromFile(createdFileIO);
+            // no table owns what a descriptor points at here, and its writer may replace it
+            return UriReader.fromFile(createdFileIO.originOnly());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

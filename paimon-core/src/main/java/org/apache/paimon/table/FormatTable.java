@@ -186,8 +186,9 @@ public interface FormatTable extends Table {
         }
 
         public FormatTable build() {
+            // other writers may replace Format Table files in place
             return new FormatTableImpl(
-                    fileIO,
+                    fileIO == null ? null : fileIO.originOnly(),
                     identifier,
                     rowType,
                     partitionKeys,

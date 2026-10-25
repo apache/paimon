@@ -80,6 +80,16 @@ public interface FileIO extends Serializable, Closeable {
     /** Set filesystem options at runtime. Usually used for job-level settings. */
     default void setRuntimeContext(Map<String, String> options) {}
 
+    /** A view of this FileIO that sends no request to an io-cache target, for mutable files. */
+    default FileIO originOnly() {
+        return this;
+    }
+
+    /** A view of this FileIO for one table: io-cache routing only serves that table's files. */
+    default FileIO withTableView(TableFileIOView view) {
+        return this;
+    }
+
     /**
      * Opens an SeekableInputStream at the indicated Path.
      *

@@ -82,7 +82,14 @@ public interface LanceTable extends Table {
         }
 
         public LanceTable build() {
-            return new LanceTableImpl(identifier, fileIO, rowType, location, options, comment);
+            // other engines write Lance datasets, so their files never use io-cache
+            return new LanceTableImpl(
+                    identifier,
+                    fileIO == null ? null : fileIO.originOnly(),
+                    rowType,
+                    location,
+                    options,
+                    comment);
         }
     }
 }

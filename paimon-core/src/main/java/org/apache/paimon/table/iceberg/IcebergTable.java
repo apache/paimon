@@ -93,8 +93,16 @@ public interface IcebergTable extends Table {
         }
 
         public IcebergTable build() {
+            // other engines write Iceberg tables, so their files never use io-cache
             return new IcebergTableImpl(
-                    identifier, fileIO, rowType, partitionKeys, location, options, comment, uuid);
+                    identifier,
+                    fileIO == null ? null : fileIO.originOnly(),
+                    rowType,
+                    partitionKeys,
+                    location,
+                    options,
+                    comment,
+                    uuid);
         }
     }
 }

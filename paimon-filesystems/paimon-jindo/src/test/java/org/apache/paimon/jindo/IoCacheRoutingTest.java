@@ -19,7 +19,10 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FilePrefixHistory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
@@ -30,7 +33,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.FileType.BUCKET_INDEX;
@@ -362,6 +369,115 @@ public class IoCacheRoutingTest {
     }
 
     @Test
+    public void testTableViews() {
+        IoCacheRouting routing = IoCacheRouting.create(multi());
+        Path custom = path("dt=1/bucket-0/custom-{uuid}-0.orc");
+        assertThat(routing.targetOf(custom)).isNull();
+
+        // a table passes the file prefixes of its schema
+        IoCacheRouting prefixed = routing.withTableView(view(null, "custom-", " "));
+        assertThat(prefixed.targetOf(custom).name).isEqualTo("cluster");
+        assertThat(prefixed.targetOf(DATA_FILE).name).isEqualTo("cluster");
+        assertThat(prefixed.targetOf(MANIFEST).name).isEqualTo("accel");
+        assertThat(prefixed.withTableView(view(null, "custom-"))).isSameAs(prefixed);
+        assertThat(routing.withTableView(TableFileIOView.NONE)).isSameAs(routing);
+
+        // Format and Object Tables send every request to the origin
+        IoCacheRouting originOnly = prefixed.originOnly();
+        for (Path path : Arrays.asList(custom, DATA_FILE, MANIFEST, path(INDEX_PATH))) {
+            assertThat(originOnly.targetOf(path)).as(path.toString()).isNull();
+        }
+        assertThat(originOnly.originOnly()).isSameAs(originOnly);
+        assertThat(originOnly.withTableView(view(null, "custom-"))).isSameAs(originOnly);
+        assertThat(prefixed.withTableView(view(null).originOnly()).targetOf(DATA_FILE)).isNull();
+        assertThat(originOnly.ossEndpoint()).isEqualTo(OSS);
+        assertThat(originOnly.readCacheEnabled()).isTrue();
+    }
+
+    @Test
+    public void testTableViewsOnlyRouteFilesUnderTheirRoots() {
+        IoCacheRouting routing = IoCacheRouting.create(multi());
+        // what a BLOB descriptor points at may be named like a data file and still be replaced
+        Path imported = path("oss://bkt/import/data-{uuid}-1.png");
+        Path otherTable = path("oss://bkt/db1.db/t10/dt=1/bucket-0/data-{uuid}-0.parquet");
+        Path otherBucket = path("oss://other/db1.db/t1/dt=1/bucket-0/data-{uuid}-0.parquet");
+        assertThat(routing.targetOf(imported).name).isEqualTo("cluster");
+
+        IoCacheRouting table = routing.withTableView(view(null));
+        for (Path path : Arrays.asList(imported, otherTable, otherBucket)) {
+            assertThat(table.targetOf(path)).as(path.toString()).isNull();
+        }
+        assertThat(table.targetOf(DATA_FILE).name).isEqualTo("cluster");
+        assertThat(table.targetOf(MANIFEST).name).isEqualTo("accel");
+        assertThat(table.targetOf(path(TABLE_ROOT + "/"))).isNull();
+
+        // an external path on the table's bucket is one of its roots
+        IoCacheRouting external =
+                routing.withTableView(
+                        TableFileIOView.of(
+                                Arrays.asList(new Path(TABLE_ROOT), new Path("oss://bkt/import/")),
+                                Collections.emptyList(),
+                                null));
+        assertThat(external.targetOf(imported).name).isEqualTo("cluster");
+        assertThat(external.targetOf(otherTable)).isNull();
+    }
+
+    @Test
+    public void testPrefixesOfOlderSchemasAreLoadedOnceWhenOnlyTheyMayRoute() {
+        CountingHistory history = new CountingHistory("older-");
+        IoCacheRouting routing = IoCacheRouting.create(multi()).withTableView(view(history));
+        Path older = path("dt=1/bucket-0/older-{uuid}-0.parquet");
+        assertThat(routing.targetOf(older)).isNull();
+
+        // known prefixes, metadata and files outside the table never load them
+        for (Path path :
+                Arrays.asList(
+                        DATA_FILE,
+                        MANIFEST,
+                        path(SNAPSHOT_PATH),
+                        path("manifest/manifest-{uuid}-0.avro.sidecar"),
+                        path("oss://bkt/import/older-{uuid}-0.parquet"))) {
+            assertThat(routing.awaitsHistory(path)).as(path.toString()).isFalse();
+        }
+        assertThat(routing.awaitsHistory(older)).isTrue();
+        routing.loadHistory(null);
+        routing.loadHistory(null);
+        assertThat(history.loads).isEqualTo(1);
+        assertThat(routing.awaitsHistory(older)).isFalse();
+        assertThat(routing.targetOf(older).name).isEqualTo("cluster");
+        // a routing derived from it shares what was loaded
+        assertThat(routing.withTableView(view(null, "custom-")).targetOf(older).name)
+                .isEqualTo("cluster");
+
+        // a copy on another process loads them again
+        IoCacheRouting copy = clone(routing);
+        assertThat(copy.awaitsHistory(older)).isTrue();
+
+        // without a target for data files nothing is loaded
+        Options metaOnly = multi();
+        metaOnly.set("io-cache.whitelist", "meta");
+        assertThat(
+                        IoCacheRouting.create(metaOnly)
+                                .withTableView(view(history))
+                                .awaitsHistory(older))
+                .isFalse();
+    }
+
+    @Test
+    public void testFailingToLoadOlderSchemasKeepsTheirFilesOnTheOrigin() {
+        FilePrefixHistory failing =
+                fileIO -> {
+                    throw new IOException("schema directory not readable");
+                };
+        IoCacheRouting routing = IoCacheRouting.create(multi()).withTableView(view(failing));
+        Path older = path("dt=1/bucket-0/older-{uuid}-0.parquet");
+        routing.loadHistory(null);
+        assertThat(routing.awaitsHistory(older)).isFalse();
+        assertThat(routing.targetOf(older)).isNull();
+        assertThat(routing.targetOf(DATA_FILE).name).isEqualTo("cluster");
+    }
+
+    @Test
     public void testTargetNames() {
         Options options = singleTargetOptions();
         options.set("io-cache.targets", " Accel , cluster-1,accel,1x,a_b,,-x");
@@ -565,6 +681,38 @@ public class IoCacheRoutingTest {
         assertThat(IoCacheRouting.cacheableType(path(path), prefixes))
                 .as("%s with %s", path, Arrays.toString(changes))
                 .isEqualTo(type);
+    }
+
+    private static TableFileIOView view(@Nullable FilePrefixHistory history, String... prefixes) {
+        return TableFileIOView.of(
+                Collections.singletonList(new Path(TABLE_ROOT)), Arrays.asList(prefixes), history);
+    }
+
+    private static IoCacheRouting clone(IoCacheRouting routing) {
+        try {
+            return InstantiationUtil.clone(routing, IoCacheRoutingTest.class.getClassLoader());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Older schemas named their data files with these prefixes; counts the loads. */
+    private static class CountingHistory implements FilePrefixHistory {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<String> prefixes;
+        private int loads;
+
+        private CountingHistory(String... prefixes) {
+            this.prefixes = Arrays.asList(prefixes);
+        }
+
+        @Override
+        public List<String> filePrefixes(FileIO fileIO) {
+            loads++;
+            return prefixes;
+        }
     }
 
     private static Path path(String path) {

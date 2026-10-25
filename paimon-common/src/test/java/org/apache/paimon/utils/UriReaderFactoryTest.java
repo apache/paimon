@@ -19,6 +19,8 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -40,6 +42,11 @@ import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link UriReaderFactory}. */
 public class UriReaderFactoryTest {
@@ -64,6 +71,24 @@ public class UriReaderFactoryTest {
         if (httpServer != null) {
             httpServer.stop(0);
         }
+    }
+
+    @Test
+    public void testFilesOfDescriptorsAreReadFromTheOriginOfTheCreatedFileIO() throws Exception {
+        // a descriptor may name a file another writer replaces, and no table owns it here
+        FileIO created = mock(FileIO.class);
+        FileIO originOnly = mock(FileIO.class);
+        when(created.originOnly()).thenReturn(originOnly);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.getScheme()).thenReturn("oss");
+        when(loader.load(any())).thenReturn(created);
+        UriReaderFactory ossFactory =
+                new UriReaderFactory(CatalogContext.create(new Options(), loader, null));
+        String uri = "oss://bkt/import/data-8b1f7c2e-3a4d-4e5f-9a0b-1c2d3e4f5a6b-1.png";
+
+        ossFactory.create(uri).newInputStream(uri);
+        verify(originOnly).newInputStream(new Path(uri));
+        verify(created, never()).newInputStream(any());
     }
 
     @Test
