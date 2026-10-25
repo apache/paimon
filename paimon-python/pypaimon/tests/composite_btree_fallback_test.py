@@ -36,6 +36,7 @@ from pypaimon.execution.python.globalindex.btree.composite_btree import (
     CompositeBTreeIndexReader,
     plan_composite,
 )
+from pypaimon.execution.python.globalindex.btree.btree_index_writer import BTreeIndexWriter
 from pypaimon.execution.python.globalindex.btree.composite_key import (
     CompositeKeySerializer,
 )
@@ -487,6 +488,37 @@ class CompositeBTreeFallbackTest(
         self.assertIsNotNone(plan_composite(fields, builder.equal('a', 1)))
         self.assertIsNotNone(plan_composite(fields, PredicateBuilder.and_predicates([
             builder.equal('a', 1), builder.equal('t', time(0, 0, 0, 123000))])))
+        self.assertIsNone(plan_composite(fields, PredicateBuilder.and_predicates([
+            builder.equal('a', 1), builder.less_than('t', time(0, 0, 0, 123456))])))
+
+    @pytest.mark.python_plan
+    def test_time_submillisecond_bound_does_not_prune_matching_row(self):
+        schema = pa.schema([('a', pa.int32()), ('t', pa.time32('ms'))])
+        table = self._create_table(pa_schema=schema)
+        self._write_arrow(table, pa.table({
+            'a': [1], 't': [time(0, 0, 0, 123000)],
+        }, schema=schema))
+        index_path = table.path_factory().global_index_path_factory().index_path()
+        writer = BTreeIndexWriter(
+            table.file_io, index_path, CompositeKeySerializer(table.fields))
+        writer.write((1, 123), 0)
+        written = writer.finish()[0]
+        index_file = IndexFileMeta(
+            index_type='btree', file_name=written.file_name,
+            file_size=table.file_io.get_file_size(index_path + '/' + written.file_name),
+            row_count=1,
+            global_index_meta=GlobalIndexMeta(0, 0, 0, [1], written.meta),
+        )
+        entry = IndexManifestEntry(0, GenericRow([], []), 0, index_file)
+        builder = table.new_read_builder().new_predicate_builder()
+        predicate = PredicateBuilder.and_predicates([
+            builder.equal('a', 1), builder.less_than('t', time(0, 0, 0, 123456)),
+        ])
+        expected = self._rows(table.copy({'global-index.enabled': 'false'}), predicate)
+        self.assertEqual([{'a': 1, 't': time(0, 0, 0, 123000)}], expected)
+        with patch.object(IndexFileHandler, 'scan', return_value=[entry]):
+            actual = self._rows(table.copy({'scalar-index.search-mode': 'full'}), predicate)
+        self.assertEqual(expected, actual)
 
     @pytest.mark.python_plan
     def test_corrupt_selected_composite_metadata_is_not_hidden(self):

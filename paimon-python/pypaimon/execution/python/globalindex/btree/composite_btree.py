@@ -148,6 +148,7 @@ def _literal_supported(type_name, literal):
                 and not isinstance(literal, bool))
     if type_name.startswith('TIME') and not type_name.startswith('TIMESTAMP'):
         return (isinstance(literal, datetime.time)
+                and literal.microsecond % 1000 == 0
                 or isinstance(literal, numbers.Integral)
                 and not isinstance(literal, bool))
     if type_name.startswith('TIMESTAMP'):
