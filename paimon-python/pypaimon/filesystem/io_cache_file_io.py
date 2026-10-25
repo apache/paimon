@@ -73,18 +73,26 @@ class IoCacheRoutingFileIO(FileIO):
                 file_io = self._create_target(name)
                 if isinstance(file_io, PyArrowFileIO):
                     file_io.creates_parent_dirs = False
+                    file_io.cleans_up_failed_writes = False
                 self._targets[name] = file_io
             return file_io
 
     def _call(self, op: Op, path: str, action):
         return action(self._file_io(self._route(op, path)))
 
-    def _write(self, path: str, action):
+    def _write(self, path: str, action, cleans_up: bool = False):
         name = self._route(Op.WRITE, path)
-        if name is not None:
-            # A target takes only the object; its parent directories are created on origin, as unrouted.
-            self._origin.create_parent_dirs(path)
-        return action(self._file_io(name))
+        if name is None:
+            return action(self._origin)
+        # A target takes only the object; its parent directories are created on origin, as unrouted.
+        self._origin.create_parent_dirs(path)
+        try:
+            return action(self._file_io(name))
+        except Exception:
+            # The cleanup the origin FileIO would do after a failed write also runs on origin.
+            if cleans_up:
+                self._origin.delete_quietly(path)
+            raise
 
     def _call_batch(self, op: Op, paths: List[str], action) -> list:
         """Runs action(file_io, paths) once per routed group; results follow the order of paths."""
@@ -179,11 +187,13 @@ class IoCacheRoutingFileIO(FileIO):
 
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
-        return self._write(path, lambda io: io.write_parquet(path, data, compression, zstd_level, **kwargs))
+        return self._write(
+            path, lambda io: io.write_parquet(path, data, compression, zstd_level, **kwargs), True)
 
     def write_orc(self, path: str, data, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
-        return self._write(path, lambda io: io.write_orc(path, data, compression, zstd_level, **kwargs))
+        return self._write(
+            path, lambda io: io.write_orc(path, data, compression, zstd_level, **kwargs), True)
 
     def write_avro(self, path: str, data, avro_schema=None,
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):

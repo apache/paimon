@@ -714,5 +714,37 @@ def test_routed_writes_create_parent_directories_on_origin(write):
     assert origin == [call for call in unrouted if call != "open_output_stream"]
 
 
+class _FailingWritesHandler(_MissingPathsHandler):
+    """Every path is missing and every upload fails."""
+
+    def open_output_stream(self, path, metadata):
+        self._record("open_output_stream")
+        raise OSError("upload failed")
+
+
+@pytest.mark.parametrize("write", [
+    lambda f, p: f.write_parquet(p, pa.table({"a": [1]})),
+    lambda f, p: f.write_orc(p, pa.table({"a": [1]})),
+], ids=["write_parquet", "write_orc"])
+def test_failed_routed_writes_are_cleaned_up_on_origin(write):
+    def file_io(calls):
+        options = Options({"fs.oss.impl": "legacy", "fs.oss.endpoint": "oss-cn-test.example.com"})
+        with mock.patch.object(OssFileIO, "_initialize_oss_fs",
+                               return_value=pafs.PyFileSystem(_FailingWritesHandler(calls))):
+            file_io = OssFileIO(TABLE, options)
+        file_io.delete_quietly = mock.Mock()
+        return file_io
+
+    unrouted, origin, target_calls = file_io([]), file_io([]), []
+    with pytest.raises(RuntimeError):
+        write(unrouted, DATA)
+    targets = {"accel": file_io([]), "cluster": file_io(target_calls)}
+    with pytest.raises(RuntimeError):
+        write(IoCacheRoutingFileIO(_routing(policy="meta,read,write"), origin, targets.__getitem__), DATA)
+    unrouted.delete_quietly.assert_called_once_with(DATA)
+    origin.delete_quietly.assert_called_once_with(DATA)
+    targets["cluster"].delete_quietly.assert_not_called()
+    assert target_calls == ["open_output_stream"]
+
 if __name__ == "__main__":
     unittest.main()

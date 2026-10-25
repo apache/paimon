@@ -59,6 +59,8 @@ class LegacyOssDirectoryListingError(RuntimeError):
 class PyArrowFileIO(FileIO):
     # False on an io-cache target, whose writes get their parent directories on origin.
     creates_parent_dirs = True
+    # False on an io-cache target, whose failed writes are cleaned up on origin.
+    cleans_up_failed_writes = True
 
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
@@ -921,7 +923,8 @@ class PyArrowFileIO(FileIO):
                 pq.write_table(data, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
-            self.delete_quietly(path)
+            if self.cleans_up_failed_writes:
+                self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
     def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
@@ -951,7 +954,8 @@ class PyArrowFileIO(FileIO):
                     )
 
         except Exception as e:
-            self.delete_quietly(path)
+            if self.cleans_up_failed_writes:
+                self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
     def write_avro(
