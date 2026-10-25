@@ -287,6 +287,85 @@ class CachingInputStreamTest(unittest.TestCase):
         # Verify block 1 is only 2 bytes
         self.assertEqual(b"ij", cache.get_block("test", 1))
 
+    def test_coalesce_cold_blocks_and_preserve_cursor(self):
+        data = b"abcdefghijklmn"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        stream.seek(2)
+        with patch.object(stream, '_read_remote', wraps=stream._read_remote) as remote:
+            self.assertEqual(data[1:13], stream.read_at(12, 1))
+            self.assertEqual(2, stream.tell())
+            remote.assert_called_once_with(0, 14)
+            self.assertEqual(data[2:], stream.read())
+            self.assertEqual(14, stream.tell())
+            self.assertEqual(1, remote.call_count)
+        self.assertEqual(b"mn", cache.get_block("test", 3))
+
+    def test_coalescing_does_not_download_cached_holes(self):
+        data = b"abcdefghijklmn"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        cache.put_block("test", 1, data[4:8])
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        with patch.object(stream, '_read_remote', wraps=stream._read_remote) as remote:
+            self.assertEqual(data[1:], stream.read_at(13, 1))
+            self.assertEqual([(0, 4), (8, 6)], [c.args for c in remote.call_args_list])
+
+    def test_coalescing_bounds_blocks_and_bytes(self):
+        for block_size, blocks in [(4, 40), (1024 * 1024, 10), (9 * 1024 * 1024, 2)]:
+            with self.subTest(block_size=block_size):
+                data = b"x" * (block_size * blocks)
+                cache = LocalMemoryCacheManager(len(data), block_size=block_size)
+                stream = CachingInputStream(self._make_file_io(data), "test", cache)
+                with patch.object(stream, '_read_remote', wraps=stream._read_remote) as remote:
+                    self.assertEqual(data, stream.read())
+                    self.assertEqual(2, remote.call_count)
+                    self.assertEqual(len(data), sum(c.args[1] for c in remote.call_args_list))
+                    for call in remote.call_args_list:
+                        self.assertLessEqual(call.args[1], max(block_size, 8 * 1024 * 1024))
+
+    def test_coalesced_short_response_does_not_populate_cache(self):
+        data = b"abcdefghijkl"
+        cache = LocalMemoryCacheManager(1024, block_size=4)
+        stream = CachingInputStream(self._make_file_io(data), "test", cache)
+        with patch.object(stream, '_read_remote', return_value=data[:-1]):
+            with self.assertRaisesRegex(OSError, "Incomplete cache range read"):
+                stream.read()
+        self.assertEqual(0, stream.tell())
+        for i in range(3):
+            self.assertIsNone(cache.get_block("test", i))
+        self.assertEqual(data, stream.read())
+
+    def test_coalesced_positioned_source(self):
+        data = b"abcdefghijkl"
+
+        class PositionedStream:
+            def __init__(self):
+                self.calls = []
+
+            def read_at(self, size, offset):
+                self.calls.append((size, offset))
+                return data[offset:offset + size]
+
+        source = PositionedStream()
+        file_io = self._make_file_io(data)
+        file_io.new_input_stream.side_effect = lambda p: source
+        stream = CachingInputStream(file_io, "test", LocalMemoryCacheManager(1024, block_size=4))
+        self.assertEqual(data[1:], stream.read_at(11, 1))
+        self.assertEqual([(12, 0)], source.calls)
+        self.assertEqual(0, stream.tell())
+
+    def test_coalesced_seek_source_handles_short_chunks(self):
+        data = b"abcdefghijkl"
+
+        class ShortChunkStream(io.BytesIO):
+            def read(self, size=-1):
+                return super().read(min(size, 3))
+
+        file_io = self._make_file_io(data)
+        file_io.new_input_stream.side_effect = lambda p: ShortChunkStream(data)
+        stream = CachingInputStream(file_io, "test", LocalMemoryCacheManager(1024, block_size=4))
+        self.assertEqual(data, stream.read())
+
 
 class CachingFileIOTest(unittest.TestCase):
 
