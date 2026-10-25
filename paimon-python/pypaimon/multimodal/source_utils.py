@@ -29,9 +29,7 @@ class _SourceFileIO:
     """Resolve external source URIs without using target warehouse options."""
 
     def __init__(self, options):
-        self._file_io = ResolvingFileIO(options)
-        # Source objects belong to no table, so they are read from origin.
-        self._resolver = self._file_io.origin_only()
+        self._resolver = ResolvingFileIO(options)
 
     def _resolve(self, path):
         file_io = self._resolver._get_fileio(path)
@@ -56,7 +54,7 @@ class _SourceFileIO:
         return self._resolve(path)[1]
 
     def close(self):
-        self._file_io.close()
+        self._resolver.close()
 
 
 def _source_path_text(value):

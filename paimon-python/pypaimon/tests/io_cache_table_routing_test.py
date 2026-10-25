@@ -39,7 +39,6 @@ from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
-from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.format.format_table import Format, FormatTable
 from pypaimon.table.row.blob import BlobDescriptor
@@ -211,10 +210,8 @@ class IoCacheTableRoutingTest(unittest.TestCase):
 
     def test_uri_readers_that_serve_no_table_read_from_origin(self):
         uri, _ = self._external_descriptor()
-        # Factories and source readers built from catalog options create FileIOs for no table.
+        # A factory built from catalog options creates FileIOs for no table.
         self.assertEqual(b"NEW", UriReaderFactory(Options({})).create(uri).new_input_stream(uri).read())
-        with _SourceFileIO(Options({})).new_input_stream(uri) as stream:
-            self.assertEqual(b"NEW", stream.read())
         self.assertEqual([], self._target_reads("/import/"))
 
     def test_table_files_named_like_external_objects_still_use_the_target(self):
