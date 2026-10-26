@@ -51,8 +51,9 @@ _PAIMON_FILE_NAMES = {
     FileType.GLOBAL_INDEX: re.compile(r"[a-z0-9_-]+-global-index-" + _UUID + r"\.index"),
 }
 _MANIFEST_SIDECAR_SUFFIX = ".avro.sidecar"
+IO_CACHE_PREFIX = "io-cache."
 # JindoSDK cache client keys; the origin option set must not talk to a cache.
-_ORIGIN_DROPPED_PREFIXES = ("fs.oss.dlf-cache.", "fs.jindocache.")
+_ORIGIN_DROPPED_PREFIXES = ("fs.oss.dlf-cache.", "fs.jindocache.", IO_CACHE_PREFIX)
 
 
 class Op(Enum):
@@ -288,19 +289,20 @@ class IoCacheRouting:
         return name if name in self._targets else None
 
     def origin_options(self, options: Mapping[str, str]) -> Dict[str, str]:
-        """Options of the origin FileIO: the origin endpoint, without cache client keys."""
+        """Options of the origin FileIO: the origin endpoint, without cache client and io-cache keys."""
         result = {key: value for key, value in options.items()
                   if not str(key).startswith(_ORIGIN_DROPPED_PREFIXES)}
         return _with_endpoint(result, self._origin)
 
     def target_options(self, options: Mapping[str, str], name: str) -> Dict[str, str]:
-        """Options of the FileIO of one target: its endpoint, addressing and region."""
+        """Options of the FileIO of one target: its endpoint, addressing and region, without io-cache keys."""
         target = self._targets[name]
         endpoint = target.endpoint
         # A target endpoint without a scheme means https.
         if "://" not in endpoint:
             endpoint = "https://" + endpoint
-        result = _with_endpoint(dict(options), endpoint)
+        result = _with_endpoint({key: value for key, value in options.items()
+                                 if not str(key).startswith(IO_CACHE_PREFIX)}, endpoint)
         result[FS_OSS_PATH_STYLE] = "true" if target.path_style_access else "false"
         if target.region and target.region.strip():
             result[FS_OSS_REGION] = target.region

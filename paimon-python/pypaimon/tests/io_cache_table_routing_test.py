@@ -32,9 +32,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
-from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.io_cache_file_io import IoCacheRoutingFileIO
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -207,12 +205,6 @@ class IoCacheTableRoutingTest(unittest.TestCase):
 
         self.assertEqual([2], self._read(table).column("id").to_pylist())
         self.assertEqual([], self._target_reads("/format_files/"))
-
-    def test_uri_readers_that_serve_no_table_read_from_origin(self):
-        uri, _ = self._external_descriptor()
-        # A factory built from catalog options creates FileIOs for no table.
-        self.assertEqual(b"NEW", UriReaderFactory(Options({})).create(uri).new_input_stream(uri).read())
-        self.assertEqual([], self._target_reads("/import/"))
 
     def test_table_files_named_like_external_objects_still_use_the_target(self):
         pa_schema = pa.schema([("id", pa.int32())])

@@ -48,15 +48,15 @@ def _enrich_options_with_rest_token(
 ) -> Dict[str, str]:
     # REST catalogs (DLF) keep OSS STS tokens on table.file_io and the bucket on table.table_path,
     # not in catalog_options; fold both in so Daft's IOConfig routes to OSS with valid credentials.
+    # Daft reads with its own client, which cannot use io-cache targets per request.
     if catalog_options.get("metastore") != "rest":
-        return catalog_options
+        return single_endpoint_options(catalog_options)
     file_io = getattr(table, "file_io", None)
     if file_io is None or not hasattr(file_io, "try_to_refresh_token"):
-        return catalog_options
+        return single_endpoint_options(catalog_options)
     file_io.try_to_refresh_token()
     if file_io.token is None:
-        return catalog_options
-    # Daft reads with its own client, which cannot use io-cache targets per request.
+        return single_endpoint_options(catalog_options)
     enriched = single_endpoint_options(effective_options(catalog_options, file_io.token.token))
     parsed = urlparse(getattr(table, "table_path", "") or "")
     if parsed.scheme and parsed.netloc:

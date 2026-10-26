@@ -696,7 +696,12 @@ class FileIO(ABC):
                 )
 
         if scheme == "oss":
+            from pypaimon.filesystem.io_cache_routing import IoCacheRouting
             from pypaimon.filesystem.oss_file_io import OssFileIO
+            # This FileIO sends every request to one endpoint, so under io-cache routing it is the origin's.
+            routing = IoCacheRouting.create(opts.to_map())
+            if routing is not None:
+                opts = Options(routing.origin_options(opts.to_map()))
             return OssFileIO(path, opts)
 
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO

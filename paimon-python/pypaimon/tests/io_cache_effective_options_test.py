@@ -28,8 +28,11 @@ from unittest import mock
 from urllib.parse import unquote, urlsplit
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
 
 OBJECT = "/bkt/raw/cam0/000123.bin"
@@ -118,6 +121,47 @@ class EffectiveOptionsTest(unittest.TestCase):
             "io-cache.origin.endpoint": self.origin.url,
             "io-cache.policy": "meta,read",
         }
+
+    def _assert_reads_origin(self, read):
+        self.assertEqual(b"NEW", read())
+        self.assertEqual([], self.cache.requests)
+        self.assertTrue(self.origin.requests)
+
+    def test_uri_reader_factory_reads_row_data_uris_from_origin(self):
+        reader = UriReaderFactory(Options(self._routing_options())).create(URI)
+        self._assert_reads_origin(lambda: reader.new_input_stream(URI).read())
+
+    def test_source_file_io_reads_import_sources_from_origin(self):
+        from pypaimon.multimodal.source_utils import _SourceFileIO
+
+        source = _SourceFileIO(Options(self._routing_options()))
+        self._assert_reads_origin(lambda: source.new_input_stream(URI).read())
+
+    def test_file_io_of_a_catalog_without_tokens_reads_from_origin(self):
+        from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+
+        catalog = FileSystemCatalog(Options(dict(self._routing_options(), warehouse="oss://bkt/wh")))
+        self._assert_reads_origin(lambda: catalog.file_io.new_input_stream(URI).read())
+
+    def test_resolving_file_io_reads_from_origin(self):
+        options = dict(self._routing_options(), **{CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(): "true"})
+        file_io = FileIO.get(URI, Options(options))
+        self._assert_reads_origin(lambda: file_io.new_input_stream(URI).read())
+
+    def test_file_ios_of_routing_targets_keep_their_endpoints(self):
+        options = self._routing_options()
+        routing = IoCacheRouting.create(options)
+        target = FileIO.get(URI, Options(routing.target_options(options, "default")))
+        self.assertEqual(b"OLD", target.new_input_stream(URI).read())
+        self.assertEqual([], self.origin.requests)
+
+    @unittest.skipIf(sys.version_info < (3, 7), "pypaimon.daft needs Python 3.7+")
+    def test_daft_reads_catalog_only_routing_from_origin(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+
+        options = dict(self._routing_options(), metastore="filesystem", warehouse="oss://bkt/wh")
+        enriched = _enrich_options_with_rest_token(options, SimpleNamespace(table_path="oss://bkt/wh/db.db/t"))
+        self.assertEqual((self.origin.url, "oss://bkt/wh"), (enriched["fs.oss.endpoint"], enriched["warehouse"]))
 
     def test_pvfs_reads_through_the_origin_of_catalog_only_routing(self):
         from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem

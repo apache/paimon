@@ -307,11 +307,12 @@ def _load_native_table(table):
             token_loader=lambda: _rest_data_token(table))
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
+        # As with a token: the core cannot use io-cache targets per request, so it gets the origin's options.
         rt = Table.from_resolved_schema(
             table.table_path, _resolved_schema_json(table),
             database=table.identifier.get_database_name(),
             table=table.identifier.get_table_name(),
-            branch=table.current_branch(), options=file_io_options)
+            branch=table.current_branch(), options=single_endpoint_options(file_io_options))
     else:
         from pypaimon_rust.datafusion import PaimonCatalog
         # The Python loader has already resolved /config, including typed

@@ -1229,6 +1229,27 @@ class NativePlanTest(unittest.TestCase):
             self.assertEqual(dict(token.token, **{'fs.oss.endpoint': 'oss-cn-test.example.com'}),
                              fake_df.Table.from_rest_response_with_token.call_args[1]['data_token'])
 
+    def test_native_table_of_a_filesystem_catalog_gets_the_origin_under_io_cache_routing(self):
+        from pypaimon.execution.native.table import _load_native_table
+
+        table = _scan(True, Mock()).table
+        table.table_schema = TableSchema(0, [])
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(CatalogContext.create_from_options(Options({
+            'warehouse': 'oss://bkt/wh',
+            'fs.oss.endpoint': 'http://cache.example.com',
+            'io-cache.enabled': 'true',
+            'io-cache.endpoint': 'http://cache.example.com',
+            'io-cache.origin.endpoint': 'https://origin.example.com',
+            'io-cache.policy': 'meta,read',
+        })))
+        with patch('pypaimon_rust.datafusion.Table', create=True) as native_table:
+            native_table.from_resolved_schema.return_value.branch.return_value = 'main'
+            _load_native_table(table)
+        options = native_table.from_resolved_schema.call_args[1]['options']
+        self.assertEqual(('https://origin.example.com', 'oss://bkt/wh'),
+                         (options['fs.oss.endpoint'], options['warehouse']))
+        self.assertNotIn('io-cache.enabled', options)
+
     def test_native_rest_cache_retries_failed_construction(self):
         from pypaimon.execution.native.table import _NativeRestTableCache
 
