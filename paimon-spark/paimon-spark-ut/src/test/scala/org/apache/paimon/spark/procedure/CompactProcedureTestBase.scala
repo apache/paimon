@@ -1930,6 +1930,73 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: data evolution vector compaction does not recompact rolled output") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, embedding ARRAY<FLOAT>)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2',
+            |  'vector-compaction.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      for (start <- Seq(0, 1250)) {
+        sql(s"""
+               |INSERT INTO T SELECT /*+ REPARTITION(1) */
+               |CAST(id AS INT), array(CAST(id AS FLOAT), 0.0f) FROM range($start, ${start + 1250})
+               |""".stripMargin)
+      }
+      // Non-overlapping files are only rewritten when small; overlap them with an update.
+      sql("""
+            |MERGE INTO T USING (SELECT CAST(id AS INT) AS id FROM range(0, 1250)) S
+            |ON T.id = S.id
+            |WHEN MATCHED THEN UPDATE SET T.embedding = array(CAST(S.id AS FLOAT), 0.0f)
+            |""".stripMargin)
+      sql("ALTER TABLE T SET TBLPROPERTIES ('vector.target-file-size' = '1 b')")
+
+      def vectorRanges(): Seq[Range] = loadTable("T")
+        .newSnapshotReader()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+        .filter(_.fileName().contains(".vector."))
+        .map(_.nonNullRowIdRange())
+        .sortBy(_.from)
+        .toSeq
+      assert(
+        vectorRanges() == Seq(new Range(0, 1249), new Range(0, 1249), new Range(1250, 2499)),
+        vectorRanges())
+
+      val table = loadTable("T")
+      val beforeSnapshot = lastSnapshotId(table)
+      val attempts = new AtomicInteger()
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        null,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => assert(attempts.incrementAndGet() <= 1, "Recompacted this invocation's output")
+      )
+
+      assert(lastSnapshotId(table) == beforeSnapshot + 1)
+      // The rolling writer checks the target size every 1000 rows.
+      assert(
+        vectorRanges() == Seq(new Range(0, 999), new Range(1000, 1999), new Range(2000, 2499)),
+        vectorRanges())
+      checkAnswer(
+        sql("SELECT id, embedding[0] FROM T ORDER BY id"),
+        (0 until 2500).map(id => Row(id, id.toFloat)))
+    }
+  }
+
   test("Paimon Procedure: materialize deletion vectors across planner batches") {
     withTable("T") {
       sql("""

@@ -3168,6 +3168,13 @@ public class CoreOptions implements Serializable {
                                                     + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
+    public static final ConfigOption<Boolean> VECTOR_COMPACTION_ENABLED =
+            key("vector-compaction.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to compact vector-store files when compacting a data evolution table.");
+
     public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
             key("vector-search.distribute.enabled")
                     .booleanType()
@@ -4996,6 +5003,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public boolean vectorCompactionEnabled() {
+        return options.get(VECTOR_COMPACTION_ENABLED);
     }
 
     public boolean vectorSearchDistributeEnabled() {

@@ -28,23 +28,17 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -53,14 +47,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
-import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -106,10 +98,10 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
         CoreOptions options = table.coreOptions();
 
-        if (isVectorStoreFile(compactBefore.get(0).fileName())) {
-            // TODO: support vector-store file compaction
-            throw new UnsupportedOperationException("Vector-store task is not supported");
-        }
+        checkArgument(
+                !isVectorStoreFile(compactBefore.get(0).fileName()),
+                "Vector-store files are compacted by %s.",
+                DataEvolutionVectorCompactTask.class.getSimpleName());
 
         Set<String> fieldsInDedicatedFile =
                 SetUtils.union(
@@ -227,59 +219,5 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
             }
             start = end + 1;
         }
-    }
-
-    @Nullable
-    private long[] compactedWriteColsSequences(FileStoreTable table, DataFileMeta outputFile) {
-        SchemaManager schemaManager = table.schemaManager();
-        Map<Long, TableSchema> schemaCache = new HashMap<>();
-        Function<Long, TableSchema> schemaLoader =
-                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaManager::schema);
-        Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache = new HashMap<>();
-
-        Map<Integer, Long> fieldMaxSequences = new HashMap<>();
-        for (DataFileMeta input : compactBefore) {
-            List<DataField> inputFields =
-                    fileFieldsCache.computeIfAbsent(
-                            Pair.of(input.schemaId(), input.writeCols()),
-                            key -> fileFields(schemaLoader, input));
-            long[] inputWriteColsSequences = input.writeColsSequences();
-            for (int inputPosition = 0; inputPosition < inputFields.size(); inputPosition++) {
-                fieldMaxSequences.merge(
-                        inputFields.get(inputPosition).id(),
-                        fieldMaxSequenceNumber(
-                                input, inputWriteColsSequences, inputPosition, inputFields.size()),
-                        Math::max);
-            }
-        }
-
-        long fallbackSequence = outputFile.maxSequenceNumber();
-        List<DataField> outputFields =
-                fileFieldsCache.computeIfAbsent(
-                        Pair.of(outputFile.schemaId(), outputFile.writeCols()),
-                        key -> fileFields(schemaLoader, outputFile));
-        boolean allEqualToFileMax =
-                outputFields.stream()
-                        .allMatch(
-                                field ->
-                                        fieldMaxSequences.getOrDefault(field.id(), fallbackSequence)
-                                                == fallbackSequence);
-        if (allEqualToFileMax) {
-            return null;
-        }
-
-        long[] result = new long[outputFields.size()];
-        for (int outputPosition = 0; outputPosition < outputFields.size(); outputPosition++) {
-            result[outputPosition] =
-                    fieldMaxSequences.getOrDefault(
-                            outputFields.get(outputPosition).id(), fallbackSequence);
-        }
-        return result;
-    }
-
-    private static List<DataField> fileFields(
-            Function<Long, TableSchema> schemaLoader, DataFileMeta file) {
-        TableSchema fileSchema = schemaLoader.apply(file.schemaId());
-        return org.apache.paimon.utils.DataEvolutionUtils.fileFields(fileSchema, file);
     }
 }
