@@ -30,15 +30,24 @@ import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
 
+/**
+ * @param writeBuilder
+ *   a batch write builder, or the stream write builder of a streaming query.
+ * @param ignorePreviousFiles
+ *   whether the write may ignore the files it would otherwise have to read first, because the
+ *   commit overwrites them. A batch write builder decides this itself for an overwrite; a stream
+ *   write builder does not know about overwrites.
+ */
 case class PaimonDataWrite(
-    writeBuilder: BatchWriteBuilder,
+    writeBuilder: WriteBuilder,
     writeType: RowType,
     rowKindColIdx: Int = -1,
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
-    batchId: Option[Long],
+    commitIdentifier: Option[Long],
     uriReaderFactory: UriReaderFactory,
-    postponePartitionBucketComputer: Option[BinaryRow => Integer])
+    postponePartitionBucketComputer: Option[BinaryRow => Integer],
+    ignorePreviousFiles: Boolean = false)
   extends abstractInnerTableDataWrite[Row]
   with InnerTableV1DataWrite {
 
@@ -49,6 +58,9 @@ case class PaimonDataWrite(
     _write.withIOManager(ioManager)
     if (writeRowTracking) {
       _write.withWriteType(writeType)
+    }
+    if (ignorePreviousFiles) {
+      _write.withIgnorePreviousFiles(true)
     }
     _write
   }
@@ -72,7 +84,13 @@ case class PaimonDataWrite(
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    write.prepareCommit().asScala.toSeq
+    val messages = commitIdentifier match {
+      // A Spark task does not outlive its micro-batch, so unlike a Flink writer it cannot leave a
+      // compaction running to be collected at the next commit.
+      case Some(identifier) => write.prepareCommit(true, identifier)
+      case None => write.prepareCommit()
+    }
+    messages.asScala.toSeq
   }
 
   override def close(): Unit = {
