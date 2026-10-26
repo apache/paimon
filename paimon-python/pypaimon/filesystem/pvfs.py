@@ -884,16 +884,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
-        merged_token = dict(token)
-        dlf_oss_endpoint = self.options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-        if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-            merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-            return merged_token
-        if self.options.contains(CatalogOptions.IO_CACHE_ENABLED):
-            merged_token[CatalogOptions.IO_CACHE_ENABLED.key()] = str(
-                self.options.get(CatalogOptions.IO_CACHE_ENABLED)).lower()
         # The OSS filesystem sends every request to one endpoint, so it cannot use io-cache targets.
-        return single_endpoint_options(merged_token)
+        return single_endpoint_options(token, self.options.to_map())
 
     @staticmethod
     def _get_storage_type(path: str):

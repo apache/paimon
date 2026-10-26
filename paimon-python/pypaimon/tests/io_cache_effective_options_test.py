@@ -18,15 +18,130 @@
 """Every component takes io-cache routing from the effective options: catalog options merged with the token."""
 
 import sys
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from types import ModuleType, SimpleNamespace
 from unittest import mock
+from urllib.parse import unquote, urlsplit
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.filesystem.io_cache_routing import IoCacheRouting
+
+OBJECT = "/bkt/raw/cam0/000123.bin"
+URI = "oss://bkt/raw/cam0/000123.bin"
+
+
+class _ObjectEndpoint:
+    """An OSS endpoint for the real PyArrow client: path-style HEAD and GET of fixed objects."""
+
+    def __init__(self, objects):
+        self.objects = objects
+        self.requests = []
+        endpoint = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_HEAD(self):
+                self._serve(False)
+
+            def do_GET(self):
+                self._serve(True)
+
+            def _serve(self, with_body):
+                path = unquote(urlsplit(self.path).path)
+                endpoint.requests.append((self.command, path))
+                data = endpoint.objects.get(path)
+                if data is None:
+                    body = b"<Error><Code>NoSuchKey</Code></Error>" if with_body else b""
+                    self.send_response(404)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                start, end, status = 0, len(data), 200
+                ranged = self.headers.get("Range")
+                if ranged and ranged.startswith("bytes="):
+                    first, _, last = ranged[len("bytes="):].partition("-")
+                    start, end, status = int(first), min(len(data), int(last) + 1 if last else len(data)), 206
+                self.send_response(status)
+                self.send_header("Content-Length", str(end - start))
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("ETag", '"etag"')
+                self.send_header("Last-Modified", "Mon, 26 Oct 2026 00:00:00 GMT")
+                if status == 206:
+                    self.send_header("Content-Range", "bytes {}-{}/{}".format(start, end - 1, len(data)))
+                self.end_headers()
+                if with_body:
+                    self.wfile.write(data[start:end])
+
+        class Server(ThreadingMixIn, HTTPServer):
+            daemon_threads = True
+
+        self.server = Server(("127.0.0.1", 0), Handler)
+        self.url = "http://127.0.0.1:{}".format(self.server.server_port)
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+
+
+class EffectiveOptionsTest(unittest.TestCase):
+    """The origin holds the current object; a legacy cache, still fs.oss.endpoint for old clients, keeps an old one."""
+
+    def setUp(self):
+        self.origin = _ObjectEndpoint({OBJECT: b"NEW"})
+        self.cache = _ObjectEndpoint({OBJECT: b"OLD"})
+        self.addCleanup(self.origin.close)
+        self.addCleanup(self.cache.close)
+
+    def _routing_options(self):
+        return {
+            "fs.oss.impl": "legacy",
+            "fs.oss.region": "cn-hangzhou",
+            "fs.oss.accessKeyId": "ak",
+            "fs.oss.accessKeySecret": "sk",
+            "fs.oss.second.level.domain.enable": "true",
+            "fs.oss.endpoint": self.cache.url,
+            "io-cache.enabled": "true",
+            "io-cache.endpoint": self.cache.url,
+            "io-cache.target.default.path-style-access": "true",
+            "io-cache.origin.endpoint": self.origin.url,
+            "io-cache.policy": "meta,read",
+        }
+
+    def test_pvfs_reads_through_the_origin_of_catalog_only_routing(self):
+        from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+
+        # The token carries credentials and the legacy endpoint; routing is configured on the catalog only.
+        token = {key: value for key, value in self._routing_options().items() if not key.startswith("io-cache.")}
+        catalog = dict({key: value for key, value in self._routing_options().items() if key.startswith("io-cache.")},
+                       uri="http://rest.example.com", warehouse="wh", **{"fs.oss.impl": "legacy"})
+        rest_api = SimpleNamespace(
+            get_table=lambda identifier: SimpleNamespace(path="oss://bkt/raw", created_at=0, updated_at=0),
+            load_table_token=lambda identifier: SimpleNamespace(
+                token=token, expires_at_millis=int(time.time() * 1000) + 7_200_000))
+        objects = {self.cache.url: b"old-object", self.origin.url: b"new-object"}
+        backends = []
+
+        def ossfs(options):
+            backends.append(options.to_map()["fs.oss.endpoint"])
+            return SimpleNamespace(cat_file=lambda path, start, end, **kwargs: objects[backends[-1]])
+
+        pvfs = PaimonVirtualFileSystem(catalog, skip_instance_cache=True)
+        with mock.patch.object(PaimonVirtualFileSystem, "_PaimonVirtualFileSystem__rest_api", return_value=rest_api), \
+                mock.patch.object(PaimonVirtualFileSystem, "_get_ossfs_filesystem", side_effect=ossfs):
+            self.assertEqual(b"new-object", pvfs.cat_file("pvfs://wh/db/t/cam0/000123.bin"))
+        self.assertEqual([self.origin.url], backends)
 
 
 class SharedTokenTest(unittest.TestCase):
