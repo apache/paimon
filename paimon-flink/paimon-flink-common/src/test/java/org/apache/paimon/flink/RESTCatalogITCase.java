@@ -102,6 +102,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
     }
 
+    @Test
     public void testExpiredDataToken() {
         Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         RESTToken expiredDataToken =
