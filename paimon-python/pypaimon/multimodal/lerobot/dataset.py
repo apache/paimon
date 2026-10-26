@@ -2140,8 +2140,10 @@ class _PyAVVideoDecoder:
                 raise IndexError(
                     "Video frame index %d is out of range." % index)
             groups.setdefault(preceding, []).append(index)
-            start = mapping.keyframes[max(0, preceding - 1)][2]
-            range_end = preceding + 2
+            # Prefetch only the target GOP. The range-backed stream fetches
+            # additional decoder dependencies on demand (including B-frames).
+            start = mapping.keyframes[preceding][2]
+            range_end = preceding + 1
             end = (
                 mapping.keyframes[range_end][2]
                 if range_end < len(mapping.keyframes)
