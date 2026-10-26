@@ -77,6 +77,9 @@ public class IoCacheRoutingTest {
         Options options = single();
         assertEndpoint(options, "read", DATA_PATH, CACHE);
         assertEndpoint(options, "meta", DATA_PATH, CACHE);
+        // a ROW sidecar is sized and read through the target of its data file
+        assertEndpoint(single("io-cache.whitelist=data"), "meta", DATA_PATH + ".row", CACHE);
+        assertEndpoint(single("io-cache.whitelist=data"), "read", DATA_PATH + ".row", CACHE);
         // exists asks whether a file is still there, so it needs its own policy token
         assertEndpoint(options, "exists", DATA_PATH, OSS);
         assertEndpoint(single(EXISTS), "exists", DATA_PATH, CACHE);
@@ -304,6 +307,7 @@ public class IoCacheRoutingTest {
         assertType("dt=1/8b1f7c2e/data-{uuid}-0.parquet", DATA);
         assertType("dt=1/bucket-0/data-{uuid}-0.parquet.index", FILE_INDEX);
         assertType("dt=1/bucket-0/data-{uuid}-0.parquet.blobref", DATA);
+        assertType("dt=1/bucket-0/data-{uuid}-0.parquet.row", DATA);
         assertType("dt=1/bucket-0/data-{uuid}-0.managed.blob", DATA);
         assertType("dt=1/bucket-0/data-{uuid}.managed.blob", DATA);
         // the postpone writer puts its commit user and write id before {uuid}-{count}
@@ -315,6 +319,7 @@ public class IoCacheRoutingTest {
             assertType(postpone, DATA);
             assertType(postpone + ".index", FILE_INDEX);
             assertType(postpone + ".blobref", DATA);
+            assertType(postpone + ".row", DATA);
         }
         assertType("index/index-{uuid}-0", BUCKET_INDEX);
         assertType("index/btree-global-index-{uuid}.index", GLOBAL_INDEX);
