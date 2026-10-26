@@ -19,9 +19,9 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FilePrefixHistory;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.StringUtils;
@@ -218,7 +218,7 @@ final class IoCacheRouting implements Serializable {
      * This routing for the table of {@code view}: only files under its roots may use a cache
      * target, also when named with its prefixes or those of its older schemas.
      */
-    IoCacheRouting withTableView(TableFileIOView view) {
+    IoCacheRouting withTableView(TableView view) {
         if (view.isOriginOnly()) {
             return originOnly();
         }
@@ -292,7 +292,7 @@ final class IoCacheRouting implements Serializable {
     CacheTarget targetOf(Path path) {
         // Only OSS paths can use cache targets, and a table view only its own files.
         if (!"oss".equals(path.toUri().getScheme())
-                || (!roots.isEmpty() && !TableFileIOView.isUnder(roots, path))) {
+                || (!roots.isEmpty() && !TableView.isUnder(roots, path))) {
             return null;
         }
         FileType type = cacheableType(path, filePrefixes());
@@ -305,7 +305,7 @@ final class IoCacheRouting implements Serializable {
                 || history.loaded != null
                 || !(targetByType.containsKey(FileType.DATA)
                         || targetByType.containsKey(FileType.FILE_INDEX))
-                || (!roots.isEmpty() && !TableFileIOView.isUnder(roots, path))) {
+                || (!roots.isEmpty() && !TableView.isUnder(roots, path))) {
             return false;
         }
         String name = path.getName();
@@ -468,10 +468,10 @@ final class IoCacheRouting implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FilePrefixHistory source;
+        private final IoCacheViewableFileIO.PrefixHistory source;
         @Nullable private transient volatile List<String> loaded;
 
-        private PrefixHistory(FilePrefixHistory source) {
+        private PrefixHistory(IoCacheViewableFileIO.PrefixHistory source) {
             this.source = source;
         }
 

@@ -24,11 +24,10 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
-import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RemoteIterator;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
@@ -265,8 +264,8 @@ class RESTTokenFileIOTest {
         IoCacheViewableFileIO delegate = mock(IoCacheViewableFileIO.class);
         FileIO originOnly = mock(FileIO.class);
         FileIO prefixed = mock(FileIO.class);
-        TableFileIOView tableView =
-                TableFileIOView.of(
+        TableView tableView =
+                TableView.of(
                         Collections.singletonList(tableRoot),
                         Collections.singletonList("custom-"),
                         null);
@@ -291,14 +290,14 @@ class RESTTokenFileIOTest {
 
         FileIO prefixView = fileIO.withTableView(tableView);
         assertThat(prefixView).isInstanceOf(RESTTokenFileIO.class).isNotSameAs(fileIO);
-        assertThat(IoCacheViews.withTableView(prefixView, tableView)).isSameAs(prefixView);
+        assertThat(IoCacheViewableFileIO.withTableView(prefixView, tableView)).isSameAs(prefixView);
         assertThat(((RESTTokenFileIO) prefixView).fileIO()).isSameAs(prefixed);
         assertThat(((RESTTokenFileIO) prefixView).fileIO()).isSameAs(prefixed);
         // the view of the token's FileIO is built once
         verify(delegate, times(1)).withTableView(any());
 
         FileIO originView = fileIO.originOnly();
-        assertThat(IoCacheViews.originOnly(originView)).isSameAs(originView);
+        assertThat(IoCacheViewableFileIO.originOnly(originView)).isSameAs(originView);
         Path data = new Path("oss://bucket/table/bucket-0/data-1.orc");
         originView.exists(data);
         verify(originOnly).exists(data);

@@ -20,7 +20,7 @@ package org.apache.paimon.table.iceberg;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.IoCacheViews;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
@@ -97,7 +97,7 @@ public interface IcebergTable extends Table {
             // other engines write Iceberg tables, so their files never use io-cache
             return new IcebergTableImpl(
                     identifier,
-                    fileIO == null ? null : IoCacheViews.originOnly(fileIO),
+                    fileIO == null ? null : IoCacheViewableFileIO.originOnly(fileIO),
                     rowType,
                     partitionKeys,
                     location,

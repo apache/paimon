@@ -21,10 +21,10 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FilePrefixHistory;
-import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.PrefixHistory;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTApi;
@@ -318,8 +318,8 @@ public class JindoIoCacheRoutingTest {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
         FileIO view = fileIO.originOnly();
         assertThat(view).isInstanceOf(JindoFileIO.class).isNotSameAs(fileIO);
-        assertThat(IoCacheViews.originOnly(view)).isSameAs(view);
-        assertThat(IoCacheViews.withTableView(view, view("custom-"))).isSameAs(view);
+        assertThat(IoCacheViewableFileIO.originOnly(view)).isSameAs(view);
+        assertThat(IoCacheViewableFileIO.withTableView(view, view("custom-"))).isSameAs(view);
 
         view.newInputStream(DATA).close();
         view.getFileStatus(MANIFEST);
@@ -341,13 +341,13 @@ public class JindoIoCacheRoutingTest {
     public void testFilePrefixViewRoutesDataFilesNamedWithThem() throws IOException {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
         Path custom = new Path(TABLE + "/dt=1/bucket-0/custom-" + UUID + "-1.orc");
-        assertThat(fileIO.withTableView(TableFileIOView.NONE)).isSameAs(fileIO);
+        assertThat(fileIO.withTableView(TableView.NONE)).isSameAs(fileIO);
 
         fileIO.newInputStream(custom).close();
         verify(ossFs).open(any(org.apache.hadoop.fs.Path.class));
 
         FileIO view = fileIO.withTableView(view("custom-"));
-        assertThat(IoCacheViews.withTableView(view, view("custom-"))).isSameAs(view);
+        assertThat(IoCacheViewableFileIO.withTableView(view, view("custom-"))).isSameAs(view);
         view.newInputStream(custom).close();
         view.newInputStream(DATA).close();
         view.getFileStatus(MANIFEST);
@@ -389,7 +389,7 @@ public class JindoIoCacheRoutingTest {
         JindoFileIO fileIO = configuredFileIO(cacheTargetOptions());
         Path older = new Path(TABLE + "/dt=1/bucket-0/older-" + UUID + "-1.orc");
         List<FileIO> readers = new ArrayList<>();
-        FilePrefixHistory history =
+        PrefixHistory history =
                 reader -> {
                     readers.add(reader);
                     reader.exists(new Path(TABLE + "/schema"));
@@ -397,7 +397,7 @@ public class JindoIoCacheRoutingTest {
                 };
         FileIO view =
                 fileIO.withTableView(
-                        TableFileIOView.of(
+                        TableView.of(
                                 Collections.singletonList(new Path(TABLE)),
                                 Collections.emptyList(),
                                 history));
@@ -418,7 +418,7 @@ public class JindoIoCacheRoutingTest {
         Options options = cacheTargetOptions();
         options.set(FILE_IO_ALLOW_CACHE, false);
         JindoFileIO fileIO = configuredFileIO(options);
-        FileIO view = IoCacheViews.originOnly(fileIO.withTableView(view("custom-")));
+        FileIO view = IoCacheViewableFileIO.originOnly(fileIO.withTableView(view("custom-")));
 
         view.newInputStream(DATA).close();
         assertThat(fileIO.fsMap).hasSize(1);
@@ -606,8 +606,8 @@ public class JindoIoCacheRoutingTest {
         return options;
     }
 
-    private static TableFileIOView view(String... prefixes) {
-        return TableFileIOView.of(
+    private static TableView view(String... prefixes) {
+        return TableView.of(
                 Collections.singletonList(new Path(TABLE)), Arrays.asList(prefixes), null);
     }
 

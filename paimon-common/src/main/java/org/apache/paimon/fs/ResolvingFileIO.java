@@ -20,6 +20,8 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
@@ -48,7 +50,7 @@ public class ResolvingFileIO implements IoCacheViewableFileIO {
 
     // a table view resolves through its base and applies the view to each FileIO
     @Nullable private ResolvingFileIO base;
-    private TableFileIOView view = TableFileIOView.NONE;
+    private TableView view = TableView.NONE;
 
     @Override
     public FileIO originOnly() {
@@ -56,11 +58,11 @@ public class ResolvingFileIO implements IoCacheViewableFileIO {
     }
 
     @Override
-    public FileIO withTableView(TableFileIOView tableView) {
+    public FileIO withTableView(TableView tableView) {
         return withView(view.merge(tableView));
     }
 
-    private FileIO withView(TableFileIOView newView) {
+    private FileIO withView(TableView newView) {
         if (newView == view) {
             return this;
         }

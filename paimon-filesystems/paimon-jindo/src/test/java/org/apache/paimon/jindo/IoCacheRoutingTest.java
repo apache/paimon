@@ -20,9 +20,9 @@ package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FilePrefixHistory;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.PrefixHistory;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
@@ -385,7 +385,7 @@ public class IoCacheRoutingTest {
         assertThat(prefixed.targetOf(DATA_FILE).name).isEqualTo("cluster");
         assertThat(prefixed.targetOf(MANIFEST).name).isEqualTo("accel");
         assertThat(prefixed.withTableView(view(null, "custom-"))).isSameAs(prefixed);
-        assertThat(routing.withTableView(TableFileIOView.NONE)).isSameAs(routing);
+        assertThat(routing.withTableView(TableView.NONE)).isSameAs(routing);
 
         // Format and Object Tables send every request to the origin
         IoCacheRouting originOnly = prefixed.originOnly();
@@ -419,7 +419,7 @@ public class IoCacheRoutingTest {
         // an external path on the table's bucket is one of its roots
         IoCacheRouting external =
                 routing.withTableView(
-                        TableFileIOView.of(
+                        TableView.of(
                                 Arrays.asList(new Path(TABLE_ROOT), new Path("oss://bkt/import/")),
                                 Collections.emptyList(),
                                 null));
@@ -470,7 +470,7 @@ public class IoCacheRoutingTest {
 
     @Test
     public void testFailingToLoadOlderSchemasKeepsTheirFilesOnTheOrigin() {
-        FilePrefixHistory failing =
+        PrefixHistory failing =
                 fileIO -> {
                     throw new IOException("schema directory not readable");
                 };
@@ -688,8 +688,8 @@ public class IoCacheRoutingTest {
                 .isEqualTo(type);
     }
 
-    private static TableFileIOView view(@Nullable FilePrefixHistory history, String... prefixes) {
-        return TableFileIOView.of(
+    private static TableView view(@Nullable PrefixHistory history, String... prefixes) {
+        return TableView.of(
                 Collections.singletonList(new Path(TABLE_ROOT)), Arrays.asList(prefixes), history);
     }
 
@@ -702,7 +702,7 @@ public class IoCacheRoutingTest {
     }
 
     /** Older schemas named their data files with these prefixes; counts the loads. */
-    private static class CountingHistory implements FilePrefixHistory {
+    private static class CountingHistory implements PrefixHistory {
 
         private static final long serialVersionUID = 1L;
 

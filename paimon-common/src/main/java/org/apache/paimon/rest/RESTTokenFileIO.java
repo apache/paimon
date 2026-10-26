@@ -23,13 +23,13 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -120,14 +120,14 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
     private volatile RESTToken token;
 
     // applied to the FileIO of each token
-    private final TableFileIOView view;
+    private final TableView view;
     private transient volatile Pair<FileIO, FileIO> lastView;
 
     private transient volatile FileIOKey lastKey;
 
     public RESTTokenFileIO(
             CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
-        this(catalogContext, apiInstance, identifier, path, TableFileIOView.NONE, null);
+        this(catalogContext, apiInstance, identifier, path, TableView.NONE, null);
     }
 
     private RESTTokenFileIO(
@@ -135,7 +135,7 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
             RESTApi apiInstance,
             Identifier identifier,
             Path path,
-            TableFileIOView view,
+            TableView view,
             @Nullable RESTToken token) {
         this.catalogContext = catalogContext;
         this.apiInstance = apiInstance;
@@ -151,11 +151,11 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
     }
 
     @Override
-    public FileIO withTableView(TableFileIOView tableView) {
+    public FileIO withTableView(TableView tableView) {
         return withView(view.merge(tableView));
     }
 
-    private FileIO withView(TableFileIOView newView) {
+    private FileIO withView(TableView newView) {
         return newView == view
                 ? this
                 : new RESTTokenFileIO(
