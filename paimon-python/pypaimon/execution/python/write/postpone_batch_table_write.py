@@ -18,12 +18,14 @@ from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.execution.python.write.file_store_write import PostponeFixedBucketFileStoreWrite
 from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner as PostponeBucketPlanner
 from pypaimon.execution.python.write.table_write import PythonTableWrite
 from pypaimon.execution.python.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 from pypaimon.write.row_utils import (
+    normalize_inline_blob_row,
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
@@ -129,6 +131,14 @@ class PythonPostponeFixedBucketWrite(PythonTableWrite):
         if self._bucket_plan.contains(partition):
             return super().write_row(row)
 
+        row, values_by_name = normalize_inline_blob_row(
+            row,
+            values_by_name,
+            self.table.field_dict,
+            column_names,
+            CoreOptions.blob_descriptor_fields(self.table.options),
+            CoreOptions.blob_view_fields(self.table.options),
+        )
         arrow_row = row_values_to_arrow_table(
             values_by_name, self.table.table_schema.fields, column_names)
         size = self._planner.input_partition_stats(arrow_row)[partition][1]

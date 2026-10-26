@@ -6027,6 +6027,149 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             }, schema=pa_schema))
         writer.close()
 
+    def test_postpone_fixed_bucket_pk_inline_blob_write_row_new_partition(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+        from pypaimon.table.row.generic_row import GenericRow
+
+        pk_pa_schema = pa.schema([
+            pa.field('pt', pa.string(), nullable=False),
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('picture', pa.large_binary()),
+        ])
+        with self.subTest(field='blob-descriptor-field'):
+            blob_file = os.path.join(self.temp_dir, 'postpone_pk_descriptor.bin')
+            with open(blob_file, 'wb') as f:
+                f.write(b'postpone-desc-0postpone-desc-1')
+            desc_0 = BlobDescriptor(blob_file, 0, 15)
+            desc_1 = BlobDescriptor(blob_file, 15, 15)
+
+            desc_schema = Schema.from_pyarrow_schema(
+                pk_pa_schema,
+                primary_keys=['pt', 'id'],
+                partition_keys=['pt'],
+                options={
+                    'bucket': '-2',
+                    'postpone.batch-write-fixed-bucket': 'true',
+                    'blob-descriptor-field': 'picture',
+                    'write.native.enabled': 'false',
+                },
+            )
+            self.catalog.create_table('test_db.pk_postpone_blob_descriptor', desc_schema, False)
+            desc_table = self.catalog.get_table('test_db.pk_postpone_blob_descriptor')
+
+            desc_wb = desc_table.new_postpone_fixed_bucket_write_builder()
+            desc_writer = desc_wb.new_write()
+            try:
+                desc_writer.write_row(GenericRow(
+                    [
+                        'p0',
+                        1,
+                        Blob.from_descriptor_bytes(
+                            desc_0.serialize(), file_io=desc_table.file_io
+                        ),
+                    ],
+                    desc_table.fields,
+                ))
+                desc_writer.write_row(GenericRow(
+                    [
+                        'p1',
+                        2,
+                        Blob.from_descriptor_bytes(
+                            desc_1.serialize(), file_io=desc_table.file_io
+                        ),
+                    ],
+                    desc_table.fields,
+                ))
+                messages = desc_writer.prepare_commit()
+                self.assertEqual({message.partition for message in messages}, {('p0',), ('p1',)})
+                for message in messages:
+                    self.assertEqual(message.total_buckets, 1)
+                desc_wb.new_commit().commit(messages)
+            finally:
+                desc_writer.close()
+
+            desc_rb = desc_table.new_read_builder()
+            desc_result = desc_rb.new_read().to_arrow(
+                desc_rb.new_scan().plan().splits()
+            ).sort_by('id')
+            self.assertEqual(desc_result.column('pt').to_pylist(), ['p0', 'p1'])
+            self.assertEqual(desc_result.column('id').to_pylist(), [1, 2])
+            self.assertEqual(
+                desc_result.column('picture').to_pylist(),
+                [b'postpone-desc-0', b'postpone-desc-1'],
+            )
+
+        with self.subTest(field='blob-view-field'):
+            source_schema = pa.schema([
+                ('id', pa.int32()),
+                ('picture', pa.large_binary()),
+            ])
+            source = Schema.from_pyarrow_schema(
+                source_schema,
+                options={
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true',
+                },
+            )
+            self.catalog.create_table('test_db.pk_postpone_view_source', source, False)
+            source_table = self.catalog.get_table('test_db.pk_postpone_view_source')
+            src_wb = source_table.new_batch_write_builder()
+            src_writer = src_wb.new_write()
+            src_writer.write_arrow(pa.Table.from_pydict({
+                'id': [10, 20],
+                'picture': [b'postpone-view-0', b'postpone-view-1'],
+            }, schema=source_schema))
+            src_wb.new_commit().commit(src_writer.prepare_commit())
+            src_writer.close()
+
+            view_0 = BlobViewStruct.of('test_db.pk_postpone_view_source', source_table, 'picture', 0)
+            view_1 = BlobViewStruct.of('test_db.pk_postpone_view_source', source_table, 'picture', 1)
+
+            view_schema = Schema.from_pyarrow_schema(
+                pk_pa_schema,
+                primary_keys=['pt', 'id'],
+                partition_keys=['pt'],
+                options={
+                    'bucket': '-2',
+                    'postpone.batch-write-fixed-bucket': 'true',
+                    'blob-view-field': 'picture',
+                    'write.native.enabled': 'false',
+                },
+            )
+            self.catalog.create_table('test_db.pk_postpone_blob_view', view_schema, False)
+            view_table = self.catalog.get_table('test_db.pk_postpone_blob_view')
+
+            view_wb = view_table.new_postpone_fixed_bucket_write_builder()
+            view_writer = view_wb.new_write()
+            try:
+                view_writer.write_row(GenericRow(
+                    ['p0', 1, Blob.from_view(view_0)],
+                    view_table.fields,
+                ))
+                view_writer.write_row(GenericRow(
+                    ['p1', 2, Blob.from_view(view_1)],
+                    view_table.fields,
+                ))
+                messages = view_writer.prepare_commit()
+                self.assertEqual({message.partition for message in messages}, {('p0',), ('p1',)})
+                for message in messages:
+                    self.assertEqual(message.total_buckets, 1)
+                view_wb.new_commit().commit(messages)
+            finally:
+                view_writer.close()
+
+            view_rb = view_table.new_read_builder()
+            view_result = view_rb.new_read().to_arrow(
+                view_rb.new_scan().plan().splits()
+            ).sort_by('id')
+            self.assertEqual(view_result.column('pt').to_pylist(), ['p0', 'p1'])
+            self.assertEqual(view_result.column('id').to_pylist(), [1, 2])
+            self.assertEqual(
+                view_result.column('picture').to_pylist(),
+                [b'postpone-view-0', b'postpone-view-1'],
+            )
+
 
 class GetBlobTest(unittest.TestCase):
 

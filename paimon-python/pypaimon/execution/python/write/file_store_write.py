@@ -25,7 +25,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import is_blob_file_field, is_blob_type
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import (
-    inline_blob_value,
+    normalize_inline_blob_row,
     require_columns,
     row_values_to_arrow_table,
 )
@@ -135,14 +135,14 @@ class FileStoreWrite:
             descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
             view_fields = CoreOptions.blob_view_fields(self.options)
             inline_columns = [name for name in column_names if name in descriptor_fields or name in view_fields]
-            if inline_columns:
-                values_by_name = dict(values_by_name)
-                for name in inline_columns:
-                    values_by_name[name] = inline_blob_value(
-                        values_by_name[name], name in descriptor_fields, name in view_fields)
-                from pypaimon.table.row.generic_row import GenericRow
-                row = GenericRow([values_by_name[name] for name in column_names],
-                                 [self.table.field_dict[name] for name in column_names], row.get_row_kind())
+            row, values_by_name = normalize_inline_blob_row(
+                row,
+                values_by_name,
+                self.table.field_dict,
+                column_names,
+                descriptor_fields,
+                view_fields,
+            )
             if not self.table.is_primary_key_table:
                 if writer is None:
                     ordinary_columns = [
