@@ -28,6 +28,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexResult;
@@ -761,20 +762,23 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
             readerSuppliers.add(
-                    () ->
-                            createFileReader(
-                                    partition,
-                                    file,
-                                    formatReaderMapping,
-                                    rowRanges,
-                                    readRowType,
-                                    new FileReadTarget(
-                                            DataFilePathFactory.formatIdentifier(file.fileName()),
-                                            dataFilePathFactory.toPath(file),
-                                            file.fileSize()),
-                                    deletionVector,
-                                    groupSelection,
-                                    null));
+                    () -> {
+                        RoaringBitmap32 selection = fileSelection(file, rowRanges, groupSelection);
+                        return createFileReader(
+                                partition,
+                                file,
+                                formatReaderMapping,
+                                rowRanges,
+                                readRowType,
+                                new FileReadTarget(
+                                        DataFilePathFactory.formatIdentifier(file.fileName()),
+                                        dataFilePathFactory.toPath(file),
+                                        file.fileSize(),
+                                        selection),
+                                deletionVector,
+                                groupSelection,
+                                null);
+                    });
         }
         return ConcatRecordReader.create(readerSuppliers);
     }
@@ -939,20 +943,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable FileIndexResult fileIndexResult,
             @Nullable FileMetadataCache metadataCache)
             throws IOException {
-        RoaringBitmap32 selection = file.toFileSelection(rowRanges);
+        RoaringBitmap32 selection = readTarget.selection;
         BitmapIndexResult bitmapIndexResult =
                 fileIndexResult instanceof BitmapIndexResult
                         ? (BitmapIndexResult) fileIndexResult
                         : null;
-        if (bitmapIndexResult != null) {
-            RoaringBitmap32 indexSelection = bitmapIndexResult.get();
-            selection =
-                    selection == null
-                            ? indexSelection.clone()
-                            : RoaringBitmap32.and(selection, indexSelection);
-            if (selection.isEmpty()) {
-                return new EmptyFileRecordReader<>();
-            }
+        if (selection != null && selection.isEmpty()) {
+            // Data-file targets never include DV-only filtering in their selection, so a file
+            // fully deleted by its DV still reaches applyDeletionVector below.
+            return new EmptyFileRecordReader<>();
         }
 
         FormatReaderContext formatReaderContext =
@@ -1540,29 +1539,69 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable FileIndexResult fileIndexResult,
             @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
+        RoaringBitmap32 selection = fileSelection(file, rowRanges, fileIndexResult);
         String rowSidecar = rowSidecarFileName(file);
-        if (rowSidecar != null
-                && shouldReadRowSidecar(
-                        file,
-                        rowRanges,
-                        fileIndexResult,
-                        deletionVector,
-                        coreOptions.dataEvolutionRowSidecarMaxSelectedRows(),
-                        coreOptions.dataEvolutionRowSidecarMaxSelectionRatio())) {
-            Path rowPath = dataFilePathFactory.toAlignedPath(rowSidecar, file);
-            try {
-                return new FileReadTarget(
-                        ROW_SIDECAR_FORMAT, rowPath, fileIO.getFileStatus(rowPath).getLen());
-            } catch (IOException e) {
-                if (!coreOptions.scanIgnoreLostFile()) {
-                    throw e;
+        if (rowSidecar != null) {
+            RoaringBitmap32 rowSidecarSelection =
+                    sidecarSelection(
+                            file,
+                            selection,
+                            deletionVector == null ? null : deletionVector.deletionVector,
+                            deletionVector == null ? null : deletionVector.range);
+            if (shouldReadRowSidecar(
+                    file,
+                    rowSidecarSelection,
+                    coreOptions.dataEvolutionRowSidecarMaxSelectedRows(),
+                    coreOptions.dataEvolutionRowSidecarMaxSelectionRatio())) {
+                Path rowPath = dataFilePathFactory.toAlignedPath(rowSidecar, file);
+                try {
+                    return new FileReadTarget(
+                            ROW_SIDECAR_FORMAT,
+                            rowPath,
+                            fileIO.getFileStatus(rowPath).getLen(),
+                            rowSidecarSelection);
+                } catch (IOException e) {
+                    if (!coreOptions.scanIgnoreLostFile()) {
+                        throw e;
+                    }
                 }
             }
         }
         return new FileReadTarget(
                 DataFilePathFactory.formatIdentifier(file.fileName()),
                 dataFilePathFactory.toPath(file),
-                file.fileSize());
+                file.fileSize(),
+                selection);
+    }
+
+    @VisibleForTesting
+    static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable RoaringBitmap32 selection,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        long selectedRowCount = selection == null ? file.rowCount() : selection.getCardinality();
+        return shouldReadRowSidecar(file, selectedRowCount, maxSelectedRows, maxSelectionRatio);
+    }
+
+    private static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            long selectedRowCount,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        if (file.rowCount() <= 0
+                || isBlobFile(file.fileName())
+                || isVectorStoreFile(file.fileName())
+                || rowSidecarFileName(file) == null) {
+            return false;
+        }
+
+        if (selectedRowCount <= 0 || selectedRowCount >= file.rowCount()) {
+            return false;
+        }
+
+        double selectionRatio = (double) selectedRowCount / file.rowCount();
+        return selectedRowCount <= maxSelectedRows && selectionRatio <= maxSelectionRatio;
     }
 
     @Nullable
@@ -1575,193 +1614,105 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return rowFiles.size() == 1 ? rowFiles.get(0) : null;
     }
 
+    /**
+     * Builds the rows read from one physical file in file-local positions. Null means every row.
+     */
+    @Nullable
     @VisibleForTesting
-    static boolean shouldReadRowSidecar(DataFileMeta file, @Nullable List<Range> rowRanges) {
-        return shouldReadRowSidecar(
-                file,
-                rowRanges,
-                null,
-                (DeletionVector) null,
-                CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.defaultValue(),
-                CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.defaultValue());
-    }
-
-    @VisibleForTesting
-    static boolean shouldReadRowSidecar(
+    static RoaringBitmap32 fileSelection(
             DataFileMeta file,
             @Nullable List<Range> rowRanges,
-            long maxSelectedRows,
-            double maxSelectionRatio) {
-        return shouldReadRowSidecar(
-                file, rowRanges, null, (DeletionVector) null, maxSelectedRows, maxSelectionRatio);
-    }
-
-    @VisibleForTesting
-    static boolean shouldReadRowSidecar(
-            DataFileMeta file,
-            @Nullable List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult,
-            long maxSelectedRows,
-            double maxSelectionRatio) {
-        return shouldReadRowSidecar(
-                file,
-                rowRanges,
-                fileIndexResult,
-                (DeletionVector) null,
-                maxSelectedRows,
-                maxSelectionRatio);
-    }
-
-    private static boolean shouldReadRowSidecar(
-            DataFileMeta file,
-            @Nullable List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult,
-            @Nullable DeletionVectorWithRange deletionVector,
-            long maxSelectedRows,
-            double maxSelectionRatio) {
-        return shouldReadRowSidecar(
-                file,
-                rowRanges,
-                fileIndexResult,
-                deletionVector == null ? null : deletionVector.deletionVector,
-                deletionVector == null ? null : deletionVector.range,
-                maxSelectedRows,
-                maxSelectionRatio);
-    }
-
-    @VisibleForTesting
-    static boolean shouldReadRowSidecar(
-            DataFileMeta file,
-            @Nullable List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult,
-            @Nullable DeletionVector deletionVector,
-            long maxSelectedRows,
-            double maxSelectionRatio) {
-        return shouldReadRowSidecar(
-                file,
-                rowRanges,
-                fileIndexResult,
-                deletionVector,
-                null,
-                maxSelectedRows,
-                maxSelectionRatio);
-    }
-
-    private static boolean shouldReadRowSidecar(
-            DataFileMeta file,
-            @Nullable List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult,
-            @Nullable DeletionVector deletionVector,
-            @Nullable Range deletionVectorRange,
-            long maxSelectedRows,
-            double maxSelectionRatio) {
-        if (file.rowCount() <= 0
-                || isBlobFile(file.fileName())
-                || isVectorStoreFile(file.fileName())
-                || rowSidecarFileName(file) == null) {
-            return false;
-        }
-
-        long selectedRowCount =
-                selectedRowCount(
-                        file, rowRanges, fileIndexResult, deletionVector, deletionVectorRange);
-        if (selectedRowCount <= 0 || selectedRowCount >= file.rowCount()) {
-            return false;
-        }
-
-        double selectionRatio = (double) selectedRowCount / file.rowCount();
-        return selectedRowCount <= maxSelectedRows && selectionRatio <= maxSelectionRatio;
-    }
-
-    @VisibleForTesting
-    static long selectedRowCount(DataFileMeta file, List<Range> rowRanges) {
-        Range fileRange = file.nonNullRowIdRange();
-        List<Range> intersections = new ArrayList<>();
-        for (Range range : rowRanges) {
-            Range intersection = Range.intersection(fileRange, range);
-            if (intersection != null) {
-                intersections.add(intersection);
-            }
-        }
-        return Range.sortAndMergeOverlap(intersections, true).stream()
-                .mapToLong(Range::count)
-                .sum();
-    }
-
-    @VisibleForTesting
-    static long selectedRowCount(
-            DataFileMeta file,
-            @Nullable List<Range> rowRanges,
-            @Nullable FileIndexResult fileIndexResult,
-            @Nullable DeletionVector deletionVector,
-            @Nullable Range deletionVectorRange) {
-        if (deletionVector != null && !deletionVector.isEmpty()) {
-            RoaringBitmap32 selection = file.toFileSelection(rowRanges);
-            if (fileIndexResult instanceof BitmapIndexResult) {
-                RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
-                selection =
-                        selection == null
-                                ? indexSelection.clone()
-                                : RoaringBitmap32.and(selection, indexSelection);
-            }
-            long rangeStart =
-                    deletionVectorRange == null
-                            ? file.nonNullFirstRowId()
-                            : deletionVectorRange.from;
-            if (selection == null) {
-                if (deletionVectorRange != null
-                        && deletionVectorRange.equals(file.nonNullRowIdRange())) {
-                    return file.rowCount() - deletionVector.getCardinality();
-                }
-                // Iterate the deletion vector instead of every row of the file: the
-                // deletion vector is usually far smaller than the row count. A deleted
-                // position outside this file's range simply does not count.
-                long firstRowId = file.nonNullFirstRowId();
-                long rowCount = file.rowCount();
-                long[] deletedInRange = new long[1];
-                deletionVector.forEachDeletedPosition(
-                        deletedPosition -> {
-                            long position = deletedPosition - firstRowId + rangeStart;
-                            if (position >= 0 && position < rowCount) {
-                                deletedInRange[0]++;
-                            }
-                        });
-                return rowCount - deletedInRange[0];
-            }
-            long selected = selection.getCardinality();
-            long deleted = deletionVector.getCardinality();
-            long offset = file.nonNullFirstRowId() - rangeStart;
-            if (selected <= deleted) {
-                long live = 0;
-                Iterator<Integer> iterator = selection.iterator();
-                while (iterator.hasNext()) {
-                    if (!deletionVector.isDeleted(iterator.next() + offset)) {
-                        live++;
-                    }
-                }
-                return live;
-            }
-            RoaringBitmap32 finalSelection = selection;
-            long[] deletedInSelection = new long[1];
-            deletionVector.forEachDeletedPosition(
-                    deletedPosition -> {
-                        long localPosition = deletedPosition - offset;
-                        if (localPosition >= 0
-                                && localPosition <= Integer.MAX_VALUE
-                                && finalSelection.contains((int) localPosition)) {
-                            deletedInSelection[0]++;
-                        }
-                    });
-            return selected - deletedInSelection[0];
-        }
+            @Nullable FileIndexResult fileIndexResult) {
+        RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         if (fileIndexResult instanceof BitmapIndexResult) {
             RoaringBitmap32 indexSelection = ((BitmapIndexResult) fileIndexResult).get();
-            RoaringBitmap32 rangeSelection = file.toFileSelection(rowRanges);
-            return rangeSelection == null
-                    ? indexSelection.getCardinality()
-                    : RoaringBitmap32.and(rangeSelection, indexSelection).getCardinality();
+            selection =
+                    selection == null
+                            ? indexSelection.clone()
+                            : RoaringBitmap32.and(selection, indexSelection);
         }
-        return isNullOrEmpty(rowRanges) ? file.rowCount() : selectedRowCount(file, rowRanges);
+        return selection;
+    }
+
+    @Nullable
+    @VisibleForTesting
+    static RoaringBitmap32 sidecarSelection(
+            DataFileMeta file,
+            @Nullable RoaringBitmap32 selection,
+            @Nullable DeletionVector deletionVector,
+            @Nullable Range deletionVectorRange) {
+        if (deletionVector == null
+                || deletionVector.isEmpty()
+                || (selection != null && selection.isEmpty())) {
+            return selection;
+        }
+        if (file.rowCount() > RoaringBitmap32.MAX_VALUE) {
+            // A 32-bit selection cannot represent all positions in this file. Keep the existing
+            // range/index selection and let ApplyDeletionVectorReader enforce the DV. This
+            // conservatively ignores the DV when deciding whether a row sidecar is selective.
+            return selection;
+        }
+        return liveSelection(file, selection, deletionVector, deletionVectorRange);
+    }
+
+    private static RoaringBitmap32 liveSelection(
+            DataFileMeta file,
+            @Nullable RoaringBitmap32 selection,
+            DeletionVector deletionVector,
+            @Nullable Range deletionVectorRange) {
+        long rangeStart =
+                deletionVectorRange == null ? file.nonNullFirstRowId() : deletionVectorRange.from;
+        long offset = file.nonNullFirstRowId() - rangeStart;
+
+        if (offset == 0 && deletionVector instanceof BitmapDeletionVector) {
+            RoaringBitmap32 deleted = ((BitmapDeletionVector) deletionVector).get();
+            if (!deleted.intersects(0, file.rowCount())) {
+                return selection;
+            }
+            return RoaringBitmap32.andNot(
+                    selection == null
+                            ? RoaringBitmap32.bitmapOfRange(0, file.rowCount())
+                            : selection,
+                    deleted);
+        }
+
+        if (selection != null && selection.getCardinality() <= deletionVector.getCardinality()) {
+            RoaringBitmap32 live = new RoaringBitmap32();
+            Iterator<Integer> iterator = selection.iterator();
+            while (iterator.hasNext()) {
+                int localPosition = iterator.next();
+                long deletionPosition = localPosition + offset;
+                if (deletionPosition < 0
+                        || (deletionVector instanceof BitmapDeletionVector
+                                && deletionPosition > RoaringBitmap32.MAX_VALUE)
+                        || !deletionVector.isDeleted(deletionPosition)) {
+                    live.add(localPosition);
+                }
+            }
+            return live;
+        }
+
+        RoaringBitmap32 deleted = deletedPositions(file, deletionVector, offset);
+        if (deleted.isEmpty()) {
+            return selection;
+        }
+        return RoaringBitmap32.andNot(
+                selection == null ? RoaringBitmap32.bitmapOfRange(0, file.rowCount()) : selection,
+                deleted);
+    }
+
+    private static RoaringBitmap32 deletedPositions(
+            DataFileMeta file, DeletionVector deletionVector, long offset) {
+        long rowCount = file.rowCount();
+        RoaringBitmap32 deleted = new RoaringBitmap32();
+        deletionVector.forEachDeletedPosition(
+                position -> {
+                    long localPosition = position - offset;
+                    if (localPosition >= 0 && localPosition < rowCount) {
+                        deleted.add((int) localPosition);
+                    }
+                });
+        return deleted;
     }
 
     private static boolean isRowSidecarFile(String fileName) {
@@ -1777,11 +1728,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         private final String formatIdentifier;
         private final Path path;
         private final long fileSize;
+        @Nullable private final RoaringBitmap32 selection;
 
-        private FileReadTarget(String formatIdentifier, Path path, long fileSize) {
+        private FileReadTarget(
+                String formatIdentifier,
+                Path path,
+                long fileSize,
+                @Nullable RoaringBitmap32 selection) {
             this.formatIdentifier = formatIdentifier;
             this.path = path;
             this.fileSize = fileSize;
+            this.selection = selection;
         }
 
         /**
