@@ -303,23 +303,11 @@ class CachingInputStream:
         if size <= 0 or self._pos >= self._get_file_size():
             return b''
 
-        end = min(self._pos + size, self._get_file_size())
-        block_size = self._cache.block_size
-
-        first_block = self._pos // block_size
-        last_block = (end - 1) // block_size
-
-        result = bytearray()
-        for bi in range(first_block, last_block + 1):
-            block_data = self._read_block(bi)
-
-            block_start = bi * block_size
-            start_in_block = max(self._pos - block_start, 0)
-            end_in_block = min(end - block_start, len(block_data))
-            result.extend(block_data[start_in_block:end_in_block])
-
-        self._pos = end
-        return bytes(result)
+        position = self._pos
+        end = min(position + size, self._get_file_size())
+        result = self.read_at(end - position, position)
+        self._pos = position + len(result)
+        return result
 
     def read_at(self, nbytes: int, offset: int) -> bytes:
         """Position-based read. Does not change the cursor. Thread-safe."""
@@ -333,9 +321,7 @@ class CachingInputStream:
         last_block = (end - 1) // block_size
 
         result = bytearray()
-        for bi in range(first_block, last_block + 1):
-            block_data = self._read_block(bi)
-
+        for bi, block_data in self._read_blocks(first_block, last_block):
             block_start = bi * block_size
             start_in_block = max(offset - block_start, 0)
             end_in_block = min(end - block_start, len(block_data))
@@ -343,18 +329,39 @@ class CachingInputStream:
 
         return bytes(result)
 
-    def _read_block(self, block_index: int) -> bytes:
-        cached = self._cache.get_block(self._file_path, block_index)
-        if cached is not None:
-            return cached
-
+    def _read_blocks(self, first: int, last: int):
         block_size = self._cache.block_size
-        offset = block_index * block_size
-        read_size = min(block_size, self._get_file_size() - offset)
-
-        data = self._read_remote(offset, read_size)
-        self._cache.put_block(self._file_path, block_index, data)
-        return data
+        # Bound temporary buffers; a larger individual block remains unchanged.
+        batch_size = max(1, min(32, (8 * 1024 * 1024) // block_size))
+        for batch_start in range(first, last + 1, batch_size):
+            batch_end = min(batch_start + batch_size, last + 1)
+            blocks = [self._cache.get_block(self._file_path, bi)
+                      for bi in range(batch_start, batch_end)]
+            i = 0
+            while i < len(blocks):
+                if blocks[i] is not None:
+                    yield batch_start + i, blocks[i]
+                    i += 1
+                    continue
+                begin = i
+                while i < len(blocks) and blocks[i] is None:
+                    i += 1
+                offset = (batch_start + begin) * block_size
+                end = min((batch_start + i) * block_size, self._get_file_size())
+                data = self._read_remote(offset, end - offset)
+                if len(data) > end - offset:
+                    raise OSError("Cache range read exceeded request")
+                complete = len(data) == end - offset
+                for j in range(begin, i):
+                    lo = (j - begin) * block_size
+                    block = data[lo:lo + block_size]
+                    if not block:
+                        break
+                    if complete:
+                        self._cache.put_block(self._file_path, batch_start + j, block)
+                    yield batch_start + j, block
+                if not complete:
+                    return
 
     def _read_remote(self, offset: int, size: int) -> bytes:
         stream = self._get_remote_stream()
