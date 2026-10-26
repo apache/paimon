@@ -50,7 +50,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -78,7 +77,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -92,6 +90,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignerTestUtils.reassignerWithBeforeCommit;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -1525,15 +1524,6 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .filter(entry -> entry.partition().equals(partition))
                 .map(ManifestEntry::file)
                 .collect(Collectors.toList());
-    }
-
-    private static DataEvolutionRowIdReassigner reassignerWithBeforeCommit(
-            FileStoreTable table, Runnable beforeCommit) throws Exception {
-        Constructor<DataEvolutionRowIdReassigner> constructor =
-                DataEvolutionRowIdReassigner.class.getDeclaredConstructor(
-                        FileStoreTable.class, PartitionPredicate.class, Runnable.class);
-        constructor.setAccessible(true);
-        return constructor.newInstance(table, null, beforeCommit);
     }
 
     @Override

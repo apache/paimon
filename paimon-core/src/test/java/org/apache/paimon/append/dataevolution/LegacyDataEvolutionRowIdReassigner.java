@@ -187,7 +187,7 @@ final class LegacyDataEvolutionRowIdReassigner {
         throw new IllegalStateException("Unreachable retry state while reassigning row IDs.");
     }
 
-    private Optional<AssignmentPlan> planAssignment(
+    Optional<AssignmentPlan> planAssignment(
             List<ManifestFileMeta> manifestMetas, ManifestFile manifestFile) {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         Map<BinaryRow, List<ManifestEntry>> entriesToReassignByPartition = new LinkedHashMap<>();
@@ -1029,9 +1029,9 @@ final class LegacyDataEvolutionRowIdReassigner {
         }
     }
 
-    private static class RelativeRowIdMappings {
-        private final Map<BinaryRow, RowRangeMappingIndex> mappings;
-        private final long totalOffset;
+    static class RelativeRowIdMappings {
+        final Map<BinaryRow, RowRangeMappingIndex> mappings;
+        final long totalOffset;
 
         private RelativeRowIdMappings(
                 Map<BinaryRow, RowRangeMappingIndex> mappings, long totalOffset) {
@@ -1040,9 +1040,9 @@ final class LegacyDataEvolutionRowIdReassigner {
         }
     }
 
-    private static class AssignmentPlan {
-        private final List<ManifestFileMeta> manifestMetasToRewrite;
-        private final RelativeRowIdMappings relativeRowIdMappings;
+    static class AssignmentPlan {
+        final List<ManifestFileMeta> manifestMetasToRewrite;
+        final RelativeRowIdMappings relativeRowIdMappings;
 
         private AssignmentPlan(
                 List<ManifestFileMeta> manifestMetasToRewrite,

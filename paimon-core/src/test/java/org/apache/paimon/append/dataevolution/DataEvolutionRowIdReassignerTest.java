@@ -44,6 +44,8 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -94,8 +96,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1032,7 +1032,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private void assertPersistedPlan(FileStoreTable table) throws Exception {
         Snapshot snapshot = Snapshot.fromJson(table.snapshotManager().latestSnapshot().toJson());
         assertThat(snapshot.properties())
@@ -1049,8 +1048,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(assignment.firstAssignedRowId())
                 .isEqualTo(table.snapshotManager().snapshot(snapshot.id() - 1).nextRowId());
         assertThat(assignment.nextRowId()).isEqualTo(snapshot.nextRowId());
-        Map<BinaryRow, RowRangeMappingIndex> mappings =
-                (Map<BinaryRow, RowRangeMappingIndex>) fieldValue(assignment, "rowIdMappings");
         Map<String, ManifestEntry> previous = new HashMap<>();
         for (ManifestEntry entry :
                 table.store().newScan().withSnapshot(snapshot.id() - 1).plan().files()) {
@@ -1059,16 +1056,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         for (ManifestEntry entry : currentEntries(table)) {
             Range oldRange = previous.get(entry.file().fileName()).file().nonNullRowIdRange();
             Range newRange = entry.file().nonNullRowIdRange();
-            RowRangeMappingIndex mapping = mappings.get(entry.partition());
-            if (oldRange.equals(newRange)) {
-                if (mapping != null) {
-                    assertThat(mapping.map(oldRange)).isEmpty();
-                    assertThat(mapping.overlaps(oldRange)).isFalse();
-                }
-            } else {
-                assertThat(mapping).isNotNull();
-                assertThat(mapping.map(oldRange)).hasValue(newRange);
-            }
+            assertThat(assignment.mapRowRange(entry.partition(), oldRange)).isEqualTo(newRange);
         }
     }
 
@@ -3770,16 +3758,19 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
             List<ManifestFileMeta> manifestMetas,
             PartitionPredicate partitionPredicate)
             throws Exception {
-        Method planAssignment =
-                DataEvolutionRowIdReassigner.class.getDeclaredMethod(
-                        "planAssignment", List.class, PartitionPredicate.class);
-        planAssignment.setAccessible(true);
-        Object result =
-                planAssignment.invoke(
-                        new DataEvolutionRowIdReassigner(table, partitionPredicate),
-                        manifestMetas,
-                        partitionPredicate);
-        return assignmentPlanView(result, manifestMetas);
+        Optional<DataEvolutionRowIdReassigner.AssignmentPlan> plan =
+                new DataEvolutionRowIdReassigner(table, partitionPredicate)
+                        .planAssignment(manifestMetas, partitionPredicate);
+        if (!plan.isPresent()) {
+            return Optional.empty();
+        }
+        DataEvolutionRowIdReassigner.AssignmentPlan assignment = plan.get();
+        return Optional.of(
+                assignmentPlanView(
+                        assignment.manifestMetasToRewrite,
+                        assignment.relativeRowIdMappings.mappings,
+                        assignment.relativeRowIdMappings.totalOffset,
+                        manifestMetas));
     }
 
     private Optional<AssignmentPlanView> legacyPlanView(
@@ -3787,52 +3778,51 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
             List<ManifestFileMeta> manifestMetas,
             PartitionPredicate partitionPredicate)
             throws Exception {
-        Method planAssignment =
-                LegacyDataEvolutionRowIdReassigner.class.getDeclaredMethod(
-                        "planAssignment", List.class, ManifestFile.class);
-        planAssignment.setAccessible(true);
-        Object result =
-                planAssignment.invoke(
-                        new LegacyDataEvolutionRowIdReassigner(table, partitionPredicate),
-                        manifestMetas,
-                        table.store().manifestFileFactory().create());
-        return assignmentPlanView(result, manifestMetas);
-    }
-
-    private Optional<AssignmentPlanView> assignmentPlanView(
-            Object optionalResult, List<ManifestFileMeta> manifestMetas) throws Exception {
-        assertThat(optionalResult).isInstanceOf(Optional.class);
-        Optional<?> optionalPlan = (Optional<?>) optionalResult;
-        if (!optionalPlan.isPresent()) {
+        Optional<LegacyDataEvolutionRowIdReassigner.AssignmentPlan> plan =
+                new LegacyDataEvolutionRowIdReassigner(table, partitionPredicate)
+                        .planAssignment(
+                                manifestMetas, table.store().manifestFileFactory().create());
+        if (!plan.isPresent()) {
             return Optional.empty();
         }
+        LegacyDataEvolutionRowIdReassigner.AssignmentPlan assignment = plan.get();
+        return Optional.of(
+                assignmentPlanView(
+                        assignment.manifestMetasToRewrite,
+                        assignment.relativeRowIdMappings.mappings,
+                        assignment.relativeRowIdMappings.totalOffset,
+                        manifestMetas));
+    }
 
-        Object assignmentPlan = optionalPlan.get();
-        @SuppressWarnings("unchecked")
-        List<ManifestFileMeta> rewrittenManifests =
-                (List<ManifestFileMeta>) fieldValue(assignmentPlan, "manifestMetasToRewrite");
+    private AssignmentPlanView assignmentPlanView(
+            List<ManifestFileMeta> rewrittenManifests,
+            Map<BinaryRow, RowRangeMappingIndex> mappings,
+            long totalOffset,
+            List<ManifestFileMeta> manifestMetas)
+            throws IOException {
         int[] manifestOrdinals = new int[rewrittenManifests.size()];
         for (int i = 0; i < rewrittenManifests.size(); i++) {
             manifestOrdinals[i] = manifestOrdinal(manifestMetas, rewrittenManifests.get(i));
         }
-
-        Object relativeMappings = fieldValue(assignmentPlan, "relativeRowIdMappings");
-        @SuppressWarnings("unchecked")
-        Map<BinaryRow, RowRangeMappingIndex> mappings =
-                (Map<BinaryRow, RowRangeMappingIndex>) fieldValue(relativeMappings, "mappings");
         List<PartitionMappingView> partitionMappings = new ArrayList<>(mappings.size());
         for (Map.Entry<BinaryRow, RowRangeMappingIndex> mapping : mappings.entrySet()) {
+            DataOutputSerializer serialized = new DataOutputSerializer(128);
+            mapping.getValue().serialize(serialized);
+            DataInputDeserializer input = new DataInputDeserializer(serialized.getCopyOfBuffer());
+            int rangeCount = input.readInt();
+            long[] oldStarts = new long[rangeCount];
+            long[] oldEnds = new long[rangeCount];
+            long[] newStarts = new long[rangeCount];
+            for (int i = 0; i < rangeCount; i++) {
+                oldStarts[i] = input.readLong();
+                oldEnds[i] = input.readLong();
+                newStarts[i] = input.readLong();
+            }
             partitionMappings.add(
                     new PartitionMappingView(
-                            mapping.getKey().toBytes(),
-                            longArrayField(mapping.getValue(), "oldStarts"),
-                            longArrayField(mapping.getValue(), "oldEnds"),
-                            longArrayField(mapping.getValue(), "newStarts"),
-                            (Long) fieldValue(mapping.getValue(), "newStartOffset")));
+                            mapping.getKey().toBytes(), oldStarts, oldEnds, newStarts));
         }
-        long totalOffset = (Long) fieldValue(relativeMappings, "totalOffset");
-        return Optional.of(
-                new AssignmentPlanView(manifestOrdinals, partitionMappings, totalOffset));
+        return new AssignmentPlanView(manifestOrdinals, partitionMappings, totalOffset);
     }
 
     private void assertPlanViewsEqual(
@@ -3854,7 +3844,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
             assertThat(compactMapping.oldStarts).containsExactly(legacyMapping.oldStarts);
             assertThat(compactMapping.oldEnds).containsExactly(legacyMapping.oldEnds);
             assertThat(compactMapping.newStarts).containsExactly(legacyMapping.newStarts);
-            assertThat(compactMapping.newStartOffset).isEqualTo(legacyMapping.newStartOffset);
         }
     }
 
@@ -3893,17 +3882,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         + plannedManifest.fileName());
     }
 
-    private static long[] longArrayField(Object target, String fieldName) throws Exception {
-        long[] values = (long[]) fieldValue(target, fieldName);
-        return Arrays.copyOf(values, values.length);
-    }
-
-    private static Object fieldValue(Object target, String fieldName) throws Exception {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        return field.get(target);
-    }
-
     private static class AssignmentPlanView {
 
         private final int[] manifestOrdinals;
@@ -3926,19 +3904,13 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         private final long[] oldStarts;
         private final long[] oldEnds;
         private final long[] newStarts;
-        private final long newStartOffset;
 
         private PartitionMappingView(
-                byte[] partitionBytes,
-                long[] oldStarts,
-                long[] oldEnds,
-                long[] newStarts,
-                long newStartOffset) {
+                byte[] partitionBytes, long[] oldStarts, long[] oldEnds, long[] newStarts) {
             this.partitionBytes = partitionBytes;
             this.oldStarts = oldStarts;
             this.oldEnds = oldEnds;
             this.newStarts = newStarts;
-            this.newStartOffset = newStartOffset;
         }
     }
 

@@ -183,7 +183,8 @@ public class DataEvolutionRowIdReassigner {
                 assignment.nextRowId);
     }
 
-    private Optional<AssignmentPlan> planAssignment(
+    @VisibleForTesting
+    Optional<AssignmentPlan> planAssignment(
             List<ManifestFileMeta> manifestMetas, @Nullable PartitionPredicate planningPredicate) {
         List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
         List<List<ManifestFileMeta>> includedGroups = new ArrayList<>();
@@ -1004,9 +1005,10 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
-    private static class RelativeRowIdMappings {
-        private final Map<BinaryRow, RowRangeMappingIndex> mappings;
-        private final long totalOffset;
+    @VisibleForTesting
+    static class RelativeRowIdMappings {
+        final Map<BinaryRow, RowRangeMappingIndex> mappings;
+        final long totalOffset;
 
         private RelativeRowIdMappings(
                 Map<BinaryRow, RowRangeMappingIndex> mappings, long totalOffset) {
@@ -1015,9 +1017,10 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
-    private static class AssignmentPlan {
-        private final List<ManifestFileMeta> manifestMetasToRewrite;
-        private final RelativeRowIdMappings relativeRowIdMappings;
+    @VisibleForTesting
+    static class AssignmentPlan {
+        final List<ManifestFileMeta> manifestMetasToRewrite;
+        final RelativeRowIdMappings relativeRowIdMappings;
         private final Set<BinaryRow> targetPartitions;
 
         private AssignmentPlan(
