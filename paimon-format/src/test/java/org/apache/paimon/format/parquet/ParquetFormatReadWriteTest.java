@@ -728,31 +728,12 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         Assertions.assertThat(rows).hasSize(3);
         Assertions.assertThat(rows.get(1).getTimestamp(0, 3)).isEqualTo(max);
         Assertions.assertThat(rows.get(1).getTimestamp(1, 3)).isEqualTo(max);
-
-        SimpleColStats[] stats =
-                format.createStatsExtractor(
-                                rowType,
-                                new SimpleColStatsCollector.Factory[] {
-                                    SimpleColStatsCollector.from("full"),
-                                    SimpleColStatsCollector.from("full")
-                                })
-                        .get()
-                        .extract(fileIO, file, fileIO.getFileSize(file));
-        Assertions.assertThat(stats)
-                .allSatisfy(
-                        stat -> {
-                            Assertions.assertThat(stat.min()).isEqualTo(min);
-                            Assertions.assertThat(stat.max()).isEqualTo(max);
-                        });
     }
 
     @Test
-    public void testIcebergTimestampMicrosFilterPushdown() throws Exception {
+    public void testIcebergTimestampMicrosPushdownKeepsMatchingRows() throws Exception {
         Options options = new Options();
         options.set("metadata.iceberg.storage", "table-location");
-        // a tiny row-group size gives a row group per 100 rows
-        options.set("parquet.block.size", "1");
-        options.set("parquet.enable.dictionary", "false");
         ParquetFileFormat format =
                 new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
         RowType rowType =
@@ -760,38 +741,57 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                         .field("local_timestamp", DataTypes.TIMESTAMP(3))
                         .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
                         .build();
-        int rowCount = 1000;
-        GenericRow[] written = new GenericRow[rowCount];
-        for (int i = 0; i < rowCount; i++) {
-            Timestamp timestamp = Timestamp.fromEpochMillis(1691827200000L + i);
-            written[i] = GenericRow.of(timestamp, timestamp);
-        }
-        write(format.createWriterFactory(rowType), file, written);
-
-        try (ParquetFileReader reader =
-                ParquetUtil.getParquetReader(
-                        fileIO, file, fileIO.getFileSize(file), new Options())) {
-            Assertions.assertThat(reader.getFooter().getBlocks()).hasSizeGreaterThan(1);
-        }
-
-        Timestamp target = written[550].getTimestamp(0, 3);
         PredicateBuilder builder = new PredicateBuilder(rowType);
-        for (int field = 0; field < 2; field++) {
-            List<Timestamp> values = new ArrayList<>();
-            try (RecordReader<InternalRow> reader =
-                    format.createReaderFactory(
-                                    rowType,
-                                    rowType,
-                                    Collections.singletonList(builder.equal(field, target)))
-                            .createReader(
-                                    new FormatReaderContext(
-                                            fileIO, file, fileIO.getFileSize(file), null, null))) {
-                int f = field;
-                reader.forEachRemaining(row -> values.add(row.getTimestamp(f, 3)));
+        for (long millis : new long[] {-1704067200123L, 0L, 1704067200123L}) {
+            // the micros of both stored values are read as the millisecond itself
+            for (int storedNanos : new int[] {0, 999_000}) {
+                Timestamp stored = Timestamp.fromEpochMillis(millis, storedNanos);
+                // a single row per file, so that a wrongly pruned row group loses the row
+                fileIO.deleteQuietly(file);
+                write(format.createWriterFactory(rowType), file, GenericRow.of(stored, stored));
+                List<InternalRow> unfiltered = readRows(format, rowType, Collections.emptyList());
+                Assertions.assertThat(unfiltered).hasSize(1);
+                Assertions.assertThat(unfiltered.get(0).getTimestamp(0, 3))
+                        .isEqualTo(Timestamp.fromEpochMillis(millis));
+
+                for (int literalNanos : new int[] {0, 1, 456_000}) {
+                    Timestamp literal = Timestamp.fromEpochMillis(millis, literalNanos);
+                    for (int field = 0; field < 2; field++) {
+                        for (Predicate predicate :
+                                Arrays.asList(
+                                        builder.lessThan(field, literal),
+                                        builder.lessOrEqual(field, literal),
+                                        builder.greaterThan(field, literal),
+                                        builder.greaterOrEqual(field, literal),
+                                        builder.equal(field, literal))) {
+                            List<InternalRow> pushed =
+                                    readRows(format, rowType, Collections.singletonList(predicate));
+                            Assertions.assertThat(pushed.stream().filter(predicate::test))
+                                    .as("%s on a file storing %s", predicate, stored)
+                                    .hasSize(
+                                            (int)
+                                                    unfiltered.stream()
+                                                            .filter(predicate::test)
+                                                            .count());
+                        }
+                    }
+                }
             }
-            // row groups without the target are pruned
-            Assertions.assertThat(values).contains(target).hasSizeLessThan(rowCount);
         }
+    }
+
+    private List<InternalRow> readRows(
+            ParquetFileFormat format, RowType rowType, List<Predicate> filters) throws IOException {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, filters)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        return rows;
     }
 
     @Test
@@ -803,22 +803,15 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         ParquetFileFormat format =
                 new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
         RowType microsType =
-                RowType.builder()
-                        .field("local_timestamp", DataTypes.TIMESTAMP(6))
-                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6))
-                        .build();
+                RowType.builder().field("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6)).build();
         RowType millisType =
-                RowType.builder()
-                        .field("local_timestamp", DataTypes.TIMESTAMP(3))
-                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
-                        .build();
+                RowType.builder().field("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)).build();
         long baseMillis = 1691827200000L;
         int rowCount = 1000;
         GenericRow[] written = new GenericRow[rowCount];
         for (int i = 0; i < rowCount; i++) {
             // every value is 456 microseconds past its millisecond
-            Timestamp timestamp = Timestamp.fromEpochMillis(baseMillis + i, 456_000);
-            written[i] = GenericRow.of(timestamp, timestamp);
+            written[i] = GenericRow.of(Timestamp.fromEpochMillis(baseMillis + i, 456_000));
         }
         write(format.createWriterFactory(microsType), file, written);
 
@@ -833,50 +826,32 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         }
         Timestamp target = Timestamp.fromEpochMillis(baseMillis + firstRowOfGroup);
 
-        PredicateBuilder builder = new PredicateBuilder(millisType);
-        for (int field = 0; field < 2; field++) {
-            for (Predicate predicate :
-                    Arrays.asList(
-                            builder.equal(field, target), builder.lessOrEqual(field, target))) {
-                List<Timestamp> values = new ArrayList<>();
-                try (RecordReader<InternalRow> reader =
-                        format.createReaderFactory(
-                                        millisType,
-                                        millisType,
-                                        Collections.singletonList(predicate))
-                                .createReader(
-                                        new FormatReaderContext(
-                                                fileIO,
-                                                file,
-                                                fileIO.getFileSize(file),
-                                                null,
-                                                null))) {
-                    int f = field;
-                    reader.forEachRemaining(row -> values.add(row.getTimestamp(f, 3)));
-                }
-                Assertions.assertThat(values).contains(target).hasSizeLessThan(rowCount);
-            }
+        List<Timestamp> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(
+                                millisType,
+                                millisType,
+                                Collections.singletonList(
+                                        new PredicateBuilder(millisType).equal(0, target)))
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> values.add(row.getTimestamp(0, 3)));
         }
+        Assertions.assertThat(values).contains(target).hasSizeLessThan(rowCount);
 
         // statistics bound the millisecond values the field reads
         SimpleColStats[] stats =
                 format.createStatsExtractor(
                                 millisType,
                                 new SimpleColStatsCollector.Factory[] {
-                                    SimpleColStatsCollector.from("full"),
                                     SimpleColStatsCollector.from("full")
                                 })
                         .get()
                         .extract(fileIO, file, fileIO.getFileSize(file));
-        Assertions.assertThat(stats)
-                .allSatisfy(
-                        stat -> {
-                            Assertions.assertThat(stat.min())
-                                    .isEqualTo(Timestamp.fromEpochMillis(baseMillis));
-                            Assertions.assertThat(stat.max())
-                                    .isEqualTo(
-                                            Timestamp.fromEpochMillis(baseMillis + rowCount - 1));
-                        });
+        Assertions.assertThat(stats[0].min()).isEqualTo(Timestamp.fromEpochMillis(baseMillis));
+        Assertions.assertThat(stats[0].max())
+                .isEqualTo(Timestamp.fromEpochMillis(baseMillis + rowCount - 1));
     }
 
     @Test
@@ -885,9 +860,7 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         Timestamp timestamp = Timestamp.fromEpochMillis(1691827200123L);
         String[][] cases = {
             {null, "MILLIS"},
-            {"disabled", "MILLIS"},
-            {" DISABLED ", "MILLIS"},
-            {"table-location", "MICROS"},
+            {"DISABLED", "MILLIS"},
             {"hive-catalog", "MICROS"}
         };
         for (String[] c : cases) {

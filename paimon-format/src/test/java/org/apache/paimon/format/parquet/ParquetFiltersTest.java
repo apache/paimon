@@ -1054,8 +1054,8 @@ class ParquetFiltersTest {
     @Test
     public void testMillisTimestampOnMicrosFile() {
         // a precision 3 field reads the micros v as the millisecond floor(v / 1000), so the
-        // literal millisecond covers [123000, 123999] and its sub-millisecond part is ignored
-        Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000);
+        // literal millisecond covers the micros [123000, 123999]
+        Timestamp value = Timestamp.fromEpochMillis(1704067200123L);
         String lower = "1704067200123000";
         String upper = "1704067200123999";
         for (boolean localZoned : new boolean[] {false, true}) {

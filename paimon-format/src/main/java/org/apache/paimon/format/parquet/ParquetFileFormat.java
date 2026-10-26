@@ -86,8 +86,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
                 !ICEBERG_STORAGE_DISABLED.equalsIgnoreCase(
                         formatContext
                                 .options()
-                                .getString(ICEBERG_STORAGE, ICEBERG_STORAGE_DISABLED)
-                                .trim());
+                                .getString(ICEBERG_STORAGE, ICEBERG_STORAGE_DISABLED));
     }
 
     @VisibleForTesting

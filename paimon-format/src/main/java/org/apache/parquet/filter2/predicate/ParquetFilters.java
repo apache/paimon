@@ -140,6 +140,12 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitLessThan(FieldRef fieldRef, Object literal) {
+            // the whole millisecond of a fractional literal reads below it
+            if (isMillisInMicrosColumn(fieldRef)
+                    && ((Timestamp) literal).getNanoOfMillisecond() != 0) {
+                return new Operators.LtEq(
+                        toParquetColumn(fieldRef), lastMicroOfMilli((Timestamp) literal));
+            }
             return new Operators.Lt(toParquetColumn(fieldRef), toParquetObject(literal, fieldRef));
         }
 
