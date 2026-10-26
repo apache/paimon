@@ -371,6 +371,36 @@ class RESTCatalogTest(RESTBaseTest):
         with self.assertRaises(TableIdNoPermissionException):
             self.rest_catalog.get_table_by_id(table_id)
 
+    def test_alter_table_column_errors(self):
+        from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
+                                                        ColumnNotExistException,
+                                                        TableNotExistException)
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+        identifier = "default.alter_table_column_errors"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        self.rest_catalog.create_table(identifier, Schema.from_pyarrow_schema(pa_schema), False)
+
+        with self.assertRaises(ColumnNotExistException) as context:
+            self.rest_catalog.alter_table(identifier, [SchemaChange.drop_column('missing')])
+        self.assertIn("missing", str(context.exception))
+        with self.assertRaises(ColumnAlreadyExistException) as context:
+            self.rest_catalog.alter_table(identifier, [SchemaChange.add_column('col1', AtomicType('INT'))])
+        self.assertIn("col1", str(context.exception))
+
+        missing = "default.no_such_table"
+        with self.assertRaises(TableNotExistException):
+            self.rest_catalog.alter_table(missing, [SchemaChange.drop_column('col1')])
+        self.rest_catalog.alter_table(missing, [SchemaChange.drop_column('col1')], True)
+
+    def test_create_table_in_missing_database(self):
+        from pypaimon.catalog.catalog_exception import DatabaseNotExistException
+        pa_schema = pa.schema([('col1', pa.int32())])
+        with self.assertRaises(DatabaseNotExistException) as context:
+            self.rest_catalog.create_table(
+                "no_such_db.table", Schema.from_pyarrow_schema(pa_schema), False)
+        self.assertIn("no_such_db", str(context.exception))
+
     def test_catalog_load_snapshot_after_rollback(self):
         """Test load_snapshot returns correct snapshot after rollback."""
         table_name = "default.table_load_snapshot_after_rollback"

@@ -29,6 +29,7 @@ from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_exception import (
+    ColumnAlreadyExistException, ColumnNotExistException,
     TableNotExistException, DatabaseAlreadyExistException,
     TableAlreadyExistException, DatabaseNotExistException,
     TableNoPermissionException, DatabaseNoPermissionException,
@@ -299,6 +300,8 @@ class RESTCatalog(Catalog):
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
 
     def rename_table(self, source_identifier: Union[str, Identifier],
                      target_identifier: Union[str, Identifier]) -> None:
@@ -424,7 +427,13 @@ class RESTCatalog(Catalog):
             self.rest_api.alter_table(identifier, changes)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
+                if e.resource_type == ErrorResponse.RESOURCE_TYPE_COLUMN:
+                    raise ColumnNotExistException(e.resource_name) from e
                 raise TableNotExistException(identifier) from e
+        except AlreadyExistsException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_COLUMN:
+                raise ColumnAlreadyExistException(e.resource_name) from e
+            raise
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
