@@ -63,7 +63,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -503,25 +502,14 @@ public class DataEvolutionRowIdReassigner {
                     "Unsupported snapshot kind %s while advancing row-id assignment.",
                     snapshot.commitKind());
 
-            Map<BinaryRow, CompactionRowRanges> compactionRanges = new HashMap<>();
             for (ManifestFileMeta manifestMeta : manifestList.readDeltaManifests(snapshot)) {
                 boolean needsReassign =
                         deltaManifestNeedsReassign(
-                                assignmentPlan,
-                                manifestFile,
-                                manifestMeta,
-                                snapshot,
-                                compactionRanges);
+                                assignmentPlan, manifestFile, manifestMeta, snapshot);
                 newManifestNeedsReassign.put(manifestMeta.fileName(), needsReassign);
                 if (needsReassign) {
                     manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
                 }
-            }
-            for (CompactionRowRanges rowRanges : compactionRanges.values()) {
-                checkState(
-                        rowRanges.preservesAssignment(),
-                        "Cannot advance row-id assignment because COMPACT snapshot %s changed planned row-id ranges.",
-                        snapshot.id());
             }
         }
 
@@ -578,8 +566,7 @@ public class DataEvolutionRowIdReassigner {
             AssignmentPlan assignmentPlan,
             ManifestFile manifestFile,
             ManifestFileMeta manifestMeta,
-            Snapshot snapshot,
-            Map<BinaryRow, CompactionRowRanges> compactionRanges) {
+            Snapshot snapshot) {
         boolean needsReassign = false;
         try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
@@ -596,12 +583,6 @@ public class DataEvolutionRowIdReassigner {
                         manifestMeta.fileName());
                 if (entryNeedsReassign(assignmentPlan, entry)) {
                     needsReassign = true;
-                    if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-                        compactionRanges
-                                .computeIfAbsent(
-                                        entry.partition(), key -> new CompactionRowRanges())
-                                .add(entry.kind(), entry.file().nonNullRowIdRange());
-                    }
                 }
             }
             return needsReassign;
@@ -1010,38 +991,6 @@ public class DataEvolutionRowIdReassigner {
             this.originalFileName = originalFileName;
             this.replacements = replacements;
             this.reassignedAddFileCount = reassignedAddFileCount;
-        }
-    }
-
-    private static class CompactionRowRanges {
-        private final TreeMap<Long, Long> removed = new TreeMap<>();
-        private final TreeMap<Long, Long> added = new TreeMap<>();
-
-        private void add(FileKind kind, Range range) {
-            TreeMap<Long, Long> ranges = kind == FileKind.ADD ? added : removed;
-            long from = range.from;
-            long to = range.to;
-            Map.Entry<Long, Long> previous = ranges.floorEntry(from);
-            if (previous != null && connected(previous.getValue(), from)) {
-                from = previous.getKey();
-                to = Math.max(to, previous.getValue());
-                ranges.remove(previous.getKey());
-            }
-            Map.Entry<Long, Long> next = ranges.ceilingEntry(from);
-            while (next != null && connected(to, next.getKey())) {
-                to = Math.max(to, next.getValue());
-                ranges.remove(next.getKey());
-                next = ranges.ceilingEntry(from);
-            }
-            ranges.put(from, to);
-        }
-
-        private boolean preservesAssignment() {
-            return removed.equals(added);
-        }
-
-        private static boolean connected(long end, long start) {
-            return start <= end || (end != Long.MAX_VALUE && start == end + 1);
         }
     }
 
