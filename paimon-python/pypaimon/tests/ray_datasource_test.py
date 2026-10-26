@@ -96,27 +96,37 @@ def test_ray_limit_is_applied_inside_worker_reader(catalog_options):
 
 
 @pytest.mark.parametrize("finish", ["exhausted", "cancelled", "failed", "empty"])
-def test_worker_closes_batch_reader(catalog_options, finish):
+@pytest.mark.parametrize("fail_close", [False, True])
+def test_worker_closes_batch_reader(catalog_options, finish, fail_close):
     source = RayDatasource(CatalogSplitProvider("default.data", catalog_options))
     task = source.get_read_tasks(1)[0]
     batch = pa.record_batch([pa.array([0, 1])], names=["id"])
+    read_error = RuntimeError("read failed")
+    close_error = OSError("close failed") if fail_close else None
     batches = [batch, StopIteration()]
     if finish == "failed":
-        batches = [batch, RuntimeError("read failed")]
+        batches = [batch, read_error]
     elif finish == "empty":
         batches = [StopIteration()]
     reader = Mock()
     reader.read_next_batch.side_effect = batches
+    reader.close.side_effect = close_error
 
     with patch.object(TableRead, "to_arrow_batch_reader", return_value=reader):
         blocks = task.read_fn()
         if finish == "cancelled":
             assert next(blocks).num_rows == 2
-            blocks.close()
-        elif finish == "failed":
-            with pytest.raises(RuntimeError, match="read failed"):
-                list(blocks)
+            consume = blocks.close
         else:
-            result = list(blocks)
-            assert sum(block.num_rows for block in result) == (0 if finish == "empty" else 2)
+            consume = lambda: list(blocks)
+
+        expected_error = read_error if finish == "failed" else close_error
+        if expected_error is not None:
+            with pytest.raises(type(expected_error)) as exc_info:
+                consume()
+            assert exc_info.value is expected_error
+        else:
+            result = consume()
+            if finish != "cancelled":
+                assert sum(block.num_rows for block in result) == (0 if finish == "empty" else 2)
         reader.close.assert_called_once_with()
