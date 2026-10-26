@@ -58,6 +58,7 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.globalindex.EsSearchQuery.require;
 
 /** Fixed-snapshot, index-only ES search planning, independent of a particular engine. */
@@ -77,7 +78,7 @@ public final class EsIndexSearch {
     public static Execution prepare(Catalog catalog, String envelope)
             throws Catalog.TableNotExistException {
         EsSearchRequest request = EsSearchRequest.parse(envelope);
-        Table table = catalog.getTable(Identifier.create(request.database, request.table));
+        Table table = catalog.getTable(targetIdentifier(request));
         require(
                 table instanceof FileStoreTable,
                 "paimon_es_search requires a Paimon file-store table");
@@ -85,6 +86,7 @@ public final class EsIndexSearch {
     }
 
     public static Execution prepare(FileStoreTable original, EsSearchRequest request) {
+        targetIdentifier(request);
         FileStoreTable table =
                 request.snapshotId == null
                         ? original
@@ -99,6 +101,14 @@ public final class EsIndexSearch {
         EsSearchQuery query =
                 request.query.mapFields(alias -> fields.get(request.bindings.get(alias)));
         return new Execution(request, plan, query);
+    }
+
+    private static Identifier targetIdentifier(EsSearchRequest request) {
+        Identifier identifier = Identifier.create(request.database, request.table);
+        require(
+                DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault()),
+                "paimon_es_search supports the main branch only");
+        return identifier;
     }
 
     /** A prepared query can be scheduled by an engine or executed locally by the Java SDK. */
@@ -169,6 +179,9 @@ public final class EsIndexSearch {
 
     /** Planning retains the catalog-supplied FileIO and opens no index readers. */
     public static Plan plan(FileStoreTable original, List<Integer> indexFields) {
+        require(
+                DEFAULT_MAIN_BRANCH.equals(original.snapshotManager().branch()),
+                "paimon_es_search supports the main branch only");
         TableQueryAuthResult.rejectSearchUnderQueryAuth(original);
         require(
                 original.coreOptions().dataEvolutionEnabled() && original.primaryKeys().isEmpty(),

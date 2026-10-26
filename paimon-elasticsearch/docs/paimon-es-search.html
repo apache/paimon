@@ -48,6 +48,13 @@ with its POM runtime dependencies (published ESLib 1.0.7 and Lucene 9.12.0). The
 artifact and profile were named <code>paimon-eslib</code>; Java package names and <code>es-index</code>
 remain unchanged. Keep the connector, index module and dependencies together on every worker.
 IK requires an additional compatible analyzer JAR.</p>
+<p>For the module-renaming release, <code>org.apache.paimon:paimon-eslib</code> is published
+as a deprecated relocation POM pointing to <code>paimon-elasticsearch</code> at the same
+version. Maven resolves the new JAR and its dependencies when the old coordinate is used.
+The old <code>-Ppaimon-eslib</code> profile remains an alias; both profiles build the new module
+and the relocation POM. Source-directory selectors should use <code>-pl paimon-elasticsearch</code>.
+Scripts downloading JARs directly must use the new artifact name because the legacy coordinate
+publishes only a POM.</p>
 <p>The existing Java archive format and persisted field mappings remain compatible.
 The module rename does not require an index rebuild.</p>
 <p>Use an append-only data-evolution table with tracked row IDs and construction-snapshot metadata
@@ -113,7 +120,12 @@ filters the returned result rows and does not change the KNN candidate set.</p>
   <tr><td>DSL</td><td><code>match_all</code>, <code>match_none</code>, scalar <code>term</code>,
     <code>terms</code>, <code>range</code>, <code>exists</code>, <code>match</code>,
     <code>match_phrase</code>, <code>bool</code> and root-level <code>knn</code> with an optional
-    filter. The persisted field mappings and analyzers determine query semantics. Java numeric terms are typed, integer fields require integral values, and date bounds use epoch milliseconds.</td></tr>
+    filter. The persisted field mappings and analyzers determine query semantics. Java numeric
+    terms are typed and integer fields require integral values. Temporal <code>term</code>,
+    <code>terms</code> and <code>range</code> values use the stored logical type's unit:
+    <code>DATE</code> is days since 1970-01-01; <code>TIME</code> is milliseconds since midnight;
+    <code>TIMESTAMP</code> and <code>TIMESTAMP_LTZ</code> use Paimon's epoch-millisecond representation.
+    Date strings and automatic unit conversion are not supported.</td></tr>
   <tr><td>Ranking</td><td>Descending ES/Lucene score, then ascending absolute row ID for ties.
     Shard-local <code>QUERY_THEN_FETCH</code> scoring; text scores use each shard's statistics.
     Vector scores retain the ES/Lucene convention: larger is better.</td></tr>

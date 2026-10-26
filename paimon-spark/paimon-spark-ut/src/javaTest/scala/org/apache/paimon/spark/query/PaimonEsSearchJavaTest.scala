@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.query
 
 import org.apache.paimon.data.serializer.InternalRowSerializer
+import org.apache.paimon.globalindex.{EsIndexSearch, EsSearchRequest}
 import org.apache.paimon.io.DataInputDeserializer
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.SpecialFields
@@ -86,10 +87,12 @@ class PaimonEsSearchJavaTest extends PaimonSparkTestBase {
     val result = sql(s"SELECT * FROM paimon_es_search('paimon', '$json')")
     assert(result.queryExecution.executedPlan.exists(_.isInstanceOf[SparkPaimonSearchTableExec]))
     val records = result.collect()
+    assert(records.forall(_.getAs[String]("branch") == "main"))
     assert(records.count(_.getAs[String]("record_kind") == "PAGE_END") == 1)
     val hits = records.filter(_.getAs[String]("record_kind") == "HIT")
     val sdk = org.apache.paimon.globalindex.EsIndexSearch.search(paimonCatalog, json)
     import scala.collection.JavaConverters._
+    assert(sdk.records().asScala.forall(_(6) == "main"))
     assert(
       sdk.hits().asScala.map(_.rowId).toSeq == hits
         .sortBy(_.getAs[Long]("rank"))
@@ -203,6 +206,42 @@ class PaimonEsSearchJavaTest extends PaimonSparkTestBase {
         .exists(value => Option(value.getMessage).exists(_.contains("changed since construction"))))
     buildIndex()
     assert(ids(search(envelope("""{"match":{"text":"changed"}}"""))) == Seq(0))
+  }
+
+  test("nested negative clauses preserve global top-K relevance") {
+    createFixture()
+    val query = """{"bool":{"should":[{"bool":{"must_not":{"term":{"label":"even"}}}},
+      {"bool":{"must_not":{"term":{"number":0}}}},{"term":{"number":0}}]}}"""
+    val top = search(envelope(query, size = 1))
+    assert(ids(top) == Seq(0))
+    assert(top.head.getAs[Float]("score") == 1.0f)
+    val ranked = search(envelope(query, size = 2))
+    assert(ids(ranked) == Seq(0, 1))
+    assert(ranked.map(_.getAs[Float]("score")).toSeq == Seq(1.0f, 0.0f))
+  }
+
+  for (entry <- Seq("catalog", "table", "request")) {
+    test(s"reject non-main indexed branches through the $entry entry") {
+      createFixture()
+      val main = loadTable("T")
+      main.createTag("search-base")
+      main.createBranch("dev", "search-base")
+      val dev = loadTable("T$branch_dev")
+      assert(dev.snapshotManager().branch() == "dev")
+      assert(dev.snapshotManager().latestSnapshotId() != null)
+      val json = envelope("""{"match_all":{}}""")
+      val branchJson = json.replace("\"table\":\"T\"", "\"table\":\"T$branch_dev\"")
+      val error = intercept[IllegalArgumentException] {
+        if (entry == "catalog") {
+          EsIndexSearch.search(paimonCatalog, branchJson)
+        } else if (entry == "table") {
+          EsIndexSearch.prepare(dev, EsSearchRequest.parse(json))
+        } else {
+          EsIndexSearch.prepare(main, EsSearchRequest.parse(branchJson))
+        }
+      }
+      assert(error.getMessage.contains("main branch only"))
+    }
   }
 
   test("reject deletion vectors before returning index hits") {

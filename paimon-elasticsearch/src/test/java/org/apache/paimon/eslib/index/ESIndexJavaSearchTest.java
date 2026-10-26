@@ -20,20 +20,26 @@ package org.apache.paimon.eslib.index;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.EsSearchQuery;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -43,6 +49,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -177,6 +184,100 @@ class ESIndexJavaSearchTest {
             assertThat(match.scoreGetter().score(0)).isEqualTo(1.0f);
             assertThat(match.scoreGetter().score(1)).isEqualTo(1.0f);
         }
+    }
+
+    @Test
+    void pureNegativeClausesDoNotContributeToTopKScore() throws Exception {
+        List<DataField> fields =
+                List.of(
+                        new DataField(0, "n", DataTypes.INT()),
+                        new DataField(1, "tag", DataTypes.STRING()));
+        Options configured = new Options();
+        configured.setString("global-index.es-index.fields.tag.type", "keyword");
+        ESIndexOptions options = new ESIndexOptions(fields, configured);
+        ResultEntry entry;
+        try (ESIndexGlobalIndexWriter writer = writer(fields, options)) {
+            writer.writeRow(0, GenericRow.of(1, BinaryString.fromString("x")));
+            writer.writeRow(1, GenericRow.of(2, BinaryString.fromString("y")));
+            entry = writer.finish().get(0);
+        }
+        String query =
+                "{\"bool\":{\"should\":[{\"bool\":{\"must_not\":{\"term\":{\"tag\":\"x\"}}}},"
+                        + "{\"bool\":{\"must_not\":{\"term\":{\"n\":1}}}},{\"term\":{\"n\":1}}]}}";
+        try (ESIndexGlobalIndexReader reader = reader(entry, fields, options)) {
+            ScoredGlobalIndexResult result =
+                    reader.visitEsSearch(new EsSearchQuery(query, 2)).join();
+            assertThat(rows(result)).containsExactlyInAnyOrder(0L, 1L);
+            assertThat(result.scoreGetter().score(0)).isEqualTo(1.0f);
+            assertThat(result.scoreGetter().score(1)).isZero();
+            assertThat(rows(reader.visitEsSearch(new EsSearchQuery(query, 1)).join()))
+                    .containsExactly(0L);
+            ScoredGlobalIndexResult negative =
+                    reader.visitEsSearch(
+                                    new EsSearchQuery(
+                                            "{\"bool\":{\"must_not\":{\"term\":{\"n\":1}}}}", 2))
+                            .join();
+            assertThat(rows(negative)).containsExactly(1L);
+            assertThat(negative.scoreGetter().score(1)).isZero();
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("temporalTypes")
+    void temporalQueriesUsePersistedLogicalTypeUnits(
+            DataType type, Object first, Object second, long firstBound, long secondBound)
+            throws Exception {
+        List<DataField> fields = List.of(new DataField(0, "value", type));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        ResultEntry entry;
+        try (ESIndexGlobalIndexWriter writer = writer(fields, options)) {
+            writer.writeRow(0, GenericRow.of(first));
+            writer.writeRow(1, GenericRow.of(second));
+            entry = writer.finish().get(0);
+        }
+        try (ESIndexGlobalIndexReader reader = reader(entry, fields, options)) {
+            assertThat(
+                            rows(
+                                    reader.visitEsSearch(
+                                                    new EsSearchQuery(
+                                                            "{\"term\":{\"value\":"
+                                                                    + firstBound
+                                                                    + "}}",
+                                                            2))
+                                            .join()))
+                    .containsExactly(0L);
+            assertThat(
+                            rows(
+                                    reader.visitEsSearch(
+                                                    new EsSearchQuery(
+                                                            "{\"range\":{\"value\":{\"gt\":"
+                                                                    + firstBound
+                                                                    + ",\"lte\":"
+                                                                    + secondBound
+                                                                    + "}}}",
+                                                            2))
+                                            .join()))
+                    .containsExactly(1L);
+        }
+    }
+
+    private static Stream<Arguments> temporalTypes() {
+        long epochMillis = 1_761_177_600_000L;
+        return Stream.of(
+                Arguments.of(DataTypes.DATE(), 20383, 20384, 20383L, 20384L),
+                Arguments.of(DataTypes.TIME(), 1000, 2000, 1000L, 2000L),
+                Arguments.of(
+                        DataTypes.TIMESTAMP(3),
+                        Timestamp.fromEpochMillis(epochMillis),
+                        Timestamp.fromEpochMillis(epochMillis + 1000),
+                        epochMillis,
+                        epochMillis + 1000),
+                Arguments.of(
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                        Timestamp.fromEpochMillis(epochMillis),
+                        Timestamp.fromEpochMillis(epochMillis + 1000),
+                        epochMillis,
+                        epochMillis + 1000));
     }
 
     private ESIndexGlobalIndexWriter writer(List<DataField> fields, ESIndexOptions options)

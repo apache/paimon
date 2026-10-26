@@ -528,6 +528,16 @@ under the License.
             <id>paimon-elasticsearch</id>
             <modules>
                 <module>paimon-elasticsearch</module>
+                <module>paimon-elasticsearch/compat</module>
+            </modules>
+        </profile>
+
+        <profile>
+            <!-- Deprecated alias retained for the module-renaming release. -->
+            <id>paimon-eslib</id>
+            <modules>
+                <module>paimon-elasticsearch</module>
+                <module>paimon-elasticsearch/compat</module>
             </modules>
         </profile>
 

@@ -192,7 +192,7 @@ final class JavaEsQueryParser {
             return new MatchAllDocsQuery();
         }
         if (positive == 0) {
-            result.add(new MatchAllDocsQuery(), BooleanClause.Occur.MUST);
+            result.add(new MatchAllDocsQuery(), BooleanClause.Occur.FILTER);
         }
         result.setMinimumNumberShouldMatch(minimum);
         return result.build();
@@ -348,7 +348,7 @@ final class JavaEsQueryParser {
     private static BigDecimal decimal(JsonNode value) {
         require(
                 value.isNumber() || value.isTextual(),
-                "Expected a numeric value (dates use epoch millis)");
+                "Expected a numeric value in the indexed field's storage unit");
         return new BigDecimal(value.asText());
     }
 

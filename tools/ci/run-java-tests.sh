@@ -85,7 +85,7 @@ case "$suite" in
         ;;
     eslib)
         profiles=flink1,spark3,paimon-elasticsearch,java-es-search-tests
-        modules=(paimon-common paimon-elasticsearch paimon-spark/paimon-spark-common
+        modules=(paimon-common paimon-elasticsearch paimon-elasticsearch/compat paimon-spark/paimon-spark-common
                  paimon-spark/paimon-spark-ut paimon-flink/paimon-flink-common)
         test_options+=(-DfailIfNoTests=false
             -Dtest=EsSearch*Test,ESIndex*Test,PaimonEsSearchProcedureITCase
