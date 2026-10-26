@@ -277,7 +277,6 @@ class DataEvolutionGlobalIndexScanner:
         if candidates:
             _, _, _, field_ids, fields, files, selected, plan = max(
                 candidates, key=lambda candidate: candidate[:3])
-            composite = self._read_composite(field_ids, fields, files, selected, plan)
             if predicate.method == 'and':
                 key_fields = {field.name for field in fields}
                 remaining = []
@@ -292,9 +291,24 @@ class DataEvolutionGlobalIndexScanner:
                 if remaining:
                     rest = (remaining[0] if len(remaining) == 1
                             else Predicate('and', None, None, remaining))
+                    if not self._may_use_composite(rest):
+                        rest_future = self._evaluator._visit_async(rest)
+                        try:
+                            composite = self._read_composite(
+                                field_ids, fields, files, selected, plan)
+                        except BaseException:
+                            try:
+                                rest_future.result()
+                            except BaseException:
+                                pass
+                            raise
+                        return self._combine_evaluations(
+                            [composite, rest_future.result()], 'and')
+                    composite = self._read_composite(
+                        field_ids, fields, files, selected, plan)
                     return self._combine_evaluations(
                         [composite, self._evaluate(rest)], 'and')
-            return composite
+            return self._read_composite(field_ids, fields, files, selected, plan)
 
         if predicate.method in ('and', 'or'):
             scalar_children = []

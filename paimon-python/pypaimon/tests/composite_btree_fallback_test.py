@@ -348,15 +348,23 @@ class CompositeBTreeFallbackTest(
         snapshot = table.snapshot_manager().get_latest_snapshot()
         scalar_files = [entry.index_file for entry in IndexFileHandler(table).scan(snapshot)]
         predicate = PredicateBuilder.and_predicates([
-            builder.equal('a', 1), builder.equal('c', 1),
+            builder.equal('a', 1), builder.equal('b', 2), builder.equal('c', 1),
         ])
-        with DataEvolutionGlobalIndexScanner.create(
-                table, index_files=[composite] + scalar_files, snapshot=snapshot,
-                allow_composite=True) as scanner:
-            evaluation = scanner.scan_with_coverage(predicate)
-            self.assertEqual([5], evaluation.result.results().to_list())
-            self.assertEqual(frozenset([0, 2]), evaluation.contributing_field_ids)
-            self.assertEqual((Range(0, 6),), evaluation.indexed_ranges)
+        gate = threading.Barrier(2, timeout=3)
+        original = BTreeIndexReader.__init__
+
+        def concurrent_init(reader, *args, **kwargs):
+            gate.wait()
+            original(reader, *args, **kwargs)
+
+        with patch.object(BTreeIndexReader, '__init__', concurrent_init):
+            with DataEvolutionGlobalIndexScanner.create(
+                    table, index_files=[composite] + scalar_files, snapshot=snapshot,
+                    allow_composite=True) as scanner:
+                evaluation = scanner.scan_with_coverage(predicate)
+                self.assertEqual([5], evaluation.result.results().to_list())
+                self.assertEqual(frozenset([0, 1, 2]), evaluation.contributing_field_ids)
+                self.assertEqual((Range(0, 6),), evaluation.indexed_ranges)
 
     @pytest.mark.python_plan
     def test_composite_and_scalar_use_intersected_coverage(self):
