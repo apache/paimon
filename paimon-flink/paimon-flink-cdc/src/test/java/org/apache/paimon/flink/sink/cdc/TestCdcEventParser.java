@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.utils.ObjectUtils;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -45,6 +43,6 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
 
     @Override
     public List<CdcRecord> parseRecords() {
-        return ObjectUtils.coalesce(raw.records(), Collections.emptyList());
+        return raw.records() != null ? raw.records() : Collections.emptyList();
     }
 }
