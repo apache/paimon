@@ -133,6 +133,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         JindoHadoopSystem fs = pair.getKey();
         String sysType = pair.getValue();
         FSDataInputStream fsInput = fs.open(hadoopPath);
+        JindoIOStats.INPUT.opened();
         return "jobj".equalsIgnoreCase(sysType)
                 ? new VectoredReadableInputStream(fsInput)
                 : new HadoopSeekableInputStream(fsInput);
@@ -143,8 +144,10 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         boolean shouldCache = writeCacheEnabled && shouldCache(path);
         LOG.debug("OutputStream should cache {} for path {}", shouldCache, path);
-        return new HadoopPositionOutputStream(
-                getFileSystem(hadoopPath, shouldCache).create(hadoopPath, overwrite));
+        FSDataOutputStream fsOutput =
+                getFileSystem(hadoopPath, shouldCache).create(hadoopPath, overwrite);
+        JindoIOStats.OUTPUT.opened();
+        return new HadoopPositionOutputStream(fsOutput);
     }
 
     @Override
@@ -290,6 +293,8 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         protected final FSDataInputStream in;
 
+        private boolean closed;
+
         private HadoopSeekableInputStream(FSDataInputStream in) {
             this.in = in;
         }
@@ -316,17 +321,31 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Override
         public int read() throws IOException {
-            return in.read();
+            int b = in.read();
+            if (b >= 0) {
+                JindoIOStats.INPUT.bytes(1);
+            }
+            return b;
         }
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            return in.read(b, off, len);
+            int n = in.read(b, off, len);
+            JindoIOStats.INPUT.bytes(n);
+            return n;
         }
 
         @Override
         public void close() throws IOException {
-            in.close();
+            if (closed) {
+                return;
+            }
+            closed = true;
+            try {
+                in.close();
+            } finally {
+                JindoIOStats.INPUT.closed();
+            }
         }
 
         /**
@@ -364,13 +383,17 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Override
         public int pread(long position, byte[] bytes, int off, int len) throws IOException {
-            return in.read(position, bytes, off, len);
+            int n = in.read(position, bytes, off, len);
+            JindoIOStats.INPUT.bytes(n);
+            return n;
         }
     }
 
     private static class HadoopPositionOutputStream extends PositionOutputStream {
 
         private final FSDataOutputStream out;
+
+        private boolean closed;
 
         private HadoopPositionOutputStream(FSDataOutputStream out) {
             this.out = out;
@@ -384,16 +407,19 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public void write(int b) throws IOException {
             out.write(b);
+            JindoIOStats.OUTPUT.bytes(1);
         }
 
         @Override
         public void write(byte[] b) throws IOException {
             out.write(b);
+            JindoIOStats.OUTPUT.bytes(b.length);
         }
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
             out.write(b, off, len);
+            JindoIOStats.OUTPUT.bytes(len);
         }
 
         @Override
@@ -403,7 +429,15 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Override
         public void close() throws IOException {
-            out.close();
+            if (closed) {
+                return;
+            }
+            closed = true;
+            try {
+                out.close();
+            } finally {
+                JindoIOStats.OUTPUT.closed();
+            }
         }
     }
 

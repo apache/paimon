@@ -24,6 +24,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.plugin.PluginLoader;
 import org.apache.paimon.utils.IOUtils;
@@ -73,6 +75,14 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
 
+    private static final ConfigOption<Duration> IO_STATS_INTERVAL =
+            ConfigOptions.key("jindo.io-stats.interval")
+                    .durationType()
+                    .defaultValue(Duration.ZERO)
+                    .withDescription(
+                            "Interval of logging JVM-wide Jindo stream and memory statistics, "
+                                    + "e.g. 1 min. 0 (the default) disables it.");
+
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
@@ -92,6 +102,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private Options hadoopOptions;
     private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
+    private Duration ioStatsInterval = IO_STATS_INTERVAL.defaultValue();
     private transient BlobPresigner blobPresigner;
 
     public JindoFileIO() {}
@@ -109,6 +120,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     public void configure(CatalogContext context) {
         super.configure(context);
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
+        ioStatsInterval = context.options().get(IO_STATS_INTERVAL);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -258,6 +270,10 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             org.apache.hadoop.fs.Path path, boolean enableCache) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
+        // FileIOs deserialized from older versions have no interval
+        if (ioStatsInterval != null) {
+            JindoIOStats.start(ioStatsInterval);
+        }
         Options options = enableCache ? hadoopOptionsWithCache : hadoopOptions;
         Supplier<Pair<JindoHadoopSystem, String>> supplier =
                 () -> {
@@ -293,8 +309,12 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                 };
 
         if (allowCache) {
-            return CACHE.computeIfAbsent(
-                    new CacheKey(options, scheme, authority), key -> supplier.get());
+            Pair<JindoHadoopSystem, String> pair =
+                    CACHE.computeIfAbsent(
+                            new CacheKey(options, scheme, authority), key -> supplier.get());
+            // cached file systems are never closed, so the reporter may call into them
+            JindoIOStats.registerNativeMetrics(pair.getKey(), path);
+            return pair;
         } else {
             return supplier.get();
         }
