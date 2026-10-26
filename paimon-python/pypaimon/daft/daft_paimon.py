@@ -43,6 +43,12 @@ if TYPE_CHECKING:
     from pypaimon.table.file_store_table import FileStoreTable
 
 
+def _single_endpoint_options_or_same(options: Dict[str, str]) -> Dict[str, str]:
+    """Preserve the legacy no-op identity while stripping routing from single-endpoint clients."""
+    converted = single_endpoint_options(options)
+    return options if converted == options else converted
+
+
 def _enrich_options_with_rest_token(
     catalog_options: Dict[str, str], table: "FileStoreTable"
 ) -> Dict[str, str]:
@@ -50,13 +56,13 @@ def _enrich_options_with_rest_token(
     # not in catalog_options; fold both in so Daft's IOConfig routes to OSS with valid credentials.
     # Daft reads with its own client, which cannot use io-cache targets per request.
     if catalog_options.get("metastore") != "rest":
-        return single_endpoint_options(catalog_options)
+        return _single_endpoint_options_or_same(catalog_options)
     file_io = getattr(table, "file_io", None)
     if file_io is None or not hasattr(file_io, "try_to_refresh_token"):
-        return single_endpoint_options(catalog_options)
+        return _single_endpoint_options_or_same(catalog_options)
     file_io.try_to_refresh_token()
     if file_io.token is None:
-        return single_endpoint_options(catalog_options)
+        return _single_endpoint_options_or_same(catalog_options)
     enriched = single_endpoint_options(effective_options(catalog_options, file_io.token.token))
     parsed = urlparse(getattr(table, "table_path", "") or "")
     if parsed.scheme and parsed.netloc:
