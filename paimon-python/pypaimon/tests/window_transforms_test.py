@@ -55,6 +55,8 @@ class WindowTransformsTest(unittest.TestCase):
         raw = images_to_tensor([rgb], return_uint8=True)
         self.assertEqual(torch.uint8, raw.dtype)
         self.assertEqual(128, raw[0, 0, 0, 0].item())
+        raw_window = images_to_tensor([rgb, rgb], return_uint8=True)
+        torch.testing.assert_close(raw_window.float().div_(255), values)
         gray = _png(np.array([[0, 255]], dtype=np.uint8))
         self.assertEqual([[[[0., 1.]]]], images_to_tensor([gray]).tolist())
 
@@ -105,6 +107,17 @@ class WindowTransformsTest(unittest.TestCase):
             values = images_to_tensor([payload], return_uint8=return_uint8)
             self.assertEqual(torch.float32, values.dtype)
             self.assertEqual([[[[0., 1024., 65535.]]]], values.tolist())
+
+    def test_mixed_bit_depth_normalizes_each_frame_independently(self):
+        low = _png(np.array([[128]], dtype=np.uint8))
+        high = _png(np.array([[1024]], dtype=np.uint16))
+        for return_uint8 in (False, True):
+            values = images_to_tensor([low, high], return_uint8=return_uint8)
+            self.assertEqual(torch.float32, values.dtype)
+            torch.testing.assert_close(
+                values[:, 0, 0, 0],
+                torch.tensor([128 if return_uint8 else 128 / 255, 1024],
+                             dtype=torch.float32))
 
     def test_exif_orientation_is_applied_before_stacking(self):
         exif = Image.Exif()

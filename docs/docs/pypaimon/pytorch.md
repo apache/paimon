@@ -238,6 +238,29 @@ dataset = (
 loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
 ```
 
+For GPU training with eight-bit images, keep decoded pixels as `uint8` in
+DataLoader workers and normalize the batch after transferring it to the GPU.
+This avoids allocating float32 image windows in the workers and transfers one
+byte per pixel instead of four. Set the `"image"` transform in the dataset
+constructor above to `partial(images_to_tensor, return_uint8=True)`, then use:
+
+```python
+loader = DataLoader(dataset, batch_size=32, num_workers=4,
+                    shuffle=True, pin_memory=True)
+
+for batch in loader:
+    image = batch["image"].to("cuda", non_blocking=True)
+    if image.dtype != torch.uint8:
+        raise TypeError("This GPU normalization path requires eight-bit images.")
+    image = image.float().div_(255)
+    # Move the other fields to the same device and feed the model.
+```
+
+`images_to_tensor` still applies EXIF orientation and palette expansion in the
+worker. Convert to float before model-specific normalization or augmentation
+that expects values in `[0, 1]`. Keep the default float32 transform for
+higher-bit-depth or mixed-bit-depth image windows.
+
 Each raw item contains scalar group/order keys, a list for every selected column,
 and a Boolean `<column>_is_pad` tensor where `True` marks padding. Unspecified
 field offsets default to `[0]`. The example produces state/action tensors with
