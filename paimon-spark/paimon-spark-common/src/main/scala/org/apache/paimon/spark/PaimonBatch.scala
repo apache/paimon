@@ -29,7 +29,8 @@ case class PaimonBatch(
     inputPartitions: Seq[PaimonInputPartition],
     readBuilder: ReadBuilder,
     blobAsDescriptor: Boolean,
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)(
+    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty,
+    dataProjection: Array[Int] = null)(
     uriReaderFactory: UriReaderFactory = null,
     blobDescriptorFieldIndices: Array[Int] = Array.empty[Int])
   extends Batch {
@@ -43,6 +44,7 @@ case class PaimonBatch(
       metadataColumns = metadataColumns,
       blobAsDescriptor = blobAsDescriptor,
       uriReaderFactory = uriReaderFactory,
-      blobDescriptorFieldIndices = blobDescriptorFieldIndices
+      blobDescriptorFieldIndices = blobDescriptorFieldIndices,
+      dataProjection = dataProjection
     )
 }

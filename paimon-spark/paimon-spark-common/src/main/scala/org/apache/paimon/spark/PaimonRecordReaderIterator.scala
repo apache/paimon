@@ -24,7 +24,8 @@ import org.apache.paimon.reader.{FileRecordIterator, RecordReader, ScoreRecordIt
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PATH_AND_INDEX_META_COLUMNS, VECTOR_SEARCH_META_COLUMN_NAMES}
 import org.apache.paimon.table.source.{ChainSplit, DataSplit, Split, Splits}
-import org.apache.paimon.utils.{CloseableIterator, IOUtils, Preconditions}
+import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.{CloseableIterator, Preconditions, ProjectedRow}
 
 import org.apache.spark.sql.PaimonUtils
 
@@ -34,19 +35,18 @@ import java.util.concurrent.TimeUnit.NANOSECONDS
 case class PaimonRecordReaderIterator(
     reader: RecordReader[PaimonInternalRow],
     metadataColumns: Seq[PaimonMetadataColumn],
-    split: Split)
+    split: Split,
+    readType: RowType = null)
   extends CloseableIterator[PaimonInternalRow] {
 
-  // Keep partition metadata restricted to the original DataSplit. Unwrapping authorization
-  // here would expose raw partition values after the reader has applied column masks.
-  if (
-    metadataColumns.exists(_.name == PaimonMetadataColumn.PARTITION_COLUMN) && !split
-      .isInstanceOf[DataSplit]
-  ) {
-    IOUtils.closeQuietly(reader)
-    throw new UnsupportedOperationException(
-      "Partition metadata is only supported for DataSplit without query authorization.")
-  }
+  private val partitionRow = metadataColumns
+    .find(_.name == PaimonMetadataColumn.PARTITION_COLUMN)
+    .map {
+      column =>
+        require(readType != null, "Partition metadata requires a read type")
+        val fields = column.toPaimonDataField.`type`().asInstanceOf[RowType].getFieldNames
+        ProjectedRow.from(readType.getFieldIndices(fields))
+    }
 
   private lazy val bucketMetadata =
     if (metadataColumns.exists(_.name == PaimonMetadataColumn.BUCKET_COLUMN)) {
@@ -151,7 +151,7 @@ case class PaimonRecordReaderIterator(
                 currentIterator.asInstanceOf[ScoreRecordIterator[PaimonInternalRow]])
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else if (needMetadata) {
-              updateMetadataRow(currentIterator)
+              updateMetadataRow(currentIterator, dataRow)
               currentResult = joinedRow.replace(dataRow, metadataRow)
             } else {
               currentResult = dataRow
@@ -178,7 +178,9 @@ case class PaimonRecordReaderIterator(
     }
   }
 
-  private def updateMetadataRow(iterator: RecordReader.RecordIterator[PaimonInternalRow]): Unit = {
+  private def updateMetadataRow(
+      iterator: RecordReader.RecordIterator[PaimonInternalRow],
+      dataRow: PaimonInternalRow): Unit = {
     metadataColumns.zipWithIndex.foreach {
       case (metadataColumn, index) =>
         metadataColumn.name match {
@@ -189,7 +191,8 @@ case class PaimonRecordReaderIterator(
           case PaimonMetadataColumn.FILE_PATH_COLUMN =>
             metadataRow.setField(index, BinaryString.fromString(lastFilePath.toString))
           case PaimonMetadataColumn.PARTITION_COLUMN =>
-            metadataRow.setField(index, split.asInstanceOf[DataSplit].partition())
+            // Core has already applied chain logical partitions, row filters and column masks.
+            metadataRow.setField(index, partitionRow.get.replaceRow(dataRow))
           case PaimonMetadataColumn.BUCKET_COLUMN =>
             metadataRow.setField(index, bucketMetadata.get)
         }

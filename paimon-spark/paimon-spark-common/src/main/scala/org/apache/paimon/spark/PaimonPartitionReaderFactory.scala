@@ -25,14 +25,15 @@ import org.apache.paimon.utils.UriReaderFactory
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 
-import java.util.Objects
+import java.util.{Arrays, Objects}
 
 case class PaimonPartitionReaderFactory(
     readBuilder: ReadBuilder,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty,
     blobAsDescriptor: Boolean,
     uriReaderFactory: UriReaderFactory = null,
-    blobDescriptorFieldIndices: Array[Int] = Array.empty[Int])
+    blobDescriptorFieldIndices: Array[Int] = Array.empty[Int],
+    dataProjection: Array[Int] = null)
   extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
@@ -44,7 +45,8 @@ case class PaimonPartitionReaderFactory(
           metadataColumns = metadataColumns,
           blobAsDescriptor = blobAsDescriptor,
           uriReaderFactory = uriReaderFactory,
-          blobDescriptorFieldIndices = blobDescriptorFieldIndices
+          blobDescriptorFieldIndices = blobDescriptorFieldIndices,
+          dataProjection = dataProjection
         )
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
@@ -54,7 +56,9 @@ case class PaimonPartitionReaderFactory(
   override def equals(obj: Any): Boolean = {
     obj match {
       case other: PaimonPartitionReaderFactory =>
-        this.readBuilder.equals(other.readBuilder) && this.metadataColumns == other.metadataColumns
+        this.readBuilder.equals(
+          other.readBuilder) && this.metadataColumns == other.metadataColumns &&
+        Arrays.equals(this.dataProjection, other.dataProjection)
 
       case _ => false
     }

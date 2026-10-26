@@ -61,6 +61,18 @@ For example:
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
+`__paimon_partition` is a struct containing the table's partition fields. For example,
+`SELECT __paimon_partition.dt FROM t` selects only the `dt` partition field. For chain tables,
+these values describe the returned row's logical partition, including rows retained from an older
+snapshot partition. With query authorization, partition metadata follows the same row filters,
+column permissions and column masks as the corresponding ordinary partition fields. With Spark's
+default `spark.sql.optimizer.nestedSchemaPruning.enabled=true`, selecting a single metadata subfield
+requires access to that field; selecting the complete struct requires access to all its fields.
+When this setting is `false`, Spark requests the complete partition struct even when only one
+subfield is selected, so access to all partition fields is required. Reads and column masks remain
+supported when these permissions are available. Predicates on this metadata are evaluated against
+the visible values.
+
 Supported equality, membership and range predicates on `__paimon_bucket` are pushed down to
 select physical buckets before reading data files. For example, to read only buckets 0 and 1:
 
