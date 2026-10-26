@@ -29,8 +29,10 @@ import unittest
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.write.commit_message import CommitMessage
 
 
 class OverwriteCommitConflictTest(unittest.TestCase):
@@ -86,6 +88,39 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         tc.commit(w.prepare_commit())
         w.close()
         tc.close()
+
+    @pytest.mark.python_commit
+    def test_repeated_file_delete_reports_partition_and_bucket(self):
+        builder = self.table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_pandas(pd.DataFrame({'f0': [3], 'f1': ['delete-me']}))
+            messages = writer.prepare_commit()
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
+        self.assertEqual(len(messages), 1)
+        original = messages[0]
+        deletion = CommitMessage(
+            original.partition, original.bucket, [], deleted_files=original.new_files)
+        first = builder.new_commit()
+        try:
+            first.commit([deletion])
+        finally:
+            first.close()
+
+        second = builder.new_commit()
+        try:
+            with self.assertRaises(RuntimeError) as raised:
+                second.commit([deletion])
+            message = str(raised.exception)
+            self.assertIn("File deletion conflicts detected", message)
+            self.assertIn(original.new_files[0].file_name, message)
+            self.assertIn("partition=f0=3, bucket={}".format(original.bucket), message)
+        finally:
+            second.close()
 
     def test_conflict_scan_runs_once_not_once_per_retry(self):
         K = 3
