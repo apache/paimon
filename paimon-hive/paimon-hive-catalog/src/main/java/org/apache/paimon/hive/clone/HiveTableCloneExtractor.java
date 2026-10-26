@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
+import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FormatTable;
@@ -356,7 +357,11 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     }
 
     private static boolean isObjectStore(FileIO fileIO, Path path) throws IOException {
-        // a resolving FileIO answers for the catalog warehouse, which may be on another file system
+        // a resolving FileIO, which local caching may wrap, answers for the catalog warehouse,
+        // which may be on another file system
+        if (fileIO instanceof CachingFileIO) {
+            fileIO = ((CachingFileIO) fileIO).delegate();
+        }
         if (fileIO instanceof ResolvingFileIO) {
             return ((ResolvingFileIO) fileIO).fileIO(path).isObjectStore();
         }
