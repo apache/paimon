@@ -1162,6 +1162,15 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    WRITE_LEROBOT_REMUX_EPISODES: ConfigOption[bool] = (
+        ConfigOptions.key("write.lerobot.remux-episodes")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Copy each LeRobot Episode's video packets into a separate MP4 "
+            "payload without re-encoding. Requires PyAV.")
+    )
+
     READ_VIDEO_MAX_OPEN_DECODERS: ConfigOption[int] = (
         ConfigOptions.key("read.video.max-open-decoders")
         .int_type()

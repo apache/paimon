@@ -3070,7 +3070,21 @@ class LeRobotValidationTest(unittest.TestCase):
     def test_imported_video_payload_supports_training_reads(self):
         self._assert_imported_video_payload_can_be_decoded(True)
 
-    def _assert_imported_video_payload_can_be_decoded(self, training_reads):
+    @unittest.skipUnless(av is not None, "PyAV is required for MP4 decoding")
+    def test_remuxed_episode_payload_can_be_decoded(self):
+        self._assert_imported_video_payload_can_be_decoded(False, remux=True)
+
+    @unittest.skipUnless(
+        av is not None
+        and sys.version_info >= (3, 10)
+        and importlib.util.find_spec("datasets") is not None
+        and importlib.util.find_spec("torch") is not None,
+        "Video training reads require Python 3.10+, PyAV, datasets, and Torch",
+    )
+    def test_remuxed_episode_payload_supports_training_reads(self):
+        self._assert_imported_video_payload_can_be_decoded(True, remux=True)
+
+    def _assert_imported_video_payload_can_be_decoded(self, training_reads, remux=False):
         import pandas as pd
 
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_mp4_"))
@@ -3244,7 +3258,8 @@ class LeRobotValidationTest(unittest.TestCase):
                     return_value=Dataset(),
             ):
                 connection.load_from_lerobot(
-                    "frames", temp_dir, batch_size=1)
+                    "frames", temp_dir, batch_size=1,
+                    options={"write.lerobot.remux-episodes": str(remux).lower()})
 
             table = connection.get_table("frames")
             rows = table.scan().select([
@@ -3262,10 +3277,14 @@ class LeRobotValidationTest(unittest.TestCase):
                 descriptor.keyframe_index_descriptor is not None
                 for descriptor in descriptors + camera_b_descriptors
             ))
-            self.assertEqual(
-                [55, 56, 61, 62, 63],
-                [descriptor.frame_index for descriptor in descriptors],
-            )
+            if not remux:
+                self.assertEqual(
+                    [55, 56, 61, 62, 63],
+                    [descriptor.frame_index for descriptor in descriptors],
+                )
+            else:
+                self.assertEqual(2, len(set(
+                    d.payload_descriptor for d in descriptors)))
 
             class Decoder:
 
@@ -3292,7 +3311,7 @@ class LeRobotValidationTest(unittest.TestCase):
             )
             try:
                 decoded_rows = collator(rows)
-                self.assertEqual(1, len(collator._decoders))
+                self.assertEqual(2 if remux else 1, len(collator._decoders))
             finally:
                 collator.close()
             np.testing.assert_allclose(
@@ -3300,11 +3319,12 @@ class LeRobotValidationTest(unittest.TestCase):
                 expected_frame_values,
                 atol=1e-6,
             )
-            np.testing.assert_allclose(
-                [row["decoded"][1] for row in decoded_rows],
-                [5.5, 5.6, 6.1, 6.2, 6.3],
-                atol=1e-6,
-            )
+            if not remux:
+                np.testing.assert_allclose(
+                    [row["decoded"][1] for row in decoded_rows],
+                    [5.5, 5.6, 6.1, 6.2, 6.3],
+                    atol=1e-6,
+                )
             if not training_reads:
                 return
 
@@ -3373,10 +3393,12 @@ class LeRobotValidationTest(unittest.TestCase):
                 self.assertEqual(
                     1, len(dataset._video_collators[0]._decoders))
                 self.assertGreater(sum(transferred), 0)
-                self.assertLess(
-                    sum(transferred),
-                    sum(descriptor.length for descriptor in selected),
-                )
+                # A short remuxed clip may be read in full. Compare with the
+                # original video rather than requiring sparse IO within it.
+                read_limit = (video_path.stat().st_size * len(selected)
+                              if remux else
+                              sum(d.length for d in selected))
+                self.assertLess(sum(transferred), read_limit)
 
                 from torch.utils.data import DataLoader
                 worker_indices = []
