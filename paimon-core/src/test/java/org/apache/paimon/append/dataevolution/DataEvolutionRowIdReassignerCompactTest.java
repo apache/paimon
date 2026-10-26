@@ -545,7 +545,7 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(ints = {1, 2})
-    public void testReassignRetriesWhenPlannedManifestExpiresDuringRewrite(int parallelism)
+    public void testReassignFailsWhenPlannedManifestExpiresDuringRewrite(int parallelism)
             throws Exception {
         FileStoreTable table =
                 createTableWithInterleavedPartitions()
@@ -556,40 +556,43 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
         table.store().setManifestCache(null);
         Snapshot before = table.snapshotManager().latestSnapshot();
         AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                null,
-                                () -> {},
-                                manifest -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            compactManifests(table);
-                                            expireSnapshots(table, 1);
-                                            Path oldManifest =
-                                                    table.store()
-                                                            .pathFactory()
-                                                            .toManifestFilePath(
-                                                                    manifest.fileName());
-                                            assertThat(table.fileIO().exists(oldManifest))
-                                                    .isFalse();
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-expired-manifest-during-rewrite");
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionRowIdReassigner(
+                                                table,
+                                                null,
+                                                () -> {},
+                                                manifest -> {
+                                                    if (compacted.compareAndSet(false, true)) {
+                                                        try {
+                                                            compactManifests(table);
+                                                            expireSnapshots(table, 1);
+                                                            Path oldManifest =
+                                                                    table.store()
+                                                                            .pathFactory()
+                                                                            .toManifestFilePath(
+                                                                                    manifest
+                                                                                            .fileName());
+                                                            assertThat(
+                                                                            table.fileIO()
+                                                                                    .exists(
+                                                                                            oldManifest))
+                                                                    .isFalse();
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    }
+                                                })
+                                        .reassign("test-reassign-expired-manifest-during-rewrite"))
+                .hasRootCauseInstanceOf(FileNotFoundException.class);
 
         assertThat(compacted).isTrue();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
-        assertThat(result.rowCount).isEqualTo(5L);
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 1);
         assertThat(rowIdsByPartition(table))
-                .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
-                .containsEntry("pt=b/", Arrays.asList(8L, 9L));
+                .containsEntry("pt=a/", Arrays.asList(0L, 2L, 4L))
+                .containsEntry("pt=b/", Arrays.asList(1L, 3L));
         assertThat(readTableRows(table))
                 .containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
-        assertPersistedPlan(table);
     }
 
     @Test
@@ -649,101 +652,6 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
                                         .reassign("test-other-manifest-failure-after-compaction"))
                 .isSameAs(failure);
         assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 1);
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testExpiredRewriteStillChecksConcurrentHistory(boolean overwrite) throws Exception {
-        FileStoreTable table =
-                createTableWithInterleavedPartitions()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "1"));
-        table.store().setManifestCache(null);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionRowIdReassigner(
-                                                table,
-                                                null,
-                                                () -> {},
-                                                manifest -> {
-                                                    if (compacted.compareAndSet(false, true)) {
-                                                        try {
-                                                            compactManifests(table);
-                                                            writeOneRow(table, "a", 100, overwrite);
-                                                            expireSnapshots(
-                                                                    table, overwrite ? 2 : 1);
-                                                            Path oldManifest =
-                                                                    table.store()
-                                                                            .pathFactory()
-                                                                            .toManifestFilePath(
-                                                                                    manifest
-                                                                                            .fileName());
-                                                            assertThat(
-                                                                            table.fileIO()
-                                                                                    .exists(
-                                                                                            oldManifest))
-                                                                    .isFalse();
-                                                        } catch (Exception e) {
-                                                            throw new RuntimeException(e);
-                                                        }
-                                                    }
-                                                })
-                                        .reassign("test-expired-manifest-unsafe-history"))
-                .hasMessageContaining(
-                        overwrite ? "OVERWRITE snapshot" : "snapshot " + (before.id() + 1))
-                .hasMessageContaining(overwrite ? "Abort row-id reassignment" : "cannot be read");
-        assertThat(compacted).isTrue();
-        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 2);
-    }
-
-    @Test
-    public void testExpiredRewriteUsesConfiguredRetryBudget() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "1");
-        options.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "1");
-        options.put(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "0ms");
-        options.put(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "0ms");
-        FileStoreTable table = createTableWithInterleavedPartitions().copy(options);
-        table.store().setManifestCache(null);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicInteger attempts = new AtomicInteger();
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionRowIdReassigner(
-                                                table,
-                                                null,
-                                                () -> {},
-                                                manifest -> {
-                                                    try {
-                                                        compactManifests(table);
-                                                        writeOneRow(
-                                                                table,
-                                                                "a",
-                                                                100 + attempts.getAndIncrement());
-                                                        expireSnapshots(table, 2);
-                                                        Path oldManifest =
-                                                                table.store()
-                                                                        .pathFactory()
-                                                                        .toManifestFilePath(
-                                                                                manifest
-                                                                                        .fileName());
-                                                        assertThat(
-                                                                        table.fileIO()
-                                                                                .exists(
-                                                                                        oldManifest))
-                                                                .isFalse();
-                                                    } catch (Exception e) {
-                                                        throw new RuntimeException(e);
-                                                    }
-                                                })
-                                        .reassign("test-expired-manifest-retry-budget"))
-                .hasMessageContaining("with 1 retries");
-        assertThat(attempts).hasValue(2);
-        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 4);
-        assertThat(readTableRows(table)).hasSize(7);
     }
 
     @ParameterizedTest

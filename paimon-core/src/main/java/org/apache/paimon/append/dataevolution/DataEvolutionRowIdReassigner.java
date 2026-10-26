@@ -391,26 +391,8 @@ public class DataEvolutionRowIdReassigner {
             }
 
             Assignment assignment = assignmentPlan.createAssignment(latest);
-            CommitAssignmentResult commitResult;
-            try {
-                commitResult = commitAssignment(assignment, manifestFile, manifestList, commitUser);
-            } catch (RuntimeException e) {
-                if (!isMissingFile(e)) {
-                    throw e;
-                }
-                Snapshot newLatest = table.snapshotManager().latestSnapshot();
-                if (newLatest == null || newLatest.id() <= latest.id()) {
-                    throw e;
-                }
-                // Compaction and expiration can remove input metadata during a rewrite.
-                // Advance through the normal history checks before trying the latest state.
-                LOG.info(
-                        "Metadata for snapshot {} is no longer available while reassigning row IDs for table {}. Snapshot {} has been committed.",
-                        latest.id(),
-                        table.name(),
-                        newLatest.id());
-                commitResult = new CommitAssignmentResult(false, 0, 0);
-            }
+            CommitAssignmentResult commitResult =
+                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
             if (commitResult.success) {
                 return assignmentResult(assignment, commitResult);
             }
@@ -435,15 +417,6 @@ public class DataEvolutionRowIdReassigner {
             retryWaiter.retryWait(retryCount);
             retryCount++;
         }
-    }
-
-    private static boolean isMissingFile(Throwable failure) {
-        return ExceptionUtils.findThrowable(
-                        failure,
-                        cause ->
-                                cause instanceof FileNotFoundException
-                                        || cause instanceof NoSuchFileException)
-                .isPresent();
     }
 
     private CommitAssignmentResult commitAssignment(
@@ -540,7 +513,12 @@ public class DataEvolutionRowIdReassigner {
                 previousManifestFiles.add(manifestMeta.fileName());
             }
         } catch (RuntimeException e) {
-            if (!isMissingFile(e)) {
+            if (!ExceptionUtils.findThrowable(
+                            e,
+                            cause ->
+                                    cause instanceof FileNotFoundException
+                                            || cause instanceof NoSuchFileException)
+                    .isPresent()) {
                 throw e;
             }
             // The planning snapshot may expire while later snapshots remain readable.
