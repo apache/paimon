@@ -307,6 +307,42 @@ class RESTTokenFileIOTest {
     }
 
     @Test
+    void testFileIOsOfOneTokenAreCachedPerCatalogOptions() throws IOException {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenAnswer(invocation -> mock(FileIO.class));
+        when(loader.getScheme()).thenReturn("oss");
+        Identifier identifier = Identifier.create("db", "table");
+        GetTableTokenResponse response =
+                new GetTableTokenResponse(
+                        Collections.singletonMap("token", UUID.randomUUID().toString()),
+                        Long.MAX_VALUE);
+
+        FileIO first = tokenFileIO(loader, identifier, response, "http://cache-a:80").fileIO();
+        FileIO same = tokenFileIO(loader, identifier, response, "http://cache-a:80").fileIO();
+        FileIO other = tokenFileIO(loader, identifier, response, "http://cache-b:80").fileIO();
+
+        // catalog-only options change the backend, so they scope the cached FileIO too
+        assertThat(same).isSameAs(first);
+        assertThat(other).isNotSameAs(first);
+    }
+
+    private static RESTTokenFileIO tokenFileIO(
+            FileIOLoader loader,
+            Identifier identifier,
+            GetTableTokenResponse response,
+            String cacheEndpoint) {
+        RESTApi api = mock(RESTApi.class);
+        when(api.loadTableToken(identifier)).thenReturn(response);
+        Options options = new Options();
+        options.set("io-cache.endpoint", cacheEndpoint);
+        return new RESTTokenFileIO(
+                CatalogContext.create(options, loader, null),
+                api,
+                identifier,
+                new Path("oss://bucket/table"));
+    }
+
+    @Test
     void testTryToWriteAtomicReachesInnerOverride() throws IOException {
         Path tableRoot = new Path("oss://bucket/table");
         FileIO delegate = mock(FileIO.class);
