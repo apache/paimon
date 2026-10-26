@@ -20,6 +20,7 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.read.datasource.split_provider import CatalogSplitProvider
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, PyarrowFieldParser
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
@@ -63,6 +64,103 @@ class TestTimeTravelSchemaEvolution:
     def _read(table):
         builder = table.new_read_builder()
         return builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
+
+    def _create_branched_table(self, fields, row):
+        table = self._create(fields, {
+            'row-tracking.enabled': 'false',
+            'data-evolution.enabled': 'false',
+            'scan.native-plan.enabled': 'false',
+            'read.native.enabled': 'false',
+            'write.native.enabled': 'false',
+        })
+        self._write(table, row)
+        table.create_tag('base', 1)
+        self.catalog.create_branch('test.t', 'dev', tag_name='base')
+        return table
+
+    @pytest.mark.parametrize('evolve_main', [False, True])
+    @pytest.mark.parametrize('selector', ['scan.snapshot-id', 'scan.tag-name'])
+    def test_branch_time_travel_uses_target_schema(self, selector, evolve_main):
+        self._create_branched_table([
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('STRING')),
+        ], {'id': 1, 'payload': 'base'})
+        if evolve_main:
+            self.catalog.alter_table('test.t', [
+                SchemaChange.add_column('source', AtomicType('STRING'))])
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.add_column('quality_score', AtomicType('DOUBLE'))])
+        main = self.catalog.get_table('test.t')
+        dev = self.catalog.get_table('test.t$branch_dev')
+        main_row = {'id': 2, 'payload': 'main'}
+        if evolve_main:
+            main_row['source'] = 'web'
+            assert main.table_schema.id == dev.table_schema.id
+        self._write(main, main_row)
+        self._write(dev, {'id': 3, 'payload': 'dev', 'quality_score': 0.9})
+        dev.create_tag('training_v1', 2)
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.add_column('later_column', AtomicType('STRING'))])
+        self._write(self.catalog.get_table('test.t$branch_dev'), {
+            'id': 4, 'payload': 'later', 'quality_score': 0.8, 'later_column': 'new'})
+
+        target = {selector: '2' if selector == 'scan.snapshot-id' else 'training_v1'}
+        historical = main.copy({'branch': 'dev', **target})
+        two_step = main.copy({'branch': 'dev'}).copy(target)
+        expected = [
+            {'id': 1, 'payload': 'base', 'quality_score': None},
+            {'id': 3, 'payload': 'dev', 'quality_score': 0.9},
+        ]
+        assert historical.field_names == two_step.field_names == ['id', 'payload', 'quality_score']
+        assert sorted(self._read(historical), key=lambda row: row['id']) == expected
+
+        provider = CatalogSplitProvider(
+            table_identifier='test.t',
+            catalog_options={'warehouse': str(self.root / 'warehouse')},
+            snapshot_id=2 if selector == 'scan.snapshot-id' else None,
+            tag_name='training_v1' if selector == 'scan.tag-name' else None,
+            dynamic_options={'branch': 'dev'},
+        )
+        assert [field.name for field in provider.read_type()] == historical.field_names
+        read = provider.table().new_read_builder().new_read()
+        assert sorted(read.to_arrow(provider.splits()).to_pylist(), key=lambda row: row['id']) == expected
+
+    def test_branch_time_travel_preserves_bigint_values(self):
+        main = self._create_branched_table([
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'count', AtomicType('INT')),
+        ], {'id': 1, 'count': 1})
+        self.catalog.alter_table('test.t$branch_dev', [
+            SchemaChange.update_column_type('count', AtomicType('BIGINT'))])
+        self._write(main, {'id': 2, 'count': 2})
+        self._write(self.catalog.get_table('test.t$branch_dev'), {'id': 3, 'count': 3000000000})
+
+        historical = main.copy({'branch': 'dev', 'scan.snapshot-id': '2'})
+
+        assert sorted(self._read(historical), key=lambda row: row['id']) == [
+            {'id': 1, 'count': 1}, {'id': 3, 'count': 3000000000}]
+
+    @pytest.mark.parametrize('branch', ['main', None])
+    def test_branch_time_travel_back_to_main(self, branch):
+        self._create_branched_table([
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('STRING')),
+        ], {'id': 1, 'payload': 'base'})
+        self.catalog.alter_table('test.t', [
+            SchemaChange.add_column('source', AtomicType('STRING'))])
+        main = self.catalog.get_table('test.t')
+        dev = self.catalog.get_table('test.t$branch_dev')
+        self._write(main, {'id': 2, 'payload': 'main', 'source': 'web'})
+        self._write(dev, {'id': 3, 'payload': 'dev'})
+
+        historical = dev.copy({'branch': branch, 'scan.snapshot-id': '2'})
+
+        assert historical.current_branch() == 'main'
+        assert historical.field_names == ['id', 'payload', 'source']
+        assert sorted(self._read(historical), key=lambda row: row['id']) == [
+            {'id': 1, 'payload': 'base', 'source': None},
+            {'id': 2, 'payload': 'main', 'source': 'web'},
+        ]
 
     def test_commit_retry_refreshes_snapshot_schema(self, monkeypatch):
         original = self._create([DataField(0, 'id', AtomicType('INT'))])
