@@ -29,17 +29,17 @@ from cachetools import TTLCache
 from pypaimon.api.auth.bearer import BearTokenAuthProvider
 from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.io_cache_file_io import (IoCacheRoutingFileIO,
                                                   table_view_spec)
 from pypaimon.filesystem.io_cache_routing import (IoCacheRouting,
-                                                  schema_file_prefixes)
+                                                  effective_options,
+                                                  schema_file_prefixes,
+                                                  with_catalog_overrides)
 
 
 class RESTTokenFileIO(FileIO):
@@ -87,6 +87,8 @@ class RESTTokenFileIO(FileIO):
             self.catalog_options = catalog_options
         self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
         self.token: Optional[RESTToken] = None
+        # The token as the REST server vended it, without this catalog's overrides.
+        self._vended_token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
@@ -242,10 +244,10 @@ class RESTTokenFileIO(FileIO):
         return self._file_io_scope
 
     def _merged_options(self, token: RESTToken) -> Options:
-        return Options(self._merge_token_with_catalog_options(RESTUtil.merge(
-            self.catalog_options.to_map() if self.catalog_options else {},
-            token.token
-        )))
+        return Options(effective_options(self._catalog_map(), token.token))
+
+    def _catalog_map(self) -> dict:
+        return self.catalog_options.to_map() if self.catalog_options else {}
 
     def _create_file_io(self, options: Options) -> FileIO:
         properties = options.to_map()
@@ -262,16 +264,12 @@ class RESTTokenFileIO(FileIO):
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
-        merged_token = dict(token)
-        if self.catalog_options:
-            dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
-            if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-                merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
-            # An explicit io-cache.enabled in the catalog options wins over the token, as in Java.
-            if self.catalog_options.contains(CatalogOptions.IO_CACHE_ENABLED):
-                merged_token[CatalogOptions.IO_CACHE_ENABLED.key()] = str(
-                    self.catalog_options.get(CatalogOptions.IO_CACHE_ENABLED)).lower()
-        return merged_token
+        return with_catalog_overrides(token, self._catalog_map())
+
+    def _adopt(self, vended: RESTToken):
+        # The shared token cache keeps the vended token; this instance applies its own catalog's overrides.
+        self._vended_token = vended
+        self.token = RESTToken(self._merge_token_with_catalog_options(vended.token), vended.expire_at_millis)
 
     def new_input_stream(self, path: str):
         return self.file_io().new_input_stream(path)
@@ -383,7 +381,7 @@ class RESTTokenFileIO(FileIO):
 
         cached_token = self._get_cached_token(identifier_str)
         if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
-            self.token = cached_token
+            self._adopt(cached_token)
             return
 
         global_lock = self._get_global_token_lock(identifier_str)
@@ -391,13 +389,13 @@ class RESTTokenFileIO(FileIO):
         with global_lock:
             cached_token = self._get_cached_token(identifier_str)
             if cached_token and not self._is_token_expired(cached_token, minimum_validity_millis):
-                self.token = cached_token
+                self._adopt(cached_token)
                 return
 
             token_to_check = cached_token if cached_token else self.token
             if token_to_check is None or self._is_token_expired(token_to_check, minimum_validity_millis):
                 self.refresh_token()
-                self._set_cached_token(identifier_str, self.token)
+                self._set_cached_token(identifier_str, self._vended_token)
 
     def _get_cached_token(self, identifier_str: str) -> Optional[RESTToken]:
         with self._TOKEN_LOCKS_LOCK:
@@ -468,11 +466,9 @@ class RESTTokenFileIO(FileIO):
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
 
-        merged_token_dict = self._merge_token_with_catalog_options(response.token)
-        new_token = RESTToken(merged_token_dict, response.expires_at_millis)
-        self.token = new_token
-        if self._is_token_expired(new_token):
-            self._log_short_token(new_token)
+        self._adopt(RESTToken(response.token, response.expires_at_millis))
+        if self._is_token_expired(self.token):
+            self._log_short_token(self.token)
 
     def _log_short_token(self, token: RESTToken):
         with self._TOKEN_LOCKS_LOCK:

@@ -110,7 +110,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             issued.append(RESTToken(
                 {OssOptions.OSS_SECURITY_TOKEN.key(): "sts-{}".format(len(issued))},
                 (now[0] + 2 * 3600) * 1000))
-            file_io.token = issued[-1]
+            file_io._adopt(issued[-1])
 
         with patch('pypaimon.catalog.rest.rest_token_file_io.time.time',
                    side_effect=lambda: now[0]), \
@@ -391,7 +391,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             if threading.current_thread() in holders:
                 refreshing.set()
                 release.wait(10)
-            file_io.token = self._valid_token("refreshed")
+            file_io._adopt(self._valid_token("refreshed"))
 
         self.addCleanup(RESTTokenFileIO._TOKEN_CACHE.pop, 'fork-test', None)
         with patch.object(RESTTokenFileIO, '_build_cache_key', return_value='fork-test'), \
@@ -484,7 +484,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
         validity = timedelta(hours=requested_hours)
 
         def refresh():
-            file_io.token = new_token
+            file_io._adopt(new_token)
 
         with patch('pypaimon.catalog.rest.rest_token_file_io.time.time', return_value=now), \
                 patch.object(file_io, '_build_cache_key', return_value='presigning-test'), \
@@ -521,7 +521,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
         validity = timedelta(minutes=30)
 
         def refresh():
-            file_io.token = new_token
+            file_io._adopt(new_token)
 
         def presign(*_):
             if now[0] == 1700000000:

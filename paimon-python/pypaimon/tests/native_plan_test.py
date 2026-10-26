@@ -1222,11 +1222,12 @@ class NativePlanTest(unittest.TestCase):
                              (data_token['fs.oss.endpoint'], data_token['fs.oss.https.enable']))
             self.assertNotIn('fs.oss.dlf-cache.consistent-hash.enabled', data_token)
 
-            # dlf.oss-endpoint turns routing off, so the token keeps the endpoint it was given.
+            # dlf.oss-endpoint turns routing off and replaces the endpoint, as for the Python FileIO.
             fake_df.Table.reset_mock()
             options = {'dlf.oss-endpoint': 'oss-cn-test.example.com'}
             _NativeRestTableCache().get('response', 'default', 't', options, token_loader=lambda: token)
-            self.assertEqual(token.token, fake_df.Table.from_rest_response_with_token.call_args[1]['data_token'])
+            self.assertEqual(dict(token.token, **{'fs.oss.endpoint': 'oss-cn-test.example.com'}),
+                             fake_df.Table.from_rest_response_with_token.call_args[1]['data_token'])
 
     def test_native_rest_cache_retries_failed_construction(self):
         from pypaimon.execution.native.table import _NativeRestTableCache

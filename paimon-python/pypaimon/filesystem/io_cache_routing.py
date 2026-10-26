@@ -175,12 +175,35 @@ def _with_endpoint(options: Dict[str, str], endpoint: Optional[str]) -> Dict[str
     return options
 
 
+def with_catalog_overrides(token: Mapping[str, str],
+                           catalog_options: Optional[Mapping[str, str]]) -> Dict[str, str]:
+    """A table token as a catalog uses it: the catalog's explicit dlf.oss-endpoint and io-cache.enabled win."""
+    result = dict(token)
+    catalog_options = catalog_options or {}
+    dlf_oss_endpoint = catalog_options.get(DLF_OSS_ENDPOINT)
+    if dlf_oss_endpoint is not None and str(dlf_oss_endpoint).strip():
+        result[FS_OSS_ENDPOINT] = dlf_oss_endpoint
+    enabled = catalog_options.get(IO_CACHE_ENABLED)
+    if enabled is not None:
+        result[IO_CACHE_ENABLED] = str(enabled).strip().lower()
+    return result
+
+
+def effective_options(catalog_options: Optional[Mapping[str, str]],
+                      token: Mapping[str, str]) -> Dict[str, str]:
+    """The options a table token takes effect with: the catalog options merged with the token, which wins,
+    then the catalog overrides."""
+    from pypaimon.api.rest_util import RESTUtil
+    return with_catalog_overrides(RESTUtil.merge(dict(catalog_options or {}), dict(token)), catalog_options)
+
+
 def single_endpoint_options(options: Mapping[str, str],
                             catalog_options: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
-    """Options for a client that sends every request to one endpoint: the origin's under io-cache routing,
-    unless catalog_options turn routing off (dlf.oss-endpoint)."""
+    """Options for a client that sends every request to one endpoint: options with the catalog overrides, and
+    the origin's endpoint when io-cache routing is on, whether its keys come from options or catalog_options."""
+    options = with_catalog_overrides(options, catalog_options)
     routing = IoCacheRouting.create({**(catalog_options or {}), **options})
-    return dict(options) if routing is None else routing.origin_options(options)
+    return options if routing is None else routing.origin_options(options)
 
 
 class CacheTarget(NamedTuple):

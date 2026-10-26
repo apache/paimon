@@ -33,7 +33,8 @@ import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from urllib.parse import urlparse
 
-from pypaimon.filesystem.io_cache_routing import single_endpoint_options
+from pypaimon.filesystem.io_cache_routing import (effective_options,
+                                                  single_endpoint_options)
 
 if TYPE_CHECKING:
     import daft
@@ -56,7 +57,7 @@ def _enrich_options_with_rest_token(
     if file_io.token is None:
         return catalog_options
     # Daft reads with its own client, which cannot use io-cache targets per request.
-    enriched = single_endpoint_options({**catalog_options, **file_io.token.token})
+    enriched = single_endpoint_options(effective_options(catalog_options, file_io.token.token))
     parsed = urlparse(getattr(table, "table_path", "") or "")
     if parsed.scheme and parsed.netloc:
         enriched["warehouse"] = f"{parsed.scheme}://{parsed.netloc}"
