@@ -5845,7 +5845,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         bad_writer = write_builder.new_write()
         with self.assertRaisesRegex(
             ValueError,
-            "blob-descriptor-field requires blob field value to be a serialized BlobDescriptor.",
+            r"blob-descriptor-field.*serialized BlobDescriptor",
         ):
             bad_writer.write_arrow(pa.Table.from_pydict({
                 'id': [1],
@@ -5951,7 +5951,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         bad_writer = target_wb.new_write()
         with self.assertRaisesRegex(
             ValueError,
-            "blob-view-field requires blob field value to be a serialized BlobViewStruct.",
+            r"blob-view-field.*serialized BlobViewStruct",
         ):
             bad_writer.write_arrow(pa.Table.from_pydict({
                 'id': [1],
@@ -6008,7 +6008,10 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
-            options={'bucket': '1'},
+            options={
+                'bucket': '1',
+                'write.native.enabled': 'false',  # Force Python writer to test the guard
+            },
         )
         self.catalog.create_table('test_db.pk_managed_blob_table', schema, False)
         table = self.catalog.get_table('test_db.pk_managed_blob_table')
