@@ -42,6 +42,8 @@ import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
@@ -80,8 +82,9 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                     .durationType()
                     .defaultValue(Duration.ZERO)
                     .withDescription(
-                            "Interval of logging JVM-wide Jindo stream and memory statistics, "
-                                    + "e.g. 1 min. 0 (the default) disables it.");
+                            "Interval of logging JVM-wide Jindo stream and memory statistics "
+                                    + "while Jindo streams are in use, e.g. 1 min. 0 (the default) "
+                                    + "disables it, and streams of this FileIO are not counted.");
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -270,10 +273,6 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             org.apache.hadoop.fs.Path path, boolean enableCache) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
-        // FileIOs deserialized from older versions have no interval
-        if (ioStatsInterval != null) {
-            JindoIOStats.start(ioStatsInterval);
-        }
         Options options = enableCache ? hadoopOptionsWithCache : hadoopOptions;
         Supplier<Pair<JindoHadoopSystem, String>> supplier =
                 () -> {
@@ -318,6 +317,13 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         } else {
             return supplier.get();
         }
+    }
+
+    @Nullable
+    @Override
+    protected Duration ioStatsInterval() {
+        // FileIOs deserialized from older versions have no interval
+        return ioStatsInterval;
     }
 
     @Override

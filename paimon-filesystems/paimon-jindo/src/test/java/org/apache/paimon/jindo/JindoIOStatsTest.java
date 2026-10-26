@@ -32,21 +32,35 @@ import org.apache.hadoop.fs.Seekable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link JindoIOStats}. */
 public class JindoIOStatsTest {
+
+    // the first positive interval wins in the JVM, so every test uses the same one
+    private static final Duration INTERVAL = Duration.ofMillis(10);
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -62,8 +76,41 @@ public class JindoIOStatsTest {
 
         assertThat(counter.open()).isEqualTo(2);
         assertThat(counter.bytesTotal()).isEqualTo(10);
-        assertThat(counter.takePeak()).isEqualTo(3);
-        assertThat(counter.takePeak()).isEqualTo(2);
+        assertThat(counter.takePeak(counter.open())).isEqualTo(3);
+        assertThat(counter.takePeak(counter.open())).isEqualTo(2);
+    }
+
+    @Test
+    public void testConcurrentCountsStayConsistent() throws InterruptedException {
+        JindoIOStats.StreamCounter counter = new JindoIOStats.StreamCounter();
+        AtomicBoolean stop = new AtomicBoolean();
+        List<Thread> workers = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            Thread worker =
+                    new Thread(
+                            () -> {
+                                while (!stop.get()) {
+                                    counter.opened();
+                                    counter.closed();
+                                }
+                            });
+            worker.start();
+            workers.add(worker);
+        }
+        try {
+            for (int i = 0; i < 100_000; i++) {
+                long open = counter.open();
+                long peak = counter.takePeak(open);
+                assertThat(open).isBetween(0L, 4L);
+                assertThat(peak).isBetween(open, 4L);
+            }
+        } finally {
+            stop.set(true);
+            for (Thread worker : workers) {
+                worker.join();
+            }
+        }
+        assertThat(counter.open()).isZero();
     }
 
     @Test
@@ -73,7 +120,7 @@ public class JindoIOStatsTest {
                 .thenAnswer(i -> new FSDataInputStream(new SeekableBytes(new byte[100])));
         when(fs.create(any(org.apache.hadoop.fs.Path.class), anyBoolean()))
                 .thenAnswer(i -> new FSDataOutputStream(new ByteArrayOutputStream(), null));
-        StubFileIO fileIO = new StubFileIO(fs);
+        StubFileIO fileIO = new StubFileIO(fs, INTERVAL);
         Path path = new Path("oss://bucket/db/t/data.parquet");
         long inOpened = JindoIOStats.INPUT.openedTotal();
         long inClosed = JindoIOStats.INPUT.closedTotal();
@@ -103,9 +150,97 @@ public class JindoIOStatsTest {
     }
 
     @Test
+    public void testDisabledStreamsAreNotCounted() throws Exception {
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.open(any(org.apache.hadoop.fs.Path.class)))
+                .thenAnswer(i -> new FSDataInputStream(new SeekableBytes(new byte[100])));
+        when(fs.create(any(org.apache.hadoop.fs.Path.class), anyBoolean()))
+                .thenAnswer(i -> new FSDataOutputStream(new ByteArrayOutputStream(), null));
+        Path path = new Path("oss://bucket/db/t/data.parquet");
+        long events = events();
+        long bytes = JindoIOStats.INPUT.bytesTotal() + JindoIOStats.OUTPUT.bytesTotal();
+
+        for (Duration interval : new Duration[] {Duration.ZERO, null}) {
+            StubFileIO fileIO = new StubFileIO(fs, interval);
+            try (SeekableInputStream in = fileIO.newInputStream(path)) {
+                assertThat(in.read(new byte[64], 0, 64)).isEqualTo(64);
+            }
+            try (PositionOutputStream out = fileIO.newOutputStream(path, true)) {
+                out.write(new byte[30]);
+                out.write(1);
+            }
+        }
+
+        assertThat(events()).isEqualTo(events);
+        assertThat(JindoIOStats.INPUT.bytesTotal() + JindoIOStats.OUTPUT.bytesTotal())
+                .isEqualTo(bytes);
+    }
+
+    @Test
+    public void testFailedCloseIsRetried() throws Exception {
+        FSDataInputStream fsInput = mock(FSDataInputStream.class);
+        doThrow(new IOException("close failed")).doNothing().when(fsInput).close();
+        FSDataOutputStream fsOutput = mock(FSDataOutputStream.class);
+        doThrow(new IOException("close failed")).doNothing().when(fsOutput).close();
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.open(any(org.apache.hadoop.fs.Path.class))).thenReturn(fsInput);
+        when(fs.create(any(org.apache.hadoop.fs.Path.class), anyBoolean())).thenReturn(fsOutput);
+        StubFileIO fileIO = new StubFileIO(fs, INTERVAL);
+        Path path = new Path("oss://bucket/db/t/data.parquet");
+        long inClosed = JindoIOStats.INPUT.closedTotal();
+        long outClosed = JindoIOStats.OUTPUT.closedTotal();
+
+        SeekableInputStream in = fileIO.newInputStream(path);
+        PositionOutputStream out = fileIO.newOutputStream(path, true);
+        assertThatThrownBy(in::close).hasMessage("close failed");
+        assertThatThrownBy(out::close).hasMessage("close failed");
+        assertThat(JindoIOStats.INPUT.closedTotal() - inClosed).isZero();
+        assertThat(JindoIOStats.OUTPUT.closedTotal() - outClosed).isZero();
+        in.close();
+        in.close();
+        out.close();
+        out.close();
+
+        verify(fsInput, times(3)).close();
+        verify(fsOutput, times(3)).close();
+        assertThat(JindoIOStats.INPUT.closedTotal() - inClosed).isEqualTo(1);
+        assertThat(JindoIOStats.OUTPUT.closedTotal() - outClosed).isEqualTo(1);
+    }
+
+    @Test
+    public void testReporterStopsWhenIdle() throws Exception {
+        Thread previous = reporterThread();
+        if (previous != null) {
+            previous.join(10_000);
+        }
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.open(any(org.apache.hadoop.fs.Path.class)))
+                .thenAnswer(i -> new FSDataInputStream(new SeekableBytes(new byte[10])));
+        StubFileIO fileIO = new StubFileIO(fs, INTERVAL);
+        Path path = new Path("oss://bucket/db/t/data.parquet");
+
+        for (int round = 0; round < 2; round++) {
+            SeekableInputStream in = fileIO.newInputStream(path);
+            Thread reporter = reporterThread();
+            assertThat(reporter).isNotNull();
+            assertThat(reporter.isDaemon()).isTrue();
+            assertThat(reporter.getContextClassLoader())
+                    .isSameAs(JindoIOStats.class.getClassLoader());
+            // an open stream keeps the reporter running across intervals
+            Thread.sleep(INTERVAL.toMillis() * 5);
+            assertThat(reporter.isAlive()).isTrue();
+
+            in.close();
+            reporter.join(10_000);
+            assertThat(reporter.isAlive()).isFalse();
+        }
+    }
+
+    @Test
     public void testActivityIncludesCloses() {
         JindoIOStats.Reporter reporter =
-                new JindoIOStats.Reporter(60_000, null, java.nio.file.Paths.get("/nonexistent"));
+                new JindoIOStats.Reporter(
+                        60_000, Collections.emptyList(), java.nio.file.Paths.get("/nonexistent"));
         reporter.hasActivity();
         assertThat(reporter.hasActivity()).isFalse();
 
@@ -150,8 +285,10 @@ public class JindoIOStatsTest {
         java.nio.file.Path procCgroup =
                 write(tempDir.resolve("cgroup-file"), "0::/kubepods/pod1\n");
 
-        JindoIOStats.Cgroup cgroup = JindoIOStats.Cgroup.detect(procCgroup, root);
+        List<JindoIOStats.Cgroup> levels = JindoIOStats.Cgroup.detect(procCgroup, root);
 
+        assertThat(levels).hasSize(1);
+        JindoIOStats.Cgroup cgroup = JindoIOStats.Cgroup.closestToLimit(levels);
         assertThat(cgroup).isNotNull();
         assertThat(cgroup.limit()).isEqualTo(2442133504L);
         assertThat(cgroup.usage()).isEqualTo(2000000000L);
@@ -159,6 +296,38 @@ public class JindoIOStatsTest {
         assertThat(cgroup.peak()).isEqualTo(2100000000L);
         assertThat(cgroup.limitHits()).isEqualTo(12);
         assertThat(cgroup.oomKills()).isEqualTo(1);
+    }
+
+    @Test
+    public void testCgroupV2AncestorLimit() throws IOException {
+        java.nio.file.Path root = tempDir.resolve("cgroup");
+        java.nio.file.Path pod = root.resolve("pod");
+        java.nio.file.Path child = pod.resolve("tm");
+        Files.createDirectories(child);
+        write(root.resolve("cgroup.controllers"), "memory");
+        write(pod.resolve("memory.max"), "1000");
+        write(pod.resolve("memory.current"), "900");
+        write(pod.resolve("memory.stat"), "inactive_file 0\n");
+        write(pod.resolve("memory.events"), "max 7\noom_kill 2\n");
+        write(child.resolve("memory.max"), "max");
+        write(child.resolve("memory.current"), "100");
+        write(child.resolve("memory.stat"), "inactive_file 0\n");
+        write(child.resolve("memory.events"), "max 0\noom_kill 0\n");
+        java.nio.file.Path procCgroup = write(tempDir.resolve("cgroup-file"), "0::/pod/tm\n");
+
+        List<JindoIOStats.Cgroup> levels = JindoIOStats.Cgroup.detect(procCgroup, root);
+        JindoIOStats.Reporter reporter = new JindoIOStats.Reporter(60_000, levels, tempDir);
+
+        assertThat(levels).hasSize(2);
+        assertThat(reporter.checkAlarm())
+                .startsWith("Container memory working set is at 90% of the limit.")
+                .contains("limitHits=7 oomKills=2");
+
+        // a limited child still loses to an ancestor that is closer to its limit
+        write(child.resolve("memory.max"), "500");
+        assertThat(JindoIOStats.Cgroup.closestToLimit(levels).limit()).isEqualTo(1000);
+        write(child.resolve("memory.current"), "480");
+        assertThat(JindoIOStats.Cgroup.closestToLimit(levels).limit()).isEqualTo(500);
     }
 
     @Test
@@ -179,8 +348,10 @@ public class JindoIOStatsTest {
         java.nio.file.Path procCgroup =
                 write(tempDir.resolve("cgroup-file"), "4:cpu,cpuacct:/a\n9:memory:/kubepods/x\n");
 
-        JindoIOStats.Cgroup cgroup = JindoIOStats.Cgroup.detect(procCgroup, root);
+        List<JindoIOStats.Cgroup> levels = JindoIOStats.Cgroup.detect(procCgroup, root);
 
+        assertThat(levels).hasSize(1);
+        JindoIOStats.Cgroup cgroup = JindoIOStats.Cgroup.closestToLimit(levels);
         assertThat(cgroup).isNotNull();
         assertThat(cgroup.limit()).isEqualTo(2442133504L);
         assertThat(cgroup.workingSet()).isEqualTo(1000000000L);
@@ -191,7 +362,7 @@ public class JindoIOStatsTest {
 
     @Test
     public void testNoCgroup() {
-        assertThat(JindoIOStats.Cgroup.detect(tempDir.resolve("missing"), tempDir)).isNull();
+        assertThat(JindoIOStats.Cgroup.detect(tempDir.resolve("missing"), tempDir)).isEmpty();
     }
 
     @Test
@@ -228,12 +399,37 @@ public class JindoIOStatsTest {
         return Files.write(file, content.getBytes(StandardCharsets.UTF_8));
     }
 
+    private static long events() {
+        return JindoIOStats.INPUT.openedTotal()
+                + JindoIOStats.INPUT.closedTotal()
+                + JindoIOStats.OUTPUT.openedTotal()
+                + JindoIOStats.OUTPUT.closedTotal();
+    }
+
+    @Nullable
+    private static Thread reporterThread() {
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            if ("paimon-jindo-io-stats".equals(thread.getName()) && thread.isAlive()) {
+                return thread;
+            }
+        }
+        return null;
+    }
+
     private static class StubFileIO extends HadoopCompliantFileIO {
 
         private final JindoHadoopSystem fs;
+        @Nullable private final Duration ioStatsInterval;
 
-        private StubFileIO(JindoHadoopSystem fs) {
+        private StubFileIO(JindoHadoopSystem fs, @Nullable Duration ioStatsInterval) {
             this.fs = fs;
+            this.ioStatsInterval = ioStatsInterval;
+        }
+
+        @Nullable
+        @Override
+        protected Duration ioStatsInterval() {
+            return ioStatsInterval;
         }
 
         @Override

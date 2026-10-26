@@ -40,6 +40,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,8 +52,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * JVM-wide counters of Jindo streams, logged periodically with Jindo native, process and container
- * memory; a WARN is logged when the container working set nears its limit.
+ * JVM-wide counters of the Jindo streams of FileIOs that enable them, logged periodically with
+ * Jindo native, process and container memory; a WARN is logged when the container working set nears
+ * its limit.
  */
 public final class JindoIOStats {
 
@@ -60,24 +63,47 @@ public final class JindoIOStats {
     static final StreamCounter INPUT = new StreamCounter();
     static final StreamCounter OUTPUT = new StreamCounter();
 
-    private static final AtomicBoolean STARTED = new AtomicBoolean(false);
+    private static final AtomicLong INTERVAL_MILLIS = new AtomicLong();
+    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
     private static volatile Pair<JindoHadoopSystem, org.apache.hadoop.fs.Path> nativeSource;
 
     private JindoIOStats() {}
 
-    /** Starts the reporter thread once per JVM; a zero or negative interval disables it. */
-    static void start(Duration interval) {
-        if (interval.isZero() || interval.isNegative() || !STARTED.compareAndSet(false, true)) {
+    /**
+     * Counts a stream just opened by a FileIO with this interval and returns its counter, or null
+     * when the interval is null, zero or negative. The first positive interval in the JVM is used.
+     */
+    @Nullable
+    static StreamCounter track(StreamCounter counter, @Nullable Duration interval) {
+        if (interval == null || interval.isZero() || interval.isNegative()) {
+            return null;
+        }
+        INTERVAL_MILLIS.compareAndSet(0, Math.max(1, interval.toMillis()));
+        counter.opened();
+        startReporter();
+        return counter;
+    }
+
+    private static void startReporter() {
+        if (RUNNING.get() || !RUNNING.compareAndSet(false, true)) {
             return;
         }
         Reporter reporter =
                 new Reporter(
-                        interval.toMillis(),
+                        INTERVAL_MILLIS.get(),
                         Cgroup.detect(Paths.get("/proc/self/cgroup"), Paths.get("/sys/fs/cgroup")),
                         Paths.get("/proc/self"));
         Thread thread = new Thread(reporter::run, "paimon-jindo-io-stats");
         thread.setDaemon(true);
+        // the inherited loader may belong to the job that opened the stream, keep it collectable
+        thread.setContextClassLoader(JindoIOStats.class.getClassLoader());
         thread.start();
+    }
+
+    /** Returns true when the reporter stopped; streams opened meanwhile keep it running. */
+    private static boolean stopReporter() {
+        RUNNING.set(false);
+        return (INPUT.open() == 0 && OUTPUT.open() == 0) || !RUNNING.compareAndSet(false, true);
     }
 
     /** Registers a file system that is never closed, used to dump the Jindo native metrics. */
@@ -92,16 +118,18 @@ public final class JindoIOStats {
 
         private final AtomicLong opened = new AtomicLong();
         private final AtomicLong closed = new AtomicLong();
+        private final AtomicLong active = new AtomicLong();
         private final AtomicLong peak = new AtomicLong();
         private final LongAdder bytes = new LongAdder();
 
         void opened() {
-            long open = opened.incrementAndGet() - closed.get();
-            peak.accumulateAndGet(open, Math::max);
+            opened.incrementAndGet();
+            peak.accumulateAndGet(active.incrementAndGet(), Math::max);
         }
 
         void closed() {
             closed.incrementAndGet();
+            active.decrementAndGet();
         }
 
         void bytes(long n) {
@@ -111,7 +139,7 @@ public final class JindoIOStats {
         }
 
         long open() {
-            return opened.get() - closed.get();
+            return active.get();
         }
 
         long openedTotal() {
@@ -126,13 +154,21 @@ public final class JindoIOStats {
             return bytes.sum();
         }
 
-        /** Returns the peak since the previous log line and restarts it from the current count. */
-        long takePeak() {
-            return peak.getAndSet(open());
+        /**
+         * Returns the peak since the previous call, at least {@code open}, and restarts it from the
+         * current count without losing a concurrent update.
+         */
+        long takePeak(long open) {
+            while (true) {
+                long previous = peak.get();
+                if (peak.compareAndSet(previous, active.get())) {
+                    return Math.max(previous, open);
+                }
+            }
         }
     }
 
-    /** Samples memory every second and logs the statistics. */
+    /** Samples memory every second and logs the statistics until the streams go idle. */
     static final class Reporter {
 
         private static final long SAMPLE_MILLIS = 1000;
@@ -140,7 +176,7 @@ public final class JindoIOStats {
         private static final double ALARM_RESET_RATIO = 0.7;
 
         private final long intervalMillis;
-        @Nullable private final Cgroup cgroup;
+        private final List<Cgroup> cgroups;
         private final Path procSelf;
 
         @Nullable private JindoMetricsStore nativeStore;
@@ -149,18 +185,21 @@ public final class JindoIOStats {
         private int alarmLevel;
         private long lastEvents;
 
-        Reporter(long intervalMillis, @Nullable Cgroup cgroup, Path procSelf) {
+        Reporter(long intervalMillis, List<Cgroup> cgroups, Path procSelf) {
             this.intervalMillis = intervalMillis;
-            this.cgroup = cgroup;
+            this.cgroups = cgroups;
             this.procSelf = procSelf;
         }
 
+        /** Runs until an interval passes without stream activity; the next open starts another. */
         void run() {
+            long sampleMillis = Math.min(SAMPLE_MILLIS, intervalMillis);
             long nextReport = System.currentTimeMillis() + intervalMillis;
             while (true) {
                 try {
-                    Thread.sleep(SAMPLE_MILLIS);
+                    Thread.sleep(sampleMillis);
                 } catch (InterruptedException e) {
+                    RUNNING.set(false);
                     return;
                 }
                 try {
@@ -173,6 +212,8 @@ public final class JindoIOStats {
                         nextReport = now + intervalMillis;
                         if (hasActivity()) {
                             LOG.info(snapshot());
+                        } else if (stopReporter()) {
+                            return;
                         }
                     }
                 } catch (Throwable t) {
@@ -184,6 +225,7 @@ public final class JindoIOStats {
         /** Returns a WARN message when the working set enters a higher alarm level. */
         @Nullable
         String checkAlarm() {
+            Cgroup cgroup = Cgroup.closestToLimit(cgroups);
             if (cgroup == null) {
                 return null;
             }
@@ -233,12 +275,13 @@ public final class JindoIOStats {
 
         private static void appendStreams(
                 StringBuilder sb, String name, StreamCounter counter, String bytesName) {
+            long open = counter.open();
             sb.append(' ')
                     .append(name)
                     .append(" open=")
-                    .append(counter.open())
+                    .append(open)
                     .append(" peak=")
-                    .append(counter.takePeak())
+                    .append(counter.takePeak(open))
                     .append(" opened=")
                     .append(counter.openedTotal())
                     .append(" closed=")
@@ -333,6 +376,7 @@ public final class JindoIOStats {
         }
 
         private void appendCgroup(StringBuilder sb) {
+            Cgroup cgroup = Cgroup.closestToLimit(cgroups);
             if (cgroup == null) {
                 sb.append(" cgroup unavailable");
                 return;
@@ -431,7 +475,7 @@ public final class JindoIOStats {
         return values;
     }
 
-    /** Memory cgroup (v1 or v2) of this process; unreadable values are -1. */
+    /** One memory cgroup (v1 or v2) level of this process; unreadable values are -1. */
     static final class Cgroup {
 
         private static final Pattern V1_MEMORY =
@@ -445,39 +489,73 @@ public final class JindoIOStats {
             this.v2 = v2;
         }
 
-        /** Uses the process's own cgroup when visible, else the mount root (container view). */
-        @Nullable
-        static Cgroup detect(Path procSelfCgroup, Path root) {
+        /**
+         * Returns the levels from the process's own cgroup up to the mount root when it is visible,
+         * else the mount root alone (container view); empty when there is no memory cgroup.
+         */
+        static List<Cgroup> detect(Path procSelfCgroup, Path root) {
             List<String> lines;
             try {
                 lines = Files.readAllLines(procSelfCgroup);
             } catch (IOException e) {
-                return null;
+                return Collections.emptyList();
             }
-            if (Files.exists(root.resolve("cgroup.controllers"))) {
-                for (String line : lines) {
-                    if (line.startsWith("0::")) {
-                        Path own = resolve(root, line.substring(3));
-                        if (Files.exists(own.resolve("memory.current"))) {
-                            return new Cgroup(own, true);
-                        }
-                    }
-                }
-                return Files.exists(root.resolve("memory.current")) ? new Cgroup(root, true) : null;
-            }
-            Path memoryRoot = root.resolve("memory");
+            boolean v2 = Files.exists(root.resolve("cgroup.controllers"));
+            Path mount = (v2 ? root : root.resolve("memory")).normalize();
             for (String line : lines) {
-                Matcher matcher = V1_MEMORY.matcher(line);
-                if (matcher.matches()) {
-                    Path own = resolve(memoryRoot, matcher.group(1));
-                    if (Files.exists(own.resolve("memory.usage_in_bytes"))) {
-                        return new Cgroup(own, false);
+                String relative = null;
+                if (v2 && line.startsWith("0::")) {
+                    relative = line.substring(3);
+                } else if (!v2) {
+                    Matcher matcher = V1_MEMORY.matcher(line);
+                    if (matcher.matches()) {
+                        relative = matcher.group(1);
+                    }
+                }
+                if (relative != null) {
+                    Path own = resolve(mount, relative).normalize();
+                    if (own.startsWith(mount) && Files.exists(own.resolve(usageFile(v2)))) {
+                        return levels(mount, own, v2);
                     }
                 }
             }
-            return Files.exists(memoryRoot.resolve("memory.usage_in_bytes"))
-                    ? new Cgroup(memoryRoot, false)
-                    : null;
+            return levels(mount, mount, v2);
+        }
+
+        /**
+         * Limits are hierarchical: the level whose working set is closest to its limit, or the
+         * leaf.
+         */
+        @Nullable
+        static Cgroup closestToLimit(List<Cgroup> levels) {
+            Cgroup closest = null;
+            double closestRatio = -1;
+            for (Cgroup level : levels) {
+                long limit = level.limit();
+                long workingSet = level.workingSet();
+                if (limit > 0 && workingSet >= 0 && (double) workingSet / limit > closestRatio) {
+                    closest = level;
+                    closestRatio = (double) workingSet / limit;
+                }
+            }
+            if (closest == null && !levels.isEmpty()) {
+                return levels.get(0);
+            }
+            return closest;
+        }
+
+        private static List<Cgroup> levels(Path mount, Path leaf, boolean v2) {
+            List<Cgroup> levels = new ArrayList<>();
+            for (Path dir = leaf; dir != null && dir.startsWith(mount); dir = dir.getParent()) {
+                if (Files.exists(dir.resolve(usageFile(v2)))) {
+                    levels.add(new Cgroup(dir, v2));
+                }
+            }
+            return levels;
+        }
+
+        private static String usageFile(boolean v2) {
+            return v2 ? "memory.current" : "memory.usage_in_bytes";
         }
 
         private static Path resolve(Path root, String relative) {
@@ -498,7 +576,7 @@ public final class JindoIOStats {
         }
 
         long usage() {
-            return readLong(v2 ? "memory.current" : "memory.usage_in_bytes");
+            return readLong(usageFile(v2));
         }
 
         /** Usage minus inactive file pages, the part the kernel cannot reclaim cheaply. */

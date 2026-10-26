@@ -37,9 +37,12 @@ import org.apache.hadoop.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -133,10 +136,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         JindoHadoopSystem fs = pair.getKey();
         String sysType = pair.getValue();
         FSDataInputStream fsInput = fs.open(hadoopPath);
-        JindoIOStats.INPUT.opened();
+        JindoIOStats.StreamCounter stats =
+                JindoIOStats.track(JindoIOStats.INPUT, ioStatsInterval());
         return "jobj".equalsIgnoreCase(sysType)
-                ? new VectoredReadableInputStream(fsInput)
-                : new HadoopSeekableInputStream(fsInput);
+                ? new VectoredReadableInputStream(fsInput, stats)
+                : new HadoopSeekableInputStream(fsInput, stats);
     }
 
     @Override
@@ -146,8 +150,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         LOG.debug("OutputStream should cache {} for path {}", shouldCache, path);
         FSDataOutputStream fsOutput =
                 getFileSystem(hadoopPath, shouldCache).create(hadoopPath, overwrite);
-        JindoIOStats.OUTPUT.opened();
-        return new HadoopPositionOutputStream(fsOutput);
+        return new HadoopPositionOutputStream(
+                fsOutput, JindoIOStats.track(JindoIOStats.OUTPUT, ioStatsInterval()));
+    }
+
+    /** Interval of logging {@link JindoIOStats}; null or zero leaves the streams uncounted. */
+    @Nullable
+    protected Duration ioStatsInterval() {
+        return null;
     }
 
     @Override
@@ -293,10 +303,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         protected final FSDataInputStream in;
 
+        @Nullable protected final JindoIOStats.StreamCounter stats;
+
         private boolean closed;
 
-        private HadoopSeekableInputStream(FSDataInputStream in) {
+        private HadoopSeekableInputStream(
+                FSDataInputStream in, @Nullable JindoIOStats.StreamCounter stats) {
             this.in = in;
+            this.stats = stats;
         }
 
         @Override
@@ -322,8 +336,8 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public int read() throws IOException {
             int b = in.read();
-            if (b >= 0) {
-                JindoIOStats.INPUT.bytes(1);
+            if (b >= 0 && stats != null) {
+                stats.bytes(1);
             }
             return b;
         }
@@ -331,20 +345,19 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
             int n = in.read(b, off, len);
-            JindoIOStats.INPUT.bytes(n);
+            if (stats != null) {
+                stats.bytes(n);
+            }
             return n;
         }
 
         @Override
         public void close() throws IOException {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            try {
-                in.close();
-            } finally {
-                JindoIOStats.INPUT.closed();
+            in.close();
+            // a close that throws is not counted, so that a retried close still reaches Jindo
+            if (stats != null && !closed) {
+                closed = true;
+                stats.closed();
             }
         }
 
@@ -377,14 +390,17 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     private static class VectoredReadableInputStream extends HadoopSeekableInputStream
             implements VectoredReadable {
 
-        private VectoredReadableInputStream(FSDataInputStream in) {
-            super(in);
+        private VectoredReadableInputStream(
+                FSDataInputStream in, @Nullable JindoIOStats.StreamCounter stats) {
+            super(in, stats);
         }
 
         @Override
         public int pread(long position, byte[] bytes, int off, int len) throws IOException {
             int n = in.read(position, bytes, off, len);
-            JindoIOStats.INPUT.bytes(n);
+            if (stats != null) {
+                stats.bytes(n);
+            }
             return n;
         }
     }
@@ -393,10 +409,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         private final FSDataOutputStream out;
 
+        @Nullable private final JindoIOStats.StreamCounter stats;
+
         private boolean closed;
 
-        private HadoopPositionOutputStream(FSDataOutputStream out) {
+        private HadoopPositionOutputStream(
+                FSDataOutputStream out, @Nullable JindoIOStats.StreamCounter stats) {
             this.out = out;
+            this.stats = stats;
         }
 
         @Override
@@ -407,19 +427,25 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         @Override
         public void write(int b) throws IOException {
             out.write(b);
-            JindoIOStats.OUTPUT.bytes(1);
+            if (stats != null) {
+                stats.bytes(1);
+            }
         }
 
         @Override
         public void write(byte[] b) throws IOException {
             out.write(b);
-            JindoIOStats.OUTPUT.bytes(b.length);
+            if (stats != null) {
+                stats.bytes(b.length);
+            }
         }
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
             out.write(b, off, len);
-            JindoIOStats.OUTPUT.bytes(len);
+            if (stats != null) {
+                stats.bytes(len);
+            }
         }
 
         @Override
@@ -429,14 +455,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Override
         public void close() throws IOException {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            try {
-                out.close();
-            } finally {
-                JindoIOStats.OUTPUT.closed();
+            out.close();
+            // a close that throws is not counted, so that a retried close still reaches Jindo
+            if (stats != null && !closed) {
+                closed = true;
+                stats.closed();
             }
         }
     }
