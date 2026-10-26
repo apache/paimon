@@ -51,6 +51,8 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -72,7 +74,7 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
 
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<FileIOKey, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
                     .expireAfterAccess(10, TimeUnit.HOURS)
@@ -120,6 +122,8 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
     // applied to the FileIO of each token
     private final TableFileIOView view;
     private transient volatile Pair<FileIO, FileIO> lastView;
+
+    private transient volatile FileIOKey lastKey;
 
     public RESTTokenFileIO(
             CatalogContext catalogContext, RESTApi apiInstance, Identifier identifier, Path path) {
@@ -295,19 +299,19 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
                             + "REST credential lifetime after refresh.");
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
+        FileIOKey key = keyOf(currentToken);
+        FileIO fileIO = FILE_IO_CACHE.getIfPresent(key);
         if (fileIO != null) {
             return new FileIOWithToken(viewOf(fileIO), currentToken);
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(currentToken);
+            fileIO = FILE_IO_CACHE.getIfPresent(key);
             if (fileIO != null) {
                 return new FileIOWithToken(viewOf(fileIO), currentToken);
             }
 
-            Options options = catalogContext.options();
-            options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
+            Options options = new Options(RESTUtil.merge(key.catalogOptions, currentToken.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -316,9 +320,23 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
             fileIO = FileIO.get(path, context);
-            FILE_IO_CACHE.put(currentToken, fileIO);
+            FILE_IO_CACHE.put(key, fileIO);
             return new FileIOWithToken(viewOf(fileIO), currentToken);
         }
+    }
+
+    private FileIOKey keyOf(RESTToken currentToken) {
+        FileIOKey key = lastKey;
+        if (key == null || key.token != currentToken) {
+            Map<String, String> catalogOptions =
+                    key == null
+                            ? Collections.unmodifiableMap(
+                                    new HashMap<>(catalogContext.options().toMap()))
+                            : key.catalogOptions;
+            key = new FileIOKey(currentToken, catalogOptions);
+            lastKey = key;
+        }
+        return key;
     }
 
     private boolean hasRemainingLifetime(RESTToken signingToken, long minimumValidityMillis) {
@@ -348,6 +366,39 @@ public class RESTTokenFileIO implements IoCacheViewableFileIO {
         return token == null
                 || token.expireAtMillis() - currentTimeMillis()
                         < Math.max(TOKEN_EXPIRATION_SAFE_TIME_MILLIS, minimumValidityMillis);
+    }
+
+    /** A cached FileIO serves one token with the catalog options it was built from. */
+    private static final class FileIOKey {
+
+        private final RESTToken token;
+        private final Map<String, String> catalogOptions;
+        private final int hash;
+
+        private FileIOKey(RESTToken token, Map<String, String> catalogOptions) {
+            this.token = token;
+            this.catalogOptions = catalogOptions;
+            this.hash = 31 * token.hashCode() + catalogOptions.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof FileIOKey)) {
+                return false;
+            }
+            FileIOKey that = (FileIOKey) o;
+            return hash == that.hash
+                    && token.equals(that.token)
+                    && catalogOptions.equals(that.catalogOptions);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
     }
 
     private static class FileIOWithToken {

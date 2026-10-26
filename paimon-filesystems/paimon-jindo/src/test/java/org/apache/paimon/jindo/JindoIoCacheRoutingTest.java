@@ -19,6 +19,7 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FilePrefixHistory;
 import org.apache.paimon.fs.IoCacheViews;
@@ -26,6 +27,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTApi;
+import org.apache.paimon.rest.RESTTokenFileIO;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 
@@ -48,7 +52,9 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
@@ -259,6 +265,52 @@ public class JindoIoCacheRoutingTest {
         verify(ossFs).delete(any(), anyBoolean());
         verify(ossFs).rename(any(), any());
         verify(ossFs).listStatus(any(org.apache.hadoop.fs.Path.class));
+    }
+
+    @Test
+    public void testTokenFileIOsOfOneTokenKeepTheirCatalogEndpoints() throws IOException {
+        Identifier identifier = Identifier.create("db1", "t1");
+        Map<String, String> token = new HashMap<>();
+        token.put("fs.oss.accessKeyId", "ak-" + java.util.UUID.randomUUID());
+        token.put("fs.oss.accessKeySecret", "sk");
+        // the cache older clients use
+        token.put("fs.oss.endpoint", ACCEL_HOST);
+        GetTableTokenResponse response = new GetTableTokenResponse(token, Long.MAX_VALUE);
+        String otherOss = "oss-cn-shanghai-internal.aliyuncs.com";
+        String otherCluster = "10.0.0.2:8080";
+
+        JindoFileIO first = jindoOf(tokenFileIO(identifier, response, OSS_HOST, CLUSTER_HOST));
+        JindoFileIO second = jindoOf(tokenFileIO(identifier, response, otherOss, otherCluster));
+
+        assertThat(endpoint(first.routedHadoopOptions(DATA, "read"))).isEqualTo(CLUSTER_HOST);
+        assertThat(endpoint(first.routedHadoopOptions(DATA, "write"))).isEqualTo(OSS_HOST);
+        assertThat(endpoint(second.routedHadoopOptions(DATA, "read"))).isEqualTo(otherCluster);
+        assertThat(endpoint(second.routedHadoopOptions(DATA, "write"))).isEqualTo(otherOss);
+        assertThat(endpoint(second.hadoopOptions(DATA, "read"))).isEqualTo(otherOss);
+        assertThat(jindoOf(tokenFileIO(identifier, response, OSS_HOST, CLUSTER_HOST)))
+                .isSameAs(first);
+    }
+
+    private static RESTTokenFileIO tokenFileIO(
+            Identifier identifier, GetTableTokenResponse response, String origin, String target) {
+        RESTApi api = mock(RESTApi.class);
+        when(api.loadTableToken(identifier)).thenReturn(response);
+        Options options = new Options();
+        options.set("io-cache.enabled", "true");
+        options.set("io-cache.origin.endpoint", origin);
+        options.set("io-cache.endpoint", "http://" + target);
+        options.set("io-cache.target.default.path-style-access", "true");
+        options.set("io-cache.policy", "meta,read");
+        return new RESTTokenFileIO(
+                CatalogContext.create(options), api, identifier, new Path(TABLE));
+    }
+
+    private static JindoFileIO jindoOf(RESTTokenFileIO fileIO) throws IOException {
+        return (JindoFileIO) fileIO.fileIO();
+    }
+
+    private static String endpoint(Options options) {
+        return options.get("fs.oss.endpoint");
     }
 
     @Test
