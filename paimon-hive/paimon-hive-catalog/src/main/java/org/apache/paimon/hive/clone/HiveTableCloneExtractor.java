@@ -205,7 +205,7 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
                         partitionRowType.getFieldNames());
         List<Partition> partitions =
                 client.listPartitions(
-                        identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
+                        identifier.getDatabaseName(), identifier.getTableName(), (short) -1);
         String format = parseFormat(sourceTable);
 
         if (partitions.isEmpty()) {
@@ -327,12 +327,17 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             throws IOException {
         Path root = new Path(location);
         List<FileStatus> fileStatuses;
-        if (recursive) {
+        if (recursive && fileIO.isObjectStore()) {
+            // one flat listing of the prefix, listing each directory would need many more requests
             fileStatuses =
                     Arrays.stream(fileIO.listFiles(root, true))
                             .filter(HIDDEN_PATH_FILTER)
                             .filter(s -> !isInHiddenDirectory(root, s.getPath()))
                             .collect(Collectors.toList());
+        } else if (recursive) {
+            // hidden directories may not be readable, so they are skipped before being listed
+            fileStatuses = new ArrayList<>();
+            listVisibleFiles(fileIO, root, fileStatuses);
         } else {
             fileStatuses =
                     Arrays.stream(fileIO.listStatus(root))
@@ -347,6 +352,20 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             fileSizes.add(fileStatus.getLen());
         }
         return new HivePartitionFiles(partition, paths, fileSizes, format);
+    }
+
+    private static void listVisibleFiles(FileIO fileIO, Path dir, List<FileStatus> files)
+            throws IOException {
+        for (FileStatus status : fileIO.listStatus(dir)) {
+            if (!HIDDEN_PATH_FILTER.test(status)) {
+                continue;
+            }
+            if (status.isDir()) {
+                listVisibleFiles(fileIO, status.getPath(), files);
+            } else {
+                files.add(status);
+            }
+        }
     }
 
     /**

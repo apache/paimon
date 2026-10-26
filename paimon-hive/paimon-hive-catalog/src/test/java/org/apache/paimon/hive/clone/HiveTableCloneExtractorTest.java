@@ -20,14 +20,19 @@ package org.apache.paimon.hive.clone;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
@@ -81,9 +86,11 @@ class HiveTableCloneExtractorTest {
                 .containsExactly(entry(LOWER_CASE_DOTTED_I + ".", "zstd"));
     }
 
-    @Test
-    void recursiveListingSkipsHiddenFilesAndDirectories(@TempDir java.nio.file.Path tmp)
-            throws IOException {
+    @TempDir java.nio.file.Path tmp;
+
+    @ParameterizedTest(name = "objectStore = {0}")
+    @ValueSource(booleans = {true, false})
+    void recursiveListingSkipsHiddenFilesAndDirectories(boolean objectStore) throws IOException {
         // hidden directories above the partition root, such as a hidden warehouse, hide nothing
         java.nio.file.Path root = tmp.resolve(".warehouse/_db/t");
         String[] files = {
@@ -103,7 +110,9 @@ class HiveTableCloneExtractorTest {
             Files.createFile(path);
         }
 
-        assertThat(recursivelyListedFiles(root.toUri().toString()))
+        assertThat(
+                        recursivelyListedFiles(
+                                new HiddenUnreadableFileIO(objectStore), root.toUri().toString()))
                 .containsExactlyInAnyOrder("a.parquet", "sub/b.parquet", "sub/deep/c.parquet");
     }
 
@@ -159,12 +168,40 @@ class HiveTableCloneExtractorTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
-    private static List<String> recursivelyListedFiles(String location) throws IOException {
+    private static List<String> recursivelyListedFiles(FileIO fileIO, String location)
+            throws IOException {
         String root = new Path(location).toUri().getPath();
         return HiveTableCloneExtractor.listFiles(
-                        LocalFileIO.create(), location, BinaryRow.EMPTY_ROW, "parquet", true)
+                        fileIO, location, BinaryRow.EMPTY_ROW, "parquet", true)
                 .paths().stream()
                 .map(p -> p.toUri().getPath().substring(root.length()).replaceAll("^/", ""))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * A file system whose hidden directories can not be read. Object stores list them with their
+     * parent prefix, so there they stay readable.
+     */
+    private static class HiddenUnreadableFileIO extends LocalFileIO {
+
+        private final boolean objectStore;
+
+        private HiddenUnreadableFileIO(boolean objectStore) {
+            this.objectStore = objectStore;
+        }
+
+        @Override
+        public boolean isObjectStore() {
+            return objectStore;
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            String name = path.getName();
+            if (!objectStore && (name.startsWith("_") || name.startsWith("."))) {
+                throw new AccessDeniedException(path.toString());
+            }
+            return super.listStatus(path);
+        }
     }
 }
