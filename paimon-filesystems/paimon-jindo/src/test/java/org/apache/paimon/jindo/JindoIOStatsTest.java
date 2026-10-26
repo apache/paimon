@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -44,7 +45,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -208,6 +214,58 @@ public class JindoIOStatsTest {
     }
 
     @Test
+    public void testConcurrentCloseIsCountedOnce() throws Exception {
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.open(any(org.apache.hadoop.fs.Path.class)))
+                .thenAnswer(i -> new FSDataInputStream(new SeekableBytes(new byte[1])));
+        when(fs.create(any(org.apache.hadoop.fs.Path.class), anyBoolean()))
+                .thenAnswer(i -> new FSDataOutputStream(new ByteArrayOutputStream(), null));
+        StubFileIO fileIO = new StubFileIO(fs, INTERVAL);
+        Path path = new Path("oss://bucket/db/t/data.parquet");
+        long inOpen = JindoIOStats.INPUT.open();
+        long inClosed = JindoIOStats.INPUT.closedTotal();
+        long outOpen = JindoIOStats.OUTPUT.open();
+        long outClosed = JindoIOStats.OUTPUT.closedTotal();
+        int rounds = 1000;
+        List<Closeable> streams = new ArrayList<>();
+        for (int i = 0; i < rounds; i++) {
+            streams.add(fileIO.newInputStream(path));
+            streams.add(fileIO.newOutputStream(path, true));
+        }
+
+        closeConcurrently(streams);
+
+        assertThat(JindoIOStats.INPUT.closedTotal() - inClosed).isEqualTo(rounds);
+        assertThat(JindoIOStats.INPUT.open()).isEqualTo(inOpen);
+        assertThat(JindoIOStats.OUTPUT.closedTotal() - outClosed).isEqualTo(rounds);
+        assertThat(JindoIOStats.OUTPUT.open()).isEqualTo(outOpen);
+    }
+
+    @Test
+    public void testStopKeepsEventsSinceIdleCheck() {
+        AtomicBoolean running = new AtomicBoolean(true);
+        JindoIOStats.Reporter reporter =
+                new JindoIOStats.Reporter(
+                        60_000,
+                        Collections.emptyList(),
+                        java.nio.file.Paths.get("/nonexistent"),
+                        running);
+        reporter.hasActivity();
+        assertThat(reporter.hasActivity()).isFalse();
+
+        // the stream sees the reporter running, so it starts no other one
+        JindoIOStats.INPUT.opened();
+        JindoIOStats.INPUT.closed();
+        assertThat(reporter.stop()).isFalse();
+        assertThat(running).isTrue();
+        assertThat(reporter.hasActivity()).isTrue();
+
+        assertThat(reporter.hasActivity()).isFalse();
+        assertThat(reporter.stop()).isTrue();
+        assertThat(running).isFalse();
+    }
+
+    @Test
     public void testReporterStopsWhenIdle() throws Exception {
         Thread previous = reporterThread();
         if (previous != null) {
@@ -240,7 +298,10 @@ public class JindoIOStatsTest {
     public void testActivityIncludesCloses() {
         JindoIOStats.Reporter reporter =
                 new JindoIOStats.Reporter(
-                        60_000, Collections.emptyList(), java.nio.file.Paths.get("/nonexistent"));
+                        60_000,
+                        Collections.emptyList(),
+                        java.nio.file.Paths.get("/nonexistent"),
+                        new AtomicBoolean());
         reporter.hasActivity();
         assertThat(reporter.hasActivity()).isFalse();
 
@@ -316,7 +377,8 @@ public class JindoIOStatsTest {
         java.nio.file.Path procCgroup = write(tempDir.resolve("cgroup-file"), "0::/pod/tm\n");
 
         List<JindoIOStats.Cgroup> levels = JindoIOStats.Cgroup.detect(procCgroup, root);
-        JindoIOStats.Reporter reporter = new JindoIOStats.Reporter(60_000, levels, tempDir);
+        JindoIOStats.Reporter reporter =
+                new JindoIOStats.Reporter(60_000, levels, tempDir, new AtomicBoolean());
 
         assertThat(levels).hasSize(2);
         assertThat(reporter.checkAlarm())
@@ -376,7 +438,10 @@ public class JindoIOStatsTest {
         java.nio.file.Path procCgroup = write(tempDir.resolve("cgroup-file"), "0::/\n");
         JindoIOStats.Reporter reporter =
                 new JindoIOStats.Reporter(
-                        60_000, JindoIOStats.Cgroup.detect(procCgroup, root), tempDir);
+                        60_000,
+                        JindoIOStats.Cgroup.detect(procCgroup, root),
+                        tempDir,
+                        new AtomicBoolean());
 
         assertThat(reporter.checkAlarm()).isNull();
         write(root.resolve("memory.current"), "810");
@@ -404,6 +469,37 @@ public class JindoIOStatsTest {
                 + JindoIOStats.INPUT.closedTotal()
                 + JindoIOStats.OUTPUT.openedTotal()
                 + JindoIOStats.OUTPUT.closedTotal();
+    }
+
+    // two threads meet before each stream and close it together, spinning so neither one parks
+    private static void closeConcurrently(List<Closeable> streams) throws Exception {
+        AtomicInteger arrived = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<?>> closers = new ArrayList<>();
+            for (int t = 0; t < 2; t++) {
+                closers.add(
+                        executor.submit(
+                                () -> {
+                                    for (int i = 0; i < streams.size(); i++) {
+                                        arrived.incrementAndGet();
+                                        while (arrived.get() < 2 * (i + 1)) {
+                                            if (Thread.interrupted()) {
+                                                throw new InterruptedException();
+                                            }
+                                            Thread.yield();
+                                        }
+                                        streams.get(i).close();
+                                    }
+                                    return null;
+                                }));
+            }
+            for (Future<?> closer : closers) {
+                closer.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Nullable

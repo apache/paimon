@@ -92,18 +92,13 @@ public final class JindoIOStats {
                 new Reporter(
                         INTERVAL_MILLIS.get(),
                         Cgroup.detect(Paths.get("/proc/self/cgroup"), Paths.get("/sys/fs/cgroup")),
-                        Paths.get("/proc/self"));
+                        Paths.get("/proc/self"),
+                        RUNNING);
         Thread thread = new Thread(reporter::run, "paimon-jindo-io-stats");
         thread.setDaemon(true);
         // the inherited loader may belong to the job that opened the stream, keep it collectable
         thread.setContextClassLoader(JindoIOStats.class.getClassLoader());
         thread.start();
-    }
-
-    /** Returns true when the reporter stopped; streams opened meanwhile keep it running. */
-    private static boolean stopReporter() {
-        RUNNING.set(false);
-        return (INPUT.open() == 0 && OUTPUT.open() == 0) || !RUNNING.compareAndSet(false, true);
     }
 
     /** Registers a file system that is never closed, used to dump the Jindo native metrics. */
@@ -178,6 +173,7 @@ public final class JindoIOStats {
         private final long intervalMillis;
         private final List<Cgroup> cgroups;
         private final Path procSelf;
+        private final AtomicBoolean running;
 
         @Nullable private JindoMetricsStore nativeStore;
         private boolean nativeDisabled;
@@ -185,10 +181,11 @@ public final class JindoIOStats {
         private int alarmLevel;
         private long lastEvents;
 
-        Reporter(long intervalMillis, List<Cgroup> cgroups, Path procSelf) {
+        Reporter(long intervalMillis, List<Cgroup> cgroups, Path procSelf, AtomicBoolean running) {
             this.intervalMillis = intervalMillis;
             this.cgroups = cgroups;
             this.procSelf = procSelf;
+            this.running = running;
         }
 
         /** Runs until an interval passes without stream activity; the next open starts another. */
@@ -199,7 +196,7 @@ public final class JindoIOStats {
                 try {
                     Thread.sleep(sampleMillis);
                 } catch (InterruptedException e) {
-                    RUNNING.set(false);
+                    running.set(false);
                     return;
                 }
                 try {
@@ -212,7 +209,7 @@ public final class JindoIOStats {
                         nextReport = now + intervalMillis;
                         if (hasActivity()) {
                             LOG.info(snapshot());
-                        } else if (stopReporter()) {
+                        } else if (stop()) {
                             return;
                         }
                     }
@@ -253,14 +250,27 @@ public final class JindoIOStats {
 
         /** True while streams are open or when any stream opened or closed since last call. */
         boolean hasActivity() {
-            long events =
-                    INPUT.openedTotal()
-                            + INPUT.closedTotal()
-                            + OUTPUT.openedTotal()
-                            + OUTPUT.closedTotal();
+            long events = events();
             boolean active = events != lastEvents || INPUT.open() > 0 || OUTPUT.open() > 0;
             lastEvents = events;
             return active;
+        }
+
+        /**
+         * Called after an idle {@link #hasActivity()}; returns true when stopped. Opens since then
+         * saw it running and started no other reporter, so their events keep it running.
+         */
+        boolean stop() {
+            running.set(false);
+            boolean missed = events() != lastEvents || INPUT.open() > 0 || OUTPUT.open() > 0;
+            return !missed || !running.compareAndSet(false, true);
+        }
+
+        private static long events() {
+            return INPUT.openedTotal()
+                    + INPUT.closedTotal()
+                    + OUTPUT.openedTotal()
+                    + OUTPUT.closedTotal();
         }
 
         String snapshot() {

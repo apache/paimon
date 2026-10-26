@@ -47,6 +47,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
@@ -305,7 +306,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Nullable protected final JindoIOStats.StreamCounter stats;
 
-        private boolean closed;
+        private final AtomicBoolean closed = new AtomicBoolean();
 
         private HadoopSeekableInputStream(
                 FSDataInputStream in, @Nullable JindoIOStats.StreamCounter stats) {
@@ -355,8 +356,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         public void close() throws IOException {
             in.close();
             // a close that throws is not counted, so that a retried close still reaches Jindo
-            if (stats != null && !closed) {
-                closed = true;
+            if (stats != null && closed.compareAndSet(false, true)) {
                 stats.closed();
             }
         }
@@ -411,7 +411,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Nullable private final JindoIOStats.StreamCounter stats;
 
-        private boolean closed;
+        private final AtomicBoolean closed = new AtomicBoolean();
 
         private HadoopPositionOutputStream(
                 FSDataOutputStream out, @Nullable JindoIOStats.StreamCounter stats) {
@@ -457,8 +457,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         public void close() throws IOException {
             out.close();
             // a close that throws is not counted, so that a retried close still reaches Jindo
-            if (stats != null && !closed) {
-                closed = true;
+            if (stats != null && closed.compareAndSet(false, true)) {
                 stats.closed();
             }
         }
