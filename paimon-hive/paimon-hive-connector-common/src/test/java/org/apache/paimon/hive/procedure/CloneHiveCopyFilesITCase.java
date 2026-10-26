@@ -65,9 +65,17 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
     public void testCopyNestedFilesIntoTargetWithMoreFields() throws Exception {
         String dbName = "hivedb" + StringUtils.randomNumericString(10);
         TableEnvironment tEnv = hiveTableEnvironment(dbName);
-        sql(tEnv, "CREATE TABLE %s.t (id STRING, s STRUCT<a:INT>) STORED AS orc", dbName);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.t (id STRING, s STRUCT<a:INT>, tags ARRAY<STRUCT<a:INT>>, "
+                        + "m MAP<STRING, STRUCT<a:INT>>) STORED AS orc",
+                dbName);
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
-        sql(tEnv, "INSERT INTO %s.t VALUES ('a', ROW(1)), ('b', ROW(2))", dbName);
+        sql(
+                tEnv,
+                "INSERT INTO %s.t VALUES ('a', ROW(1), ARRAY[ROW(10)], MAP['k', ROW(100)]), "
+                        + "('b', ROW(2), ARRAY[ROW(20)], MAP['k', ROW(200)])",
+                dbName);
 
         Path root = hiveTableDir(dbName, "t");
         Path nested = Files.createDirectories(root.resolve("sub/deep"));
@@ -78,13 +86,19 @@ public class CloneHiveCopyFilesITCase extends ActionITCaseBase {
         usePaimonCatalog(tEnv);
         sql(
                 tEnv,
-                "CREATE TABLE test.t (extra INT, id STRING, s ROW<b INT, a INT>) "
+                "CREATE TABLE test.t (extra INT, id STRING, s ROW<b INT, a INT>, "
+                        + "tags ARRAY<ROW<b INT, a INT>>, m MAP<STRING, ROW<b INT, a INT>>) "
                         + "WITH ('bucket' = '-1', 'file.format' = 'orc')");
         cloneWithCopyFiles(dbName, "t");
 
-        assertThat(sql(tEnv, "SELECT * FROM test.t"))
+        assertThat(
+                        sql(
+                                tEnv,
+                                "SELECT extra, id, s.b, s.a, tags[1].b, tags[1].a, m['k'].b, "
+                                        + "m['k'].a FROM test.t"))
                 .containsExactlyInAnyOrder(
-                        Row.of(null, "a", Row.of(null, 1)), Row.of(null, "b", Row.of(null, 2)));
+                        Row.of(null, "a", null, 1, null, 10, null, 100),
+                        Row.of(null, "b", null, 2, null, 20, null, 200));
     }
 
     @Test

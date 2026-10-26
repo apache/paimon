@@ -275,8 +275,8 @@ CALL sys.clone(
 Copied files keep the columns they were written with, and Paimon reads them by column name:
 
 - An existing target must have every source field, nested fields included, with the same type.
-  It may have more fields at the top level or inside structs, in any position, which read as null
-  for the copied files. All its fields must be nullable, otherwise clone fails before copying.
+  It may have more fields at the top level or inside structs, also structs in arrays and maps, in
+  any position, which read as null for the copied files. All its fields must be nullable, otherwise clone fails before copying.
 - A partition whose metastore columns have other types than the table columns fails the clone.
   Columns missing from a partition are read as null.
 - The column names inside the files must match the metastore columns exactly. Positional names,

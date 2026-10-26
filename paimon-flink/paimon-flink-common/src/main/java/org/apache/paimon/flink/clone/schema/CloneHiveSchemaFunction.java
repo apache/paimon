@@ -29,8 +29,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -182,9 +184,10 @@ public class CloneHiveSchemaFunction
 
     /**
      * Copied files keep the columns they were written with, but are read with the latest schema of
-     * the target, which matches columns and nested fields by name and reads missing ones as null.
-     * So the target must have every source field with the same type, and all its fields, nested
-     * ones included, must be nullable as Hive columns are.
+     * the target, which matches columns and the fields of structs, also of structs in arrays and
+     * maps, by name and reads missing ones as null. So the target must have every source field with
+     * the same type, and all its fields, elements and map values must be nullable as Hive columns
+     * are.
      */
     @VisibleForTesting
     static void checkReadableFields(
@@ -221,7 +224,24 @@ public class CloneHiveSchemaFunction
         if (source instanceof RowType && existed instanceof RowType) {
             return canReadFields(((RowType) source).getFields(), ((RowType) existed).getFields());
         }
+        if (source instanceof ArrayType && existed instanceof ArrayType) {
+            return canReadElement(
+                    ((ArrayType) source).getElementType(), ((ArrayType) existed).getElementType());
+        }
+        if (source instanceof MapType && existed instanceof MapType) {
+            MapType sourceMap = (MapType) source;
+            MapType existedMap = (MapType) existed;
+            return sourceMap
+                            .getKeyType()
+                            .copy(true)
+                            .equalsIgnoreFieldId(existedMap.getKeyType().copy(true))
+                    && canReadElement(sourceMap.getValueType(), existedMap.getValueType());
+        }
         return source.copy(true).equalsIgnoreFieldId(existed);
+    }
+
+    private static boolean canReadElement(DataType source, DataType existed) {
+        return existed.isNullable() && canRead(source, existed);
     }
 
     private void checkCompatible(Schema sourceSchema, FileStoreTable existedTable) {
