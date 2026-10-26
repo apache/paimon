@@ -26,7 +26,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.IoCacheViews;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -189,7 +189,7 @@ public interface FormatTable extends Table {
         public FormatTable build() {
             // other writers may replace Format Table files in place
             return new FormatTableImpl(
-                    fileIO == null ? null : IoCacheViews.originOnly(fileIO),
+                    fileIO == null ? null : IoCacheViewableFileIO.originOnly(fileIO),
                     identifier,
                     rowType,
                     partitionKeys,

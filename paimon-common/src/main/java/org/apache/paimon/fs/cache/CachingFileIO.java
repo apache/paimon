@@ -22,13 +22,12 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
-import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -221,12 +220,12 @@ public class CachingFileIO implements IoCacheViewableFileIO {
 
     @Override
     public FileIO originOnly() {
-        return withDelegate(IoCacheViews.originOnly(delegate));
+        return withDelegate(IoCacheViewableFileIO.originOnly(delegate));
     }
 
     @Override
-    public FileIO withTableView(TableFileIOView view) {
-        return withDelegate(IoCacheViews.withTableView(delegate, view));
+    public FileIO withTableView(TableView view) {
+        return withDelegate(IoCacheViewableFileIO.withTableView(delegate, view));
     }
 
     // a view shares this wrapper's cache

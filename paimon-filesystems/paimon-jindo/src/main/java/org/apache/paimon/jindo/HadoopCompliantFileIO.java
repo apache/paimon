@@ -21,12 +21,12 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Pair;
 
@@ -261,7 +261,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     IoCacheRouting.CacheTarget cacheTargetOf(Path path) {
         IoCacheRouting.CacheTarget target = cacheRouting.targetOf(path);
         if (target == null && cacheRouting.awaitsHistory(path)) {
-            cacheRouting.loadHistory(IoCacheViews.originOnly(this));
+            cacheRouting.loadHistory(IoCacheViewableFileIO.originOnly(this));
             target = cacheRouting.targetOf(path);
         }
         return target;

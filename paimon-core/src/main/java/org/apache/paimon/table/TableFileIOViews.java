@@ -20,10 +20,10 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FilePrefixHistory;
-import org.apache.paimon.fs.IoCacheViews;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.PrefixHistory;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.StringUtils;
@@ -37,7 +37,7 @@ import java.util.Objects;
 import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PREFIX;
 
-/** Builds the {@link TableFileIOView} every {@link FileStoreTable} applies to its FileIO. */
+/** Builds the {@link TableView} every {@link FileStoreTable} applies to its FileIO. */
 final class TableFileIOViews {
 
     private TableFileIOViews() {}
@@ -48,16 +48,16 @@ final class TableFileIOViews {
         prefixes.add(options.get(DATA_FILE_PREFIX.key()));
         prefixes.add(options.get(CHANGELOG_FILE_PREFIX.key()));
         // only files under the table's location use io-cache, not those under external paths
-        return IoCacheViews.withTableView(
+        return IoCacheViewableFileIO.withTableView(
                 fileIO,
-                TableFileIOView.of(
+                TableView.of(
                         Collections.singletonList(path),
                         prefixes,
                         new SchemaFilePrefixHistory(path, CoreOptions.branch(options))));
     }
 
     /** The data and changelog file prefixes of every schema of a branch, read from storage. */
-    static final class SchemaFilePrefixHistory implements FilePrefixHistory {
+    static final class SchemaFilePrefixHistory implements PrefixHistory {
 
         private static final long serialVersionUID = 1L;
 

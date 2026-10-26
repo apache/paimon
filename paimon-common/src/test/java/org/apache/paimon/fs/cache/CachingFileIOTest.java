@@ -23,13 +23,13 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.VectoredReadUtils;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
@@ -238,8 +238,8 @@ class CachingFileIOTest {
         verify(originOnly).exists(data);
         verify(delegate, never()).exists(any());
         // a delegate without anything to narrow keeps the wrapper
-        TableFileIOView tableView =
-                TableFileIOView.of(
+        TableView tableView =
+                TableView.of(
                         Collections.singletonList(new Path("oss://bucket/t")),
                         Collections.singletonList("custom-"),
                         null);

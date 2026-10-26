@@ -22,10 +22,10 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableFileIOView;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.jindo.IoCacheRouting.CacheTarget;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.plugin.PluginLoader;
@@ -203,7 +203,7 @@ public class JindoFileIO extends HadoopCompliantFileIO
     }
 
     @Override
-    public FileIO withTableView(TableFileIOView view) {
+    public FileIO withTableView(TableView view) {
         return cacheRouting == null ? this : withRouting(cacheRouting.withTableView(view));
     }
 

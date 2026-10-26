@@ -27,10 +27,10 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -82,7 +82,7 @@ class IoCacheTableRoutingTest {
         target = new Target();
         catalog =
                 new FileSystemCatalog(
-                        new TargetRetainingFileIO(target, false, TableFileIOView.NONE),
+                        new TargetRetainingFileIO(target, false, TableView.NONE),
                         new Path(tempDir.resolve("warehouse").toUri().toString()));
         catalog.createDatabase("db", true);
     }
@@ -311,10 +311,10 @@ class IoCacheTableRoutingTest {
 
         private final Target target;
         private final boolean originOnly;
-        private final TableFileIOView view;
+        private final TableView view;
         private transient volatile List<String> olderPrefixes;
 
-        private TargetRetainingFileIO(Target target, boolean originOnly, TableFileIOView view) {
+        private TargetRetainingFileIO(Target target, boolean originOnly, TableView view) {
             this.target = target;
             this.originOnly = originOnly;
             this.view = view;
@@ -326,8 +326,8 @@ class IoCacheTableRoutingTest {
         }
 
         @Override
-        public FileIO withTableView(TableFileIOView tableView) {
-            TableFileIOView merged = view.merge(tableView);
+        public FileIO withTableView(TableView tableView) {
+            TableView merged = view.merge(tableView);
             return originOnly || merged.equals(view)
                     ? this
                     : new TargetRetainingFileIO(target, false, merged);
@@ -363,8 +363,7 @@ class IoCacheTableRoutingTest {
         }
 
         private boolean routes(Path path) throws IOException {
-            if (originOnly
-                    || (!view.roots().isEmpty() && !TableFileIOView.isUnder(view.roots(), path))) {
+            if (originOnly || (!view.roots().isEmpty() && !TableView.isUnder(view.roots(), path))) {
                 return false;
             }
             List<String> prefixes = new ArrayList<>(view.filePrefixes());

@@ -21,6 +21,7 @@ package org.apache.paimon.fs;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 
@@ -72,7 +73,7 @@ public class ResolvingFileIOTest {
 
         FileIO view = fileIO.originOnly();
         assertInstanceOf(ResolvingFileIO.class, view);
-        assertSame(view, IoCacheViews.originOnly(view));
+        assertSame(view, IoCacheViewableFileIO.originOnly(view));
         assertSame(originOnly, ((ResolvingFileIO) view).fileIO(data));
         assertSame(oss, fileIO.fileIO(data));
         // loading a FileIO checks access with exists

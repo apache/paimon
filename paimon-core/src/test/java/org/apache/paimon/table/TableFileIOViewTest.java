@@ -23,9 +23,9 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.IoCacheViewableFileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TableFileIOView;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -52,7 +52,7 @@ class TableFileIOViewTest {
 
     @Test
     void testTablesTakeTheirViewOfTheCatalogFileIO() throws Exception {
-        ViewFileIO fileIO = new ViewFileIO(false, TableFileIOView.NONE);
+        ViewFileIO fileIO = new ViewFileIO(false, TableView.NONE);
         try (FileSystemCatalog catalog =
                 new FileSystemCatalog(fileIO, new Path(tempDir.toUri().toString()))) {
             catalog.createDatabase("db", false);
@@ -87,7 +87,7 @@ class TableFileIOViewTest {
 
             // a Paimon table owns its location and passes the file prefixes of its schema
             FileStoreTable table = (FileStoreTable) catalog.getTable(custom);
-            TableFileIOView view = viewOf(table).view;
+            TableView view = viewOf(table).view;
             assertThat(viewOf(table).originOnly).isFalse();
             assertThat(view.roots()).containsExactly(root(table.location()));
             assertThat(view.filePrefixes()).containsExactly("custom-", "cl-");
@@ -140,7 +140,7 @@ class TableFileIOViewTest {
 
     @Test
     void testBranchesAndExternalPathsTakeTheirOwnView() throws Exception {
-        ViewFileIO fileIO = new ViewFileIO(false, TableFileIOView.NONE);
+        ViewFileIO fileIO = new ViewFileIO(false, TableView.NONE);
         String external = tempDir.resolve("external").toUri().toString();
         try (FileSystemCatalog catalog =
                 new FileSystemCatalog(fileIO, new Path(tempDir.toUri().toString()))) {
@@ -229,7 +229,7 @@ class TableFileIOViewTest {
     }
 
     private static String root(Path path) {
-        return TableFileIOView.of(Collections.singletonList(path), Collections.emptyList(), null)
+        return TableView.of(Collections.singletonList(path), Collections.emptyList(), null)
                 .roots()
                 .get(0);
     }
@@ -240,9 +240,9 @@ class TableFileIOViewTest {
         private static final long serialVersionUID = 1L;
 
         private final boolean originOnly;
-        private final TableFileIOView view;
+        private final TableView view;
 
-        private ViewFileIO(boolean originOnly, TableFileIOView view) {
+        private ViewFileIO(boolean originOnly, TableView view) {
             this.originOnly = originOnly;
             this.view = view;
         }
@@ -253,8 +253,8 @@ class TableFileIOViewTest {
         }
 
         @Override
-        public FileIO withTableView(TableFileIOView tableView) {
-            TableFileIOView merged = view.merge(tableView);
+        public FileIO withTableView(TableView tableView) {
+            TableView merged = view.merge(tableView);
             return originOnly || merged.equals(view) ? this : new ViewFileIO(false, merged);
         }
     }
