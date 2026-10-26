@@ -872,11 +872,14 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
     }
 
-    @Test
-    public void testReassignKeepsHistoricalAddDeleteEntriesConsistentAfterRetry() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "data", "manifest"})
+    public void testReassignKeepsHistoricalEntriesConsistentAfterRetry(String compaction)
+            throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         FileEntry.Identifier compactedFile = compactOneFile(table, "pt=a/");
         long oldFirstRowId = assertAddDeleteEntriesConsistent(table, compactedFile);
+        List<String> plannedManifestFiles = dataManifestFileNames(table);
 
         AtomicBoolean appended = new AtomicBoolean();
         new DataEvolutionRowIdReassigner(
@@ -885,6 +888,13 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         () -> {
                             if (appended.compareAndSet(false, true)) {
                                 try {
+                                    if (compaction.equals("data")) {
+                                        compactOneFile(table, "pt=a/");
+                                    } else if (compaction.equals("manifest")) {
+                                        compactManifests(table);
+                                        assertThat(dataManifestFileNames(table))
+                                                .doesNotContainAnyElementsOf(plannedManifestFiles);
+                                    }
                                     writeOneRow(table, "c", 100);
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
@@ -894,8 +904,14 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .reassign("test-reassign-historical-add-delete");
 
         assertThat(appended).isTrue();
-        assertThat(assertAddDeleteEntriesConsistent(table, compactedFile))
-                .isNotEqualTo(oldFirstRowId);
+        if (!compaction.equals("manifest")) {
+            assertThat(assertAddDeleteEntriesConsistent(table, compactedFile))
+                    .isNotEqualTo(oldFirstRowId);
+        }
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(6L, 7L, 8L))
+                .containsEntry("pt=b/", Arrays.asList(9L, 10L))
+                .containsEntry("pt=c/", Collections.singletonList(5L));
         assertThat(readTableRows(table))
                 .containsExactly("0|a|v0", "100|c|v100", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
     }

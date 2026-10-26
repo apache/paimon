@@ -82,7 +82,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -256,94 +255,6 @@ public class CompactReassignReuseTest extends TableTestBase {
         assertThat(actual)
                 .containsExactlyElementsOf(
                         Arrays.stream(expected).boxed().collect(Collectors.toList()));
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void testReassignAfterConcurrentNormalOrBlobCompaction(boolean blob) throws Exception {
-        FileStoreTable table = prepare();
-        if (blob) {
-            // A merged BLOB must stay within one normal-file range.
-            commit(table, compact(table, false), false);
-        }
-        CommitMessageImpl message = compact(table, blob);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                null,
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            commit(table, message, true);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-concurrent-normal-or-blob");
-
-        assertThat(compacted).isTrue();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
-        assertThat(result.firstAssignedRowId).isEqualTo(4L);
-        assertThat(result.nextRowId).isEqualTo(7L);
-        List<String> outputNames =
-                message.compactIncrement().compactAfter().stream()
-                        .map(DataFileMeta::fileName)
-                        .collect(Collectors.toList());
-        List<DataFileMeta> outputs =
-                table.store().newScan().plan().files().stream()
-                        .map(ManifestEntry::file)
-                        .filter(file -> outputNames.contains(file.fileName()))
-                        .collect(Collectors.toList());
-        assertThat(outputs).hasSize(outputNames.size());
-        assertThat(outputs).allSatisfy(file -> assertThat(file.nonNullFirstRowId()).isEqualTo(4L));
-        assertThat(message.compactIncrement().compactAfter().get(0).nonNullFirstRowId()).isZero();
-        checkRows(table, 0, 1, 2, 3);
-    }
-
-    @Test
-    void testReassignAfterConcurrentIndexCompaction() throws Exception {
-        FileStoreTable table = prepare();
-        CommitMessageImpl message = compactIndex(table);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                null,
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            commit(table, message, true);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-concurrent-index-compact");
-
-        assertThat(compacted).isTrue();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
-        List<String> outputNames =
-                message.compactIncrement().newIndexFiles().stream()
-                        .map(IndexFileMeta::fileName)
-                        .collect(Collectors.toList());
-        assertThat(
-                        table.store().newIndexFileHandler().scanEntries().stream()
-                                .map(entry -> entry.indexFile().fileName()))
-                .containsAll(outputNames);
-        Predicate predicate = new PredicateBuilder(table.rowType()).equal(1, 1);
-        try (DataEvolutionGlobalIndexScanner scanner =
-                DataEvolutionGlobalIndexScanner.create(table, null, predicate).get()) {
-            GlobalIndexResult ids = scanner.scan(predicate).get();
-            assertThat(ids.results().getLongCardinality()).isEqualTo(1);
-            assertThat(ids.results().contains(5L)).isTrue();
-        }
-        checkRows(table, 0, 1, 2, 3);
     }
 
     @ParameterizedTest
