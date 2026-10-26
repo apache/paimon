@@ -215,6 +215,32 @@ class IoCacheTableRoutingTest {
         }
     }
 
+    @Test
+    void testBranchFilesOfOlderMainPrefixesUseTheTarget() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        "inherited",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .option(CoreOptions.DATA_FILE_PREFIX.key(), "older-")
+                                .build());
+        write(table, GenericRow.of(1));
+        new FileSystemSchemaManager(table.fileIO(), table.location())
+                .commitChanges(
+                        SchemaChange.setOption(CoreOptions.DATA_FILE_PREFIX.key(), "newer-"));
+        write(table(table.name()), GenericRow.of(2));
+        table(table.name()).createTag("tag");
+        table(table.name()).createBranch("dev", "tag");
+
+        // the branch keeps copies of the schemas its files were written with
+        before();
+        Identifier dev = new Identifier("db", table.name(), "dev");
+        target.reads.clear();
+        assertThat(read((FileStoreTable) catalog.getTable(dev))).hasSize(2);
+        assertThat(target.reads).anyMatch(name -> name.startsWith("older-"));
+        assertThat(target.reads).anyMatch(name -> name.startsWith("newer-"));
+    }
+
     private FileStoreTable createTable(String name, Schema schema) throws Exception {
         catalog.createTable(Identifier.create("db", name), schema, false);
         return table(name);
