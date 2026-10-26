@@ -487,8 +487,7 @@ public class DataEvolutionRowIdReassigner {
                         e);
             }
 
-            if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT
-                    || snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
                 throw new RuntimeException(
                         String.format(
                                 "Abort row-id reassignment because %s snapshot %s was committed after snapshot %s.",
@@ -498,14 +497,15 @@ public class DataEvolutionRowIdReassigner {
                 continue;
             }
             checkState(
-                    snapshot.commitKind() == Snapshot.CommitKind.APPEND,
+                    snapshot.commitKind() == Snapshot.CommitKind.APPEND
+                            || snapshot.commitKind() == Snapshot.CommitKind.COMPACT,
                     "Unsupported snapshot kind %s while advancing row-id assignment.",
                     snapshot.commitKind());
 
             for (ManifestFileMeta manifestMeta : manifestList.readDeltaManifests(snapshot)) {
                 boolean needsReassign =
-                        appendedManifestNeedsReassign(
-                                assignmentPlan, manifestFile, manifestMeta, snapshot.id());
+                        deltaManifestNeedsReassign(
+                                assignmentPlan, manifestFile, manifestMeta, snapshot);
                 newManifestNeedsReassign.put(manifestMeta.fileName(), needsReassign);
                 if (needsReassign) {
                     manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
@@ -562,11 +562,11 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
-    private boolean appendedManifestNeedsReassign(
+    private boolean deltaManifestNeedsReassign(
             AssignmentPlan assignmentPlan,
             ManifestFile manifestFile,
             ManifestFileMeta manifestMeta,
-            long appendSnapshotId) {
+            Snapshot snapshot) {
         boolean needsReassign = false;
         try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
@@ -577,11 +577,11 @@ public class DataEvolutionRowIdReassigner {
                     continue;
                 }
                 checkState(
-                        entry.isAdd(),
+                        snapshot.commitKind() != Snapshot.CommitKind.APPEND || entry.isAdd(),
                         "APPEND snapshot %s contains a non-ADD entry in manifest %s.",
-                        appendSnapshotId,
+                        snapshot.id(),
                         manifestMeta.fileName());
-                if (appendedEntryNeedsReassign(assignmentPlan, entry)) {
+                if (entryNeedsReassign(assignmentPlan, entry)) {
                     needsReassign = true;
                 }
             }
@@ -594,8 +594,7 @@ public class DataEvolutionRowIdReassigner {
         }
     }
 
-    private boolean appendedEntryNeedsReassign(
-            AssignmentPlan assignmentPlan, ManifestEntry appendedEntry) {
+    private boolean entryNeedsReassign(AssignmentPlan assignmentPlan, ManifestEntry appendedEntry) {
         RowRangeMappingIndex mapping =
                 assignmentPlan.relativeRowIdMappings.mappings.get(appendedEntry.partition());
         if (mapping == null) {
@@ -609,7 +608,7 @@ public class DataEvolutionRowIdReassigner {
 
         checkState(
                 !mapping.overlaps(appendedRange),
-                "Cannot advance row-id assignment because appended row-id range %s partially overlaps planned ranges in partition %s.",
+                "Cannot advance row-id assignment because row-id range %s partially overlaps planned ranges in partition %s.",
                 appendedRange,
                 appendedEntry.partition());
         return false;
