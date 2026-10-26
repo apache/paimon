@@ -3771,11 +3771,14 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
             PartitionPredicate partitionPredicate)
             throws Exception {
         Method planAssignment =
-                DataEvolutionRowIdReassigner.class.getDeclaredMethod("planAssignment", List.class);
+                DataEvolutionRowIdReassigner.class.getDeclaredMethod(
+                        "planAssignment", List.class, PartitionPredicate.class);
         planAssignment.setAccessible(true);
         Object result =
                 planAssignment.invoke(
-                        new DataEvolutionRowIdReassigner(table, partitionPredicate), manifestMetas);
+                        new DataEvolutionRowIdReassigner(table, partitionPredicate),
+                        manifestMetas,
+                        partitionPredicate);
         return assignmentPlanView(result, manifestMetas);
     }
 

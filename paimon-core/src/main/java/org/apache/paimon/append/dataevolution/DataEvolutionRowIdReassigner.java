@@ -150,7 +150,7 @@ public class DataEvolutionRowIdReassigner {
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         ManifestList manifestList = table.store().manifestListFactory().create();
         Optional<AssignmentPlan> optionalPlan =
-                planAssignment(manifestList.readDataManifests(latest));
+                planAssignment(manifestList.readDataManifests(latest), partitionPredicate);
         if (!optionalPlan.isPresent()) {
             LOG.info(
                     "Skip reassigning row IDs for table {} because no partition requires reassignment.",
@@ -181,10 +181,6 @@ public class DataEvolutionRowIdReassigner {
                 commitResult.indexFileCount,
                 assignment.firstAssignedRowId,
                 assignment.nextRowId);
-    }
-
-    private Optional<AssignmentPlan> planAssignment(List<ManifestFileMeta> manifestMetas) {
-        return planAssignment(manifestMetas, partitionPredicate);
     }
 
     private Optional<AssignmentPlan> planAssignment(
