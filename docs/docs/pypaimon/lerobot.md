@@ -249,7 +249,9 @@ batches, avoiding a second full-resolution copy during collation.
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
 on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GOPs, then fetch
 uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
-`video_backend` to force either decoder.
+`video_backend` to force either decoder. With `video_backend="torchcodec"`, indexed
+MP4 videos use timestamp seeks verified against their sample table and returned PTS.
+Unsupported timelines or mismatched timestamps fall back to TorchCodec exact mode.
 
 With `pypaimon-rust` installed, LeRobot defaults to Rust frame lookup and table reads
 unless native read/planning options are explicitly configured. Set
@@ -262,9 +264,9 @@ Each open decoder uses memory and a file handle, so usage grows with cameras and
 `read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
 Dataset worker (default: 16). Set it to 1 for serial decoding. Parallel decoding
 applies to video windows without `image_transforms` and uses more CPU and memory.
-`read.video.codec-threads` controls FFmpeg threads per PyAV decoder (default: 1),
+`read.video.codec-threads` controls FFmpeg threads per PyAV or indexed TorchCodec decoder (default: 1),
 avoiding nested codec parallelism with multiple workers and concurrent videos.
-Set it to 0 for automatic selection. It does not affect TorchCodec.
+Set it to 0 for automatic selection. TorchCodec exact-mode fallback uses its own defaults.
 
 `read.video.decoders-per-payload` (default: 4) also splits single-video windows across
 independent cached decoders, within those limits. Set it to 1 to disable this splitting;
