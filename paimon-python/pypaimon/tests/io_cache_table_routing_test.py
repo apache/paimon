@@ -188,6 +188,24 @@ class IoCacheTableRoutingTest(unittest.TestCase):
         self.assertEqual([1], self._read(copy).column("id").to_pylist())
         self.assertTrue(self._target_reads("/dev-"))
 
+    def test_tag_branches_route_the_files_they_took_under_older_prefixes(self):
+        pa_schema = pa.schema([("id", pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={"data-file.prefix": "old-"})
+        self.catalog.create_table("db.tagged", schema, False)
+        self._write(self.catalog.get_table("db.tagged"), pa.Table.from_pydict({"id": [1]}, schema=pa_schema))
+        self.catalog.alter_table("db.tagged", [SchemaChange.set_option("data-file.prefix", "new-")], False)
+        main = self.catalog.get_table("db.tagged")
+        self._write(main, pa.Table.from_pydict({"id": [2]}, schema=pa_schema))
+        main.create_tag("t1")
+        main.branch_manager().create_branch("dev", "t1")
+        self.target.requests.clear()
+
+        # The branch knows new- from its schema; old- comes from the schemas the tag copied into it.
+        branch = self.catalog.get_table("db.tagged$branch_dev")
+        self.assertEqual([1, 2], sorted(self._read(branch).column("id").to_pylist()))
+        self.assertTrue(self._target_reads("/db.db/tagged/bucket-0/old-"))
+        self.assertTrue(self._target_reads("/db.db/tagged/bucket-0/new-"))
+
     def test_format_table_files_replaced_on_origin_are_read_from_origin(self):
         pa_schema = pa.schema([("id", pa.int32())])
         self.catalog.create_table("db.format_schema", Schema.from_pyarrow_schema(pa_schema), False)
