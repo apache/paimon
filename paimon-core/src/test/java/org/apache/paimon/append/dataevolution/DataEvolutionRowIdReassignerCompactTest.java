@@ -38,7 +38,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -57,7 +56,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -541,176 +539,6 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
         assertThat(readTableRows(table))
                 .containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4", "5|a|v5");
         assertPersistedPlan(table);
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void testReassignFailsWhenPlannedManifestExpiresDuringRewrite(int parallelism)
-            throws Exception {
-        FileStoreTable table =
-                createTableWithInterleavedPartitions()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_MANIFEST_PARALLELISM.key(),
-                                        String.valueOf(parallelism)));
-        table.store().setManifestCache(null);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionRowIdReassigner(
-                                                table,
-                                                null,
-                                                () -> {},
-                                                manifest -> {
-                                                    if (compacted.compareAndSet(false, true)) {
-                                                        try {
-                                                            compactManifests(table);
-                                                            expireSnapshots(table, 1);
-                                                            Path oldManifest =
-                                                                    table.store()
-                                                                            .pathFactory()
-                                                                            .toManifestFilePath(
-                                                                                    manifest
-                                                                                            .fileName());
-                                                            assertThat(
-                                                                            table.fileIO()
-                                                                                    .exists(
-                                                                                            oldManifest))
-                                                                    .isFalse();
-                                                        } catch (Exception e) {
-                                                            throw new RuntimeException(e);
-                                                        }
-                                                    }
-                                                })
-                                        .reassign("test-reassign-expired-manifest-during-rewrite"))
-                .hasRootCauseInstanceOf(FileNotFoundException.class);
-
-        assertThat(compacted).isTrue();
-        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 1);
-        assertThat(rowIdsByPartition(table))
-                .containsEntry("pt=a/", Arrays.asList(0L, 2L, 4L))
-                .containsEntry("pt=b/", Arrays.asList(1L, 3L));
-        assertThat(readTableRows(table))
-                .containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
-    }
-
-    @Test
-    public void testReassignDoesNotRetryMissingManifestWithoutNewSnapshot() throws Exception {
-        FileStoreTable table =
-                createTableWithInterleavedPartitions()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "1"));
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicInteger attempts = new AtomicInteger();
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionRowIdReassigner(
-                                                table,
-                                                null,
-                                                () -> {},
-                                                manifest -> {
-                                                    attempts.incrementAndGet();
-                                                    table.fileIO()
-                                                            .deleteQuietly(
-                                                                    table.store()
-                                                                            .pathFactory()
-                                                                            .toManifestFilePath(
-                                                                                    manifest
-                                                                                            .fileName()));
-                                                })
-                                        .reassign("test-missing-manifest-without-progress"))
-                .hasRootCauseInstanceOf(FileNotFoundException.class);
-        assertThat(attempts).hasValue(1);
-        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id());
-    }
-
-    @Test
-    public void testReassignDoesNotRetryOtherFailuresAfterConcurrentCompaction() throws Exception {
-        FileStoreTable table =
-                createTableWithInterleavedPartitions()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "1"));
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        IllegalStateException failure = new IllegalStateException("Manifest read failure");
-        assertThatThrownBy(
-                        () ->
-                                new DataEvolutionRowIdReassigner(
-                                                table,
-                                                null,
-                                                () -> {},
-                                                manifest -> {
-                                                    try {
-                                                        compactManifests(table);
-                                                    } catch (Exception e) {
-                                                        throw new RuntimeException(e);
-                                                    }
-                                                    throw failure;
-                                                })
-                                        .reassign("test-other-manifest-failure-after-compaction"))
-                .isSameAs(failure);
-        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 1);
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testReassignAfterPlanningSnapshotExpires(boolean compact) throws Exception {
-        FileStoreTable table = createTableWithInterleavedPartitions();
-        table.store().setManifestCache(null);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                null,
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            if (compact) {
-                                                compactManifests(table);
-                                            } else {
-                                                writeOneRow(table, "c", 100);
-                                            }
-                                            expireSnapshots(table, 1);
-                                            assertThat(
-                                                            table.snapshotManager()
-                                                                    .snapshotExists(before.id()))
-                                                    .isFalse();
-                                            assertThat(
-                                                            table.fileIO()
-                                                                    .exists(
-                                                                            table.store()
-                                                                                    .pathFactory()
-                                                                                    .toManifestListPath(
-                                                                                            before
-                                                                                                    .baseManifestList())))
-                                                    .isFalse();
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-expired-planning-snapshot");
-        assertThat(result.reassigned).isTrue();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.firstAssignedRowId).isEqualTo(compact ? 5L : 6L);
-        assertThat(result.nextRowId).isEqualTo(compact ? 10L : 11L);
-        assertThat(readTableRows(table))
-                .hasSize(compact ? 5 : 6)
-                .contains("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
-        assertPersistedPlan(table);
-    }
-
-    private void expireSnapshots(FileStoreTable table, int retained) {
-        table.newExpireSnapshots()
-                .config(
-                        ExpireConfig.builder()
-                                .snapshotRetainMin(retained)
-                                .snapshotRetainMax(retained)
-                                .build())
-                .expire();
     }
 
     private void createBTreeIndex(FileStoreTable table) throws Exception {
