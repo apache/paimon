@@ -86,7 +86,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -199,7 +198,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         "true,true,false",
         "false,false,true"
     })
-    public void testRowIdReassignReplansAfterConcurrentDeletionMaterialization(
+    public void testRowIdReassignRejectsConcurrentDeletionMaterialization(
             boolean materializeAllRanges, boolean appendDisjointPartition, boolean deleteFirstRange)
             throws Exception {
         FileStoreTable table =
@@ -224,104 +223,48 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         AtomicReference<Snapshot> compactedSnapshot = new AtomicReference<>();
         AtomicReference<List<String>> compactedRows = new AtomicReference<>();
 
-        DataEvolutionRowIdReassigner.Result result =
-                reassignerWithBeforeCommit(
-                                table,
-                                () -> {
-                                    if (materialized.compareAndSet(false, true)) {
-                                        try {
-                                            materializeDeletionVectors(table);
-                                            compactedSnapshot.set(table.latestSnapshot().get());
-                                            compactedRows.set(readPartitionedRowsWithRowIds(table));
-                                            assertThat(compactedSnapshot.get().commitKind())
-                                                    .isEqualTo(Snapshot.CommitKind.COMPACT);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-concurrent-materialize");
+        assertThatThrownBy(
+                        () ->
+                                reassignerWithBeforeCommit(
+                                                table,
+                                                () -> {
+                                                    if (materialized.compareAndSet(false, true)) {
+                                                        try {
+                                                            materializeDeletionVectors(table);
+                                                            compactedSnapshot.set(
+                                                                    table.latestSnapshot().get());
+                                                            compactedRows.set(
+                                                                    readPartitionedRowsWithRowIds(
+                                                                            table));
+                                                            assertThat(
+                                                                            compactedSnapshot
+                                                                                    .get()
+                                                                                    .commitKind())
+                                                                    .isEqualTo(
+                                                                            Snapshot.CommitKind
+                                                                                    .COMPACT);
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    }
+                                                })
+                                        .reassign("test-reassign-concurrent-materialize"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("changed planned row-id ranges");
 
         assertThat(materialized).isTrue();
         assertThat(readPartitionedRows(table))
                 .containsExactlyInAnyOrderElementsOf(visibleRowsBefore);
-        boolean requiresReassignment = appendDisjointPartition && !materializeAllRanges;
-        assertThat(result.reassigned).isEqualTo(requiresReassignment);
-        assertThat(result.previousSnapshotId).isEqualTo(compactedSnapshot.get().id());
-        assertThat(result.newSnapshotId)
-                .isEqualTo(compactedSnapshot.get().id() + (requiresReassignment ? 1 : 0));
-        if (requiresReassignment) {
-            assertThat(result.firstAssignedRowId).isEqualTo(12L);
-            assertThat(result.nextRowId).isEqualTo(17L);
-            assertThat(result.rowCount).isEqualTo(5L);
-            assertThat(readPartitionedRowsWithRowIds(table))
-                    .containsExactly(
-                            "b|3|3", "b|4|4", "c|8|8", "c|9|9", "a|5|12", "a|6|13", "a|7|14",
-                            "a|0|15", "a|2|16");
-        } else {
-            assertThat(result.nextRowId).isEqualTo(compactedSnapshot.get().nextRowId());
-            assertThat(readPartitionedRowsWithRowIds(table)).isEqualTo(compactedRows.get());
-        }
-    }
-
-    @Test
-    public void testRowIdReassignRetainsOriginalPartitionScopeAcrossReplanning() throws Exception {
-        FileStoreTable table =
-                createPartitionedReassignTable("reassign_original_scope", false)
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions
-                                                .DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT
-                                                .key(),
-                                        "1"));
-        writePartitionRows(table, "a", 0);
-        writePartitionRows(table, "b", 1);
-        writePartitionRows(table, "a", 2);
-        writePartitionRows(table, "b", 3);
-        commitDeletionVectors(
-                table,
-                partition(table, "a"),
-                Collections.singletonList(new DvSpec(new Range(0, 0), 0)));
-        AtomicInteger attempts = new AtomicInteger();
-        DataEvolutionRowIdReassigner.Result result =
-                reassignerWithBeforeCommit(
-                                table,
-                                () -> {
-                                    try {
-                                        int attempt = attempts.getAndIncrement();
-                                        if (attempt == 0) {
-                                            writePartitionRows(table, "b", 4);
-                                            compactDataEvolutionTable(
-                                                    table.copy(
-                                                            Collections.singletonMap(
-                                                                    CoreOptions
-                                                                            .COMPACTION_MIN_FILE_NUM
-                                                                            .key(),
-                                                                    "2")),
-                                                    false);
-                                        } else if (attempt == 1) {
-                                            writePartitionRows(table, "c", 5);
-                                            writePartitionRows(table, "b", 6);
-                                            materializeDeletionVectors(table);
-                                        }
-                                    } catch (Exception e) {
-                                        throw new RuntimeException(e);
-                                    }
-                                })
-                        .reassign("test-reassign-original-scope");
-        assertThat(attempts).hasValue(3);
-        assertThat(result.reassigned).isTrue();
-        assertThat(result.rowCount).isEqualTo(2L);
-        assertThat(result.firstAssignedRowId).isEqualTo(7L);
-        assertThat(result.nextRowId).isEqualTo(9L);
-        assertThat(readPartitionedRowsWithRowIds(table))
-                .containsExactly("a|2|2", "b|3|3", "b|4|4", "c|5|5", "b|1|7", "b|6|8");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(compactedSnapshot.get().id());
+        assertThat(table.latestSnapshot().get().nextRowId())
+                .isEqualTo(compactedSnapshot.get().nextRowId());
+        assertThat(readPartitionedRowsWithRowIds(table)).isEqualTo(compactedRows.get());
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testConcurrentMaterializationReassignsBlobAndPartialColumns(boolean partialUpdate)
-            throws Exception {
+    public void testConcurrentMaterializationWithBlobAndPartialColumnsAbortsReassignment(
+            boolean partialUpdate) throws Exception {
         FileStoreTable table = createPartitionedReassignTable("reassign_materialize_blob", true);
         writeDedicatedPartitionRows(table, "a", 0, 1, 2);
         writeDedicatedPartitionRows(table, "b", 3, 4);
@@ -335,39 +278,43 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 partition(table, "a"),
                 Collections.singletonList(new DvSpec(new Range(0, 2), 1)));
         AtomicBoolean materialized = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                reassignerWithBeforeCommit(
-                                table,
-                                () -> {
-                                    if (materialized.compareAndSet(false, true)) {
-                                        try {
-                                            materializeDeletionVectors(table);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-materialize-blob-and-partial-columns");
+        assertThatThrownBy(
+                        () ->
+                                reassignerWithBeforeCommit(
+                                                table,
+                                                () -> {
+                                                    if (materialized.compareAndSet(false, true)) {
+                                                        try {
+                                                            materializeDeletionVectors(table);
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    }
+                                                })
+                                        .reassign(
+                                                "test-reassign-materialize-blob-and-partial-columns"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("changed planned row-id ranges");
 
         assertThat(materialized).isTrue();
-        assertThat(result.rowCount).isEqualTo(5L);
-        assertThat(result.firstAssignedRowId).isEqualTo(12L);
-        assertThat(result.nextRowId).isEqualTo(17L);
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(12L);
         assertThat(readPartitionedRowsWithRowIds(table))
                 .containsExactly(
                         "b|3|base-3|3|3",
                         "b|4|base-4|4|4",
+                        "a|5|base-5|5|5",
+                        "a|6|base-6|6|6",
+                        "a|7|base-7|7|7",
                         "c|8|base-8|8|8",
                         "c|9|base-9|9|9",
-                        "a|5|base-5|5|12",
-                        "a|6|base-6|6|13",
-                        "a|7|base-7|7|14",
-                        "a|0|" + (partialUpdate ? "updated-100" : "base-0") + "|0|15",
-                        "a|2|" + (partialUpdate ? "updated-102" : "base-2") + "|2|16");
+                        "a|0|" + (partialUpdate ? "updated-100" : "base-0") + "|0|10",
+                        "a|2|" + (partialUpdate ? "updated-102" : "base-2") + "|2|11");
     }
 
     @Test
-    public void testRowIdReassignReplansAfterConcurrentCompactionWithDeletionVectors()
+    public void testRowIdReassignRejectsPartiallyMappedCompactionWithDeletionVectors()
             throws Exception {
         FileStoreTable table = createPartitionedReassignTable("reassign_compact_dv_table", false);
         writePartitionRows(table, "a", 0, 1, 2);
@@ -381,43 +328,51 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         AtomicBoolean compacted = new AtomicBoolean();
         List<String> compactedAnchors = new ArrayList<>();
         List<String> compactedDvFiles = new ArrayList<>();
-        DataEvolutionRowIdReassigner.Result result =
-                reassignerWithBeforeCommit(
-                                table,
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            writePartitionRows(table, "a", 8, 9);
-                                            compactDataEvolutionTable(
-                                                    table.copy(
-                                                            Collections.singletonMap(
-                                                                    CoreOptions
-                                                                            .COMPACTION_MIN_FILE_NUM
-                                                                            .key(),
-                                                                    "2")),
-                                                    false);
-                                            assertThat(table.latestSnapshot().get().commitKind())
-                                                    .isEqualTo(Snapshot.CommitKind.COMPACT);
-                                            compactedAnchors.addAll(
-                                                    liveDeletionVectorDataFileNames(table));
-                                            compactedDvFiles.addAll(
-                                                    liveDeletionVectorIndexFileNames(table));
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-concurrent-compact-dv");
+        assertThatThrownBy(
+                        () ->
+                                reassignerWithBeforeCommit(
+                                                table,
+                                                () -> {
+                                                    if (compacted.compareAndSet(false, true)) {
+                                                        try {
+                                                            writePartitionRows(table, "a", 8, 9);
+                                                            compactDataEvolutionTable(
+                                                                    table.copy(
+                                                                            Collections
+                                                                                    .singletonMap(
+                                                                                            CoreOptions
+                                                                                                    .COMPACTION_MIN_FILE_NUM
+                                                                                                    .key(),
+                                                                                            "2")),
+                                                                    false);
+                                                            assertThat(
+                                                                            table.latestSnapshot()
+                                                                                    .get()
+                                                                                    .commitKind())
+                                                                    .isEqualTo(
+                                                                            Snapshot.CommitKind
+                                                                                    .COMPACT);
+                                                            compactedAnchors.addAll(
+                                                                    liveDeletionVectorDataFileNames(
+                                                                            table));
+                                                            compactedDvFiles.addAll(
+                                                                    liveDeletionVectorIndexFileNames(
+                                                                            table));
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    }
+                                                })
+                                        .reassign("test-reassign-concurrent-compact-dv"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("partially overlaps planned ranges");
 
         assertThat(compacted).isTrue();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 2);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 3);
-        assertThat(result.firstAssignedRowId).isEqualTo(10L);
-        assertThat(result.nextRowId).isEqualTo(18L);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(before.id() + 2);
+        assertThat(table.latestSnapshot().get().nextRowId()).isEqualTo(10L);
         assertThat(readPartitionedRowsWithRowIds(table))
                 .containsExactly(
-                        "b|3|3", "b|4|4", "a|0|10", "a|2|12", "a|5|13", "a|7|15", "a|8|16",
-                        "a|9|17");
+                        "a|0|0", "a|2|2", "b|3|3", "b|4|4", "a|5|5", "a|7|7", "a|8|8", "a|9|9");
         assertThat(compactedAnchors).isNotEmpty();
         assertThat(liveDeletionVectorDataFileNames(table)).isEqualTo(compactedAnchors);
         assertThat(liveDeletionVectorIndexFileNames(table)).isEqualTo(compactedDvFiles);

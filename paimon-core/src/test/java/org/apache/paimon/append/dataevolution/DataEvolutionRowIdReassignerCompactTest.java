@@ -33,7 +33,6 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -235,104 +234,51 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testReassignReplansAfterPartiallyOverlappingConcurrentCompaction(boolean filter)
+    public void testReassignRejectsPartiallyOverlappingConcurrentCompaction(boolean filter)
             throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         createBTreeIndex(table);
         Snapshot before = table.snapshotManager().latestSnapshot();
-
         AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                filter ? partitionPredicate(table, "a") : null,
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            writeOneRow(table, "a", 5);
-                                            compactNormalFiles(table, "pt=a/", 4L);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-reassign-partially-overlapping-compact");
-
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionRowIdReassigner(
+                                                table,
+                                                filter ? partitionPredicate(table, "a") : null,
+                                                () -> {
+                                                    if (compacted.compareAndSet(false, true)) {
+                                                        try {
+                                                            writeOneRow(table, "a", 5);
+                                                            compactNormalFiles(table, "pt=a/", 4L);
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    }
+                                                })
+                                        .reassign("test-reassign-partially-overlapping-compact"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("partially overlaps planned ranges");
         assertThat(compacted).isTrue();
-        assertThat(result.reassigned).isTrue();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 2);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 3);
-        assertThat(result.firstAssignedRowId).isEqualTo(6L);
-        assertThat(result.nextRowId).isEqualTo(filter ? 10L : 12L);
-        assertThat(result.rowCount).isEqualTo(filter ? 4L : 6L);
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id() + 2);
         assertThat(expandedRowIdsByPartition(table))
-                .containsEntry("pt=a/", Arrays.asList(6L, 7L, 8L, 9L))
-                .containsEntry("pt=b/", filter ? Arrays.asList(1L, 3L) : Arrays.asList(10L, 11L));
+                .containsEntry("pt=a/", Arrays.asList(0L, 2L, 4L, 5L))
+                .containsEntry("pt=b/", Arrays.asList(1L, 3L));
         assertThat(readTableRows(table))
                 .containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4", "5|a|v5");
-        assertThat(result.indexFileCount).isEqualTo(filter ? 3L : 5L);
-        List<Range> indexRanges = new ArrayList<>();
-        for (IndexManifestEntry entry : table.store().newIndexFileHandler().scanEntries()) {
-            indexRanges.add(entry.indexFile().globalIndexMeta().rowRange());
-        }
-        assertThat(indexRanges)
-                .containsExactlyInAnyOrderElementsOf(
-                        filter
-                                ? Arrays.asList(
-                                        new Range(1, 1),
-                                        new Range(3, 3),
-                                        new Range(6, 6),
-                                        new Range(7, 7),
-                                        new Range(8, 8))
-                                : Arrays.asList(
-                                        new Range(6, 6),
-                                        new Range(7, 7),
-                                        new Range(8, 8),
-                                        new Range(10, 10),
-                                        new Range(11, 11)));
-        assertPersistedPlan(table);
-    }
-
-    @Test
-    public void testReplanningDoesNotIncludeNewlyFragmentedPartitions() throws Exception {
-        FileStoreTable table = createTableWithInterleavedPartitions();
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                null,
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            writeOneRow(table, "a", 5);
-                                            compactNormalFiles(table, "pt=a/", 4L);
-                                            writeOneRow(table, "c", 6);
-                                            writeOneRow(table, "d", 7);
-                                            writeOneRow(table, "c", 8);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-replan-original-partitions");
-
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 5);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 6);
-        assertThat(result.firstAssignedRowId).isEqualTo(9L);
-        assertThat(result.nextRowId).isEqualTo(15L);
-        assertThat(expandedRowIdsByPartition(table))
-                .containsEntry("pt=a/", Arrays.asList(9L, 10L, 11L, 12L))
-                .containsEntry("pt=b/", Arrays.asList(13L, 14L))
-                .containsEntry("pt=c/", Arrays.asList(6L, 8L))
-                .containsEntry("pt=d/", Collections.singletonList(7L));
-        assertThat(readTableRows(table)).hasSize(9);
-        assertPersistedPlan(table);
+        assertThat(table.store().newIndexFileHandler().scanEntries())
+                .extracting(entry -> entry.indexFile().globalIndexMeta().rowRange())
+                .containsExactlyInAnyOrder(
+                        new Range(0, 0),
+                        new Range(1, 1),
+                        new Range(2, 2),
+                        new Range(3, 3),
+                        new Range(4, 4));
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testReplanningKeepsNullPartition(boolean filter) throws Exception {
+    public void testReassignNullPartitionAfterConcurrentCompaction(boolean filter)
+            throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
         writeOneRow(table, null, 0);
@@ -357,28 +303,26 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
                                 () -> {
                                     if (compacted.compareAndSet(false, true)) {
                                         try {
-                                            writeOneRow(table, null, 5);
-                                            compactNormalFiles(table, nullPartitionPath, 4L);
+                                            compactOneFile(table, nullPartitionPath);
                                         } catch (Exception e) {
                                             throw new RuntimeException(e);
                                         }
                                     }
                                 })
-                        .reassign("test-replan-null-partition");
+                        .reassign("test-reassign-null-partition-compact");
 
         assertThat(result.reassigned).isTrue();
-        assertThat(result.rowCount).isEqualTo(filter ? 4L : 6L);
+        assertThat(result.rowCount).isEqualTo(filter ? 3L : 5L);
         assertThat(expandedRowIdsByPartition(table))
-                .containsEntry(nullPartitionPath, Arrays.asList(6L, 7L, 8L, 9L))
-                .containsEntry("pt=b/", filter ? Arrays.asList(1L, 3L) : Arrays.asList(10L, 11L));
+                .containsEntry(nullPartitionPath, Arrays.asList(5L, 6L, 7L))
+                .containsEntry("pt=b/", filter ? Arrays.asList(1L, 3L) : Arrays.asList(8L, 9L));
         assertThat(readTableRows(table))
-                .containsExactly(
-                        "0|null|v0", "1|b|v1", "2|null|v2", "3|b|v3", "4|null|v4", "5|null|v5");
+                .containsExactly("0|null|v0", "1|b|v1", "2|null|v2", "3|b|v3", "4|null|v4");
         assertPersistedPlan(table);
     }
 
     @Test
-    public void testReassignReplansAcrossRepeatedCompactionConflicts() throws Exception {
+    public void testReassignRetriesAcrossRepeatedCompactionConflicts() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         Snapshot before = table.snapshotManager().latestSnapshot();
         AtomicInteger attempts = new AtomicInteger();
@@ -390,77 +334,29 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
                                     int attempt = attempts.getAndIncrement();
                                     if (attempt < 2) {
                                         try {
-                                            writeOneRow(table, "a", 5 + attempt);
-                                            compactNormalFiles(table, "pt=a/", 4L);
+                                            compactOneFile(table, "pt=a/");
                                             compactManifests(table);
                                         } catch (Exception e) {
                                             throw new RuntimeException(e);
                                         }
                                     }
                                 })
-                        .reassign("test-replan-repeated-compactions");
-
+                        .reassign("test-reassign-repeated-compactions");
         assertThat(attempts).hasValue(3);
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 6);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 7);
-        assertThat(result.firstAssignedRowId).isEqualTo(7L);
-        assertThat(result.nextRowId).isEqualTo(14L);
-        assertThat(expandedRowIdsByPartition(table))
-                .containsEntry("pt=a/", Arrays.asList(7L, 8L, 9L, 10L, 11L))
-                .containsEntry("pt=b/", Arrays.asList(12L, 13L));
+        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 4);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 5);
+        assertThat(result.firstAssignedRowId).isEqualTo(5L);
+        assertThat(result.nextRowId).isEqualTo(10L);
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
+                .containsEntry("pt=b/", Arrays.asList(8L, 9L));
         assertThat(readTableRows(table))
-                .containsExactly(
-                        "0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4", "5|a|v5", "6|a|v6");
+                .containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|b|v3", "4|a|v4");
         assertPersistedPlan(table);
     }
 
     @Test
-    public void testReplanningSkipsWhenNoPartitionStillRequiresReassignment() throws Exception {
-        createTableDefault();
-        FileStoreTable table =
-                getTableDefault()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions
-                                                .DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT
-                                                .key(),
-                                        "1"));
-        writeOneRow(table, "a", 0);
-        writeOneRow(table, "b", 1);
-        writeOneRow(table, "a", 2);
-        Snapshot before = table.snapshotManager().latestSnapshot();
-        AtomicBoolean compacted = new AtomicBoolean();
-        DataEvolutionRowIdReassigner.Result result =
-                new DataEvolutionRowIdReassigner(
-                                table,
-                                partitionPredicate(table, "a"),
-                                () -> {
-                                    if (compacted.compareAndSet(false, true)) {
-                                        try {
-                                            writeOneRow(table, "a", 3);
-                                            compactNormalFiles(table, "pt=a/", 2L);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }
-                                })
-                        .reassign("test-replan-nothing-to-reassign");
-
-        assertThat(result.reassigned).isFalse();
-        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 2);
-        assertThat(result.newSnapshotId).isEqualTo(result.previousSnapshotId);
-        assertThat(result.firstAssignedRowId).isEqualTo(4L);
-        assertThat(result.nextRowId).isEqualTo(4L);
-        assertThat(result.skipReason).contains("after concurrent compaction");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(result.newSnapshotId);
-        assertThat(expandedRowIdsByPartition(table))
-                .containsEntry("pt=a/", Arrays.asList(0L, 2L, 3L))
-                .containsEntry("pt=b/", Collections.singletonList(1L));
-        assertThat(readTableRows(table)).containsExactly("0|a|v0", "1|b|v1", "2|a|v2", "3|a|v3");
-    }
-
-    @Test
-    public void testReplanningStillRejectsConcurrentOverwrite() throws Exception {
+    public void testConcurrentCompactionStillRejectsOverwrite() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         AtomicBoolean compacted = new AtomicBoolean();
         assertThatThrownBy(
@@ -471,8 +367,7 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
                                                 () -> {
                                                     if (compacted.compareAndSet(false, true)) {
                                                         try {
-                                                            writeOneRow(table, "a", 5);
-                                                            compactNormalFiles(table, "pt=a/", 4L);
+                                                            compactOneFile(table, "pt=a/");
                                                             BatchWriteBuilder builder =
                                                                     table.newBatchWriteBuilder()
                                                                             .withOverwrite();
@@ -497,7 +392,7 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
                                                         }
                                                     }
                                                 })
-                                        .reassign("test-replan-rejects-overwrite"))
+                                        .reassign("test-compact-rejects-overwrite"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("OVERWRITE snapshot");
         assertThat(table.snapshotManager().latestSnapshot().commitKind())
@@ -559,15 +454,7 @@ public class DataEvolutionRowIdReassignerCompactTest extends TableTestBase {
     }
 
     private void writeOneRow(FileStoreTable table, String partition, int id) throws Exception {
-        writeOneRow(table, partition, id, false);
-    }
-
-    private void writeOneRow(FileStoreTable table, String partition, int id, boolean overwrite)
-            throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        if (overwrite) {
-            builder.withOverwrite();
-        }
         try (BatchTableWrite write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
             write.write(
