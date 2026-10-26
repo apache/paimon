@@ -2130,6 +2130,11 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         verifyReassignOutOfOrderPartitionEntries(LARGE_ENTRY_COUNT, LARGE_MANIFEST_FILE_COUNT);
     }
 
+    public static DataEvolutionRowIdReassigner reassignerWithBeforeCommit(
+            FileStoreTable table, Runnable beforeCommit) {
+        return new DataEvolutionRowIdReassigner(table, null, beforeCommit);
+    }
+
     private FileStoreTable createTableWithInterleavedPartitions() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

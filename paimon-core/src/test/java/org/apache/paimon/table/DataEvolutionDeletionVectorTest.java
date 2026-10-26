@@ -87,7 +87,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignerTestUtils.reassignerWithBeforeCommit;
+import static org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassignerTest.reassignerWithBeforeCommit;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
