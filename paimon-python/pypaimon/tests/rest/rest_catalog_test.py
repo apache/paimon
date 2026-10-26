@@ -335,6 +335,42 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIn("no_such_table_for_snapshot", str(context.exception))
         self.assertIn("does not exist", str(context.exception))
 
+    def test_get_table_by_id(self):
+        from pypaimon.catalog.catalog_exception import (TableIdNoPermissionException,
+                                                        TableIdNotExistException)
+        from pypaimon.execution.native.table import _resolved_rest_table_response
+        # a dotted database name must come back unchanged
+        identifier = Identifier.create("test.table_db", "get_table_by_id")
+        self.rest_catalog.create_database(identifier.get_database_name(), False)
+        pa_schema = pa.schema([('col1', pa.int32())])
+        self.rest_catalog.create_table(identifier, Schema.from_pyarrow_schema(pa_schema), False)
+        table = self.rest_catalog.get_table(identifier)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({'col1': [1]}, schema=pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table_id = table.catalog_environment.uuid
+        table_by_id = self.rest_catalog.get_table_by_id(table_id)
+        self.assertEqual(table_by_id.catalog_environment.uuid, table_id)
+        self.assertEqual(table_by_id.identifier.get_database_name(), "test.table_db")
+        self.assertEqual(table_by_id.identifier.get_table_name(), "get_table_by_id")
+        self.assertEqual(table_by_id.table_path, table.table_path)
+        # native readers can reuse the response
+        self.assertIsNotNone(_resolved_rest_table_response(table_by_id))
+        read_builder = table_by_id.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(result.column('col1').to_pylist(), [1])
+
+        with self.assertRaises(TableIdNotExistException):
+            self.rest_catalog.get_table_by_id("missing_table_id")
+        self.server.add_no_permission_table(identifier)
+        with self.assertRaises(TableIdNoPermissionException):
+            self.rest_catalog.get_table_by_id(table_id)
+
     def test_catalog_load_snapshot_after_rollback(self):
         """Test load_snapshot returns correct snapshot after rollback."""
         table_name = "default.table_load_snapshot_after_rollback"
