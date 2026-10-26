@@ -200,8 +200,13 @@ class _NativeRestTableCache:
         def create():
             token = token_loader() if token_loader else None
             if token is None:
+                # A REST table can reach this path before its data token is available (for
+                # example a copied branch or a token refresh race).  The native core sends
+                # every OSS request to one endpoint, so routing keys in the catalog must not
+                # leave its legacy fs.oss.endpoint pointed at a cache target.
                 return Table.from_rest_response(
-                    response, database=database, table=table, rest_options=options)
+                    response, database=database, table=table,
+                    rest_options=single_endpoint_options(options))
             # The native core cannot use io-cache targets per request, and fs.oss.endpoint may name the cache.
             return Table.from_rest_response_with_token(
                 response, database=database, table=table, rest_options=options,
@@ -317,7 +322,11 @@ def _load_native_table(table):
         from pypaimon_rust.datafusion import PaimonCatalog
         # The Python loader has already resolved /config, including typed
         # FUSE options. Match RESTCatalogLoader.load() and reuse that context.
-        catalog = PaimonCatalog(_catalog_options(table), config_required=False)
+        # This catalog is also a single-endpoint client.  Keep its metadata/catalog
+        # configuration, but make its storage endpoint the origin when catalog-only
+        # io-cache routing is enabled.
+        catalog = PaimonCatalog(
+            single_endpoint_options(_catalog_options(table)), config_required=False)
         # REST may keep branch schemas in the catalog only. Load the base
         # environment, then attach the schema/branch already resolved here.
         rt = catalog.get_table((

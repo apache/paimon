@@ -1199,6 +1199,26 @@ class NativePlanTest(unittest.TestCase):
             fake_df.Table.from_rest_response.assert_called_once_with(
                 'response', database='default', table='t', rest_options={})
 
+            # A copied branch can reach the REST fallback before a data token is available.
+            # The native core is single-endpoint, so catalog-only routing must still select
+            # the origin instead of the legacy endpoint that names a cache target.
+            fake_df.Table.reset_mock()
+            options = {
+                'fs.oss.endpoint': 'http://cache.example.com',
+                'io-cache.enabled': 'true',
+                'io-cache.endpoint': 'http://cache.example.com',
+                'io-cache.origin.endpoint': 'https://origin.example.com',
+                'io-cache.policy': 'meta,read',
+            }
+            cache = _NativeRestTableCache()
+            cache.get('response', 'default', 't', options, token_loader=lambda: None)
+            fake_df.Table.from_rest_response.assert_called_once_with(
+                'response', database='default', table='t',
+                rest_options={
+                    'fs.oss.endpoint': 'https://origin.example.com',
+                    'fs.oss.https.enable': 'true',
+                })
+
     def test_native_rest_cache_gives_the_core_the_origin_under_io_cache_routing(self):
         import time
 
