@@ -131,7 +131,8 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             throws IOException {
         try {
             return readerFactory.createReader(context);
-        } catch (Exception e) {
+        } catch (Exception | InternalError e) {
+            rethrowIfNotIgnorable(e, ignoreCorruptFiles);
             Path actualPath =
                     CompactedChangelogPathResolver.resolveCompactedChangelogPath(
                             context.filePath());
@@ -173,7 +174,8 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         FileRecordIterator<InternalRow> iterator;
         try {
             iterator = readBatchInternal();
-        } catch (Exception e) {
+        } catch (Exception | InternalError e) {
+            rethrowIfNotIgnorable(e, ignoreCorruptFiles);
             if (ignoreCorruptException(e, ignoreCorruptFiles)) {
                 LOG.warn("Failed to read batch from file: {}, ignore exception", filePath, e);
                 corrupted = true;
@@ -272,6 +274,17 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     }
 
     /**
+     * {@link InternalError} (such as {@link java.util.zip.ZipError}) is only caught so that it can
+     * be ignored as a corrupt file. Without {@code scan.ignore-corrupt-files} it propagates as
+     * before.
+     */
+    private static void rethrowIfNotIgnorable(Throwable e, boolean ignoreCorruptFiles) {
+        if (e instanceof InternalError && !ignoreCorruptFiles) {
+            throw (InternalError) e;
+        }
+    }
+
+    /**
      * Row-based formats (CSV, JSON, TEXT, Avro, ...) decode lazily in {@link #next()}, so a file
      * that is truncated or corrupt in the middle only fails after {@link #readBatch()} returned.
      * This iterator extends {@code scan.ignore-corrupt-files} to that point: the rows already
@@ -293,7 +306,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             }
             try {
                 return iterator.next();
-            } catch (Exception e) {
+            } catch (Exception | InternalError e) {
                 return handleCorruptException(e, null);
             }
         }
@@ -307,12 +320,12 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 return iterator.skip();
             } catch (UnsupportedOperationException e) {
                 throw e;
-            } catch (Exception e) {
+            } catch (Exception | InternalError e) {
                 return handleCorruptException(e, false);
             }
         }
 
-        private <T> T handleCorruptException(Exception e, T endOfFile) throws IOException {
+        private <T> T handleCorruptException(Throwable e, T endOfFile) throws IOException {
             if (ignoreCorruptException(e, ignoreCorruptFiles)) {
                 LOG.warn(
                         "Failed to read records from file: {}, ignore the rest of the file",
@@ -324,7 +337,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             if (e instanceof IOException) {
                 throw (IOException) e;
             }
-            throw (RuntimeException) e;
+            if (e instanceof Error) {
+                throw (Error) e;
+            }
+            throw new IOException(e);
         }
 
         @Override

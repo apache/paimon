@@ -297,7 +297,11 @@ public class FormatReadBuilder implements ReadBuilder {
                     Collections.emptyMap(),
                     null,
                     formatReaderContext.filePath());
-        } catch (Exception e) {
+        } catch (Exception | InternalError e) {
+            // InternalError (such as ZipError) is only caught to be ignored as a corrupt file.
+            if (e instanceof InternalError && !options.scanIgnoreCorruptFile()) {
+                throw (InternalError) e;
+            }
             Path filePath = formatReaderContext.filePath();
             // A missing file is not corrupt: keep reporting it as not found.
             FileUtils.checkExists(formatReaderContext.fileIO(), filePath);

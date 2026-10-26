@@ -21,6 +21,9 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -47,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.zip.GZIPOutputStream;
+import java.util.zip.ZipError;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,6 +65,9 @@ class FormatTableIgnoreCorruptFilesTest {
     private static final int TRUNCATED_FILE_ROWS = 20_000;
     private static final int INTACT_FILE_FIRST_ID = 1_000_000;
     private static final int INTACT_FILE_ROWS = 3;
+    private static final String ZIP_ERROR_AT_OPEN = "zip-error-at-open";
+    private static final String ZIP_ERROR_WHILE_READING = "zip-error-while-reading";
+    private static final int ZIP_ERROR_AFTER_BYTES = 64 * 1024;
 
     @TempDir Path tempDir;
 
@@ -135,6 +142,66 @@ class FormatTableIgnoreCorruptFilesTest {
                         INTACT_FILE_FIRST_ID, INTACT_FILE_FIRST_ID + 1, INTACT_FILE_FIRST_ID + 2);
     }
 
+    @ParameterizedTest(name = "format = {0}")
+    @ValueSource(strings = {"csv", "json"})
+    void testZipErrorWhileReading(String format) throws Exception {
+        // ZipError is an InternalError, not an Exception, but the option treats it as corruption.
+        writeGzip(
+                tempDir.resolve(ZIP_ERROR_WHILE_READING + "." + format + ".gz"), format, 0, 20_000);
+        writeGzip(
+                tempDir.resolve("intact." + format + ".gz"),
+                format,
+                INTACT_FILE_FIRST_ID,
+                INTACT_FILE_ROWS);
+
+        FormatTable table = createTable(format, new ZipErrorFileIO());
+
+        assertThatThrownBy(() -> readIds(table)).isInstanceOf(ZipError.class);
+
+        List<Integer> ids =
+                readIds(
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "true")));
+
+        List<Integer> brokenIds = new ArrayList<>();
+        List<Integer> intactIds = new ArrayList<>();
+        for (int id : ids) {
+            (id >= INTACT_FILE_FIRST_ID ? intactIds : brokenIds).add(id);
+        }
+        assertThat(intactIds)
+                .containsExactly(
+                        INTACT_FILE_FIRST_ID, INTACT_FILE_FIRST_ID + 1, INTACT_FILE_FIRST_ID + 2);
+        assertThat(brokenIds).isNotEmpty().hasSizeLessThan(20_000);
+        for (int i = 0; i < brokenIds.size(); i++) {
+            assertThat(brokenIds.get(i)).isEqualTo(i);
+        }
+    }
+
+    @ParameterizedTest(name = "format = {0}")
+    @ValueSource(strings = {"csv", "json"})
+    void testZipErrorAtOpen(String format) throws Exception {
+        writeGzip(tempDir.resolve(ZIP_ERROR_AT_OPEN + "." + format + ".gz"), format, 0, 1_000);
+        writeGzip(
+                tempDir.resolve("intact." + format + ".gz"),
+                format,
+                INTACT_FILE_FIRST_ID,
+                INTACT_FILE_ROWS);
+
+        FormatTable table = createTable(format, new ZipErrorFileIO());
+
+        assertThatThrownBy(() -> readIds(table)).isInstanceOf(ZipError.class);
+
+        List<Integer> ids =
+                readIds(
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_IGNORE_CORRUPT_FILE.key(), "true")));
+        assertThat(ids)
+                .containsExactly(
+                        INTACT_FILE_FIRST_ID, INTACT_FILE_FIRST_ID + 1, INTACT_FILE_FIRST_ID + 2);
+    }
+
     @Test
     void testLostFileIsNotTreatedAsCorrupt() throws Exception {
         writeGzip(tempDir.resolve("lost.csv.gz"), "csv", 0, INTACT_FILE_ROWS);
@@ -159,10 +226,14 @@ class FormatTableIgnoreCorruptFilesTest {
     }
 
     private FormatTable createTable(String format) {
+        return createTable(format, LocalFileIO.create());
+    }
+
+    private FormatTable createTable(String format, FileIO fileIO) {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.FILE_FORMAT.key(), format);
         return FormatTable.builder()
-                .fileIO(LocalFileIO.create())
+                .fileIO(fileIO)
                 .identifier(Identifier.create("test_db", "corrupt_" + format))
                 .rowType(
                         RowType.builder()
@@ -207,5 +278,56 @@ class FormatTableIgnoreCorruptFilesTest {
         byte[] half = new byte[bytes.length / 2];
         System.arraycopy(bytes, 0, half, 0, half.length);
         Files.write(file, half);
+    }
+
+    /**
+     * Throws {@link ZipError} for files named after the failure to simulate: either as soon as the
+     * file is opened, or once the first {@link #ZIP_ERROR_AFTER_BYTES} bytes have been read.
+     */
+    private static class ZipErrorFileIO extends LocalFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public SeekableInputStream newInputStream(org.apache.paimon.fs.Path path)
+                throws IOException {
+            String name = path.getName();
+            if (name.startsWith(ZIP_ERROR_AT_OPEN)) {
+                throw new ZipError("simulated zip error at open: " + name);
+            }
+            SeekableInputStream in = super.newInputStream(path);
+            if (!name.startsWith(ZIP_ERROR_WHILE_READING)) {
+                return in;
+            }
+            return new SeekableInputStreamWrapper(in) {
+                private long bytesRead;
+
+                @Override
+                public int read() throws IOException {
+                    checkLimit();
+                    int b = super.read();
+                    if (b >= 0) {
+                        bytesRead++;
+                    }
+                    return b;
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    checkLimit();
+                    int n = super.read(b, off, len);
+                    if (n > 0) {
+                        bytesRead += n;
+                    }
+                    return n;
+                }
+
+                private void checkLimit() {
+                    if (bytesRead >= ZIP_ERROR_AFTER_BYTES) {
+                        throw new ZipError("simulated zip error while reading: " + name);
+                    }
+                }
+            };
+        }
     }
 }
