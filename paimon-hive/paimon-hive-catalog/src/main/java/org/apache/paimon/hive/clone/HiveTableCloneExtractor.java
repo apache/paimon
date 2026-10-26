@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FormatTable;
@@ -327,7 +328,7 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             throws IOException {
         Path root = new Path(location);
         List<FileStatus> fileStatuses;
-        if (recursive && fileIO.isObjectStore()) {
+        if (recursive && isObjectStore(fileIO, root)) {
             // one flat listing of the prefix, listing each directory would need many more requests
             fileStatuses =
                     Arrays.stream(fileIO.listFiles(root, true))
@@ -352,6 +353,14 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             fileSizes.add(fileStatus.getLen());
         }
         return new HivePartitionFiles(partition, paths, fileSizes, format);
+    }
+
+    private static boolean isObjectStore(FileIO fileIO, Path path) throws IOException {
+        // a resolving FileIO answers for the catalog warehouse, which may be on another file system
+        if (fileIO instanceof ResolvingFileIO) {
+            return ((ResolvingFileIO) fileIO).fileIO(path).isObjectStore();
+        }
+        return fileIO.isObjectStore();
     }
 
     private static void listVisibleFiles(FileIO fileIO, Path dir, List<FileStatus> files)
