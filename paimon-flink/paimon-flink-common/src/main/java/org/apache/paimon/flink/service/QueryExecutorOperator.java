@@ -119,12 +119,14 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
     @Override
     public void processElement(StreamRecord<InternalRow> streamRecord) throws Exception {
         InternalRow row = streamRecord.getValue();
+        // FileMonitorTable row: snapshot id, partition, bucket, before files, data files.
+        long snapshotId = row.getLong(0);
         BinaryRow partition = deserializeBinaryRow(row.getBinary(1));
         int bucket = row.getInt(2);
         DataFileMetaSerializer fileMetaSerializer = new DataFileMetaSerializer();
         List<DataFileMeta> beforeFiles = fileMetaSerializer.deserializeList(row.getBinary(3));
         List<DataFileMeta> dataFiles = fileMetaSerializer.deserializeList(row.getBinary(4));
-        query.refreshFiles(partition, bucket, beforeFiles, dataFiles);
+        query.refreshFiles(partition, bucket, beforeFiles, dataFiles, snapshotId);
     }
 
     @Override

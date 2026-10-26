@@ -2717,7 +2717,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 table.newLocalTableQuery().withIOManager(ioManager).withMetrics(metrics);
         for (DataSplit split : dataSplits) {
             query.refreshFiles(
-                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+                    split.partition(),
+                    split.bucket(),
+                    Collections.emptyList(),
+                    split.dataFiles(),
+                    split.snapshotId());
         }
         InternalRow value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
@@ -2739,7 +2743,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                         .withIOManager(ioManager);
         for (DataSplit split : dataSplits) {
             projected.refreshFiles(
-                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+                    split.partition(),
+                    split.bucket(),
+                    Collections.emptyList(),
+                    split.dataFiles(),
+                    split.snapshotId());
         }
         assertThatThrownBy(() -> projected.lookup(row(1), 0, row(10)))
                 .isInstanceOf(Exception.class);
@@ -2756,7 +2764,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                         .withIOManager(ioManager);
         for (DataSplit split : dataSplits) {
             rebuilt.refreshFiles(
-                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+                    split.partition(),
+                    split.bucket(),
+                    Collections.emptyList(),
+                    split.dataFiles(),
+                    split.snapshotId());
         }
         InternalRow projectedValue = rebuilt.lookup(row(1), 0, row(10));
         assertThat(projectedValue).isNotNull();
@@ -2980,7 +2992,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         LocalTableQuery query = table.newLocalTableQuery();
         query.withIOManager(ioManager);
 
-        refreshTableService(query, commitMessages1);
+        refreshTableService(query, commitMessages1, table.snapshotManager().latestSnapshot().id());
         InternalRow value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
         assertThat(BATCH_ROW_TO_STRING.apply(value))
@@ -2993,7 +3005,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         List<CommitMessage> commitMessages2 = write.prepareCommit(true, 0);
         commit.commit(0, commitMessages2);
 
-        refreshTableService(query, commitMessages2);
+        refreshTableService(query, commitMessages2, table.snapshotManager().latestSnapshot().id());
 
         value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
@@ -3014,8 +3026,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         query.close();
         query.withValueProjection(new int[] {2, 1, 0});
-        refreshTableService(query, commitMessages1);
-        refreshTableService(query, commitMessages2);
+        refreshTableService(query, commitMessages1, table.snapshotManager().latestSnapshot().id());
+        refreshTableService(query, commitMessages2, table.snapshotManager().latestSnapshot().id());
         value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
         Function<InternalRow, String> projectToString =
@@ -3027,19 +3039,22 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         commit.close();
     }
 
-    private void refreshTableService(LocalTableQuery query, List<CommitMessage> commitMessages) {
+    private void refreshTableService(
+            LocalTableQuery query, List<CommitMessage> commitMessages, long snapshotId) {
         for (CommitMessage m : commitMessages) {
             CommitMessageImpl msg = (CommitMessageImpl) m;
             query.refreshFiles(
                     msg.partition(),
                     msg.bucket(),
                     Collections.emptyList(),
-                    msg.newFilesIncrement().newFiles());
+                    msg.newFilesIncrement().newFiles(),
+                    snapshotId);
             query.refreshFiles(
                     msg.partition(),
                     msg.bucket(),
                     msg.compactIncrement().compactBefore(),
-                    msg.compactIncrement().compactAfter());
+                    msg.compactIncrement().compactAfter(),
+                    snapshotId);
         }
     }
 

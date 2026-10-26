@@ -355,7 +355,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             int bucket = split.bucket();
             List<DataFileMeta> after = split.dataFiles();
 
-            tableQuery.refreshFiles(partition, bucket, emptyList(), after);
+            tableQuery.refreshFiles(partition, bucket, emptyList(), after, split.snapshotId());
             Integer totalBuckets = split.totalBuckets();
             if (totalBuckets == null) {
                 // Just for compatibility with older versions
@@ -370,7 +370,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         private void refreshSplit(IncrementalSplit split) {
             BinaryRow partition = split.partition();
             tableQuery.refreshFiles(
-                    partition, split.bucket(), split.beforeFiles(), split.afterFiles());
+                    partition,
+                    split.bucket(),
+                    split.beforeFiles(),
+                    split.afterFiles(),
+                    split.snapshotId());
             numBuckets.put(partition, split.totalBuckets());
         }
 
