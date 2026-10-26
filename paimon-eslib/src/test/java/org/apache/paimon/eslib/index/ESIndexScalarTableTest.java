@@ -30,6 +30,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
@@ -46,6 +47,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -56,6 +58,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
@@ -64,6 +67,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -78,6 +82,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertAll;
 
 /** Real ES archives must accelerate scalar predicates without dropping uncovered table rows. */
 class ESIndexScalarTableTest {
@@ -292,6 +298,290 @@ class ESIndexScalarTableTest {
                 .containsExactly(new Range(4, 4));
     }
 
+    @ParameterizedTest
+    @CsvSource({"full,false", "full,true", "detail,false", "detail,true"})
+    void testUnsupportedScalarPredicatesFallBack(String mode, boolean inReader) throws Exception {
+        FileStoreTable table = createTable();
+        build(table, 0, 4, "embedding", "category", "price");
+        build(table, 6, 10, "embedding", "category", "price");
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate range = b.greaterThan(2, BinaryString.fromString("c1"));
+        Predicate price = b.greaterThan(3, 0.0);
+        for (Predicate filter :
+                Arrays.asList(
+                        range,
+                        b.greaterOrEqual(2, BinaryString.fromString("c1")),
+                        b.lessThan(2, BinaryString.fromString("c1")),
+                        b.lessOrEqual(2, BinaryString.fromString("c1")),
+                        b.between(2, BinaryString.fromString("c0"), BinaryString.fromString("c1")),
+                        b.between(2, BinaryString.fromString("c0"), BinaryString.fromString("c1"))
+                                .negate()
+                                .get(),
+                        PredicateBuilder.and(range, price),
+                        PredicateBuilder.or(range, price))) {
+            assertThat(read(configured(table, mode, inReader), filter))
+                    .as("%s", filter)
+                    .containsExactlyElementsOf(read(withoutIndex(table), filter));
+        }
+    }
+
+    @Test
+    void testUnsupportedFilterDoesNotClaimCoverageButZeroHitsDo() throws Exception {
+        FileStoreTable table = createTable();
+        build(table, 0, 12, "embedding", "category", "price");
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate range = b.greaterThan(2, BinaryString.fromString("c1"));
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
+                                table, table.snapshotManager().latestSnapshot(), null, indexFiles)
+                        .get()) {
+            assertThat(scanner.scanWithCoverage(range)).isEmpty();
+            assertThat(scanner.scanWithCoverage(PredicateBuilder.or(range, b.equal(3, 6.0))))
+                    .isEmpty();
+
+            GlobalIndexEvaluator.Evaluation partial =
+                    scanner.scanWithCoverage(PredicateBuilder.and(range, b.greaterThan(3, 0.0)))
+                            .get();
+            assertThat(partial.fullyEvaluated()).isFalse();
+            assertThat(partial.coveredRanges()).containsExactly(new Range(0, 11));
+            assertThat(partial.contributingFieldIds()).containsExactly(3);
+
+            // Supported but unmatched is an exact empty bitmap, not an unsupported operation.
+            GlobalIndexEvaluator.Evaluation zero =
+                    scanner.scanWithCoverage(b.equal(2, BinaryString.fromString("absent"))).get();
+            assertThat(zero.fullyEvaluated()).isTrue();
+            assertThat(zero.coveredRanges()).containsExactly(new Range(0, 11));
+            assertThat(zero.result().results().isEmpty()).isTrue();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "fast,true",
+        "fast,false",
+        "full,true",
+        "full,false",
+        "detail,true",
+        "detail,false"
+    })
+    void testUnsupportedKeywordRangeCannotBypassSearchFilter(String mode, boolean refine)
+            throws Exception {
+        FileStoreTable table = createTable();
+        build(table, 0, 12, "embedding", "category", "price");
+        build(table, 0, 12, "note", "category", "price");
+        table =
+                configured(table, mode, false)
+                        .copy(
+                                Collections.singletonMap(
+                                        "global-index.filter.refine-from-data",
+                                        Boolean.toString(refine)));
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).greaterThan(2, BinaryString.fromString("c1"));
+        assertThat(read(withoutIndex(table), filter)).containsExactly(2, 8, 11);
+
+        // Row 5 is the nearest vector but has a null category. Returning all indexed rows as an
+        // exact scalar result would incorrectly select it, even with data refinement enabled.
+        // Unsupported filters use the existing fallback, independently of candidate refinement.
+        assertSearchResults(
+                table,
+                filter,
+                5,
+                Collections.singletonList(new Range(2, 2)),
+                "fast".equals(mode)
+                        ? Collections.emptyList()
+                        : Arrays.asList(new Range(2, 2), new Range(8, 8)),
+                false);
+        assertThat(
+                        table.newFullTextSearchBuilder()
+                                .withQuery("note", "{\"match\":{\"query\":\"keep\"}}")
+                                .withFilter(filter)
+                                .withLimit(1)
+                                .executeLocal()
+                                .results()
+                                .toRangeList())
+                .containsExactlyElementsOf(
+                        "fast".equals(mode)
+                                ? Collections.emptyList()
+                                : Collections.singletonList(new Range(2, 2)));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "fast,true",
+        "fast,false",
+        "full,true",
+        "full,false",
+        "detail,true",
+        "detail,false"
+    })
+    void testUnsupportedKeywordRangeInSearchConjunctionAndDisjunction(String mode, boolean refine)
+            throws Exception {
+        FileStoreTable table = createTable();
+        build(table, 0, 12, "embedding", "category", "price");
+        build(table, 0, 12, "note", "category", "price");
+        table =
+                configured(table, mode, false)
+                        .copy(
+                                Collections.singletonMap(
+                                        "global-index.filter.refine-from-data",
+                                        Boolean.toString(refine)));
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        Predicate range = b.greaterThan(2, BinaryString.fromString("c1"));
+        // AND retains supported candidates, but must refine the complete predicate before top-k.
+        assertSearchResults(
+                table,
+                PredicateBuilder.and(range, b.greaterThan(3, 0.0)),
+                5,
+                refine ? Collections.singletonList(new Range(2, 2)) : Collections.emptyList(),
+                refine ? Collections.singletonList(new Range(2, 2)) : Collections.emptyList(),
+                true);
+        // OR cannot use only its supported branch: it must also retain matches of the range.
+        assertSearchResults(
+                table,
+                PredicateBuilder.or(range, b.equal(3, 6.0)),
+                5,
+                Collections.singletonList(new Range(6, 6)),
+                "fast".equals(mode)
+                        ? Collections.emptyList()
+                        : Arrays.asList(new Range(2, 2), new Range(6, 6), new Range(8, 8)),
+                false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testUnsupportedFilterPreservesPersistedVectorMetric(boolean missingBuildOptions)
+            throws Exception {
+        FileStoreTable table = createTable();
+        build(
+                table.copy(
+                        Collections.singletonMap(
+                                "global-index.es-index.fields.embedding.metric", "cosine")),
+                0,
+                12,
+                "embedding",
+                "category",
+                "price");
+        if (missingBuildOptions) {
+            Map<String, String> remove = new HashMap<>();
+            remove.put("global-index.es-index.fields.embedding.metric", null);
+            remove.put("global-index.es-index.fields.embedding.dimension", null);
+            table = table.copy(remove);
+        }
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+        // These filters are equivalent for this data. Only the equality is supported by ESLib.
+        // Both paths must use the metric stored with the index, not the table's current L2 option.
+        for (Predicate filter :
+                Arrays.asList(
+                        b.equal(2, BinaryString.fromString("c2")),
+                        b.greaterThan(2, BinaryString.fromString("c1")))) {
+            assertThat(
+                            table.newVectorSearchBuilder()
+                                    .withVectorColumn("embedding")
+                                    .withVector(vector(5))
+                                    .withLimit(1)
+                                    .withFilter(filter)
+                                    .executeLocal()
+                                    .results()
+                                    .toRangeList())
+                    .as("%s", filter)
+                    .containsExactly(new Range(8, 8));
+            assertThat(
+                            table.newBatchVectorSearchBuilder()
+                                    .withVectorColumn("embedding")
+                                    .withVectors(new float[][] {vector(5), vector(5)})
+                                    .withLimit(1)
+                                    .withFilter(filter)
+                                    .executeBatchLocal())
+                    .allSatisfy(
+                            result ->
+                                    assertThat(result.results().toRangeList())
+                                            .containsExactly(new Range(8, 8)));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testUnsupportedFilterValidatesMetricsAcrossDifferentDefinitions(boolean mixedMetrics)
+            throws Exception {
+        FileStoreTable table = createTable();
+        FileStoreTable cosine =
+                table.copy(
+                        Collections.singletonMap(
+                                "global-index.es-index.fields.embedding.metric", "cosine"));
+        build(cosine, 0, 6, "embedding", "category", "price");
+        build(mixedMetrics ? table : cosine, 6, 12, "embedding", "category");
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).greaterThan(2, BinaryString.fromString("c1"));
+        if (mixedMetrics) {
+            assertThatThrownBy(
+                            () ->
+                                    table.newVectorSearchBuilder()
+                                            .withVectorColumn("embedding")
+                                            .withVector(vector(5))
+                                            .withLimit(1)
+                                            .withFilter(filter)
+                                            .executeLocal())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("different metrics");
+        } else {
+            assertThat(
+                            table.newVectorSearchBuilder()
+                                    .withVectorColumn("embedding")
+                                    .withVector(vector(5))
+                                    .withLimit(1)
+                                    .withFilter(filter)
+                                    .executeLocal()
+                                    .results()
+                                    .toRangeList())
+                    .containsExactly(new Range(8, 8));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"full,false", "full,true", "detail,false", "detail,true"})
+    void testTypeEvolutionDoesNotDropUnsupportedShards(String mode, boolean inReader)
+            throws Exception {
+        FileStoreTable table = createTable();
+        build(table, 0, 4, "embedding", "id", "price");
+        build(table, 0, 4, "note", "id", "price");
+        new FileSystemSchemaManager(fileIO, table.location())
+                .commitChanges(SchemaChange.updateColumnType("id", DataTypes.BIGINT()));
+        table = FileStoreTableFactory.create(fileIO, table.location());
+        build(table, 6, 10, "embedding", "id", "price");
+        build(table, 6, 10, "note", "id", "price");
+        table = configured(table, mode, inReader);
+        Predicate filter = new PredicateBuilder(table.rowType()).lessThan(0, 9L);
+        assertThat(read(table, filter))
+                .containsExactlyElementsOf(read(withoutIndex(table), filter));
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForScalarFilters(
+                                table, table.snapshotManager().latestSnapshot(), null, indexFiles)
+                        .get()) {
+            GlobalIndexEvaluator.Evaluation result = scanner.scanWithCoverage(filter).get();
+            assertThat(result.coveredRanges()).containsExactly(new Range(6, 9));
+        }
+        assertThat(
+                        table.newVectorSearchBuilder()
+                                .withVectorColumn("embedding")
+                                .withVector(vector(2))
+                                .withFilter(filter)
+                                .withLimit(1)
+                                .executeLocal()
+                                .results()
+                                .toRangeList())
+                .containsExactly(new Range(2, 2));
+        assertThat(
+                        table.newFullTextSearchBuilder()
+                                .withQuery("note", "{\"match\":{\"query\":\"keep\"}}")
+                                .withFilter(filter)
+                                .withLimit(10)
+                                .executeLocal()
+                                .results()
+                                .toRangeList())
+                .containsExactly(
+                        new Range(0, 0), new Range(2, 2), new Range(6, 6), new Range(8, 8));
+    }
+
     private FileStoreTable createTable() throws Exception {
         Path path = new Path(temporary.toUri());
         Schema schema =
@@ -331,6 +621,110 @@ class ESIndexScalarTableTest {
         return table;
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "fast,true",
+        "fast,false",
+        "full,true",
+        "full,false",
+        "detail,true",
+        "detail,false"
+    })
+    void testSameFieldPartialFilterCannotBypassSearchRefinement(String mode, boolean refine)
+            throws Exception {
+        FileStoreTable table = createTable();
+        build(table, 0, 12, "embedding", "category", "price");
+        build(table, 0, 12, "note", "category", "price");
+        table =
+                configured(table, mode, false)
+                        .copy(
+                                Collections.singletonMap(
+                                        "global-index.filter.refine-from-data",
+                                        Boolean.toString(refine)));
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+
+        // A field ID cannot distinguish these two conjuncts. The range is supported; isNaN
+        // is not, and all stored prices are finite or null. Both searches must return nothing.
+        Predicate empty = PredicateBuilder.and(b.greaterThan(3, 0.0), b.isNaN(3));
+        assertThat(read(withoutIndex(table), empty)).isEmpty();
+        assertSearchFilters(table, empty, Collections.emptyList(), Collections.emptyList());
+
+        // Row 4 is closest but has category c1. Refinement must keep row 3 before top-k,
+        // not just discard row 4 afterwards. An always-empty fix would fail this positive case.
+        Predicate partial =
+                PredicateBuilder.and(
+                        b.startsWith(2, BinaryString.fromString("c")),
+                        b.startsWith(2, BinaryString.fromString("c1")).negate().get());
+        assertSearchFilters(
+                table,
+                partial,
+                refine ? Collections.singletonList(new Range(3, 3)) : Collections.emptyList(),
+                refine
+                        ? Arrays.asList(new Range(2, 2), new Range(6, 6), new Range(8, 8))
+                        : Collections.emptyList());
+
+        // Multiple conditions on the same field are not inherently inexact. All-supported
+        // conjunctions must continue to work even with data refinement disabled.
+        Predicate complete =
+                PredicateBuilder.and(
+                        b.startsWith(2, BinaryString.fromString("c")),
+                        b.notEqual(2, BinaryString.fromString("c1")));
+        assertSearchFilters(
+                table,
+                complete,
+                Collections.singletonList(new Range(3, 3)),
+                Arrays.asList(new Range(2, 2), new Range(6, 6), new Range(8, 8)));
+    }
+
+    private void assertSearchFilters(
+            FileStoreTable table,
+            Predicate filter,
+            List<Range> vectorRows,
+            List<Range> fullTextRows) {
+        assertSearchResults(table, filter, 4, vectorRows, fullTextRows, true);
+    }
+
+    private void assertSearchResults(
+            FileStoreTable table,
+            Predicate filter,
+            int queryVector,
+            List<Range> vectorRows,
+            List<Range> fullTextRows,
+            boolean mustReadIndex) {
+        assertAll(
+                () -> {
+                    fileIO.indexOpens.set(0);
+                    assertThat(
+                                    table.newVectorSearchBuilder()
+                                            .withVectorColumn("embedding")
+                                            .withVector(vector(queryVector))
+                                            .withLimit(1)
+                                            .withFilter(filter)
+                                            .executeLocal()
+                                            .results()
+                                            .toRangeList())
+                            .containsExactlyElementsOf(vectorRows);
+                    if (mustReadIndex) {
+                        assertThat(fileIO.indexOpens.get()).isPositive();
+                    }
+                },
+                () -> {
+                    fileIO.indexOpens.set(0);
+                    assertThat(
+                                    table.newFullTextSearchBuilder()
+                                            .withQuery("note", "{\"match\":{\"query\":\"keep\"}}")
+                                            .withFilter(filter)
+                                            .withLimit(10)
+                                            .executeLocal()
+                                            .results()
+                                            .toRangeList())
+                            .containsExactlyElementsOf(fullTextRows);
+                    if (mustReadIndex) {
+                        assertThat(fileIO.indexOpens.get()).isPositive();
+                    }
+                });
+    }
+
     private void build(FileStoreTable table, int from, int to, String... names) throws Exception {
         List<DataField> fields =
                 Arrays.stream(names).map(table.rowType()::getField).collect(Collectors.toList());
@@ -343,6 +737,11 @@ class ESIndexScalarTableTest {
                                 .createWriter(io);
         for (int id = from; id < to; id++) {
             Map<String, Object> values = new HashMap<>();
+            if (table.rowType().getTypeAt(0).getTypeRoot() == DataTypeRoot.BIGINT) {
+                values.put("id", (long) id);
+            } else {
+                values.put("id", id);
+            }
             values.put("embedding", new GenericArray(vector(id)));
             values.put("category", category(id));
             values.put("price", price(id));
@@ -393,7 +792,13 @@ class ESIndexScalarTableTest {
         List<Integer> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 builder.newRead().executeFilter().createReader(splits)) {
-            reader.forEachRemaining(row -> result.add(row.getInt(0)));
+            reader.forEachRemaining(
+                    row ->
+                            result.add(
+                                    table.rowType().getTypeAt(0).getTypeRoot()
+                                                    == DataTypeRoot.BIGINT
+                                            ? (int) row.getLong(0)
+                                            : row.getInt(0)));
         }
         Collections.sort(result);
         return result;

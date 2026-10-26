@@ -30,10 +30,13 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CastTransform;
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.SimpleStats;
@@ -183,6 +186,105 @@ class GlobalIndexQueryTest {
         assertThat(query.contributingFieldIds(rowType)).containsExactly(1);
     }
 
+    @Test
+    void testGroupedCompletenessSurvivesPlanningClippingAndV1Restore() throws Exception {
+        RowType type =
+                RowType.of(
+                        new DataField(0, "embedding", DataTypes.INT()),
+                        new DataField(1, "price", DataTypes.DOUBLE()),
+                        new DataField(2, "other", DataTypes.INT()));
+        PredicateBuilder b = new PredicateBuilder(type);
+        Predicate equal = b.equal(1, 10.0);
+        List<Predicate> predicates =
+                Arrays.asList(
+                        equal,
+                        PredicateBuilder.and(equal, b.isNotNull(1)),
+                        PredicateBuilder.and(equal, b.isNaN(1)),
+                        PredicateBuilder.and(equal, b.equal(2, 1)),
+                        PredicateBuilder.or(PredicateBuilder.and(equal, b.isNaN(1)), equal),
+                        // Unlike isNaN, this same-field predicate is dropped before reader
+                        // execution.
+                        PredicateBuilder.and(
+                                equal,
+                                b.equal(
+                                        new CastTransform(
+                                                new FieldRef(1, "price", DataTypes.DOUBLE()),
+                                                DataTypes.INT()),
+                                        10)),
+                        PredicateBuilder.and(b.greaterThan(1, 0.0), b.lessThan(1, 100.0)));
+        List<IndexFileMeta> files =
+                Collections.singletonList(
+                        indexFile("test-grouped", "index", 0, 9, 0, new int[] {1}));
+        IndexPathFactory paths = mock(IndexPathFactory.class);
+        when(paths.toPath(any(IndexFileMeta.class))).thenReturn(new Path("index"));
+        GlobalIndexReader reader = mock(GlobalIndexReader.class, CALLS_REAL_METHODS);
+        when(reader.visitEqual(any(), any()))
+                .thenReturn(
+                        CompletableFuture.completedFuture(
+                                Optional.of(GlobalIndexResult.fromRange(new Range(2, 2)))));
+        when(reader.visitGreaterThan(any(), any()))
+                .thenReturn(
+                        CompletableFuture.completedFuture(
+                                Optional.of(GlobalIndexResult.fromRange(new Range(2, 2)))));
+        when(reader.visitLessThan(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+        GlobalIndexer indexer = mock(GlobalIndexer.class);
+        when(indexer.createReader(any(), anyList(), anyLong(), anyList(), any()))
+                .thenReturn(reader);
+        GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
+        when(factory.create(anyList(), any())).thenReturn(indexer);
+        try (MockedStatic<GlobalIndexerFactoryUtils> factories =
+                mockStatic(GlobalIndexerFactoryUtils.class, CALLS_REAL_METHODS)) {
+            factories
+                    .when(
+                            () ->
+                                    GlobalIndexerFactoryUtils.supportsGroupedIndexScalarQueries(
+                                            "test-grouped"))
+                    .thenReturn(true);
+            factories
+                    .when(() -> GlobalIndexerFactoryUtils.load("test-grouped"))
+                    .thenReturn(factory);
+            List<Range> ranges = Collections.singletonList(new Range(0, 9));
+            for (int i = 0; i < predicates.size(); i++) {
+                GlobalIndexQuery query =
+                        GlobalIndexQuery.create(
+                                type, predicates.get(i), files, paths, new Options());
+                assertThat(query).isNotNull();
+                for (GlobalIndexQuery local : Arrays.asList(query, query.forRanges(ranges))) {
+                    GlobalIndexEvaluator.Evaluation result =
+                            local.evaluateWithCoverage(mock(FileIO.class), new Options(), ranges)
+                                    .get();
+                    assertThat(result.fullyEvaluated())
+                            .as("%s", predicates.get(i))
+                            .isEqualTo(i < 2);
+                    assertThat(result.result().results().toRangeList())
+                            .containsExactly(new Range(2, 2));
+                }
+                DataOutputSerializer out = new DataOutputSerializer(256);
+                query.serialize(out);
+                GlobalIndexQuery restored =
+                        GlobalIndexQuery.deserialize(
+                                new DataInputDeserializer(out.getCopyOfBuffer()));
+                assertThat(
+                                restored.evaluateWithCoverage(
+                                                mock(FileIO.class), new Options(), ranges)
+                                        .get()
+                                        .fullyEvaluated())
+                        .isFalse();
+                assertThat(
+                                restored.evaluateCandidates(
+                                                mock(FileIO.class), new Options(), ranges)
+                                        .get()
+                                        .results()
+                                        .toRangeList())
+                        .containsExactly(new Range(2, 2));
+                DataOutputSerializer roundTrip = new DataOutputSerializer(256);
+                restored.serialize(roundTrip);
+                assertThat(roundTrip.getCopyOfBuffer()).isEqualTo(out.getCopyOfBuffer());
+            }
+        }
+    }
+
     @TempDir java.nio.file.Path tempDir;
 
     @ParameterizedTest
@@ -260,14 +362,17 @@ class GlobalIndexQueryTest {
         assertThat(SplitSerializer.deserialize(SplitSerializer.serialize(split))).isEqualTo(split);
 
         GlobalIndexReader reader = mock(GlobalIndexReader.class);
-        when(reader.visitRange(any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive)))
+        when(reader.visitRangeWithCompleteness(
+                        any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive)))
                 .thenReturn(
                         CompletableFuture.completedFuture(
                                 Optional.of(
-                                        GlobalIndexResult.fromRange(
-                                                new Range(
-                                                        lowerInclusive ? 5 : 6,
-                                                        upperInclusive ? 9 : 8)))));
+                                        new GlobalIndexPredicateResult(
+                                                GlobalIndexResult.fromRange(
+                                                        new Range(
+                                                                lowerInclusive ? 5 : 6,
+                                                                upperInclusive ? 9 : 8)),
+                                                true))));
         GlobalIndexer indexer = mock(GlobalIndexer.class);
         when(indexer.createReader(any(), anyList(), eq(100L), anyList(), any())).thenReturn(reader);
         GlobalIndexerFactory factory = mock(GlobalIndexerFactory.class);
@@ -285,7 +390,9 @@ class GlobalIndexQueryTest {
                             eq(100L),
                             anyList(),
                             any());
-            verify(reader).visitRange(any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive));
+            verify(reader)
+                    .visitRangeWithCompleteness(
+                            any(), eq(5), eq(9), eq(lowerInclusive), eq(upperInclusive));
         }
 
         assertThat(

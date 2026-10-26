@@ -132,7 +132,8 @@ final class ContainsRefinementEvaluator {
                                                     new GlobalIndexEvaluator.Evaluation(
                                                             GlobalIndexResult.createEmpty(),
                                                             emptyResultFields,
-                                                            null)));
+                                                            null,
+                                                            false)));
                                 }
                             }
                             List<ContainsGroup> groupedContains = new ArrayList<>(groups.values());
@@ -171,7 +172,8 @@ final class ContainsRefinementEvaluator {
                                                                                 GlobalIndexResult
                                                                                         .createEmpty(),
                                                                                 emptyResultFields,
-                                                                                null)));
+                                                                                null,
+                                                                                false)));
                                                     }
                                                 }
 
@@ -201,8 +203,10 @@ final class ContainsRefinementEvaluator {
                                                                                             exactFutures
                                                                                                             .size()
                                                                                                     + 1);
-                                                                    if (remainingEvaluation
-                                                                            .isPresent()) {
+                                                                    // An absent result for existing
+                                                                    // remaining conditions is not
+                                                                    // the same as no conditions.
+                                                                    if (!remaining.isEmpty()) {
                                                                         results.add(
                                                                                 remainingEvaluation);
                                                                     }
@@ -269,10 +273,15 @@ final class ContainsRefinementEvaluator {
                         result ->
                                 result.map(
                                         value ->
+                                                // Legacy wrappers can retain only supported
+                                                // contains literals. This opaque result does not
+                                                // prove completeness; search already treats
+                                                // contains as candidate-only.
                                                 new GlobalIndexEvaluator.Evaluation(
                                                         value,
                                                         Collections.singleton(group.fieldId),
-                                                        null)));
+                                                        null,
+                                                        false)));
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> intersectReaderResults(
