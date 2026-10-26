@@ -24,6 +24,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, InnerTabl
 
 import org.apache.spark.internal.Logging
 
+import java.io.FileNotFoundException
 import java.util.Collections
 
 import scala.collection.JavaConverters._
@@ -110,9 +111,9 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
    * A micro-batch that was not committed is committed directly. One that was is not committed
    * again, but is handed to the commit callbacks, through the committer's filtered commit, to retry
    * what may have failed after its first commit, such as registering its partitions. It is handed
-   * over without its files: should expiration remove the first commit between this lookup and the
-   * one of the filtered commit, what gets published is an empty commit, not the batch a second
-   * time.
+   * over without its files: the filtered commit only compares with the latest snapshot of the
+   * commit user, and should that one not show the first commit, what gets published is an empty
+   * commit, not the batch a second time.
    */
   private def commitFirstOfRun(
       write: StreamingWrite,
@@ -121,8 +122,7 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
     val identifier = write.commitIdentifier
     val previousAttempt = marker.flatMap(_.latestSnapshotIdBefore(commitUser, write.batchId))
     writeMarker(write, table)
-    val latestOfUser = table.snapshotManager().latestSnapshotOfUser(commitUser)
-    if (latestOfUser.isPresent && latestOfUser.get().commitIdentifier() >= identifier) {
+    if (previousAttempt.exists(committedAfter(_, identifier, table))) {
       committer.filterAndCommit(
         Collections.singletonMap(Long.box(identifier), withoutFiles(messages).asJava))
       // Expected of a replay; the only trace of a misconfigured identity otherwise.
@@ -133,6 +133,32 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
       checkReplayIsRecognisable(previousAttempt, identifier, table)
       committer.commit(identifier, messages.asJava)
     }
+  }
+
+  /**
+   * Whether the commit user published `identifier`, or a later one, in a snapshot after `before`,
+   * the latest snapshot when the previous attempt of the micro-batch was about to commit. Every
+   * snapshot since is looked at, not only the latest one of the commit user: the maintenance a
+   * commit starts, such as the expiration of partitions, publishes under the identifier of the
+   * micro-batch that started it, and when it runs asynchronously it can do so after the next
+   * micro-batch committed. A snapshot expired during the lookup ends it, and the validation of the
+   * lookup tells whether it may have missed a commit.
+   */
+  private def committedAfter(before: Long, identifier: Long, table: FileStoreTable): Boolean = {
+    val snapshots = table.snapshotManager()
+    var id = Option(snapshots.latestSnapshotId()).map(_.longValue()).getOrElse(before)
+    var committed = false
+    var retained = true
+    while (!committed && retained && id > before) {
+      try {
+        val snapshot = snapshots.tryGetSnapshot(id)
+        committed = snapshot.commitUser() == commitUser && snapshot.commitIdentifier() >= identifier
+      } catch {
+        case _: FileNotFoundException => retained = false
+      }
+      id -= 1
+    }
+    committed
   }
 
   /** The partitions and buckets a micro-batch wrote to, without anything it wrote there. */
@@ -148,11 +174,11 @@ class StreamingWriteContext(val commitUser: String, @transient marker: Option[Co
 
   /**
    * Validates a lookup that found no commit of this micro-batch. A micro-batch whose previous
-   * attempt left no marker never reached its commit. One that did was committed, if at all, after
-   * the snapshot its marker recorded; while the snapshot after that one is still retained, every
-   * commit since was retained when the commit user was looked up, as expiration only removes the
-   * oldest snapshots, so the lookup is exact. Otherwise the lookup may have missed an expired
-   * commit, and committing again could write the micro-batch twice.
+   * attempt left no marker never reached its commit, and is not looked up. One that did was
+   * committed, if at all, after the snapshot its marker recorded; while the snapshot after that one
+   * is still retained, every commit since was retained when it was looked up, as expiration only
+   * removes the oldest snapshots, so the lookup is exact. Otherwise the lookup may have missed an
+   * expired commit, and committing again could write the micro-batch twice.
    */
   private def checkReplayIsRecognisable(
       previousAttempt: Option[Long],

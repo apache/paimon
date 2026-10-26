@@ -223,6 +223,61 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Sink: a replay is recognised after a late partition expiration of an earlier batch") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE T (a INT, dt STRING) PARTITIONED BY (dt)")
+          val location = loadTable("T").location().toString
+          val checkpointPath = checkpointDir.getCanonicalPath
+
+          val inputData = MemoryStream[(Int, String)]
+          val df = inputData.toDS().toDF("a", "dt")
+
+          def start(): StreamingQuery =
+            df.writeStream
+              .option("checkpointLocation", checkpointPath)
+              .format("paimon")
+              .start(location)
+
+          val query = start()
+          try {
+            inputData.addData((1, "2020-01-01"))
+            query.processAllAvailable()
+            inputData.addData((2, "2999-01-01"))
+            query.processAllAvailable()
+          } finally {
+            query.stop()
+          }
+          assert(snapshotCount("T") == 2)
+
+          // With asynchronous maintenance, the partition expiration started by the commit of
+          // batch 0 can finish after batch 1 committed. It publishes its OVERWRITE under the
+          // commit user of the query and the identifier of batch 0.
+          val commitUser = latestCommitUser("T")
+          val expiring = loadTable("T").copy(
+            Map(
+              "partition.expiration-time" -> "1 d",
+              "partition.expiration-check-interval" -> "0 s",
+              "partition.timestamp-formatter" -> "yyyy-MM-dd").asJava)
+          val expired = expiring.store().newPartitionExpire(commitUser, expiring).expire(1L)
+          assert(expired != null && expired.size() == 1, s"unexpected expiration: $expired")
+          val latest = loadTable("T").snapshotManager().latestSnapshot()
+          assert(latest.commitUser() == commitUser && latest.commitIdentifier() == 1L)
+
+          dropCommitLogEntry(checkpointPath, 1)
+          runToCompletion(start())
+
+          // The newest snapshot of the commit user carries the identifier of batch 0, but the
+          // retained history shows that batch 1 was committed: its data is not written again.
+          checkAnswer(spark.sql("SELECT * FROM T"), Row(2, "2999-01-01") :: Nil)
+          assert(
+            snapshotCount("T") == 3,
+            s"replaying batch 1 created another snapshot (${snapshotCount("T")} in total)")
+      }
+    }
+  }
+
   test("Paimon Sink: a replayed micro-batch of a complete mode query leaves the table as it was") {
     failAfter(streamingTimeout) {
       withTempDir {
@@ -431,6 +486,43 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
 
         attempt("missing-the-commit", "replay")
         checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "first") :: Nil)
+    }
+  }
+
+  test("Paimon Sink: a snapshot from before the first attempt does not show the batch committed") {
+    withTempDir {
+      dir =>
+        // Only the snapshots since the boundary its marker recorded can hold the commit of a
+        // replayed micro-batch. One before it says nothing about it, whatever identifier it
+        // carries.
+        spark.sql("CREATE TABLE T (a INT, b STRING)")
+        val hadoopConf = spark.sessionState.newHadoopConf()
+        val marker = new CommitMarker(new File(dir, "cp").getCanonicalPath, hadoopConf)
+
+        def commitBatch(batchId: Long, value: String): Unit = {
+          val table = loadTable("T")
+          val context = new StreamingWriteContext("user", Some(marker))
+          val builder = table.newStreamWriteBuilder().withCommitUser("user")
+          val write = builder.newWrite()
+          try {
+            write.write(GenericRow.of(Integer.valueOf(1), BinaryString.fromString(value)))
+            val messages = write.prepareCommit(true, batchId + 1).asScala.toSeq
+            context.openCommitter(builder.newCommit().asInstanceOf[InnerTableCommit])
+            context.commit(StreamingWrite(context, batchId), messages, table, overwrite = false)
+          } finally {
+            write.close()
+            context.close()
+          }
+        }
+
+        commitBatch(9, "old")
+        assert(loadTable("T").snapshotManager().latestSnapshot().commitIdentifier() == 10)
+
+        // The first attempt of batch 2 was about to commit when snapshot 1 was the latest.
+        marker.write("user", 2, loadTable("T").snapshotManager().latestSnapshotId())
+        commitBatch(2, "new")
+
+        checkAnswer(spark.sql("SELECT * FROM T ORDER BY b"), Row(1, "new") :: Row(1, "old") :: Nil)
     }
   }
 

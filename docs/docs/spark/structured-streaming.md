@@ -98,8 +98,11 @@ run committed is not recognised and its data is written again.
 A replay is recognised by the snapshots its commit user left behind, which snapshot expiration
 eventually removes. Before committing a micro-batch, the sink records under the checkpoint location
 of the query which snapshot was the latest before its first attempt. Retries preserve this original
-marker rather than advancing it. If filtering cannot recognise the replay and expiration has removed
-the snapshot immediately after that boundary, the query fails instead of possibly writing it twice.
+marker rather than advancing it. Every snapshot since that boundary is checked, so a replay is
+recognised even when the maintenance of an earlier micro-batch, such as asynchronous partition
+expiration, published its snapshot after the replayed one. If none of them shows the replay and
+expiration has removed the snapshot immediately after that boundary, the query fails instead of
+possibly writing it twice.
 An incomplete or corrupt marker also fails the query, since it may belong to an already committed
 batch. The error names the marker file; restore it or delete it only after verifying that the batch
 was not committed. Retain snapshots for longer than a query may be down.
