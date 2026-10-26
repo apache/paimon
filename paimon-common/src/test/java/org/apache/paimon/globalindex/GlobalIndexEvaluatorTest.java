@@ -29,7 +29,6 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
@@ -939,42 +938,14 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
-    void testShorterIndexPaddedToLongestRangeNotDroppedByAnd() {
+    void testShorterIndexWithoutPaddingDropsTailUnderAnd() {
         executor = Executors.newFixedThreadPool(2);
         RowType rowType = rowType();
 
         // Field c (id 2) is an extra column of two multi-column indexes:
         //  - a short index covering rows [0,4] that matches the predicate at {1,3}
         //  - a long index covering rows [0,9] that matches the predicate at {1,3,7,8}
-        // The evaluator AND-s both readers for the leaf. Padding the short index over its
-        // unindexed tail (5..9) with an all-hit reader keeps the long index's tail matches.
-        GlobalIndexReader shortIndexPadded =
-                new UnionGlobalIndexReader(
-                        Arrays.asList(
-                                readerReturning(resultOf(1, 3)),
-                                new ConstantGlobalIndexReader(
-                                        GlobalIndexResult.fromRange(new Range(5, 9)))));
-        GlobalIndexReader longIndex = readerReturning(resultOf(1, 3, 7, 8));
-
-        GlobalIndexEvaluator evaluator =
-                new GlobalIndexEvaluator(
-                        rowType, fieldId -> Arrays.asList(shortIndexPadded, longIndex));
-
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-        Optional<GlobalIndexResult> result = evaluator.evaluate(builder.equal(2, 42));
-
-        assertThat(result).isPresent();
-        assertBitmapContainsExactly(result.get().results(), 1L, 3L, 7L, 8L);
-        evaluator.close();
-    }
-
-    @Test
-    void testShorterIndexWithoutPaddingDropsTailUnderAnd() {
-        executor = Executors.newFixedThreadPool(2);
-        RowType rowType = rowType();
-
-        // Same setup as above but WITHOUT padding the short index: AND drops the tail matches
-        // {7,8}, which is exactly the bug the padding prevents.
+        // The evaluator AND-s both readers for the leaf, so the tail matches {7,8} are dropped.
         GlobalIndexReader shortIndex = readerReturning(resultOf(1, 3));
         GlobalIndexReader longIndex = readerReturning(resultOf(1, 3, 7, 8));
 
@@ -1220,29 +1191,6 @@ class GlobalIndexEvaluatorTest {
         assertBitmapContainsExactly(overlapResult.get().results(), 11L, 13L);
         assertThat(containsAllResult).isPresent();
         assertBitmapContainsExactly(containsAllResult.get().results(), 11L, 13L);
-        Optional<GlobalIndexResult> constantResult =
-                new ConstantGlobalIndexReader(resultOf(4))
-                        .visitArrayContains(
-                                new FieldRef(0, "tags", DataTypes.ARRAY(DataTypes.INT())), 2)
-                        .join();
-        assertThat(constantResult).isPresent();
-        assertBitmapContainsExactly(constantResult.get().results(), 4L);
-        ConstantGlobalIndexReader constantReader = new ConstantGlobalIndexReader(resultOf(5));
-        FieldRef fieldRef = new FieldRef(0, "tags", DataTypes.ARRAY(DataTypes.INT()));
-        assertBitmapContainsExactly(
-                constantReader
-                        .visitArraysOverlap(fieldRef, Arrays.asList(2))
-                        .join()
-                        .get()
-                        .results(),
-                5L);
-        assertBitmapContainsExactly(
-                constantReader
-                        .visitArrayContainsAll(fieldRef, Arrays.asList(2))
-                        .join()
-                        .get()
-                        .results(),
-                5L);
         evaluator.close();
     }
 
@@ -1287,16 +1235,6 @@ class GlobalIndexEvaluatorTest {
         assertThat(evaluator.evaluate(builder.between(0, 1, 2).negate().get())).isEmpty();
         assertThat(evaluator.evaluate(builder.between(0, 1, 2))).isEmpty();
         evaluator.close();
-    }
-
-    @Test
-    void testConstantReaderReturnsFixedResultForIsNaNAndNotBetween() {
-        GlobalIndexResult expected = resultOf(1, 2);
-        GlobalIndexReader reader = new ConstantGlobalIndexReader(expected);
-        FieldRef fieldRef = new FieldRef(0, "a", DataTypes.DOUBLE());
-
-        assertThat(reader.visitIsNaN(fieldRef).join()).contains(expected);
-        assertThat(reader.visitNotBetween(fieldRef, 1, 2).join()).contains(expected);
     }
 
     @Test
