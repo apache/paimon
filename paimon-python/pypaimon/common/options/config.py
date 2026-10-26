@@ -24,6 +24,14 @@ class OssOptions:
         "OSS filesystem implementation: legacy, jindo, or cpp (native reads only)")
     OSS_PYTHON_IMPL = ConfigOptions.key("fs.oss.python.impl").string_type().default_value("jindo").with_description(
         "Python OSS implementation when fs.oss.impl=cpp: jindo or legacy")
+    OSS_JINDO_PREAD_MAX_SIZE = (
+        ConfigOptions.key("fs.oss.jindo.pread-max-size")
+        .memory_type()
+        .default_value(MemorySize.of_bytes(0))
+        .with_description(
+            "Max size of a Jindo read after a seek that uses pread instead of the "
+            "read-ahead stream. 0 disables it.")
+    )
     OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
         "OSS access key ID")
     OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
