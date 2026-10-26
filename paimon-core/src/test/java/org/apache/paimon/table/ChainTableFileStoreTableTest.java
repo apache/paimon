@@ -68,6 +68,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
@@ -83,6 +84,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -987,10 +989,184 @@ public class ChainTableFileStoreTableTest {
                         });
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,true",
+        "true,false,true",
+        "true,true,true",
+        "false,false,false",
+        "true,false,false",
+        "true,true,false"
+    })
+    public void testQueryAuthWithProjectedColumns(
+            boolean streaming, boolean streamingMergeSnapshot, boolean withSnapshot)
+            throws Exception {
+        createChainTableWithQueryAuth(withSnapshot);
+        FileStoreTable table =
+                loadTable(
+                                queryAuthEnvironment(
+                                        select -> {
+                                            if (select == null
+                                                    || !Arrays.asList("k", "dt", "hour")
+                                                            .containsAll(select)) {
+                                                throw new SecurityException(
+                                                        "No permission to read unselected columns");
+                                            }
+                                            return new TableQueryAuthResult(null, null);
+                                        }))
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT.key(),
+                                        String.valueOf(streamingMergeSnapshot)));
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withReadType(table.rowType().project("k", "dt", "hour"));
+        TableScan scan = streaming ? readBuilder.newStreamScan() : readBuilder.newScan();
+        List<GenericRow> expected =
+                new ArrayList<>(
+                        Arrays.asList(
+                                row(1L, "20250810", "20"), row(2L, "20250810", "20"),
+                                row(1L, "20250810", "21"), row(4L, "20250810", "21")));
+        if (!streaming) {
+            expected.add(row(2L, "20250810", "21"));
+        }
+        if (streamingMergeSnapshot) {
+            expected =
+                    Arrays.asList(
+                            row(1L, "20250810", "21"),
+                            row(2L, "20250810", "21"),
+                            row(4L, "20250810", "21"));
+        }
+        if (!withSnapshot) {
+            expected = Arrays.asList(row(1L, "20250810", "21"), row(4L, "20250810", "21"));
+        }
+        assertThat(readProjectedSplits(readBuilder, scan.plan().splits()))
+                .containsExactlyInAnyOrderElementsOf(expected);
+        if (streaming) {
+            writeWithCommit(
+                    loadTable().switchToBranch(DELTA_BRANCH),
+                    row(5L, 1L, "5", "CN", "20250810", "22"));
+            assertThat(readProjectedSplits(readBuilder, scan.plan().splits()))
+                    .containsExactly(row(5L, "20250810", "22"));
+        }
+
+        if (!streaming) {
+            assertThat(readBuilder.newScan().listPartitionEntries()).hasSize(withSnapshot ? 2 : 1);
+            ReadBuilder partitionFiltered =
+                    table.newReadBuilder()
+                            .withReadType(readBuilder.readType())
+                            .withPartitionFilter(Collections.singletonMap("region", "CN"));
+            assertThatThrownBy(() -> partitionFiltered.newScan().plan())
+                    .hasMessageContaining("No permission");
+            assertThatThrownBy(() -> partitionFiltered.newScan().listPartitionEntries())
+                    .hasMessageContaining("No permission");
+            ReadBuilder filtered =
+                    table.newReadBuilder()
+                            .withReadType(readBuilder.readType())
+                            .withFilter(
+                                    new PredicateBuilder(table.rowType())
+                                            .equal(3, BinaryString.fromString("CN")));
+            assertThatThrownBy(() -> filtered.newScan().plan())
+                    .hasMessageContaining("No permission");
+        }
+
+        ReadBuilder denied = table.newReadBuilder().withReadType(table.rowType().project("v"));
+        assertThatThrownBy(() -> (streaming ? denied.newStreamScan() : denied.newScan()).plan())
+                .hasMessageContaining("No permission");
+        readBuilder.withFilter(
+                new PredicateBuilder(table.rowType()).equal(2, BinaryString.fromString("secret")));
+        assertThatThrownBy(
+                        () ->
+                                (streaming ? readBuilder.newStreamScan() : readBuilder.newScan())
+                                        .plan())
+                .hasMessageContaining("No permission");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,false",
+        "false,false,true",
+        "false,true,false",
+        "false,true,true",
+        "true,false,false",
+        "true,false,true",
+        "true,true,false",
+        "true,true,true"
+    })
+    public void testQueryAuthWithUnprojectedValueFilter(
+            boolean skipPreload, boolean allowValue, boolean withSnapshot) throws Exception {
+        createChainTableWithQueryAuth(withSnapshot);
+        List<String> allowedFields = new ArrayList<>(Arrays.asList("k", "dt", "hour"));
+        if (allowValue) {
+            allowedFields.add("v");
+        }
+        FallbackReadFileStoreTable table =
+                (FallbackReadFileStoreTable)
+                        loadTable(
+                                queryAuthEnvironment(
+                                        select -> {
+                                            if (select == null
+                                                    || !allowedFields.containsAll(select)) {
+                                                throw new SecurityException("No permission");
+                                            }
+                                            return new TableQueryAuthResult(null, null);
+                                        }));
+        FileStoreTable chainGroup = table.other();
+        // The snapshot value "1" is replaced by "1-1" in delta. Pushing the value filter
+        // into either merge input could discard the update and resurrect the old value.
+        for (String value : Arrays.asList("1", "1-1")) {
+            ReadBuilder readBuilder =
+                    chainGroup
+                            .newReadBuilder()
+                            .withReadType(chainGroup.rowType().project("k", "dt", "hour"))
+                            .withFilter(
+                                    new PredicateBuilder(chainGroup.rowType())
+                                            .equal(2, BinaryString.fromString(value)));
+            ChainGroupReadTable.ChainTableBatchScan scan =
+                    (ChainGroupReadTable.ChainTableBatchScan) readBuilder.newScan();
+            if (skipPreload) {
+                scan.skipPreloadTargetSnapshot();
+            }
+            if (!allowValue) {
+                assertThatThrownBy(scan::plan).hasMessageContaining("No permission");
+                assertThatThrownBy(scan::listPartitionEntries)
+                        .hasMessageContaining("No permission");
+                continue;
+            }
+
+            List<GenericRow> rows = new ArrayList<>();
+            InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
+            try (RecordReader<InternalRow> reader =
+                    readBuilder.newRead().executeFilter().createReader(scan.plan().splits())) {
+                reader.forEachRemaining(row -> rows.add((GenericRow) serializer.copy(row)));
+            }
+            if ("1-1".equals(value)) {
+                assertThat(rows).containsExactly(row(1L, "20250810", "21"));
+            } else if (withSnapshot && !skipPreload) {
+                assertThat(rows).containsExactly(row(1L, "20250810", "20"));
+            } else {
+                assertThat(rows).isEmpty();
+            }
+        }
+    }
+
+    private List<GenericRow> readProjectedSplits(ReadBuilder readBuilder, List<Split> splits)
+            throws Exception {
+        InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
+        List<GenericRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits)) {
+            reader.forEachRemaining(row -> rows.add((GenericRow) serializer.copy(row)));
+        }
+        return rows;
+    }
+
     private static final Map<String, String> QUERIED_PARTITION =
             ImmutableMap.of("dt", "20250810", "hour", "21");
 
     private void createChainTableWithQueryAuth() throws Exception {
+        createChainTableWithQueryAuth(true);
+    }
+
+    private void createChainTableWithQueryAuth(boolean withSnapshot) throws Exception {
         createChainTable(
                 options -> {
                     options.set(CoreOptions.QUERY_AUTH_ENABLED, true);
@@ -999,10 +1175,12 @@ public class ChainTableFileStoreTableTest {
                     options.set(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST, true);
                 });
         FileStoreTable chainTable = loadTable();
-        writeWithCommit(
-                chainTable.switchToBranch(SNAPSHOT_BRANCH),
-                row(1L, 1L, "1", "CN", "20250810", "20"),
-                row(2L, 1L, "2", "CN", "20250810", "20"));
+        if (withSnapshot) {
+            writeWithCommit(
+                    chainTable.switchToBranch(SNAPSHOT_BRANCH),
+                    row(1L, 1L, "1", "CN", "20250810", "20"),
+                    row(2L, 1L, "2", "CN", "20250810", "20"));
+        }
         writeWithCommit(
                 chainTable.switchToBranch(DELTA_BRANCH),
                 row(1L, 2L, "1-1", "CN", "20250810", "21"),
@@ -1026,11 +1204,16 @@ public class ChainTableFileStoreTableTest {
      * circuits to "no rules", so no split is ever wrapped.
      */
     private CatalogEnvironment queryAuthEnvironment(Supplier<TableQueryAuthResult> authResult) {
+        return queryAuthEnvironment(select -> authResult.get());
+    }
+
+    private CatalogEnvironment queryAuthEnvironment(
+            Function<List<String>, TableQueryAuthResult> authResult) {
         Catalog catalog = Mockito.mock(Catalog.class);
         try {
             // a fresh instance per call, as RESTCatalog#authTableQuery builds one per scan
             Mockito.when(catalog.authTableQuery(Mockito.any(), Mockito.any()))
-                    .thenAnswer(invocation -> authResult.get());
+                    .thenAnswer(invocation -> authResult.apply(invocation.getArgument(1)));
             // the snapshot manager takes the same catalog; let it fall back to the file system
             // instead of answering "no snapshot" for every branch
             Mockito.when(catalog.loadSnapshot(Mockito.any(Identifier.class)))
