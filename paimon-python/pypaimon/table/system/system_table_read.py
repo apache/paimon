@@ -169,19 +169,6 @@ class SystemTableRead:
         if predicate.method in ("and", "or"):
             results = (self._test_row(child, row) for child in predicate.literals)
             return all(results) if predicate.method == "and" else any(results)
-        if predicate.method in (
-            "equal", "notEqual", "lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"
-        ) and predicate.literals[0] is None:
-            # Arrow comparisons with NULL never select a row.
-            return False
-        if predicate.method in ("between", "notBetween") and any(v is None for v in predicate.literals):
-            value = row.get_field(predicate.index)
-            if predicate.method == "between" or value is None:
-                return False
-            # NOT BETWEEN is an OR: a non-null bound can still match.
-            lower, upper = predicate.literals
-            return ((lower is not None and value < lower)
-                    or (upper is not None and value > upper))
         if predicate.method == "like":
             value = row.get_field(predicate.index)
             # SQL '_' matches a newline too, as in Java's Like predicate.
