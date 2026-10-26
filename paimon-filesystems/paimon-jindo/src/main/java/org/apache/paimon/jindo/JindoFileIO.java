@@ -82,9 +82,12 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
                     .durationType()
                     .defaultValue(Duration.ZERO)
                     .withDescription(
-                            "Interval of logging JVM-wide Jindo stream and memory statistics "
-                                    + "while Jindo streams are in use, e.g. 1 min. 0 (the default) "
-                                    + "disables it, and streams of this FileIO are not counted.");
+                            "Interval of logging Jindo stream and memory statistics while Jindo "
+                                    + "streams are in use, e.g. 1 min. Stream counts cover the "
+                                    + "class loader of paimon-jindo, which is the whole JVM unless "
+                                    + "jobs bundle their own copy. The shortest interval set in "
+                                    + "it is used. 0 (the default) disables it, and streams of "
+                                    + "this FileIO are not counted.");
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -221,7 +224,10 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             return super.newTwoPhaseOutputStream(path, overwrite);
         }
         return new JindoTwoPhaseOutputStream(
-                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()), hadoopPath, path);
+                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()),
+                hadoopPath,
+                path,
+                ioStatsInterval());
     }
 
     @Override

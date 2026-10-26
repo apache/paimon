@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jindo;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 
@@ -45,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
@@ -52,9 +54,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * JVM-wide counters of the Jindo streams of FileIOs that enable them, logged periodically with
- * Jindo native, process and container memory; a WARN is logged when the container working set nears
- * its limit.
+ * Counters of the Jindo streams in the class loader of paimon-jindo, which is the whole JVM unless
+ * jobs bundle their own copy, logged with native, process and container memory and a WARN near OOM.
  */
 public final class JindoIOStats {
 
@@ -63,42 +64,62 @@ public final class JindoIOStats {
     static final StreamCounter INPUT = new StreamCounter();
     static final StreamCounter OUTPUT = new StreamCounter();
 
-    private static final AtomicLong INTERVAL_MILLIS = new AtomicLong();
+    static final AtomicLong INTERVAL_MILLIS = new AtomicLong();
     private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
     private static volatile Pair<JindoHadoopSystem, org.apache.hadoop.fs.Path> nativeSource;
+    private static volatile long startRetryMillis;
+
+    @VisibleForTesting
+    static volatile ThreadFactory reporterThreads = r -> new Thread(r, "paimon-jindo-io-stats");
 
     private JindoIOStats() {}
 
     /**
      * Counts a stream just opened by a FileIO with this interval and returns its counter, or null
-     * when the interval is null, zero or negative. The first positive interval in the JVM is used.
+     * when the interval is null, zero or negative. The shortest positive interval is used.
      */
     @Nullable
     static StreamCounter track(StreamCounter counter, @Nullable Duration interval) {
         if (interval == null || interval.isZero() || interval.isNegative()) {
             return null;
         }
-        INTERVAL_MILLIS.compareAndSet(0, Math.max(1, interval.toMillis()));
+        long millis = Math.max(1, interval.toMillis());
+        long current = INTERVAL_MILLIS.get();
+        if (current == 0 || millis < current) {
+            INTERVAL_MILLIS.accumulateAndGet(millis, (c, m) -> c == 0 ? m : Math.min(c, m));
+        }
         counter.opened();
         startReporter();
         return counter;
     }
 
     private static void startReporter() {
-        if (RUNNING.get() || !RUNNING.compareAndSet(false, true)) {
+        if (RUNNING.get()
+                || System.currentTimeMillis() < startRetryMillis
+                || !RUNNING.compareAndSet(false, true)) {
             return;
         }
-        Reporter reporter =
-                new Reporter(
-                        INTERVAL_MILLIS.get(),
-                        Cgroup.detect(Paths.get("/proc/self/cgroup"), Paths.get("/sys/fs/cgroup")),
-                        Paths.get("/proc/self"),
-                        RUNNING);
-        Thread thread = new Thread(reporter::run, "paimon-jindo-io-stats");
-        thread.setDaemon(true);
-        // the inherited loader may belong to the job that opened the stream, keep it collectable
-        thread.setContextClassLoader(JindoIOStats.class.getClassLoader());
-        thread.start();
+        try {
+            Reporter reporter =
+                    new Reporter(
+                            INTERVAL_MILLIS,
+                            Cgroup.detect(
+                                    Paths.get("/proc/self/cgroup"), Paths.get("/sys/fs/cgroup")),
+                            Paths.get("/proc/self"),
+                            RUNNING);
+            Thread thread = reporterThreads.newThread(reporter::run);
+            thread.setDaemon(true);
+            // the inherited loader may be a job's, which must stay collectable
+            thread.setContextClassLoader(JindoIOStats.class.getClassLoader());
+            thread.start();
+        } catch (Throwable t) {
+            // e.g. no native thread near the memory limit; the stream must still reach its caller
+            startRetryMillis = System.currentTimeMillis() + INTERVAL_MILLIS.get();
+            RUNNING.set(false);
+            LOG.warn(
+                    "Failed to start the Jindo IO stats reporter, retrying with a later stream.",
+                    t);
+        }
     }
 
     /** Registers a file system that is never closed, used to dump the Jindo native metrics. */
@@ -170,31 +191,35 @@ public final class JindoIOStats {
         private static final double[] ALARM_RATIOS = {0.8, 0.9, 0.95};
         private static final double ALARM_RESET_RATIO = 0.7;
 
-        private final long intervalMillis;
+        private final AtomicLong intervalMillis;
         private final List<Cgroup> cgroups;
         private final Path procSelf;
         private final AtomicBoolean running;
+        private final int[] alarmLevels;
 
         @Nullable private JindoMetricsStore nativeStore;
         private boolean nativeDisabled;
         @Nullable private String jemalloc;
-        private int alarmLevel;
         private long lastEvents;
 
-        Reporter(long intervalMillis, List<Cgroup> cgroups, Path procSelf, AtomicBoolean running) {
+        Reporter(
+                AtomicLong intervalMillis,
+                List<Cgroup> cgroups,
+                Path procSelf,
+                AtomicBoolean running) {
             this.intervalMillis = intervalMillis;
             this.cgroups = cgroups;
             this.procSelf = procSelf;
             this.running = running;
+            this.alarmLevels = new int[cgroups.size()];
         }
 
         /** Runs until an interval passes without stream activity; the next open starts another. */
         void run() {
-            long sampleMillis = Math.min(SAMPLE_MILLIS, intervalMillis);
-            long nextReport = System.currentTimeMillis() + intervalMillis;
+            long lastReport = System.currentTimeMillis();
             while (true) {
                 try {
-                    Thread.sleep(sampleMillis);
+                    Thread.sleep(Math.min(SAMPLE_MILLIS, intervalMillis.get()));
                 } catch (InterruptedException e) {
                     running.set(false);
                     return;
@@ -205,8 +230,9 @@ public final class JindoIOStats {
                         LOG.warn(alarm);
                     }
                     long now = System.currentTimeMillis();
-                    if (now >= nextReport) {
-                        nextReport = now + intervalMillis;
+                    // read every time, so that a shorter interval set by a later FileIO applies
+                    if (now - lastReport >= intervalMillis.get()) {
+                        lastReport = now;
                         if (hasActivity()) {
                             LOG.info(snapshot());
                         } else if (stop()) {
@@ -219,33 +245,41 @@ public final class JindoIOStats {
             }
         }
 
-        /** Returns a WARN message when the working set enters a higher alarm level. */
+        /** Returns a WARN message when the working set of a cgroup level enters its next alarm. */
         @Nullable
         String checkAlarm() {
-            Cgroup cgroup = Cgroup.closestToLimit(cgroups);
-            if (cgroup == null) {
+            Cgroup alarmed = null;
+            double alarmedRatio = 0;
+            // each level keeps its own alarm, so a parent's WARN does not mute a child's
+            for (int i = 0; i < cgroups.size(); i++) {
+                Cgroup cgroup = cgroups.get(i);
+                long limit = cgroup.limit();
+                long workingSet = cgroup.workingSet();
+                if (limit <= 0 || workingSet < 0) {
+                    continue;
+                }
+                double ratio = (double) workingSet / limit;
+                if (ratio < ALARM_RESET_RATIO) {
+                    alarmLevels[i] = 0;
+                }
+                int level = 0;
+                while (level < ALARM_RATIOS.length && ratio >= ALARM_RATIOS[level]) {
+                    level++;
+                }
+                if (level > alarmLevels[i]) {
+                    alarmLevels[i] = level;
+                    if (ratio > alarmedRatio) {
+                        alarmed = cgroup;
+                        alarmedRatio = ratio;
+                    }
+                }
+            }
+            if (alarmed == null) {
                 return null;
             }
-            long limit = cgroup.limit();
-            long workingSet = cgroup.workingSet();
-            if (limit <= 0 || workingSet < 0) {
-                return null;
-            }
-            double ratio = (double) workingSet / limit;
-            if (ratio < ALARM_RESET_RATIO) {
-                alarmLevel = 0;
-            }
-            int level = 0;
-            while (level < ALARM_RATIOS.length && ratio >= ALARM_RATIOS[level]) {
-                level++;
-            }
-            if (level <= alarmLevel) {
-                return null;
-            }
-            alarmLevel = level;
             return String.format(
                     "Container memory working set is at %d%% of the limit. %s",
-                    Math.round(ratio * 100), snapshot());
+                    Math.round(alarmedRatio * 100), snapshot(alarmed));
         }
 
         /** True while streams are open or when any stream opened or closed since last call. */
@@ -274,12 +308,16 @@ public final class JindoIOStats {
         }
 
         String snapshot() {
+            return snapshot(Cgroup.closestToLimit(cgroups));
+        }
+
+        private String snapshot(@Nullable Cgroup cgroup) {
             StringBuilder sb = new StringBuilder("Jindo IO stats:");
             appendStreams(sb, "input", INPUT, "read");
             appendStreams(sb, "output", OUTPUT, "written");
             appendNative(sb);
             appendProcess(sb);
-            appendCgroup(sb);
+            appendCgroup(sb, cgroup);
             return sb.toString();
         }
 
@@ -385,8 +423,7 @@ public final class JindoIOStats {
                     .append(';');
         }
 
-        private void appendCgroup(StringBuilder sb) {
-            Cgroup cgroup = Cgroup.closestToLimit(cgroups);
+        private static void appendCgroup(StringBuilder sb, @Nullable Cgroup cgroup) {
             if (cgroup == null) {
                 sb.append(" cgroup unavailable");
                 return;

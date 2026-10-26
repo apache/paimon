@@ -19,6 +19,7 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -48,9 +49,11 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -193,6 +196,7 @@ public class JindoIOStatsTest {
         when(fs.create(any(org.apache.hadoop.fs.Path.class), anyBoolean())).thenReturn(fsOutput);
         StubFileIO fileIO = new StubFileIO(fs, INTERVAL);
         Path path = new Path("oss://bucket/db/t/data.parquet");
+        long inOpen = JindoIOStats.INPUT.open();
         long inClosed = JindoIOStats.INPUT.closedTotal();
         long outClosed = JindoIOStats.OUTPUT.closedTotal();
 
@@ -202,6 +206,17 @@ public class JindoIOStatsTest {
         assertThatThrownBy(out::close).hasMessage("close failed");
         assertThat(JindoIOStats.INPUT.closedTotal() - inClosed).isZero();
         assertThat(JindoIOStats.OUTPUT.closedTotal() - outClosed).isZero();
+
+        // until a close succeeds the stream may hold native memory, so it stays open and reported
+        assertThat(JindoIOStats.INPUT.open() - inOpen).isEqualTo(1);
+        JindoIOStats.Reporter reporter =
+                new JindoIOStats.Reporter(
+                        new AtomicLong(60_000),
+                        Collections.emptyList(),
+                        java.nio.file.Paths.get("/nonexistent"),
+                        new AtomicBoolean());
+        reporter.hasActivity();
+        assertThat(reporter.hasActivity()).isTrue();
         in.close();
         in.close();
         out.close();
@@ -246,7 +261,7 @@ public class JindoIOStatsTest {
         AtomicBoolean running = new AtomicBoolean(true);
         JindoIOStats.Reporter reporter =
                 new JindoIOStats.Reporter(
-                        60_000,
+                        new AtomicLong(60_000),
                         Collections.emptyList(),
                         java.nio.file.Paths.get("/nonexistent"),
                         running);
@@ -295,10 +310,87 @@ public class JindoIOStatsTest {
     }
 
     @Test
+    public void testReporterStartFailureKeepsStreams() throws Exception {
+        Thread previous = reporterThread();
+        if (previous != null) {
+            previous.join(10_000);
+        }
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        when(fs.open(any(org.apache.hadoop.fs.Path.class)))
+                .thenAnswer(i -> new FSDataInputStream(new SeekableBytes(new byte[10])));
+        StubFileIO fileIO = new StubFileIO(fs, INTERVAL);
+        Path path = new Path("oss://bucket/db/t/data.parquet");
+        long inOpen = JindoIOStats.INPUT.open();
+        ThreadFactory threads = JindoIOStats.reporterThreads;
+        try {
+            JindoIOStats.reporterThreads =
+                    r -> {
+                        throw new OutOfMemoryError("unable to create native thread");
+                    };
+            try (SeekableInputStream in = fileIO.newInputStream(path)) {
+                assertThat(in.read(new byte[10], 0, 10)).isEqualTo(10);
+                assertThat(JindoIOStats.INPUT.open() - inOpen).isEqualTo(1);
+                assertThat(reporterThread()).isNull();
+            }
+        } finally {
+            JindoIOStats.reporterThreads = threads;
+        }
+
+        // a later stream starts the reporter once the retry delay has passed
+        Thread.sleep(INTERVAL.toMillis() * 3);
+        try (SeekableInputStream in = fileIO.newInputStream(path)) {
+            assertThat(reporterThread()).isNotNull();
+        }
+        assertThat(JindoIOStats.INPUT.open()).isEqualTo(inOpen);
+    }
+
+    @Test
+    public void testShortestIntervalWins() {
+        JindoIOStats.StreamCounter counter = new JindoIOStats.StreamCounter();
+        JindoIOStats.track(counter, INTERVAL);
+        long interval = JindoIOStats.INTERVAL_MILLIS.get();
+        assertThat(interval).isLessThanOrEqualTo(INTERVAL.toMillis());
+
+        JindoIOStats.track(counter, Duration.ofHours(1));
+        assertThat(JindoIOStats.INTERVAL_MILLIS.get()).isEqualTo(interval);
+        JindoIOStats.track(counter, Duration.ofMillis(interval - 1));
+        assertThat(JindoIOStats.INTERVAL_MILLIS.get()).isEqualTo(interval - 1);
+    }
+
+    @Test
+    public void testTwoPhaseOutputStreamIsCounted() throws Exception {
+        @SuppressWarnings("unchecked")
+        MultiPartUploadStore<SerializableJdoObjectPart, String> store =
+                mock(MultiPartUploadStore.class);
+        when(store.startMultiPartUpload(any())).thenReturn("upload");
+        org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path("oss://bucket/t/f");
+        Path path = new Path("oss://bucket/t/f");
+        long opened = JindoIOStats.OUTPUT.openedTotal();
+        long closed = JindoIOStats.OUTPUT.closedTotal();
+        long written = JindoIOStats.OUTPUT.bytesTotal();
+
+        JindoTwoPhaseOutputStream out =
+                new JindoTwoPhaseOutputStream(store, hadoopPath, path, INTERVAL);
+        out.write(new byte[30]);
+        out.write(new byte[30], 5, 20);
+        out.write(1);
+        out.closeForCommit();
+        out.close();
+        new JindoTwoPhaseOutputStream(store, hadoopPath, path, null).close();
+        when(store.startMultiPartUpload(any())).thenThrow(new IOException("start failed"));
+        assertThatThrownBy(() -> new JindoTwoPhaseOutputStream(store, hadoopPath, path, INTERVAL))
+                .hasMessage("start failed");
+
+        assertThat(JindoIOStats.OUTPUT.openedTotal() - opened).isEqualTo(1);
+        assertThat(JindoIOStats.OUTPUT.closedTotal() - closed).isEqualTo(1);
+        assertThat(JindoIOStats.OUTPUT.bytesTotal() - written).isEqualTo(51);
+    }
+
+    @Test
     public void testActivityIncludesCloses() {
         JindoIOStats.Reporter reporter =
                 new JindoIOStats.Reporter(
-                        60_000,
+                        new AtomicLong(60_000),
                         Collections.emptyList(),
                         java.nio.file.Paths.get("/nonexistent"),
                         new AtomicBoolean());
@@ -378,7 +470,8 @@ public class JindoIOStatsTest {
 
         List<JindoIOStats.Cgroup> levels = JindoIOStats.Cgroup.detect(procCgroup, root);
         JindoIOStats.Reporter reporter =
-                new JindoIOStats.Reporter(60_000, levels, tempDir, new AtomicBoolean());
+                new JindoIOStats.Reporter(
+                        new AtomicLong(60_000), levels, tempDir, new AtomicBoolean());
 
         assertThat(levels).hasSize(2);
         assertThat(reporter.checkAlarm())
@@ -390,6 +483,39 @@ public class JindoIOStatsTest {
         assertThat(JindoIOStats.Cgroup.closestToLimit(levels).limit()).isEqualTo(1000);
         write(child.resolve("memory.current"), "480");
         assertThat(JindoIOStats.Cgroup.closestToLimit(levels).limit()).isEqualTo(500);
+    }
+
+    @Test
+    public void testAlarmsPerCgroupLevel() throws IOException {
+        java.nio.file.Path root = tempDir.resolve("cgroup");
+        java.nio.file.Path pod = root.resolve("pod");
+        java.nio.file.Path child = pod.resolve("tm");
+        Files.createDirectories(child);
+        write(root.resolve("cgroup.controllers"), "memory");
+        write(pod.resolve("memory.max"), "1000");
+        write(pod.resolve("memory.current"), "960");
+        write(pod.resolve("memory.stat"), "inactive_file 0\n");
+        write(pod.resolve("memory.events"), "max 7\noom_kill 0\n");
+        write(child.resolve("memory.max"), "500");
+        write(child.resolve("memory.current"), "100");
+        write(child.resolve("memory.stat"), "inactive_file 0\n");
+        write(child.resolve("memory.events"), "max 3\noom_kill 0\n");
+        java.nio.file.Path procCgroup = write(tempDir.resolve("cgroup-file"), "0::/pod/tm\n");
+        JindoIOStats.Reporter reporter =
+                new JindoIOStats.Reporter(
+                        new AtomicLong(60_000),
+                        JindoIOStats.Cgroup.detect(procCgroup, root),
+                        tempDir,
+                        new AtomicBoolean());
+
+        assertThat(reporter.checkAlarm()).contains("at 96% of the limit").contains("limitHits=7");
+        // the parent eases but stays above the reset ratio while the child fills up
+        write(pod.resolve("memory.current"), "750");
+        write(child.resolve("memory.current"), "450");
+        assertThat(reporter.checkAlarm()).contains("at 90% of the limit").contains("limitHits=3");
+        write(child.resolve("memory.current"), "490");
+        assertThat(reporter.checkAlarm()).contains("at 98% of the limit");
+        assertThat(reporter.checkAlarm()).isNull();
     }
 
     @Test
@@ -438,7 +564,7 @@ public class JindoIOStatsTest {
         java.nio.file.Path procCgroup = write(tempDir.resolve("cgroup-file"), "0::/\n");
         JindoIOStats.Reporter reporter =
                 new JindoIOStats.Reporter(
-                        60_000,
+                        new AtomicLong(60_000),
                         JindoIOStats.Cgroup.detect(procCgroup, root),
                         tempDir,
                         new AtomicBoolean());
