@@ -16,7 +16,7 @@
 
 """File-level configuration and dispatch for the public table scanner."""
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import StartupMode
 from pypaimon.read.scan_request import scan_partition_predicate
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.utils.range import Range
@@ -60,7 +60,7 @@ class FileScanner:
         self._global_index_result = request.global_index_result
         self._row_ranges = (None if request.row_ranges is None else
                             [Range(start, end) for start, end in request.row_ranges])
-        self.is_streaming = self.table.options.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+        self.is_streaming = self.table.options.startup_mode() == StartupMode.INCREMENTAL
         self.skip_level0 = False if self.is_streaming else self.table.options.batch_scan_skip_level0()
         self.only_read_real_buckets = self.table.options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.auth_partition_predicate = None

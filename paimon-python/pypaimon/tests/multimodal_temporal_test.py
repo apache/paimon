@@ -2241,17 +2241,10 @@ class MultimodalTemporalTest(unittest.TestCase):
             ).to_list()
 
     def test_alignment_rejects_incremental_scans(self):
-        anchors = self.conn.create_table(
-            "incremental_anchors",
-            schema=pa.schema([
-                pa.field("episode_id", pa.int32()),
-                pa.field("event_time", pa.int64()),
-            ]),
-            options={
-                "scan.mode": "incremental",
-                "incremental-between-timestamp": "0,9999999999999",
-            },
-        )
+        anchors = self._table("incremental_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
         source = self._table("incremental_source", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -2262,13 +2255,19 @@ class MultimodalTemporalTest(unittest.TestCase):
             "episode_id": 1, "event_time": 100, "value": 7,
         }])
 
-        with self.assertRaisesRegex(
-                ValueError, "Temporal alignment.*incremental"):
-            pmm.join_asof(
-                anchors.scan(), source.scan().select("value"),
-                on="event_time", by="episode_id",
-                direction="nearest", tolerance=0,
-            ).to_list()
+        for mode in ("default", "incremental"):
+            for selector, value in (
+                    ("incremental-between", "0,1"),
+                    ("incremental-between-timestamp", "0,9999999999999"),
+                    ("incremental-to-auto-tag", "end")):
+                with self.subTest(mode=mode, selector=selector):
+                    query = temporal.ScanQuery(anchors.raw_table.copy({"scan.mode": mode, selector: value}))
+                    with self.assertRaisesRegex(ValueError, "Temporal alignment.*incremental"):
+                        pmm.join_asof(
+                            query, source.scan().select("value"),
+                            on="event_time", by="episode_id",
+                            direction="nearest", tolerance=0,
+                        ).to_list()
 
     def test_alignment_supports_zero_output_columns(self):
         anchors = self._table("zero_output_anchors", {

@@ -522,6 +522,28 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(True, snapshot_json.__contains__("writerVersion"))
         self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
 
+    @parameterized.expand([
+        ('incremental-between', '1,2'),
+        ('incremental-between-timestamp', '0,9999999999999'),
+        ('incremental-to-auto-tag', 'end'),
+    ])
+    def test_write_through_incremental_copy_restores_latest_sequence(self, selector, value):
+        name = 'default.write_' + selector.replace('-', '_')
+        schema = pa.schema([pa.field('id', pa.int64(), nullable=False), ('value', pa.int64())])
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(
+            schema, primary_keys=['id'], options={'bucket': '1'}), False)
+        table = self.catalog.get_table(name)
+        for number in range(3):
+            self._commit_arrow(table, pa.Table.from_pydict({'id': [1], 'value': [number]}, schema=schema))
+
+        selected = table.copy({selector: value})
+        self._commit_arrow(selected, pa.Table.from_pydict({'id': [1], 'value': [3]}, schema=schema))
+
+        self.assertEqual([{'id': 1, 'value': 3}], self._read_sorted(table, 'id').to_pylist())
+        splits = table.new_read_builder().new_scan().plan().splits()
+        self.assertEqual(3, max(file.max_sequence_number for split in splits for file in split.files))
+        self.assertEqual(value, selected.table_schema.options[selector])
+
     def test_write_row_append_only_partitioned_table(self):
         from pypaimon.table.row.generic_row import GenericRow
 

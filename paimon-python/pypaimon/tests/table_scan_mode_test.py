@@ -69,6 +69,35 @@ class TableScanModeTest(unittest.TestCase):
         self.assertEqual(options.startup_mode(), StartupMode.FROM_SNAPSHOT)
         _scan(options.options.to_map())._validate_scan_mode()
 
+    def test_incremental_selector_startup_mode(self):
+        for key in ('incremental-between', 'incremental-between-timestamp', 'incremental-to-auto-tag'):
+            with self.subTest(key=key):
+                scan = _scan({key: '1,2'})
+                self.assertEqual(scan.table.options.startup_mode(), StartupMode.INCREMENTAL)
+                scan._validate_scan_mode()
+
+    def test_incremental_selector_requires_exactly_one_range(self):
+        for ranges in ({}, {'incremental-between': '1,2', 'incremental-between-timestamp': '100,200'},
+                       {'incremental-between': '1,2', 'incremental-to-auto-tag': 'tag2'}):
+            with self.subTest(ranges=ranges):
+                scan = _scan(dict(ranges, **{'scan.mode': 'incremental'}))
+                with self.assertRaisesRegex(ValueError, 'must set only one key'):
+                    scan._validate_scan_mode()
+
+    def test_incremental_selector_conflicts_with_time_travel(self):
+        for key in ('incremental-between', 'incremental-to-auto-tag'):
+            for scan_options in ({'scan.snapshot-id': '1'}, {'scan.mode': 'latest-full'}):
+                with self.subTest(key=key, scan_options=scan_options):
+                    with self.assertRaisesRegex(ValueError, key):
+                        _scan(dict(scan_options, **{key: '1,2'}))._validate_scan_mode()
+
+    def test_incremental_between_format(self):
+        for value in ('', '1', '1,', ',', '1,2,3'):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'The incremental-between must specific'):
+                    CoreOptions.from_dict({'incremental-between': value}).incremental_between()
+        self.assertEqual(CoreOptions.from_dict({'incremental-between': '1,2,'}).incremental_between(), ('1', '2'))
+
     def test_unsupported_scan_modes_raise_value_error(self):
         scan = _scan({
             CoreOptions.SCAN_MODE.key(): StartupMode.COMPACTED_FULL.value,
