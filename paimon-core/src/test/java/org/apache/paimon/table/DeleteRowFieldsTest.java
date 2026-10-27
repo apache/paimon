@@ -34,7 +34,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,9 +46,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DeleteRowFieldsTest extends TableTestBase {
 
     @ParameterizedTest
-    @ValueSource(strings = {"deduplicate", "partial-update", "aggregation"})
-    public void testDeleteReadFilterCompactionAndReinsert(String mergeEngine) throws Exception {
-        FileStoreTable table = createTable(mergeEngine);
+    @CsvSource({
+        "deduplicate, false",
+        "deduplicate, true",
+        "partial-update, false",
+        "partial-update, true",
+        "aggregation, false",
+        "aggregation, true"
+    })
+    public void testDeleteReadFilterCompactionAndReinsert(String mergeEngine, boolean thinMode)
+            throws Exception {
+        FileStoreTable table = createTable(mergeEngine, thinMode);
         write(table, row(RowKind.INSERT, 1L, "old-payload"));
         write(table, row(RowKind.DELETE, 2L, "old-payload"));
 
@@ -62,7 +70,11 @@ public class DeleteRowFieldsTest extends TableTestBase {
         assertThat(delete.getInt(1)).isEqualTo(1);
         assertThat(delete.getLong(2)).isEqualTo(2L);
         assertThat(delete.getString(3).toString()).isEqualTo("required-value");
-        assertThat(delete.isNullAt(4)).isTrue();
+        if (thinMode) {
+            assertThat(delete.isNullAt(4)).isTrue();
+        } else {
+            assertThat(delete.getString(4).toString()).isEqualTo("old-payload");
+        }
 
         Predicate payloadFilter =
                 new PredicateBuilder(table.rowType())
@@ -82,7 +94,7 @@ public class DeleteRowFieldsTest extends TableTestBase {
         assertThat(rows.get(0).getString(4).toString()).isEqualTo("new-payload");
     }
 
-    private FileStoreTable createTable(String mergeEngine) throws Exception {
+    private FileStoreTable createTable(String mergeEngine, boolean thinMode) throws Exception {
         Schema.Builder builder =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -97,6 +109,9 @@ public class DeleteRowFieldsTest extends TableTestBase {
                         .option(CoreOptions.SEQUENCE_FIELD.key(), "seq")
                         .option(CoreOptions.DATA_FILE_THIN_MODE.key(), "true")
                         .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
+        if (thinMode) {
+            builder.option(CoreOptions.DELETE_ROW_THIN_MODE.key(), "true");
+        }
         if (mergeEngine.equals("partial-update")) {
             builder.option(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(), "true");
         } else if (mergeEngine.equals("aggregation")) {

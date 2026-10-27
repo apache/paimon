@@ -37,7 +37,9 @@ final class DeleteRowFieldsProjector {
     private final KeyValue reused = new KeyValue();
 
     static @Nullable int[] createProjection(TableSchema schema, CoreOptions options) {
-        if (schema.primaryKeys().isEmpty() || !removeWholeRecordOnDelete(options)) {
+        if (!options.deleteRowThinMode()
+                || schema.primaryKeys().isEmpty()
+                || !removeWholeRecordOnDelete(options)) {
             return null;
         }
 

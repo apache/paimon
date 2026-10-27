@@ -137,12 +137,16 @@ contains five columns:
 _SEQUENCE_NUMBER | _VALUE_KIND | a | b | c
 ```
 
-For a primary-key merge engine where `DELETE` removes the whole record, Paimon keeps the
-primary-key, sequence, record-level time, clustering, indexed, and non-null fields in data-file
-DELETE rows, and writes null for other nullable value fields. This applies to deduplicate tables,
-partial-update tables with `partial-update.remove-record-on-delete`, and aggregation tables with
-`aggregation.remove-record-on-delete`. The physical schema is unchanged. Changelog files are not
-projected by this optimization.
+With `delete-row.thin-mode = true`, for a primary-key merge engine where `DELETE` removes the
+whole record, Paimon keeps the primary-key, sequence, record-level time, clustering, and non-null
+fields in data-file DELETE rows, and writes null for other nullable value fields. This applies to
+deduplicate tables, partial-update tables with `partial-update.remove-record-on-delete`, and
+aggregation tables with `aggregation.remove-record-on-delete`. The physical schema is unchanged.
+Changelog files are not projected by this optimization.
+
+This option defaults to `false` and is independent of `data-file.thin-mode`. When enabled, readers
+that expose DELETE rows from data files, such as audit-log and delta readers, may observe nulls in
+these fields. Disabling the option does not restore values already written as null.
 
 ### Table w/o Primary key Data File
 

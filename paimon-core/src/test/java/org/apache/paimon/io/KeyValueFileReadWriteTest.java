@@ -630,6 +630,7 @@ public class KeyValueFileReadWriteTest {
     })
     void testDeleteRowFieldsProjection(String format, boolean thinMode) throws Exception {
         Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
         options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
         options.set(CoreOptions.METADATA_STATS_DENSE_STORE, false);
         options.set(CoreOptions.DATA_FILE_THIN_MODE, thinMode);
@@ -678,6 +679,7 @@ public class KeyValueFileReadWriteTest {
     @Test
     void testDeleteRowFieldsProjectionInClusteringFile() throws Exception {
         Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
         options.set(CoreOptions.CLUSTERING_COLUMNS, "comment");
         options.set(CoreOptions.SEQUENCE_FIELD, "itemId");
 

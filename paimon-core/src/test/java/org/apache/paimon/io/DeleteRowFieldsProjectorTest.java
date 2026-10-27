@@ -38,8 +38,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DeleteRowFieldsProjectorTest {
 
     @Test
+    void testDisabledByDefault() {
+        Options options = new Options();
+        assertThat(createProjection(options)).isNull();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
+        assertThat(createProjection(options)).isNotNull();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, false);
+        assertThat(createProjection(options)).isNull();
+    }
+
+    @Test
     void testRequiredFieldProjection() {
         Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
         options.set(CoreOptions.SEQUENCE_FIELD, "seq");
         options.set(CoreOptions.RECORD_LEVEL_TIME_FIELD, "expire");
         options.set(CoreOptions.CLUSTERING_COLUMNS, "cluster");
@@ -59,23 +70,22 @@ class DeleteRowFieldsProjectorTest {
 
     @Test
     void testOnlyWholeRecordDeletesAreProjected() {
-        assertThat(createProjection(new Options())).isNotNull();
+        Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
+        assertThat(createProjection(options)).isNotNull();
 
-        Options partialUpdate = new Options();
-        partialUpdate.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        assertThat(createProjection(partialUpdate)).isNull();
-        partialUpdate.set(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE, true);
-        assertThat(createProjection(partialUpdate)).isNotNull();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        assertThat(createProjection(options)).isNull();
+        options.set(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE, true);
+        assertThat(createProjection(options)).isNotNull();
 
-        Options aggregation = new Options();
-        aggregation.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.AGGREGATE);
-        assertThat(createProjection(aggregation)).isNull();
-        aggregation.set(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE, true);
-        assertThat(createProjection(aggregation)).isNotNull();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.AGGREGATE);
+        assertThat(createProjection(options)).isNull();
+        options.set(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE, true);
+        assertThat(createProjection(options)).isNotNull();
 
-        Options firstRow = new Options();
-        firstRow.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.FIRST_ROW);
-        assertThat(createProjection(firstRow)).isNull();
+        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.FIRST_ROW);
+        assertThat(createProjection(options)).isNull();
     }
 
     @Test
@@ -96,8 +106,9 @@ class DeleteRowFieldsProjectorTest {
                         "payload");
         KeyValue input = new KeyValue().replace(GenericRow.of(1), 2L, RowKind.DELETE, value);
 
-        KeyValue projected =
-                new DeleteRowFieldsProjector(createProjection(new Options())).project(input);
+        Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
+        KeyValue projected = new DeleteRowFieldsProjector(createProjection(options)).project(input);
 
         assertThat(projected.key()).isSameAs(input.key());
         assertThat(projected.sequenceNumber()).isEqualTo(2L);

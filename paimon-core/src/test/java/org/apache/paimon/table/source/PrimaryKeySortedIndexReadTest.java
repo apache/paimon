@@ -77,7 +77,11 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
     @Test
     void testDeletionVectorAndResidualPredicateRemainActive() throws Exception {
         createTableDefault();
-        FileStoreTable table = getTableDefault();
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DELETE_ROW_THIN_MODE.key(), "true"));
         BinaryString keep = BinaryString.fromString("keep");
         BinaryString drop = BinaryString.fromString("drop");
         write(table, ioManager, GenericRow.of(1, 10, keep), GenericRow.of(2, 10, drop));
