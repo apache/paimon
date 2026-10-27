@@ -66,7 +66,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_ALL_OPERATORS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,8 +80,8 @@ import static org.assertj.core.api.Assertions.fail;
  * shape of the stream graph.
  *
  * <p>The table asks for full coverage through {@link
- * org.apache.paimon.flink.FlinkConnectorOptions#SINK_OPERATOR_UID_COVER_ALL_OPERATORS}, without
- * which the suffix reaches only the writer and the committer.
+ * org.apache.paimon.flink.FlinkConnectorOptions#SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS},
+ * without which the suffix reaches only the writer and the committer.
  *
  * <p>Only a checkpoint recovered from the {@link CompletedCheckpointStore} shows this, which is
  * what a JobManager restores from when it is highly available. The savepoint route hides it. {@code
@@ -229,7 +229,7 @@ class OperatorUidSuffixRestoreITCase {
         Options options = new Options();
         options.set(PATH, warehouse.resolve(directory).resolve(TABLE_NAME).toString());
         options.set(SINK_OPERATOR_UID_SUFFIX, uidSuffix);
-        options.set(SINK_OPERATOR_UID_COVER_ALL_OPERATORS, true);
+        options.set(SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS, true);
 
         Schema schema =
                 new Schema(

@@ -483,15 +483,17 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Set the uid suffix for the source operators. After setting, the uid format is "
                                     + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
-                                    + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+                                    + "automatically generate the operator uid, which may be incompatible when the topology changes. "
+                                    + "Other operators the table source adds keep generated uids unless "
+                                    + "'source.operator-uid.cover-table-source-operators' is true.");
 
-    public static final ConfigOption<Boolean> SOURCE_OPERATOR_UID_COVER_ALL_OPERATORS =
-            key("source.operator-uid.cover-all-operators")
+    public static final ConfigOption<Boolean> SOURCE_OPERATOR_UID_COVER_TABLE_SOURCE_OPERATORS =
+            key("source.operator-uid.cover-table-source-operators")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, 'source.operator-uid.suffix' also names every other operator a streaming "
-                                    + "read adds: the split monitor, the split reader, the watermark assigner and the "
+                            "If true, 'source.operator-uid.suffix' also names every other operator the table "
+                                    + "source adds: the split monitor, the split reader, the watermark assigner and the "
                                     + "DataStream row conversion. Without it those operators take their uid from the "
                                     + "shape of the stream graph, so a change elsewhere in the job orphans their "
                                     + "checkpoint state. Has no effect unless 'source.operator-uid.suffix' is set. "
@@ -505,16 +507,19 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
                                     + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
-                                    + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+                                    + "automatically generate the operator uid, which may be incompatible when the topology changes. "
+                                    + "Other operators the table sink adds keep generated uids unless "
+                                    + "'sink.operator-uid.cover-table-sink-operators' is true.");
 
-    public static final ConfigOption<Boolean> SINK_OPERATOR_UID_COVER_ALL_OPERATORS =
-            key("sink.operator-uid.cover-all-operators")
+    public static final ConfigOption<Boolean> SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS =
+            key("sink.operator-uid.cover-table-sink-operators")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, 'sink.operator-uid.suffix' also names every other operator a streaming "
-                                    + "write adds: the row conversions, the local merge, the compaction operators, "
+                            "If true, 'sink.operator-uid.suffix' also names every other operator the table "
+                                    + "sink adds: the row conversions, the local merge, the compaction operators, "
                                     + "the partition statistics operators, the index bootstrap and the final sink. "
+                                    + "Operators the CDC sync actions add before the table sink are not covered. "
                                     + "Without it those operators take their uid from the shape of the stream graph, "
                                     + "so a change elsewhere in the job orphans their checkpoint state. Has no effect "
                                     + "unless 'sink.operator-uid.suffix' is set. Turning it on for a running job "
