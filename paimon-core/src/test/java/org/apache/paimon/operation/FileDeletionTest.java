@@ -44,6 +44,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -73,6 +75,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertNFilesExists;
@@ -389,9 +392,14 @@ public class FileDeletionTest {
         assertPathExists(fileIO, pathFactory.toManifestListPath(tag1.deltaManifestList()));
     }
 
-    @Test
-    public void testDeleteTagWithSnapshot() throws Exception {
-        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testDeleteTagWithSnapshot(boolean deleteAllTags) throws Exception {
+        TestFileStore store =
+                createStore(
+                        TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED,
+                        3,
+                        CoreOptions.ChangelogProducer.NONE);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
@@ -417,14 +425,14 @@ public class FileDeletionTest {
         ManifestList manifestList = store.manifestListFactory().create();
         Snapshot snapshot1 = snapshotManager.snapshot(1);
         List<ManifestFileMeta> snapshot1Data = manifestList.readDataManifests(snapshot1);
-        Snapshot snapshot3 = snapshotManager.snapshot(3);
-        List<ManifestFileMeta> snapshot3Data = manifestList.readDataManifests(snapshot3);
-
         List<String> manifestLists =
                 Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
 
         // create tag1
         createTag(snapshot1, "tag1", store.options().tagDefaultTimeRetained());
+        if (deleteAllTags) {
+            createTag(snapshot1, "tag1-copy", store.options().tagDefaultTimeRetained());
+        }
 
         // expire snapshot 1, 2
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -441,25 +449,73 @@ public class FileDeletionTest {
             assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
         }
 
-        tagManager.deleteTag(
-                "tag1", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+        Set<java.nio.file.Path> retainedFiles = tableFiles();
+        retainedFiles.remove(Paths.get(tagManager.tagPath("tag1").toString()));
+        if (deleteAllTags) {
+            retainedFiles.remove(Paths.get(tagManager.tagPath("tag1-copy").toString()));
+            tagManager.deleteAllTagsOfOneSnapshot(
+                    Arrays.asList("tag1", "tag1-copy"), store.newTagDeletion(), snapshotManager);
+            assertThat(tagManager.tagExists("tag1-copy")).isFalse();
+        } else {
+            tagManager.deleteTag(
+                    "tag1", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+        }
+        assertThat(tagManager.tagExists("tag1")).isFalse();
+        assertThat(tableFiles()).containsExactlyInAnyOrderElementsOf(retainedFiles);
 
         // check data files
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 2));
 
         // check manifests
         for (ManifestFileMeta manifestFileMeta : snapshot1Data) {
             Path path = pathFactory.toManifestFilePath(manifestFileMeta.fileName());
-            if (snapshot3Data.contains(manifestFileMeta)) {
-                assertPathExists(fileIO, path);
-            } else {
-                assertPathNotExists(fileIO, path);
-            }
+            assertPathExists(fileIO, path);
         }
         for (String manifestListName : manifestLists) {
+            assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+        }
+
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, store.options().path());
+        assertThat(new LocalOrphanFilesClean(table).clean().getDeletedFilesPath()).isEmpty();
+        assertThat(tableFiles()).containsExactlyInAnyOrderElementsOf(retainedFiles);
+        List<Path> orphanDataFiles =
+                Arrays.stream(fileIO.listStatus(pathFactory.bucketPath(partition, 0)))
+                        .map(status -> status.getPath())
+                        .filter(path -> path.getName().startsWith("data-"))
+                        .collect(Collectors.toList());
+        assertThat(orphanDataFiles).isNotEmpty();
+
+        // Remove obsolete entries from the retained manifests so the old data is unreferenced.
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.compactManifest();
+        }
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
+        for (Path path : orphanDataFiles) {
+            assertPathExists(fileIO, path);
+        }
+
+        List<Path> deleted =
+                new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000)
+                        .clean()
+                        .getDeletedFilesPath();
+        assertThat(deleted).containsAll(orphanDataFiles);
+        assertThat(deleted.stream().map(path -> path.toUri().getPath()))
+                .contains(
+                        pathFactory
+                                .toManifestListPath(snapshot1.deltaManifestList())
+                                .toUri()
+                                .getPath());
+        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 2));
+        for (String manifestListName : manifestLists) {
             assertPathNotExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+        }
+        for (ManifestFileMeta meta :
+                manifestList.readDataManifests(snapshotManager.latestSnapshot())) {
+            assertPathExists(fileIO, pathFactory.toManifestFilePath(meta.fileName()));
         }
     }
 
@@ -520,27 +576,20 @@ public class FileDeletionTest {
 
         tagManager.deleteTag(
                 "tag2", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+        assertThat(tagManager.tagExists("tag2")).isFalse();
 
         // check data files
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
 
         // check manifests
-        Snapshot tag1 = tagManager.getOrThrow("tag1");
-        Snapshot tag3 = tagManager.getOrThrow("tag3");
-        List<ManifestFileMeta> existing = manifestList.readDataManifests(tag1);
-        existing.addAll(manifestList.readDataManifests(tag3));
         for (ManifestFileMeta manifestFileMeta : snapshot2Data) {
             Path path = pathFactory.toManifestFilePath(manifestFileMeta.fileName());
-            if (existing.contains(manifestFileMeta)) {
-                assertPathExists(fileIO, path);
-            } else {
-                assertPathNotExists(fileIO, path);
-            }
+            assertPathExists(fileIO, path);
         }
 
         for (String manifestListName : manifestLists) {
-            assertPathNotExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+            assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
         }
     }
 
@@ -851,17 +900,27 @@ public class FileDeletionTest {
         return createStore(mode, 2);
     }
 
+    private Set<java.nio.file.Path> tableFiles() throws IOException {
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            return files.filter(Files::isRegularFile).collect(Collectors.toSet());
+        }
+    }
+
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
             throws Exception {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
+        return createStore(
+                mode,
+                buckets,
+                ThreadLocalRandom.current().nextBoolean()
+                        ? CoreOptions.ChangelogProducer.INPUT
+                        : CoreOptions.ChangelogProducer.NONE);
+    }
 
-        CoreOptions.ChangelogProducer changelogProducer;
-        if (random.nextBoolean()) {
-            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
-        } else {
-            changelogProducer = CoreOptions.ChangelogProducer.NONE;
-        }
-
+    private TestFileStore createStore(
+            TestKeyValueGenerator.GeneratorMode mode,
+            int buckets,
+            CoreOptions.ChangelogProducer changelogProducer)
+            throws Exception {
         RowType rowType, partitionType;
         switch (mode) {
             case NON_PARTITIONED:

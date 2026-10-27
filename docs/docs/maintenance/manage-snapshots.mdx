@@ -398,9 +398,10 @@ changelog producer.
 
 ## Remove Orphan Files
 
-Paimon files are deleted physically only when expiring snapshots. However, it is possible that some unexpected errors occurred
-when deleting files, so that there may exist files that are not used by Paimon snapshots (so-called "orphan files"). You can
-submit a `remove_orphan_files` job to clean them:
+Snapshot expiration physically deletes unused files. Deleting a tag only removes its tag file,
+and unexpected errors during file deletion can also leave unused files behind. Files that are no longer
+referenced by any snapshot, tag, or changelog are called "orphan files". You can submit a `remove_orphan_files` job
+to clean them:
 
 <Tabs groupId="remove-orphan-files">
 
