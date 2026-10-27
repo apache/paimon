@@ -148,31 +148,29 @@ So migrate through a savepoint:
 
 2. **Set the options** with `ALTER TABLE ... SET` or SQL hints. Keep the existing suffix:
    changing it renames the Writer and Global Committer too, and loses their state.
-
-3. **Restart from the savepoint** with the same topology. The newly covered sink operators hold
-   no state, so Flink skips their entries without `allowNonRestoredState` and logs
-   `Skipping empty savepoint state for operator` once per operator. Check that the job resumes
-   committing from the snapshot it stopped at.
+3. **Restart from the savepoint** with the same topology. The operators the sink options newly
+   cover hold no state, so Flink skips their entries without `allowNonRestoredState` and logs
+   `Skipping empty savepoint state for operator` once per operator. Check that the snapshot ids
+   in `<table>$snapshots` continue past the one the job stopped at, under the same `commit_user`.
 
    Two cases drop an entry that holds state. Without `allowNonRestoredState` the restore fails
    with `Cannot map checkpoint/savepoint state for operator <id>`, so submit this one restart
-   with it. Flink then logs `Skipping savepoint state for operator <id>` per dropped entry. The
-   Writer and Global Committer keep their UIDs, so Flink still restores their state.
+   with it. Flink then logs `Skipping savepoint state for operator <id>` for each entry it skips,
+   empty ones included. The Writer and Global Committer keep their UIDs, so Flink still restores
+   their state.
 
    - **`'partition.sink-strategy' = 'PARTITION_DYNAMIC'`**: the `Collect Statistics` coordinator's
      entry is dropped. It rebuilds its statistics from the next records.
-   - **A read with an exactly-once consumer**: the split monitor's entry is dropped. The
-     exactly-once route needs a [consumer ID](./consumer-id) with the default `consumer.mode`.
-     After `flink stop` the consumer holds the same next snapshot as the monitor, and the reader
-     resumes from it, so no snapshot is skipped or read twice. This holds only if you stop with
-     `flink stop` (`flink savepoint` then cancel can re-read snapshots), restart before
-     `consumer.expiration-time`, and keep `consumer.ignore-progress` false.
+   - **A read with dedicated split generation or an exactly-once consumer**: the split monitor's
+     entry is dropped. An exactly-once read needs a [consumer ID](./consumer-id) with the default
+     `consumer.mode`. After `flink stop` the consumer holds the same next snapshot as the
+     monitor, and the reader resumes from it, so no snapshot is skipped or read twice. This holds
+     only if you stop with `flink stop` (`flink savepoint` then cancel can re-read snapshots),
+     restart before `consumer.expiration-time`, and keep `consumer.ignore-progress` false. Check
+     that `next_snapshot_id` in `<table>$consumers` holds, then advances.
 
-   A bounded read with dedicated split generation reads its whole scan again after the
-   restart. Let such a job finish, then set the option.
-
-4. **Take a new savepoint** once the job checkpoints. Later restores, including `last-state`
-   upgrades, then use the new ids.
+4. **Do not restore from savepoints or checkpoints taken before the migration.** They still hold
+   the old ids.
 
 After the migration, topology changes around the table, such as a map in front of the sink or a
 new parallelism, keep every Paimon operator's state on the routes above.
