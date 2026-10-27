@@ -21,7 +21,6 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
 import org.apache.paimon.tag.TagTimeExtractor.WatermarkExtractor;
@@ -53,7 +52,6 @@ public class TagAutoCreation {
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
-    private final TagDeletion tagDeletion;
     private final TagTimeExtractor timeExtractor;
     private final TagPeriodHandler periodHandler;
     private final Duration delay;
@@ -70,7 +68,6 @@ public class TagAutoCreation {
     private TagAutoCreation(
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            TagDeletion tagDeletion,
             TagTimeExtractor timeExtractor,
             TagPeriodHandler periodHandler,
             Duration delay,
@@ -82,7 +79,6 @@ public class TagAutoCreation {
             ZoneId sinkProcessTimeZone) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
-        this.tagDeletion = tagDeletion;
         this.timeExtractor = timeExtractor;
         this.periodHandler = periodHandler;
         this.delay = delay;
@@ -196,7 +192,7 @@ public class TagAutoCreation {
                                 "Delete tag {}, because the number of auto-created tags reached numRetainedMax of {}.",
                                 toDeleteTag,
                                 numRetainedMax);
-                        tagManager.deleteTag(toDeleteTag, tagDeletion, snapshotManager, callbacks);
+                        tagManager.deleteTag(toDeleteTag, callbacks);
                         i++;
                         if (i == toDelete) {
                             break;
@@ -225,7 +221,6 @@ public class TagAutoCreation {
             CoreOptions options,
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            TagDeletion tagDeletion,
             List<TagCallback> callbacks) {
         TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);
         if (extractor == null) {
@@ -234,7 +229,6 @@ public class TagAutoCreation {
         return new TagAutoCreation(
                 snapshotManager,
                 tagManager,
-                tagDeletion,
                 extractor,
                 TagPeriodHandler.create(options),
                 options.tagCreationDelay(),

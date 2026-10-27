@@ -25,7 +25,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
@@ -211,27 +210,16 @@ public class TagManager {
     /**
      * Delete only tag files, leaving referenced files to orphan file cleanup. Make sure the
      * tagNames are ALL tags of one snapshot.
-     *
-     * @param tagDeletion unused; retained for compatibility
-     * @param snapshotManager unused; retained for compatibility
      */
-    public void deleteAllTagsOfOneSnapshot(
-            List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
+    public void deleteAllTagsOfOneSnapshot(List<String> tagNames) {
         tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
     }
 
     /**
      * Delete only the tag file, leaving referenced files to orphan file cleanup. Ignore errors if
      * the tag doesn't exist.
-     *
-     * @param tagDeletion unused; retained for compatibility
-     * @param snapshotManager unused; retained for compatibility
      */
-    public void deleteTag(
-            String tagName,
-            TagDeletion tagDeletion,
-            SnapshotManager snapshotManager,
-            List<TagCallback> callbacks) {
+    public void deleteTag(String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
         Optional<Tag> tag = get(tagName);
         if (!tag.isPresent()) {

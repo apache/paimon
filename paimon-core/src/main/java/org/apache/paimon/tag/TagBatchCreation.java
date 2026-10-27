@@ -20,7 +20,6 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -44,14 +43,12 @@ public class TagBatchCreation {
     private final CoreOptions options;
     private final TagManager tagManager;
     private final SnapshotManager snapshotManager;
-    private final TagDeletion tagDeletion;
     private final ZoneId zoneId;
 
     public TagBatchCreation(FileStoreTable table) {
         this.table = table;
         this.snapshotManager = table.snapshotManager();
         this.tagManager = table.tagManager();
-        this.tagDeletion = table.store().newTagDeletion();
         this.options = table.coreOptions();
         this.zoneId = options.sinkProcessTimeZone();
     }
@@ -70,8 +67,7 @@ public class TagBatchCreation {
                                 + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         try {
             // If the tag already exists, delete the tag
-            tagManager.deleteTag(
-                    tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks(table));
+            tagManager.deleteTag(tagName, table.store().createTagCallbacks(table));
             // Create a new tag
             tagManager.createTag(
                     snapshot,
@@ -86,11 +82,7 @@ public class TagBatchCreation {
                     snapshot.id(),
                     e);
             if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(
-                        tagName,
-                        tagDeletion,
-                        snapshotManager,
-                        table.store().createTagCallbacks(table));
+                tagManager.deleteTag(tagName, table.store().createTagCallbacks(table));
             }
         }
         // Expire the tag
@@ -108,17 +100,13 @@ public class TagBatchCreation {
             while (tagCount > tagNumRetainedMax) {
                 for (List<String> tagNames : tagManager.tags().values()) {
                     if (tagCount - tagNames.size() > tagNumRetainedMax) {
-                        tagManager.deleteAllTagsOfOneSnapshot(
-                                tagNames, tagDeletion, snapshotManager);
+                        tagManager.deleteAllTagsOfOneSnapshot(tagNames);
                         tagCount = tagCount - tagNames.size();
                     } else {
                         List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
                         for (String toBeDeleted : sortedTagNames) {
                             tagManager.deleteTag(
-                                    toBeDeleted,
-                                    tagDeletion,
-                                    snapshotManager,
-                                    table.store().createTagCallbacks(table));
+                                    toBeDeleted, table.store().createTagCallbacks(table));
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {
                                 break;

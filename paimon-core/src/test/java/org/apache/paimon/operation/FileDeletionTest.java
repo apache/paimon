@@ -453,12 +453,10 @@ public class FileDeletionTest {
         retainedFiles.remove(Paths.get(tagManager.tagPath("tag1").toString()));
         if (deleteAllTags) {
             retainedFiles.remove(Paths.get(tagManager.tagPath("tag1-copy").toString()));
-            tagManager.deleteAllTagsOfOneSnapshot(
-                    Arrays.asList("tag1", "tag1-copy"), store.newTagDeletion(), snapshotManager);
+            tagManager.deleteAllTagsOfOneSnapshot(Arrays.asList("tag1", "tag1-copy"));
             assertThat(tagManager.tagExists("tag1-copy")).isFalse();
         } else {
-            tagManager.deleteTag(
-                    "tag1", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+            tagManager.deleteTag("tag1", Collections.emptyList());
         }
         assertThat(tagManager.tagExists("tag1")).isFalse();
         assertThat(tableFiles()).containsExactlyInAnyOrderElementsOf(retainedFiles);
@@ -574,8 +572,7 @@ public class FileDeletionTest {
             assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
         }
 
-        tagManager.deleteTag(
-                "tag2", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+        tagManager.deleteTag("tag2", Collections.emptyList());
         assertThat(tagManager.tagExists("tag2")).isFalse();
 
         // check data files
@@ -745,8 +742,7 @@ public class FileDeletionTest {
                                 .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
                                 .build())
                 .expire();
-        tagManager.deleteTag(
-                "tag1", store.newTagDeletion(), snapshotManager, Collections.emptyList());
+        tagManager.deleteTag("tag1", Collections.emptyList());
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
