@@ -48,7 +48,6 @@ import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.NormalPartitionExpire;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.partition.PartitionExpireStrategy;
@@ -371,20 +370,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         return new TagManager(fileIO, options.path(), options.branch(), options);
     }
 
-    @Override
-    public TagDeletion newTagDeletion() {
-        return new TagDeletion(
-                fileIO,
-                pathFactory(),
-                manifestFileFactory().create(),
-                manifestListFactory().create(),
-                newIndexFileHandler(),
-                newStatsFileHandler(),
-                options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum(),
-                options.scanManifestParallelism());
-    }
-
     public abstract Comparator<InternalRow> newKeyComparator();
 
     @Override
@@ -577,11 +562,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public TagAutoManager newTagAutoManager(FileStoreTable table) {
         return TagAutoManager.create(
-                options,
-                snapshotManager(),
-                newTagManager(),
-                newTagDeletion(),
-                createTagCallbacks(table));
+                options, snapshotManager(), newTagManager(), createTagCallbacks(table));
     }
 
     @Override

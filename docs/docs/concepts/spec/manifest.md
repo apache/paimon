@@ -61,7 +61,8 @@ skip manifests before opening them.
 | `_EXTRA_FILES` | ARRAY of STRING, nullable | Names of additional files in the manifest directory; defaults to null. |
 
 Each extra file belongs exclusively to one manifest. It is retained and cleaned up together with
-that manifest during snapshot, tag, or changelog deletion.
+that manifest during snapshot or changelog expiration and orphan file cleanup. Tag deletion retains
+both the manifest and its extra files for later orphan file cleanup.
 
 ### Manifest Sidecar
 

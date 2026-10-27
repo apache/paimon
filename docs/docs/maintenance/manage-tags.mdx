@@ -177,6 +177,10 @@ CALL sys.create_tag(table => 'test.t', tag => 'test_tag');
 
 You can delete a tag by its name.
 
+Deleting a tag only removes the tag file. Its manifest, index, and data files are retained.
+Use [Remove Orphan Files](./manage-snapshots#remove-orphan-files) to reclaim files that are no longer
+referenced by any snapshot, tag, or changelog, subject to the orphan file cleanup retention period.
+
 <Tabs groupId="delete-tag">
 
 <TabItem value="flink-sql" label="Flink SQL">
