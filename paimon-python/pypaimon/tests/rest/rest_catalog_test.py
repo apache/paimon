@@ -159,6 +159,10 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIn("default.no_such_table", str(context.exception))
         self.assertIn("does not exist", str(context.exception))
 
+    def test_table_operations_reject_branch_and_system_tables(self):
+        from pypaimon.tests.catalog_table_guard_test import assert_table_guards
+        assert_table_guards(self, self.rest_catalog, 'guard_db')
+
     def test_table_rollback_to_snapshot(self):
         """Test table-level rollback_to_snapshot via FileStoreTable."""
         table_name = "default.table_level_rollback_snapshot"
