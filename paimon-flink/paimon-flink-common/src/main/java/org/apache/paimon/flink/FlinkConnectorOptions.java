@@ -25,6 +25,7 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
 
 import java.lang.reflect.Field;
@@ -33,10 +34,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.LinkElement.link;
 import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for flink connector. */
 public class FlinkConnectorOptions {
+
+    /** Relative to the configurations page that embeds the generated option tables. */
+    private static final String OPERATOR_UID_GUIDE = "../flink/savepoint#operator-uids";
 
     public static final String NONE = "none";
 
@@ -481,50 +486,64 @@ public class FlinkConnectorOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Set the uid suffix for the source operators. After setting, the uid format is "
-                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
-                                    + "automatically generate the operator uid, which may be incompatible when the topology changes. "
-                                    + "Other operators the table source adds keep generated uids unless "
-                                    + "'source.operator-uid.cover-table-source-operators' is true.");
+                            Description.builder()
+                                    .text(
+                                            "Set the uid suffix for the source operators. The uid format is "
+                                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. Without a suffix Flink "
+                                                    + "generates these ids from the shape of the stream graph, so a topology "
+                                                    + "change can orphan their state. The suffix alone does not prevent that: "
+                                                    + "the other operators the table source adds keep generated ids, and a "
+                                                    + "recovery from the HA checkpoint store fails when one of them moves. "
+                                                    + "For stable ids also set 'source.operator-uid.cover-table-source-operators'; existing jobs must follow the %s first.",
+                                            link(OPERATOR_UID_GUIDE, "migration steps"))
+                                    .build());
 
     public static final ConfigOption<Boolean> SOURCE_OPERATOR_UID_COVER_TABLE_SOURCE_OPERATORS =
             key("source.operator-uid.cover-table-source-operators")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, 'source.operator-uid.suffix' also names every other operator the table "
-                                    + "source adds: the split monitor, the split reader, the watermark assigner and the "
-                                    + "DataStream row conversion. Without it those operators take their uid from the "
-                                    + "shape of the stream graph, so a change elsewhere in the job orphans their "
-                                    + "checkpoint state. Has no effect unless 'source.operator-uid.suffix' is set. "
-                                    + "Turning it on for a running job changes those uids, see the migration steps "
-                                    + "in the Flink savepoint documentation.");
+                            Description.builder()
+                                    .text(
+                                            "If true, 'source.operator-uid.suffix' also names every other operator the table source adds in a streaming job: the split monitor, the split reader, the watermark assigner and the DataStream row conversion. "
+                                                    + "Without it those operators get ids generated from the shape of the "
+                                                    + "stream graph, so a change elsewhere in the job orphans their checkpoint "
+                                                    + "state. Has no effect unless 'source.operator-uid.suffix' is set. Enabling it on an existing "
+                                                    + "job changes those ids at the next restore; follow the %s first.",
+                                            link(OPERATOR_UID_GUIDE, "migration steps"))
+                                    .build());
 
     public static final ConfigOption<String> SINK_OPERATOR_UID_SUFFIX =
             key("sink.operator-uid.suffix")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
-                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
-                                    + "automatically generate the operator uid, which may be incompatible when the topology changes. "
-                                    + "Other operators the table sink adds keep generated uids unless "
-                                    + "'sink.operator-uid.cover-table-sink-operators' is true.");
+                            Description.builder()
+                                    .text(
+                                            "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
+                                                    + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. Without a suffix Flink "
+                                                    + "generates these ids from the shape of the stream graph, so a topology "
+                                                    + "change can orphan their state. The suffix alone does not prevent that: "
+                                                    + "the other operators the table sink adds keep generated ids, and a "
+                                                    + "recovery from the HA checkpoint store fails when one of them moves. "
+                                                    + "For stable ids also set 'sink.operator-uid.cover-table-sink-operators'; existing jobs must follow the %s first.",
+                                            link(OPERATOR_UID_GUIDE, "migration steps"))
+                                    .build());
 
     public static final ConfigOption<Boolean> SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS =
             key("sink.operator-uid.cover-table-sink-operators")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, 'sink.operator-uid.suffix' also names every other operator the table "
-                                    + "sink adds: the row conversions, the local merge, the compaction operators, "
-                                    + "the partition statistics operators, the index bootstrap and the final sink. "
-                                    + "Operators the CDC sync actions add before the table sink are not covered. "
-                                    + "Without it those operators take their uid from the shape of the stream graph, "
-                                    + "so a change elsewhere in the job orphans their checkpoint state. Has no effect "
-                                    + "unless 'sink.operator-uid.suffix' is set. Turning it on for a running job "
-                                    + "changes those uids, see the migration steps in the Flink savepoint "
-                                    + "documentation.");
+                            Description.builder()
+                                    .text(
+                                            "If true, 'sink.operator-uid.suffix' also names every other operator the table sink adds in a streaming job: the row conversions, the local merge, the compaction operators, the partition statistics operators, the index bootstrap and the final sink. Operators the CDC sync actions add before the table sink are not covered. "
+                                                    + "Without it those operators get ids generated from the shape of the "
+                                                    + "stream graph, so a change elsewhere in the job orphans their checkpoint "
+                                                    + "state. Has no effect unless 'sink.operator-uid.suffix' is set. Enabling it on an existing "
+                                                    + "job changes those ids at the next restore; follow the %s first.",
+                                            link(OPERATOR_UID_GUIDE, "migration steps"))
+                                    .build());
 
     public static final ConfigOption<Boolean> SCAN_BOUNDED =
             key("scan.bounded")

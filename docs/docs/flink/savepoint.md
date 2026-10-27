@@ -88,13 +88,12 @@ Verify that checkpoints complete and new Paimon snapshots appear before resuming
 
 ## Operator UIDs
 
-Flink stores state per operator and finds it again by operator id, which comes from the UID when
-the operator has one. An operator without one gets an id derived from its position in the job
-graph. Adding an operator upstream, or changing a parallelism that alters operator chaining, then
-gives it a new id and orphans its checkpoint entry.
+Flink maps checkpoint state to operators by id. An operator without a UID gets an id from its
+place in the job graph, so adding an operator upstream, or a parallelism change that alters
+chaining, gives it a new id and orphans its state.
 
-A Paimon source or sink is several operators. The suffix options name some of them; the
-cover options name the rest:
+A Paimon source or sink is several operators. The suffix options name some of them; the cover
+options name the rest:
 
 | Option | Operators named |
 | --- | --- |
@@ -103,16 +102,12 @@ cover options name the rest:
 | `source.operator-uid.suffix` | The source |
 | `source.operator-uid.cover-table-source-operators` | Also the split monitor and reader used by dedicated split generation and exactly-once consumers, the watermark assigner, and the DataStream row conversion |
 
-Each UID is `<operator>_<table name>_<suffix>`. The table name does not include the database, so
-two tables with the same name and the same suffix in one job collide. Flink then rejects the job
-with `Hash collision on user-specified ID`. Give each table its own suffix.
+Each UID is `<operator>_<table name>_<suffix>`. The table name leaves out the database, so two
+tables with the same name and suffix in one job collide, and Flink rejects the job with
+`Hash collision on user-specified ID`. Give each table its own suffix.
 
-The CDC sync actions are not covered: the operators they add around the table sink, such as Side Output, Schema Evolution and Case-insensitive Convert, and the shared operators of a database sync keep generated ids. Such jobs cannot run with `pipeline.auto-generate-uids=false`.
-
-The cover options are off by default and do nothing without the matching suffix.
-Set the sink pair on a table before the first streaming job that writes it, and the source pair
-before the first streaming job that reads it. The example below sets all four, for a table used
-both ways:
+The cover options do nothing without the matching suffix. Set the sink pair before the first
+streaming job writes the table, and the source pair before the first streaming job reads it:
 
 ```sql
 ALTER TABLE my_table SET (
@@ -123,75 +118,61 @@ ALTER TABLE my_table SET (
 );
 ```
 
-Batch jobs are not covered. They do not restore from checkpoints today, and the options name only operators that a streaming job also builds.
+Not covered:
 
-### How an orphaned entry fails
-
-Flink handles an entry that no operator claims in two different ways, and the way depends on how
-the job is restored:
-
-- **From a savepoint or an explicit checkpoint path** (`execution.state-recovery.path`), Flink
-  skips an unclaimed entry that holds no state and rejects one that does.
-- **From the high-availability checkpoint store**, which is what a JobManager failover and the
-  Flink Kubernetes Operator's `last-state` upgrade mode use, Flink rejects every unclaimed entry,
-  empty or not:
-
-  ```
-  JobInitializationException: Could not start the JobMaster.
-  Caused by: IllegalStateException: There is no operator for the state <operator id>
-  ```
-
-  The job then stays in a terminal state. The `allowNonRestoredState` setting of a job
-  submission does not apply on this route. Nor does `execution.state-recovery.ignore-unclaimed-state`;
-  Flink reads it only together with `execution.state-recovery.path`. A recovery from the HA
-  checkpoint store has no way to skip an entry. Restore from a savepoint or an explicit
-  checkpoint path instead.
+- The CDC sync actions: the operators they add around the table sink, such as Side Output,
+  Schema Evolution and Case-insensitive Convert, and the shared operators of a database sync.
+  Such jobs cannot run with `pipeline.auto-generate-uids=false`.
+- Operators only a `BATCH` job builds, such as sort and clustering. Flink does not checkpoint in
+  `BATCH` mode. A bounded job in `STREAMING` mode is covered.
 
 ### Migrate a running job
 
-Turning a cover option on changes the ids of the operators it newly covers, so their
-entries in the job's existing checkpoints become unclaimed. Migrate through a savepoint, never
-through a `last-state` upgrade or a JobManager failover.
+Turning on a cover option gives the newly covered operators new ids, so their entries in the
+job's checkpoints become unclaimed. A restore from a savepoint or from
+`execution.state-recovery.path` skips an unclaimed entry that holds no state and rejects one
+that does. A restore from the high-availability checkpoint store, as in a JobManager failover or
+a Kubernetes Operator `last-state` upgrade, rejects every unclaimed entry, and neither
+`allowNonRestoredState` nor `execution.state-recovery.ignore-unclaimed-state` helps:
 
-1. **Stop the job with a savepoint.** Use
+```
+JobInitializationException: Could not start the JobMaster.
+Caused by: IllegalStateException: There is no operator for the state <operator id>
+```
+
+So migrate through a savepoint:
+
+1. **Stop the job** with
    [stop-with-savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint)
-   and wait for it to finish.
+   (`flink stop`) and wait for it to finish.
 
-2. **Set the options** on the table with `ALTER TABLE ... SET`, or in the job's SQL hints. Keep the
-   existing suffix. Changing it renames the Writer and Global Committer UIDs too, and their state
-   would be lost.
+2. **Set the options** with `ALTER TABLE ... SET` or SQL hints. Keep the existing suffix:
+   changing it renames the Writer and Global Committer too, and loses their state.
 
-3. **Restart from the savepoint.** With `'partition.sink-strategy' = 'PARTITION_DYNAMIC'`, or a
-   read with dedicated split generation or an exactly-once consumer, go to step 4 first. Otherwise
-   restart with the same topology as before. The newly covered sink operators keep nothing in a
-   checkpoint, so Flink skips their old entries and the restore succeeds without
-   `allowNonRestoredState`. The JobManager log shows one `Skipping empty savepoint state for
-   operator` line per operator that gained a UID. Confirm the job resumes committing from the
-   snapshot it stopped at.
+3. **Restart from the savepoint** with the same topology. The newly covered sink operators hold
+   no state, so Flink skips their entries without `allowNonRestoredState` and logs
+   `Skipping empty savepoint state for operator` once per operator. Check that the job resumes
+   committing from the snapshot it stopped at.
 
-4. **Partition-dynamic append tables need one more step.** With
-   `'partition.sink-strategy' = 'PARTITION_DYNAMIC'` the `Collect Statistics` operator has an
-   operator coordinator, and a coordinator's entry is never empty. Restarting the normal way
-   then fails with `Cannot map checkpoint/savepoint state for operator <id>...`. For that one
-   restart, submit with `allowNonRestoredState`. The JobManager then logs `Skipping savepoint
-   state for operator <id>` once per dropped entry. The only dropped entry that held state is
-   the statistics coordinator, which rebuilds it from the records it sees next. The source,
-   Writer and Global Committer already carry UIDs and keep their ids, so Flink still finds
-   their state.
+   Two cases drop an entry that holds state. Without `allowNonRestoredState` the restore fails
+   with `Cannot map checkpoint/savepoint state for operator <id>`, so submit this one restart
+   with it. Flink then logs `Skipping savepoint state for operator <id>` per dropped entry. The
+   Writer and Global Committer keep their UIDs, so Flink still restores their state.
 
-5. **Reads with dedicated split generation or an exactly-once consumer hold their position in
-   the split monitor.** Only these read routes gain operators from
-   `source.operator-uid.cover-table-source-operators`. Every other read already carries its UID on the
-   source. A DataStream job that calls `buildForRow` gains the row conversion operator on every
-   route. The monitor's entry holds the next snapshot to read, so step 3 rejects it the same
-   way. Restart with `allowNonRestoredState`, and one of the dropped entries is the monitor's.
-   With a [consumer ID](./consumer-id) the reader resumes from the snapshot recorded in
-   the consumer and nothing is lost. Without one it starts again from the configured scan
-   mode, so plan for replayed or skipped snapshots, or set the source option on a fresh job
-   instead of migrating.
+   - **`'partition.sink-strategy' = 'PARTITION_DYNAMIC'`**: the `Collect Statistics` coordinator's
+     entry is dropped. It rebuilds its statistics from the next records.
+   - **A read with an exactly-once consumer**: the split monitor's entry is dropped. The
+     exactly-once route needs a [consumer ID](./consumer-id) with the default `consumer.mode`.
+     After `flink stop` the consumer holds the same next snapshot as the monitor, and the reader
+     resumes from it, so no snapshot is skipped or read twice. This holds only if you stop with
+     `flink stop` (`flink savepoint` then cancel can re-read snapshots), restart before
+     `consumer.expiration-time`, and keep `consumer.ignore-progress` false.
 
-6. **Take a new savepoint** once the job checkpoints again. Later restores, including
-   `last-state` upgrades, then start from the new UID layout.
+   A bounded read with dedicated split generation reads its whole scan again after the
+   restart. Let such a job finish, then set the option.
 
-After the migration, changing the topology around the table, for example adding a map function
-in front of the sink or changing parallelism, keeps every Paimon operator's state.
+4. **Take a new savepoint** once the job checkpoints. Later restores, including `last-state`
+   upgrades, then use the new ids.
+
+After the migration, topology changes around the table, such as a map in front of the sink or a
+new parallelism, keep every Paimon operator's state on the routes above.
