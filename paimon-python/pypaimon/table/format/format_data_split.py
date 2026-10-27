@@ -26,6 +26,14 @@ class FormatDataSplit:
     file_path: str
     file_size: int
     partition: Optional[Dict[str, Any]] = None  # partition column name -> value
+    # Earlier PyPaimon versions named directories with unescaped values: the directory's values read that
+    # way, when they differ, and whether the directory is only an earlier version's, such as pt=a=b.
+    legacy_partition: Optional[Dict[str, Any]] = None
+    legacy_directory: bool = False
+    # The partition filter whose rows a read keeps, for files that keep their partition columns, and whether
+    # the directory's own values match it.
+    row_filter: Optional[Dict[str, Any]] = None
+    directory_matches: bool = True
 
     def data_path(self) -> str:
         return self.file_path
