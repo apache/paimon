@@ -146,6 +146,8 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void dropBranch(String branchName) {
+        checkArgument(
+                !BranchManager.isMainBranch(branchName), "The main branch cannot be deleted.");
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
         try {
             // Delete branch directory
