@@ -59,6 +59,9 @@ public class ExpirePartitionsAction extends TableActionBase implements LocalActi
         map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
         map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        map.put(
+                CoreOptions.PARTITION_EXPIRATION_RETAIN_LATEST.key(),
+                table.options().get(CoreOptions.PARTITION_EXPIRATION_RETAIN_LATEST.key()));
     }
 
     @Override
