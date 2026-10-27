@@ -17,6 +17,7 @@
 
 """Native/Python planner parity on persisted snapshots and data files."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import json
 import tempfile
 import unittest
@@ -29,15 +30,14 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 @pytest.mark.native_plan
@@ -127,7 +127,9 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
             if native:
                 # Make an implicit Python fallback fail the test, including
                 # empty plans for which a row comparison alone proves nothing.
-                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
+                with patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                        side_effect=AssertionError(
                         'native planner fell back')):
                     plan = scan.plan()
             else:
@@ -137,7 +139,7 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
                     getattr(split, '_native_split', None) is not None
                     for split in plan.splits()))
                 read_guard = patch(
-                    'pypaimon.read.table_read.TableRead._create_split_read',
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                     side_effect=AssertionError(
                         'native capability read fell back to Python'))
             else:
@@ -310,7 +312,7 @@ class NativePlanCapabilitiesTest(unittest.TestCase):
         vector.delete(3)
         # Python's delete API is DE-only. Use its production bitmap writer to
         # create the same index payload for this compacted primary-key fixture.
-        index_entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        index_entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
             GenericRow([], []), 0, {data_file.file_name: vector})
         commit = table.new_batch_write_builder().new_commit()
         try:

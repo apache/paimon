@@ -1,6 +1,6 @@
 ---
 title: "Multimodal Reads and Row IDs"
-description: "Filter and project multimodal rows, fetch BLOB payloads, and carry row IDs between processing stages."
+description: "Filter and project multimodal rows, export Lance datasets, fetch BLOB payloads, and carry row IDs between processing stages."
 ---
 
 <!--
@@ -24,7 +24,7 @@ under the License.
 
 # Multimodal Reads and Row IDs
 
-Filter and project multimodal rows, fetch BLOB payloads, and carry row IDs between processing stages. The examples use the `docs` table from [Multimodal Tables](./multimodal-tables). Examples with `frames` require a frame table with the named grouping, ordering, and payload columns.
+Filter and project multimodal rows, export Lance datasets, fetch BLOB payloads, and carry row IDs between processing stages. The examples use the `docs` table from [Multimodal Tables](./multimodal-tables). Examples with `frames` require a frame table with the named grouping, ordering, and payload columns.
 
 ## Scan
 
@@ -49,6 +49,105 @@ with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
     for batch in reader:
         consume(batch)
 ```
+
+### Export to Lance
+
+`scan().export_lance()` writes the scan's logical rows to an independent Lance
+dataset directory and returns a `lance.LanceDataset`. It honors `where()`,
+`select()`, `limit()`, and the snapshot or tag selected by `scan()`.
+PyPaimon supports Lance as an export destination only. It does not read or write
+Paimon data or vector files using `file.format=lance` or
+`vector.file.format=lance`. Java's Lance file format support remains available.
+Before accessing an existing table through PyPaimon, rewrite any Lance data or
+vector files into a format supported by PyPaimon.
+Export requires Python 3.10 or later and `pylance>=13,<14` to preserve null Blob
+values across batches.
+Install the optional Lance dependency:
+
+```shell
+pip install 'pypaimon[lance]'
+```
+
+The output uses Lance data storage version 2.1 to preserve nested null values.
+
+This example uses the explicit schema from [Multimodal Tables](./multimodal-tables#create)
+and assumes a retained tag named `train-v1` already exists; see [Manage Tags](./manage-tags).
+
+```python
+import lance
+
+exported = (
+    docs.scan(tag_name="train-v1")
+    .where("category = 'lake'")
+    .select(["id", "embedding", "image"])
+    .limit(1000)
+    .export_lance("/tmp/train.lance")
+)
+
+# Reopen the result directly with Lance, independently of the Paimon table.
+reopened = lance.dataset("/tmp/train.lance")
+assert reopened.count_rows() == exported.count_rows()
+```
+
+Use `docs.scan(snapshot_id=42)` instead of `tag_name` to export an existing
+snapshot by ID. The two arguments are mutually exclusive. Without either,
+the export resolves the latest snapshot once and reads that version throughout.
+Snapshot and tag reads use their historical schema. Latest reads preserve the
+table's logical schema, including schema-only changes without a new data commit.
+Resolving a snapshot does not retain its source files: use a retained tag for
+long exports. The export does not create a retention tag automatically.
+
+The method accepts these keyword arguments:
+
+| Argument | Default | Behavior |
+| --- | --- | --- |
+| `mode` | `"create"` | Create a new dataset; use `"overwrite"` to replace an existing target. Append is not supported. |
+| `blob_mode` | `"materialize"` | Copy actual BLOB bytes into the target. Reference export is not supported. |
+| `storage_options` | `None` | Storage options for the Lance target. Source Paimon credentials are not inherited. Pass the target options again when reopening it with Lance. |
+| `blob_parallelism` | `64` | Maximum concurrent BLOB body reads per fetch. |
+
+BLOB data is supported in output columns of type `BLOB`, `ARRAY<BLOB>`, or
+`MAP<K, BLOB>`. Top-level BLOB fields become native Lance Blob columns: Arrow
+`large_binary` with field metadata `lance-encoding:blob=true`. The default
+`blob_mode="materialize"` copies the Paimon payloads into the independent target,
+where Lance can read them lazily. BLOB values inside ARRAY/MAP columns remain
+ordinary `large_binary` payloads. Nulls and empty bytes are preserved in both
+representations. Other BLOB nesting, such as BLOBs inside ROW fields or nested
+arrays, is not supported; project those columns out before exporting. Vectors
+retain their fixed-size list type.
+
+Lance scans such as `to_table()` return descriptors for native Blob columns.
+Use `take_blobs()` to obtain file handles supporting lazy `seek()` and `read()`.
+Check descriptor nullness first: `take_blobs()` returns an empty handle for a
+null value, so the handle alone does not distinguish null from empty bytes.
+
+```python
+first = reopened.head(1, columns=["image"])
+if first.num_rows:
+    descriptor = first["image"][0].as_py()
+    if descriptor is None:
+        prefix = None
+    else:
+        with reopened.take_blobs("image", indices=[0])[0] as image:
+            image.seek(0)
+            prefix = image.read(64)  # b"" for an empty, non-null payload
+```
+
+For Lance compatibility, every MAP is exported as Arrow
+`list<struct<key: K, value: V>>`, including MAPs nested in ordinary scalar
+structures. Entry order, null maps, empty maps, and null values are preserved.
+For `MAP<K, BLOB>`, the `value` field is materialized `large_binary`.
+
+The export streams batches instead of collecting the whole result; batch memory
+still depends on payload sizes and has no fixed byte cap. Unresolvable BLOB
+references fail the export instead of copying internal Paimon descriptors into
+the target.
+
+The first version rejects selected video-frame fields or descriptors and VARIANT columns;
+project these fields out before exporting. Paimon indexes and snapshot history
+are not transferred. Build any required indexes on the Lance dataset after export.
+With `blob-as-descriptor=true`, BLOB authorization masks that compute from BLOB
+inputs are unsupported; direct field-reference masks remain supported.
 
 ### As-of joins
 
@@ -282,6 +381,9 @@ Both `fps` and `tolerance_s` are only accepted with `delta_timestamps`.
 Offsets must align to the regular frame grid within the tolerance; this API
 does not search actual timestamps or interpolate missing frames. Do not combine
 `delta_timestamps`, `frame_offsets`, and `window_size`.
+
+To align separate streams by recorded timestamps, use the `join_asof`,
+`interpolate`, or `join_window` APIs described in [As-of joins](#as-of-joins).
 
 `column_transforms` receive one padded Python list per projected column. This is
 where applications define tensor dtype and shape or decode BLOB bytes. Even

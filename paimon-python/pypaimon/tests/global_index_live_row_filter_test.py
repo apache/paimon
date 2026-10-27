@@ -20,8 +20,8 @@ from unittest.mock import patch
 import pyarrow as pa
 
 import pypaimon.multimodal as pm
-from pypaimon.deletionvectors.deletion_vector import DeletionVector
-from pypaimon.table.source.global_index_live_row_filter import live_rows
+from pypaimon.execution.python.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.execution.python.read.search.global_index_live_row_filter import live_rows
 from pypaimon.utils.range import Range
 
 

@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test
 from pypaimon.tests.native_commit_semantics_test import _publication
 
@@ -57,13 +57,16 @@ def _read(table, native, snapshot_id=None):
     scan = builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python plan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python plan fallback')))
         plan = scan.plan()
         if native:
             assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
-            stack.enter_context(patch('pypaimon.read.table_read.TableRead._create_split_read',
-                                      side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         return builder.new_read().to_arrow(plan.splits()).sort_by('id').to_pylist()
 
 

@@ -17,7 +17,8 @@
 
 """Parquet vector sidecars must not force row-level updates back to Python."""
 
-from contextlib import ExitStack
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -25,12 +26,11 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.table_read import TableRead
+from pypaimon.execution.native.read.table_read import (native_read as read_native_splits)
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 pytestmark = pytest.mark.native_plan
@@ -73,16 +73,17 @@ def _rows(table):
         yield sorted(rows, key=lambda row: row['id'])
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for owner, method in [(TableUpdateByRowId, '_load_existing_files_info'),
-                              (TableUpsertByKey, '_upsert_partition'),
-                              (TableUpdate, '_build_predicate_update_table')]:
-            stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
-        stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
-                                  side_effect=AssertionError('Python merge fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                  (PythonTableUpsert, '_upsert_partition'),
+                                  (PythonTableUpdate, '_build_predicate_update_table')]:
+                stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python update fallback')))
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
+                                      side_effect=AssertionError('Python merge fallback')))
+        yield
 
 
 def _commit(builder, messages, stream):
@@ -172,17 +173,9 @@ def test_shard_normal_updates_preserve_parquet_vector_and_blob_sidecars(tmp_path
     update = builder.new_update().with_update_type(['score'])
     update.with_read_projection(['id', 'score'])
 
-    def reversed_groups(self, readers):
-        # A valid completion order for parallel readers must not change which
-        # row receives an update. Read actual files, but finish the last group first.
-        for reader in reversed(readers):
-            try:
-                yield from reader
-            finally:
-                reader.close()
-
     with ExitStack() as stack:
-        stack.enter_context(patch.object(TableRead, '_native_batches_parallel_streaming', reversed_groups))
+        native_calls = stack.enter_context(patch(
+            'pypaimon.execution.native.read.table_read.native_read', wraps=read_native_splits))
         if native:
             stack.enter_context(patch('pypaimon.write.table_update.ShardTableUpdator.__init__',
                                       side_effect=AssertionError('Python shard fallback')))
@@ -195,6 +188,12 @@ def test_shard_normal_updates_preserve_parquet_vector_and_blob_sidecars(tmp_path
         finally:
             reader.close()
         messages = shard.prepare_commit()
+        if native_read and not native:
+            # Pure shard writers consume their ranges in split order. Their
+            # Native read delegates every split to one serial Core stream.
+            native_calls.assert_called_once()
+            assert native_calls.call_args.kwargs['parallelism'] == 1
+            assert native_calls.call_args.kwargs['ordered'] is False
     _commit(builder, messages, stream)
     for rows in _rows(table):
         assert rows == [dict(row, score=row['score'] + 10) for row in before]

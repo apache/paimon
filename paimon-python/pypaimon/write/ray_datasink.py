@@ -35,7 +35,7 @@ from ray.data._internal.execution.interfaces import TaskContext
 import pyarrow as pa
 
 from pypaimon.write.commit_callback import CommitCallback
-from pypaimon.write.file_store_commit import CommitDedup
+from pypaimon.write.commit_options import CommitDedup
 
 if TYPE_CHECKING:
     from pypaimon.table.table import Table
@@ -491,17 +491,12 @@ def write_paimon_dataset(
             )
         )
     ):
-        from pypaimon.write.postpone_bucket import (
-            PostponeBucketPlanner,
-        )
-        from pypaimon.write.row_key_extractor import (
-            PostponeFixedBucketRowKeyExtractor,
-        )
+        from pypaimon.write.backend_dispatch import create_input_router, create_postpone_bucket_planner
 
         planner = (
             postpone_bucket_planner
             if postpone_bucket_planner is not None
-            else PostponeBucketPlanner(
+            else create_postpone_bucket_planner(
                 table, known_num_buckets={}
                 if overwrite or static_partition is not None else None)
         )
@@ -520,7 +515,7 @@ def write_paimon_dataset(
             static_partition=static_partition,
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
-            bucket_extractor=PostponeFixedBucketRowKeyExtractor(table, plan),
+            bucket_router=create_input_router(table, plan),
             postpone_bucket_plan=plan,
             options=options,
         )
@@ -685,7 +680,7 @@ def _write_primary_key_groups(
     static_partition: Optional[Dict[str, Any]],
     concurrency: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]],
-    bucket_extractor=None,
+    bucket_router=None,
     postpone_bucket_plan=None,
     options: Optional[Dict[str, str]] = None,
 ) -> Optional[PaimonWriteResult]:
@@ -696,7 +691,7 @@ def _write_primary_key_groups(
     )
 
     grouped, bucket_col = _group_by_partition_bucket(
-        dataset, table, extractor=bucket_extractor
+        dataset, table, router=bucket_router
     )
     message_col = "__paimon_commit_messages__"
     error_col = "__paimon_write_error__"

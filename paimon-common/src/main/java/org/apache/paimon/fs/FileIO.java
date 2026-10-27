@@ -656,12 +656,20 @@ public interface FileIO extends Serializable, Closeable {
                                 + fallbackIO.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
+            String firstErrorMsg = "";
+            if (!ioExceptionList.isEmpty()) {
+                Throwable rootCause = ioExceptionList.get(0);
+                while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+                    rootCause = rootCause.getCause();
+                }
+                firstErrorMsg = " First error: " + rootCause;
+            }
             UnsupportedSchemeException ex =
                     new UnsupportedSchemeException(
                             String.format(
                                     "Could not find a file io implementation for scheme '%s' in the classpath."
-                                            + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
-                                    uri.getScheme(), preferMsg, fallbackMsg, path));
+                                            + "%s %s Hadoop FileSystem also cannot access this path '%s'.%s",
+                                    uri.getScheme(), preferMsg, fallbackMsg, path, firstErrorMsg));
             for (IOException ioException : ioExceptionList) {
                 ex.addSuppressed(ioException);
             }
@@ -704,9 +712,20 @@ public interface FileIO extends Serializable, Closeable {
         }
 
         // check access
-        FileIO io = fileIO.load(path);
-        io.configure(config);
-        io.exists(path);
+        try {
+            FileIO io = fileIO.load(path);
+            io.configure(config);
+            io.exists(path);
+        } catch (RuntimeException | LinkageError e) {
+            // Keep unchecked failures (e.g. Hadoop's RuntimeException wrapping a
+            // ClassNotFoundException when the file system class of the scheme is missing) so that
+            // the caller reports them together with the failures of the other loaders, instead
+            // of letting them hide those failures.
+            throw new IOException(
+                    String.format(
+                            "%s cannot access path '%s'.", fileIO.getClass().getSimpleName(), path),
+                    e);
+        }
         return fileIO;
     }
 }

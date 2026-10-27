@@ -18,13 +18,13 @@
 """Builder to build full-text search."""
 
 from abc import ABC, abstractmethod
+from copy import copy
 from typing import Optional
 
 from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.table.source.full_text_read import FullTextRead, DataEvolutionFullTextRead
-from pypaimon.table.source.full_text_scan import FullTextScan, DataEvolutionFullTextScan
+from pypaimon.table.source.search_types import FullTextRead, FullTextScan
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.index.pk.primary_key_index_definition import PrimaryKeyIndexFamily
@@ -85,12 +85,8 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return self
 
     def execute_local(self) -> GlobalIndexResult:
-        from pypaimon.table.source.native_full_text_search import try_native_full_text_search
-
-        result = try_native_full_text_search(self)
-        if result is not None:
-            return result
-        return super().execute_local()
+        from pypaimon.table.source.search_dispatch import execute_full_text_search
+        return execute_full_text_search(self)
 
     def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
         self._field_name = field_name
@@ -147,24 +143,13 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         return predicate.new_index(name_to_idx[predicate.field])
 
     def new_full_text_scan(self) -> FullTextScan:
-        from pypaimon.table.source.native_search_plan import native_full_text_scan
+        from pypaimon.table.source.search_dispatch import create_full_text_scan
         reject_search_under_query_auth(self._table)
-        definition = self._primary_key_full_text_definition()
-        if definition is not None:
-            from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-            scan = PrimaryKeyFullTextScan(
-                self._table, definition, partition_filter=self._partition_filter)
-            return native_full_text_scan(self, scan)
-        scan = DataEvolutionFullTextScan(
-            self._table,
-            self._text_columns(),
-            partition_filter=self._partition_filter,
-            filter_=self._filter,
-        )
-        return native_full_text_scan(self, scan)
+        self._primary_key_full_text_definition()
+        return create_full_text_scan(self, copy(self))
 
     def new_full_text_read(self) -> FullTextRead:
-        from pypaimon.table.source.native_search_plan import native_full_text_read
+        from pypaimon.table.source.search_dispatch import create_full_text_read
         reject_search_under_query_auth(self._table)
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
@@ -181,20 +166,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
                     "Primary-key full-text search only supports the FAST "
                     "full-text index search mode; FULL and DETAIL require "
                     "merge-aware logical-row fallback.")
-            from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
-            reader = PrimaryKeyFullTextRead(
-                self._table, self._limit, self._text_columns(), self._query,
-                definition=definition, partition_filter=self._partition_filter)
-            return native_full_text_read(self, reader)
-        reader = DataEvolutionFullTextRead(
-            self._table,
-            self._limit,
-            self._text_columns(),
-            self._query,
-            partition_filter=self._partition_filter,
-            filter_=self._filter,
-        )
-        return native_full_text_read(self, reader)
+        return create_full_text_read(self, copy(self))
 
     def _text_columns(self):
         if self._query is None:

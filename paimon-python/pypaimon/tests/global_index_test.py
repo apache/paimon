@@ -28,10 +28,11 @@ from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
-from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
+from pypaimon.execution.python.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.read.read_dispatch import _python_scan_execution
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -126,7 +127,9 @@ def _coverage_index_file(field_id, start, end, extra_field_ids=None):
 class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
     def test_fast_mode_does_not_return_unindexed_ranges(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable(GlobalIndexSearchMode.FAST)
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -139,7 +142,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([], coverage.unindexed_ranges(0))
 
     def test_full_mode_uses_snapshot_next_row_id(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -152,7 +157,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges(0))
 
     def test_full_mode_accepts_multiple_field_ids(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -168,7 +175,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges([0, 1]))
 
     def test_full_mode_intersects_coverage_for_all_predicate_fields(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -192,8 +201,10 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
             coverage.unindexed_ranges(table.fields, predicate),
         )
 
-    def test_extra_fields_count_as_index_coverage(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+    def test_composite_fields_do_not_count_as_scalar_coverage(self):
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("full")
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -203,10 +214,12 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
             [_coverage_index_file(0, 0, 9, extra_field_ids=[1])],
         )
 
-        self.assertEqual([], coverage.unindexed_ranges(1))
+        self.assertEqual([Range(0, 9)], coverage.unindexed_ranges(1))
 
     def test_detail_mode_uses_table_data_ranges(self):
-        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+        from pypaimon.execution.python.globalindex.data_evolution_global_index_coverage import (
+            DataEvolutionGlobalIndexCoverage,
+        )
 
         table = _CoverageTable("detail", data_ranges=[Range(0, 2), Range(7, 9)])
         coverage = DataEvolutionGlobalIndexCoverage(
@@ -221,10 +234,9 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
+    @pytest.mark.python_plan
     def test_full_fallback_groups_are_pruned_before_split_packing(self):
-        from pypaimon.read.scanner.file_scanner import (
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (_GlobalIndexPlanningResult)
 
         with tempfile.TemporaryDirectory() as warehouse:
             catalog = CatalogFactory.create({'warehouse': warehouse})
@@ -268,17 +280,18 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             )
 
             baseline_scan = read_builder.new_scan()
-            baseline_scan.file_scanner._global_index_result = index_plan
-            baseline_scan.file_scanner.predicate_for_stats = None
+            baseline_scanner = _python_scan_execution(baseline_scan)._file_scanner()
+            baseline_scanner._global_index_result = index_plan
+            baseline_scanner.predicate_for_stats = None
             baseline_plan = baseline_scan.plan()
 
             scan = read_builder.new_scan()
-            scan.file_scanner._global_index_result = index_plan
+            _python_scan_execution(scan)._file_scanner()._global_index_result = index_plan
             plan = scan.plan()
 
             stats_scan = read_builder.new_scan()
-            stats_scan.file_scanner._global_index_result = index_plan
-            stats_plan, stats = stats_scan.file_scanner.scan_with_stats()
+            _python_scan_execution(stats_scan)._file_scanner()._global_index_result = index_plan
+            stats_plan, stats = stats_scan.scan_with_stats()
 
             self.assertEqual(
                 10,
@@ -302,10 +315,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             self.assertEqual(baseline_result, pruned_result)
 
     def test_eval_global_index_keeps_unindexed_ranges_out_of_bitmap(self):
-        from pypaimon.read.scanner.file_scanner import (
-            FileScanner,
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner, _GlobalIndexPlanningResult)
 
         class _Options:
             def global_index_enabled(self):
@@ -335,7 +345,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
+                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner), unittest.mock.patch.object(
                     GlobalIndexResult,
                     "from_ranges",
@@ -352,10 +363,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         )
 
     def test_split_planning_merges_indexed_and_unindexed_ranges(self):
-        from pypaimon.read.scanner.file_scanner import (
-            FileScanner,
-            _GlobalIndexPlanningResult,
-        )
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner, _GlobalIndexPlanningResult)
 
         scanner = FileScanner.__new__(FileScanner)
         scanner.idx_of_this_subtask = None
@@ -383,7 +391,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
                 }))
                 scanner._eval_global_index.reset_mock()
                 with unittest.mock.patch(
-                        "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
+                        "pypaimon.execution.python.read.scanner.file_scanner.DataEvolutionSplitGenerator"
                 ) as split_generator:
                     scanner._create_data_evolution_split_generator()
 
@@ -398,7 +406,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
                         scanner.manifest_scanner.return_value[1])
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
-        from pypaimon.read.scanner.file_scanner import FileScanner
+        from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
 
         class _Options:
             def global_index_enabled(self):
@@ -421,7 +429,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
+                "pypaimon.execution.python.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner):
             result = scanner._eval_global_index(snapshot=object())
 

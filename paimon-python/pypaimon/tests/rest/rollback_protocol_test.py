@@ -17,7 +17,6 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import Mock
 from urllib.parse import unquote_plus, urlsplit
 
 import pyarrow as pa
@@ -34,11 +33,10 @@ from pypaimon.catalog.table_rollback import TableRollback
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import Options
-from pypaimon.read.native_plan import _resolved_rest_table_response
+from pypaimon.execution.native.table import (_resolved_rest_table_response)
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.instant import Instant
-from pypaimon.write.file_store_commit import FileStoreCommit
-from pypaimon.write.native_commit import _rest_catalog_supported
+from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
 
 
 @pytest.fixture
@@ -133,7 +131,7 @@ def test_table_rollback_transmits_loaded_uuid(table, transport, target, instant)
 
 @pytest.mark.parametrize('snapshot_uuid', ['observed-head-uuid', 'missing', None])
 @pytest.mark.parametrize('branch', [None, 'dev / blue'])
-def test_compact_rollback_transmits_uuid_and_expected_head(
+def test_conditional_rollback_transmits_uuid_and_expected_head(
         catalog, transport, compact_head, snapshot_uuid, branch):
     payload = json.loads(JSON.to_json(compact_head))
     if snapshot_uuid == 'missing':
@@ -145,9 +143,8 @@ def test_compact_rollback_transmits_uuid_and_expected_head(
     identifier = Identifier('db', 'table', branch=branch)
     table = catalog.get_table(identifier)
     transport.requests.clear()
-    commit = FileStoreCommit(Mock(), table, 'current-writer')
-
-    assert commit.rollback.try_to_rollback(head)
+    table.catalog_environment.catalog_table_rollback().rollback_to(
+        Instant.snapshot(head.id - 1), head.id)
 
     assert len(transport.requests) == 1
     assert transport.requests[0].method == 'POST'
@@ -157,15 +154,6 @@ def test_compact_rollback_transmits_uuid_and_expected_head(
     }
     object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
     assert object_name == identifier.get_object_name()
-
-
-@pytest.mark.parametrize('commit_kind', ['APPEND', 'OVERWRITE'])
-def test_non_compact_head_is_not_rolled_back(table, transport, compact_head, commit_kind):
-    compact_head.commit_kind = commit_kind
-    commit = FileStoreCommit(Mock(), table, 'current-writer')
-
-    assert not commit.rollback.try_to_rollback(compact_head)
-    assert transport.requests == []
 
 
 @pytest.mark.parametrize('entrypoint', ['catalog', 'api'])
@@ -241,15 +229,16 @@ def test_replaced_table_does_not_refresh_retry_or_clean_locally(table, transport
 
 
 @pytest.mark.parametrize('status', [400, 403, 404, 409])
-def test_compact_rollback_rejection_preserves_identity(table, transport, compact_head, monkeypatch, status):
+def test_conditional_rollback_rejection_preserves_identity(table, transport, compact_head, monkeypatch, status):
     transport.status = status
-    commit = FileStoreCommit(Mock(), table, 'current-writer')
 
     def unexpected_cleanup():
         pytest.fail('Catalog rejection must not trigger local cleanup')
 
     monkeypatch.setattr(table, 'rollback_helper', unexpected_cleanup)
-    assert not commit.rollback.try_to_rollback(compact_head)
+    with pytest.raises(RuntimeError, match="Failed to rollback table"):
+        table.catalog_environment.catalog_table_rollback().rollback_to(
+            Instant.snapshot(compact_head.id - 1), compact_head.id)
 
     assert len(transport.requests) == 1
     assert transport.requests[0].method == 'POST'
@@ -280,15 +269,15 @@ def test_legacy_catalog_override_never_discards_known_uuid(table_uuid):
 
 
 @pytest.mark.parametrize('source,target', [(None, 'dev'), ('dev', None), ('dev', 'release')])
-@pytest.mark.parametrize('automatic', [False, True])
-def test_copied_branch_rollback_omits_source_identity(catalog, transport, compact_head, source, target, automatic):
+@pytest.mark.parametrize('conditional', [False, True])
+def test_copied_branch_rollback_omits_source_identity(catalog, transport, compact_head, source, target, conditional):
     table = catalog.get_table(Identifier('db', 'table', branch=source))
     copied = table.copy({'branch': target})
     transport.requests.clear()
 
-    if automatic:
-        commit = FileStoreCommit(Mock(), copied, 'current-writer')
-        assert commit.rollback.try_to_rollback(compact_head)
+    if conditional:
+        copied.catalog_environment.catalog_table_rollback().rollback_to(
+            Instant.snapshot(compact_head.id - 1), compact_head.id)
     else:
         copied.rollback_to(1)
 
@@ -296,15 +285,15 @@ def test_copied_branch_rollback_omits_source_identity(catalog, transport, compac
     assert copied.catalog_environment.uuid is None
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
-        'instant': {'type': 'snapshot', 'snapshotId': 2 if automatic else 1},
-        **({'fromSnapshot': 3} if automatic else {}),
+        'instant': {'type': 'snapshot', 'snapshotId': 2 if conditional else 1},
+        **({'fromSnapshot': 3} if conditional else {}),
     }
     object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
     assert object_name == Identifier('db', 'table', branch=target).get_object_name()
 
 
-@pytest.mark.parametrize('automatic', [False, True])
-def test_same_branch_copy_and_independent_load_preserve_identity(table, catalog, transport, compact_head, automatic):
+@pytest.mark.parametrize('conditional', [False, True])
+def test_same_branch_copy_and_independent_load_preserve_identity(table, catalog, transport, compact_head, conditional):
     assert table.copy({'scan.parallelism': '2'}).catalog_environment.uuid == 'loaded-table-uuid'
     assert table.copy({'branch': 'main'}).catalog_environment.uuid == 'loaded-table-uuid'
     assert _rest_catalog_supported(table)
@@ -319,24 +308,24 @@ def test_same_branch_copy_and_independent_load_preserve_identity(table, catalog,
     assert _rest_catalog_supported(branch)
     transport.requests.clear()
 
-    if automatic:
+    if conditional:
         copied = branch.copy({'branch': 'dev'})
-        commit = FileStoreCommit(Mock(), copied, 'current-writer')
-        assert commit.rollback.try_to_rollback(compact_head)
+        copied.catalog_environment.catalog_table_rollback().rollback_to(
+            Instant.snapshot(compact_head.id - 1), compact_head.id)
     else:
         branch.rollback_to(1)
 
     assert len(transport.requests) == 1
     assert request_body(transport.requests[0]) == {
-        'instant': {'type': 'snapshot', 'snapshotId': 2 if automatic else 1},
-        **({'fromSnapshot': 3} if automatic else {}), 'tableId': 'loaded-dev-uuid',
+        'instant': {'type': 'snapshot', 'snapshotId': 2 if conditional else 1},
+        **({'fromSnapshot': 3} if conditional else {}), 'tableId': 'loaded-dev-uuid',
     }
     object_name = unquote_plus(urlsplit(transport.requests[0].url).path.split('/')[-2])
     assert object_name == Identifier('db', 'table', branch='dev').get_object_name()
 
 
 def test_copied_branch_rejects_source_read_metadata(table, monkeypatch):
-    monkeypatch.setattr('pypaimon.read.native_plan.native_runtime_available', lambda *args: True)
+    monkeypatch.setattr('pypaimon.execution.native.runtime.native_runtime_available', lambda *args: True)
 
     assert _resolved_rest_table_response(table) == table.catalog_environment.rest_table_response
     assert _resolved_rest_table_response(table.copy({'branch': 'main'})) is not None

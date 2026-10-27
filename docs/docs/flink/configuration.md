@@ -61,6 +61,36 @@ INSERT INTO paimon_table /*+ OPTIONS(
 SELECT * FROM source_table;
 ```
 
+### Managed Memory for an Explicit Writer Resource Group
+
+When setting `sink.writer-memory` to configure the writer slot sharing group's task heap,
+use `sink.writer-managed-memory` to also request managed memory for that group. This optional
+budget must be positive and requires `sink.writer-memory`; `sink.writer-cpu` retains its default
+of one core unless explicitly configured.
+See Flink's [fine-grained resource management](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/deployment/finegrained_resource/)
+for the deployment requirements and limitations of explicit slot sharing group resources.
+
+```sql
+INSERT INTO paimon_table /*+ OPTIONS(
+    'sink.writer-memory' = '512 mb',
+    'sink.writer-managed-memory' = '1 gb',
+    'sink.use-managed-memory-allocator' = 'true',
+    'sink.managed.writer-buffer-memory' = '256 mb'
+) */
+SELECT * FROM source_table;
+```
+
+The managed budget is a resource request for each shared slot of the writer group, not a total
+across all writer subtasks or a guaranteed allocation to the writer alone. Actual allocation
+depends on Flink's resource management mode, available resources, and managed memory consumers.
+The writer-buffer setting remains a weight: `256 mb` in this example does not cap the writer's
+buffer at 256 MiB. Flink determines each writer subtask's share of the slot's managed memory.
+
+Setting the budget does not enable the managed allocator. With the allocator disabled, writer
+buffers still use heap memory. The existing downstream slot sharing and explicit committer
+resource settings are unchanged. Leaving the new option unset preserves existing resource
+configuration, including default-slot managed allocation.
+
 ## Setting dynamic options
 
 Dynamic options tune a query or a subsequently submitted job without changing the options

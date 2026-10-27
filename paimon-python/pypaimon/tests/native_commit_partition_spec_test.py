@@ -27,10 +27,10 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.partition_spec import _partition_spec_value
+from pypaimon.execution.python.write.partition_spec import _partition_spec_value
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -130,7 +130,9 @@ def test_partition_specs_parse_declared_types(rest_catalog, use_native, operatio
     try:
         if use_native:
             method = 'drop_partitions' if operation == 'truncate' else 'overwrite'
-            guard = patch.object(commit.file_store_commit, method, side_effect=AssertionError('Python fallback'))
+            guard = patch('pypaimon.execution.python.write.file_store_commit.'
+                          'FileStoreCommit.' + method,
+                          side_effect=AssertionError('Python fallback'))
         else:
             guard = patch.object(commit, '_prepare_native_commit', return_value=None)
         with guard:

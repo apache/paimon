@@ -210,7 +210,7 @@ view or retained snapshot metadata. Current main-branch REST table sources
 with `query-auth.enabled=true` also use core when the catalog returns no row
 filter or column mask. Core requests authorization for every source column,
 even for a key-only DELETE, and refreshes it for each MERGE. A restricted or
-denied source fails before target actions, as with Python's `plan_all_files`.
+denied source fails before target actions, as with Python's `plan_all`.
 
 Python and native writers use Java's escaped partition directories for data,
 changelog, Blob and row sidecar files, including external locations. Both
@@ -443,16 +443,32 @@ Native reads return PyArrow batches through the Arrow C Data interface. Native
 planner handles are used directly when available; splits refined by Python
 index or shuffle logic are serialized through the stable split contract and
 reconstructed by Rust. Nested projection and row-kind output are supported.
+Public builders and table APIs delegate to implementations under
+`pypaimon.execution.python` and `pypaimon.execution.native`. Shared plans,
+splits, schemas and commit messages remain independent of either backend.
+Python scanners, search readers and committers are initialized only when Python
+execution is selected. Index execution lives under these implementation
+directories too; public index APIs, results and file formats remain shared.
+See the [execution layout](pypaimon/execution/README.md) for the dependency and
+fallback boundaries.
 Authorization captured by an original Native plan is evaluated in Rust;
 Python-planned or serialized authorization rules retain the Python reader.
 For both materialized
 `to_arrow()` and streaming `to_arrow_batch_reader()` reads, the effective split
 parallelism (the method argument, `read.parallelism`, or the automatic default)
-runs independent Rust readers. Splits stay in input order but contiguous groups
-are balanced by physical file bytes to reduce worker skew. An unfiltered row
-limit also caps reader fan-out to avoid speculative work.
-Streaming buffers at most one batch per reader and closing the batch reader
-interrupts native reads that are still in flight. An uninstalled extension,
+is executed by Rust Core. Core owns byte-balanced split groups, bounded
+prefetch, the shared row limit and cancellation. The Rust reader's `ordered`
+argument defaults to `False`. PyPaimon requests `ordered=True` for materialized
+reads, emitting groups in supplied split order; streaming reads use
+`ordered=False` and emit batches as groups become ready. Both modes retain each
+split reader's row order.
+Ordered parallel reads disable background Parquet row-group prefetch to prevent
+later groups from holding scheduling permits needed by earlier groups; split
+workers still read concurrently.
+An unfiltered row limit also caps reader fan-out to avoid speculative work.
+The split scheduler buffers at most one batch per worker, and closing the batch
+reader interrupts native reads that are still in flight. Limited BLOB reads visit
+splits lazily with the remaining quota, before resolving output payloads. An uninstalled extension,
 unsupported route, or native-reader construction failure falls back to Python;
 I/O and data errors raised after streaming starts surface to the caller.
 
@@ -574,11 +590,15 @@ live REST authorization and snapshot-file, deletion-vector and merge-group
 validation. Transported metadata never supplies a live grant. If restrictions
 changed incompatibly, the captured plan retains Python execution.
 Continuous streaming delegates planning and resume state to Rust core.
-`TableScan.plan_all_files()` includes L0 and every data-evolution column file,
+`TableScan.plan_all()` returns a split plan including L0 and every data-evolution column file,
 retaining scan filters and limits and requiring unrestricted query authorization.
 Writer restore, overwrite and index construction use this entrypoint and delegate
 planning to Rust core when Native planning is enabled.
 Native planning remains optional and is disabled by default.
+
+Binary partition keys use UTF-8 text and normal partition escaping in both
+`partition.legacy-name` modes, matching Java. This makes repeated writes to the
+same binary value use a stable directory.
 
 # Coalesced BLOB reads
 

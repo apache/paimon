@@ -23,12 +23,16 @@ import pyarrow as pa
 import pytest
 
 from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
-from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
-    PaimonVindexInput, VINDEX_IDENTIFIERS,
+from pypaimon.execution.python.globalindex.create_global_index import PythonGlobalIndexBuilder
+from pypaimon.globalindex.vindex_input import (
+    PaimonVindexInput,
+)
+from pypaimon.globalindex.vindex_options import (
+    VINDEX_IDENTIFIERS,
 )
 from pypaimon.tests import native_generic_index_build_test as generic
 from pypaimon.tests import native_sorted_index_build_test as indexes
-from pypaimon.read.native_plan import _native_table
+from pypaimon.execution.native.table import (_native_table)
 
 rest_catalog = indexes.rest_catalog
 pytestmark = generic.pytestmark
@@ -48,7 +52,7 @@ def _table(catalog, vectors, options=None, partitioned=False):
 
 
 def _build(table, kind, options=None, **kwargs):
-    with patch.object(GlobalIndexBuilder, '_build_generic_index',
+    with patch.object(PythonGlobalIndexBuilder, '_build_generic_index',
                       side_effect=AssertionError('Python vector rows were materialized')):
         return GlobalIndexBuilder(table, 'embedding', index_type=kind, options=options, **kwargs).build()
 
@@ -77,7 +81,7 @@ def _assert_ids(table, expected, kind):
               .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute_local())
     assert sorted(result.results()) == expected
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
-              .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute_local())
+              .with_query_vector([1., 1.]).with_limit(64).with_options(search_options).execute())
     assert sorted(result.row_ids()) == expected
 
 
@@ -131,10 +135,9 @@ def test_native_search_filters_live_null_vectors_with_deletion_vectors(rest_cata
     indexes._commit(table, _build(table, kind, generic._options(kind)))
     options = {'diskann.l_search': '64'} if kind == 'diskann' else {'ivf.nprobe': '64'}
     result = (_native_table(table).new_vector_search_builder().with_vector_column('embedding')
-              .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute_local())
+              .with_query_vector([1., 1.]).with_limit(64).with_options(options).execute())
     assert sorted(result.row_ids()) == [1, 4]
-    # Python table-level planning also uses the core low-level index reader,
-    # avoiding the third-party scalar FFI's fixed-result-length restriction.
+    # Python table-level reads use the batch ABI for short filtered results.
     _assert_ids(table, [1, 4], kind)
 
 

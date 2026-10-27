@@ -272,6 +272,16 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public AbstractDataTableScan withInternalPartitionFilter(
+            PartitionPredicate partitionPredicate) {
+        // Replace the physical partition filter while preserving user-filter authorization
+        // fields. Internal pruning must not add its own columns to authorization.
+        return pushPartitionFilter(
+                partitionFilterFields,
+                () -> snapshotReader.withPartitionFilter(partitionPredicate));
+    }
+
+    @Override
     public InnerTableScan withPartitionFilter(Predicate predicate) {
         return pushPartitionFilter(
                 predicate == null

@@ -51,11 +51,13 @@ def table_mode(request):
 
 @contextmanager
 def native_only():
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native read fell back')), \
-            patch('pypaimon.common.predicate_json_parser._apply_predicate_transform',
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native read fell back')
+    ), \
+            patch('pypaimon.common.arrow_predicate._apply_predicate_transform',
                   side_effect=AssertionError('Python executed an authorization transform')), \
-            patch('pypaimon.read.reader.auth_masking_reader._apply_predicate_transform',
+            patch('pypaimon.execution.python.read.reader.auth_masking_reader._apply_predicate_transform',
                   side_effect=AssertionError('Python executed an authorization mask')):
         yield
 

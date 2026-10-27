@@ -25,21 +25,18 @@ from unittest.mock import Mock, patch
 import pyarrow as pa
 import pytest
 
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon import CatalogFactory, Schema
-from pypaimon.index.dynamic_bucket import (
-    HashBucketAssigner,
-    _PartitionIndex,
-    _iter_hashes,
-    compute_assigner,
-    to_signed_int32,
-    validate_bucket_id,
+from pypaimon.index.dynamic_bucket import to_signed_int32, validate_bucket_id
+from pypaimon.execution.python.write.dynamic_bucket import (
+    DynamicBucketAssigner, _PartitionIndex, _iter_hashes, compute_assigner,
 )
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
 
 class DynamicBucketTest(unittest.TestCase):
@@ -122,6 +119,28 @@ class DynamicBucketTest(unittest.TestCase):
         min_int = -(2 ** 31)
         self.assertEqual(compute_assigner(min_int, 0, 5, 5), 3)
         self.assertEqual(compute_assigner(2, min_int, 5, 5), 0)
+        # Java int addition wraps before the final remainder.
+        self.assertEqual(compute_assigner(max_int - 1, max_int - 1, max_int, max_int), -4)
+
+    def test_global_maximum_does_not_hide_an_unused_partition_bucket(self):
+        index = _PartitionIndex({10: 0}, {0: 1}, 1)
+        # A different partition already restored the global maximum bucket.
+        # Java PartitionIndex still allocates the unused local bucket 1.
+        self.assertEqual(index.assign(20, lambda _: True, 2, 1), 1)
+        self.assertEqual(index.assign(20, lambda _: True, 2, 1), 1)
+
+    def test_reached_partition_bucket_limit_is_cached_and_hash_assignments_stay_stable(self):
+        index = _PartitionIndex({10: 1}, {1: 1}, 1)
+        owns_odd = Mock(side_effect=lambda bucket: bucket % 2 == 1)
+        self.assertEqual(index.assign(20, owns_odd, 4, 3), 3)
+        first_overflow = index.assign(30, owns_odd, 4, 3)
+        self.assertIn(first_overflow, (1, 3))
+        owns_odd.reset_mock()
+        for key in range(31, 50):
+            bucket = index.assign(key, owns_odd, 4, 3)
+            self.assertIn(bucket, (1, 3))
+            self.assertEqual(index.assign(key, owns_odd, 4, 3), bucket)
+        owns_odd.assert_not_called()
 
     def test_binary_row_hash_matches_java_for_bucket_key_types(self):
         # Generated with Java InternalRowSerializer.toBinaryRow(...).hashCode().
@@ -226,7 +245,7 @@ class DynamicBucketTest(unittest.TestCase):
             validate_bucket_id(32768)
 
     def test_restore_rejects_bucket_id_above_java_short_range(self):
-        assigner = HashBucketAssigner(
+        assigner = DynamicBucketAssigner(
             table=Mock(),
             num_channels=1,
             num_assigners=1,
@@ -239,7 +258,7 @@ class DynamicBucketTest(unittest.TestCase):
         entry.bucket = 32768
 
         with patch(
-            'pypaimon.index.dynamic_bucket.IndexFileHandler'
+            'pypaimon.execution.python.write.dynamic_bucket.IndexFileHandler'
         ) as handler:
             handler.return_value.scan.return_value = [entry]
             with patch.object(
@@ -260,7 +279,7 @@ class DynamicBucketTest(unittest.TestCase):
     def test_assigner_rejects_record_owned_by_another_writer(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'wrong_assigner')
-            assigner = HashBucketAssigner(
+            assigner = DynamicBucketAssigner(
                 table=table,
                 num_channels=2,
                 num_assigners=2,
@@ -324,12 +343,13 @@ class DynamicBucketTest(unittest.TestCase):
             ):
                 list(_iter_hashes(table, entry))
 
+    @pytest.mark.python_write
     def test_regular_dynamic_writer_uses_persistent_index(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'regular_dynamic')
             writer = table.new_batch_write_builder().new_write()
 
-            self.assertIs(table, writer.row_key_extractor._table)
+            self.assertIs(table, writer._execution.row_key_extractor._table)
             writer.write_arrow_batch(pa.RecordBatch.from_pydict({
                 'id': [1],
                 'value': ['v-1'],
@@ -359,9 +379,9 @@ class DynamicBucketTest(unittest.TestCase):
             writer = table.new_batch_write_builder().new_write()
             writer.write_arrow(pa.table({'id': [3], 'value': ['new-3']}))
 
-            partition_index = writer.row_key_extractor._assigner._partition_indexes[()]
+            partition_index = writer._execution.row_key_extractor._assigner._partition_indexes[()]
             self.assertEqual(1, len(partition_index.hash_to_bucket))
-            self.assertEqual({}, writer.row_key_extractor._index_maintainer._states)
+            self.assertEqual({}, writer._execution.row_key_extractor._index_maintainer._states)
 
     @pytest.mark.python_write
     def test_legacy_dynamic_data_without_hash_index_fails_fast(self):
@@ -369,7 +389,7 @@ class DynamicBucketTest(unittest.TestCase):
             table = self._create_table(root, 'legacy_no_index')
             builder = table.new_batch_write_builder()
             writer = builder.new_write()
-            writer.row_key_extractor = DynamicBucketRowKeyExtractor(
+            writer._execution.row_key_extractor = DynamicBucketRowKeyExtractor(
                 table.table_schema
             )
             writer.write_arrow(pa.table({'id': [1], 'value': ['old']}))
@@ -437,7 +457,7 @@ class DynamicBucketTest(unittest.TestCase):
                 data = pa.table({'id': [1, 2, 3], 'value': ['v-1', 'v-2', 'v-3']})
                 try:
                     writer.write_arrow(data)
-                    maintainer = writer.row_key_extractor._index_maintainer
+                    maintainer = writer._execution.row_key_extractor._index_maintainer
                     bucket_count = len(maintainer._states)
                     self.assertGreaterEqual(bucket_count, 2)
                     write_index = maintainer._write_index
@@ -485,7 +505,7 @@ class DynamicBucketTest(unittest.TestCase):
                     .to_path(messages[0].index_adds[0].index_file.file_name)
                 )
             self.assertEqual(
-                [], writer.row_key_extractor._index_maintainer._new_paths
+                [], writer._execution.row_key_extractor._index_maintainer._new_paths
             )
 
             commit.commit(messages, 1)
@@ -669,7 +689,7 @@ class DynamicBucketTest(unittest.TestCase):
                 for message in messages
                 for entry in message.index_adds
             ]
-            original_snapshot_commit = commit.file_store_commit.snapshot_commit
+            original_snapshot_commit = python_commit(commit).file_store_commit.snapshot_commit
             snapshot_commit = original_snapshot_commit.commit
             calls = 0
 
@@ -692,7 +712,7 @@ class DynamicBucketTest(unittest.TestCase):
                 'commit',
                 side_effect=lose_first_compare_and_set,
             ), patch.object(
-                commit.file_store_commit,
+                python_commit(commit).file_store_commit,
                 '_commit_retry_wait',
             ):
                 commit.commit(messages)

@@ -25,7 +25,6 @@ import pyarrow as pa
 from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform,
     extract_referenced_fields,
-    parse_predicate_to_batch_filter,
 )
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import DataField
@@ -137,6 +136,8 @@ class TableQueryAuthResult:
     def extract_row_filter(self) -> Optional[Callable[[pa.RecordBatch], pa.Array]]:
         if not self.filter:
             return None
+        from pypaimon.common.arrow_predicate import parse_predicate_to_batch_filter
+
         if len(self.filter) == 1:
             return parse_predicate_to_batch_filter(self.filter[0])
         # Java PredicateBuilder.and evaluates entries in their original order.

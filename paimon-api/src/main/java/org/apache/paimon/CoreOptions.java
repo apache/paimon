@@ -443,6 +443,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "File index container version to write (1 or 2). Version 2 supports 64-bit payload positions and lengths.");
 
+    public static final ConfigOption<Boolean> FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE =
+            key("file-index.read.ignore-unknown-type")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore unregistered file index types when reading. "
+                                    + "If true, skip these indexes with a warning and retain all rows "
+                                    + "for them. Other indexes can still filter rows. "
+                                    + "If false, fail when reading an unregistered non-empty index.");
+
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
             key("file-index.read.enabled")
                     .booleanType()
@@ -1003,6 +1013,15 @@ public class CoreOptions implements Serializable {
                     .durationType()
                     .noDefaultValue()
                     .withDescription("Timeout duration of retry when commit failed.");
+
+    public static final ConfigOption<Boolean> COMMIT_AUTO_ROLLBACK_ENABLED =
+            key("commit.auto-rollback.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Allow Java writers to roll back compaction on write conflicts. "
+                                    + "May delete snapshots and tags. Does not affect explicit rollback "
+                                    + "or Python writers.");
 
     public static final ConfigOption<Integer> COMMIT_MAX_RETRIES =
             key("commit.max-retries")
@@ -3149,6 +3168,13 @@ public class CoreOptions implements Serializable {
                                                     + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
+    public static final ConfigOption<Boolean> VECTOR_COMPACTION_ENABLED =
+            key("vector-compaction.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to compact vector-store files when compacting a data evolution table.");
+
     public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
             key("vector-search.distribute.enabled")
                     .booleanType()
@@ -4070,7 +4096,11 @@ public class CoreOptions implements Serializable {
 
     public List<String> changelogRowDeduplicateIgnoreFields() {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
-                .map(s -> Arrays.asList(s.split(",")))
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
 
@@ -4592,6 +4622,10 @@ public class CoreOptions implements Serializable {
         return bytes;
     }
 
+    public boolean fileIndexReadIgnoreUnknownType() {
+        return options.get(FILE_INDEX_READ_IGNORE_UNKNOWN_TYPE);
+    }
+
     public boolean fileIndexReadEnabled() {
         return options.get(FILE_INDEX_READ_ENABLED);
     }
@@ -4969,6 +5003,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public boolean vectorCompactionEnabled() {
+        return options.get(VECTOR_COMPACTION_ENABLED);
     }
 
     public boolean vectorSearchDistributeEnabled() {

@@ -25,7 +25,7 @@ import pytest
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.tests.native_blob_write_test import _table, _read
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -189,7 +189,7 @@ def test_application_factory_selection_errors_do_not_fall_back_to_native_io(tmp_
         assert caught.value is error
         assert selected == [source.as_uri()]
         assert writer._python_writer is None
-        assert writer._blob_rows.readers == {}
+        assert writer._execution._blob_rows.readers == {}
     finally:
         writer.close()
     assert not list(tmp_path.rglob('*.blob'))

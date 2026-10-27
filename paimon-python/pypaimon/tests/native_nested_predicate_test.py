@@ -27,7 +27,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.native_plan import _predicate_to_native
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 
 
 pytestmark = pytest.mark.native_plan
@@ -114,14 +114,17 @@ def _read(table, native, stream, case, projection, limit, compound):
         scan = builder.new_scan()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                                 side_effect=AssertionError('Python scan fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Python scan fallback')))
             splits = scan.plan().splits()
     read = builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         result = read.to_arrow_batch_reader(splits).read_all()
     return result.sort_by('id').to_pylist()
 
@@ -230,10 +233,13 @@ def test_nested_predicate_alias_collisions(
     scan, read = builder.new_scan(), builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python scan fallback')))
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         rows = read.to_arrow_batch_reader(scan.plan().splits()).read_all().to_pylist()
     expected = {11} if nested_filter else {12, 13}
     if compound == 'and':
@@ -306,10 +312,13 @@ def test_nested_projection_keeps_physical_filter_only_inputs(
     schema_names = [field.name for field in builder._output_fields()]
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python scan fallback')))
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         splits = scan.plan().splits()
         for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
             assert result.schema.names == schema_names
@@ -347,10 +356,13 @@ def test_nested_projection_keeps_synthesized_row_id_filter_input(tmp_path, nativ
     read, scan = builder.new_read(), builder.new_scan()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(scan.file_scanner, 'scan',
-                                             side_effect=AssertionError('Python scan fallback')))
-            stack.enter_context(patch.object(read, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                side_effect=AssertionError('Python scan fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         splits = scan.plan().splits()
         for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
             assert result.to_pylist() == [{'_ROW_ID': 100, 'id': 1}]

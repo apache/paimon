@@ -16,86 +16,30 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
-SetSpec = Union[str, Mapping[str, Any]]
-OnSpec = Union[Sequence[str], Mapping[str, str]]
+from pypaimon.write.merge_types import (
+    LiteralValue as LiteralValue,
+    OnSpec as OnSpec,
+    SetSpec as SetSpec,
+    SourceColumnRef as SourceColumnRef,
+    TargetColumnRef as TargetColumnRef,
+    WhenMatched as WhenMatched,
+    WhenNotMatched as WhenNotMatched,
+    _NormalizedClause as _NormalizedClause,
+    lit as lit,
+    source_col as source_col,
+    target_col as target_col,
+)
 
 
-@dataclass(frozen=True)
-class SourceColumnRef:
-    column: str
-
-
-@dataclass(frozen=True)
-class TargetColumnRef:
-    column: str
-
-
-@dataclass(frozen=True)
-class LiteralValue:
-    value: Any
-
-
-def source_col(name: str) -> SourceColumnRef:
-    return SourceColumnRef(name)
-
-
-def target_col(name: str) -> TargetColumnRef:
-    return TargetColumnRef(name)
-
-
-def lit(value: Any) -> LiteralValue:
-    return LiteralValue(value)
-
-
-class WhenMatched:
-    """Matched UPDATE/DELETE clause; callable SET values consume t./s. Arrow columns."""
-
-    def __init__(
-            self,
-            action: str,
-            *,
-            update: Optional[SetSpec] = None,
-            condition: Optional[str] = None):
-        if action not in ("update", "delete"):
-            raise ValueError("WhenMatched action must be 'update' or 'delete'.")
-        if action == "update" and update is None:
-            raise ValueError("WhenMatched.update requires an update spec.")
-        if action == "delete" and update is not None:
-            raise ValueError("WhenMatched.delete must not specify update.")
-        self.update = update
-        self.condition = condition
-        self.delete = action == "delete"
-
-    @classmethod
-    def update(
-            cls,
-            update: SetSpec = "*",
-            condition: Optional[str] = None):
-        return cls("update", update=update, condition=condition)
-
-    @classmethod
-    def delete(cls, condition: Optional[str] = None):
-        return cls("delete", condition=condition)
-
-
-@dataclass
-class WhenNotMatched:
-    """INSERT clause; callable values consume s. Arrow columns and return Arrow arrays."""
-
-    insert: SetSpec
-    condition: Optional[str] = None
-
-
-@dataclass
-class _NormalizedClause:
-    spec: Dict[str, Any]
-    condition: Optional[str] = None
-    delete: bool = False
+__all__ = [
+    'LiteralValue', 'OnSpec', 'SetSpec', 'SourceColumnRef', 'TargetColumnRef',
+    'WhenMatched', 'WhenNotMatched', '_NormalizedClause', 'lit', 'source_col', 'target_col',
+    'vectorized_matched_transform', 'vectorized_delete_transform', 'vectorized_insert_transform',
+]
 
 
 def vectorized_matched_transform(
@@ -107,20 +51,8 @@ def vectorized_matched_transform(
     update_schema: pa.Schema,
     callable_input: Optional[pa.Table] = None,
 ) -> pa.Table:
-    available = set(batch.schema.names)
-    arrays: list = [batch.column(f"t.{row_id_name}")]
-    for col in update_cols:
-        out_type = update_schema.field(col).type
-        if col in spec:
-            arrays.append(
-                _resolve_spec_array(
-                    spec[col], batch, available, on_pairs, out_type,
-                    callable_input=callable_input,
-                )
-            )
-        else:
-            arrays.append(batch.column(f"t.{col}"))
-    return pa.Table.from_arrays(arrays, schema=update_schema)
+    from pypaimon.write.merge_transform import vectorized_matched_transform as execute
+    return execute(batch, spec, on_pairs, update_cols, row_id_name, update_schema, callable_input)
 
 
 def vectorized_delete_transform(
@@ -128,9 +60,8 @@ def vectorized_delete_transform(
     row_id_name: str,
     delete_schema: pa.Schema,
 ) -> pa.Table:
-    return pa.Table.from_arrays(
-        [batch.column(f"t.{row_id_name}")], schema=delete_schema
-    )
+    from pypaimon.write.merge_transform import vectorized_delete_transform as execute
+    return execute(batch, row_id_name, delete_schema)
 
 
 def vectorized_insert_transform(
@@ -139,23 +70,13 @@ def vectorized_insert_transform(
     target_field_names: Sequence[str],
     target_pa_schema: pa.Schema,
 ) -> pa.Table:
-    available = set(batch.schema.names)
-    arrays: list = []
-    for col in target_field_names:
-        out_type = target_pa_schema.field(col).type
-        if col in spec:
-            arrays.append(
-                _resolve_spec_array(
-                    spec[col], batch, available, (), out_type
-                )
-            )
-        else:
-            arrays.append(pa.nulls(batch.num_rows, type=out_type))
-    return pa.Table.from_arrays(arrays, schema=target_pa_schema)
+    from pypaimon.write.merge_transform import vectorized_insert_transform as execute
+    return execute(batch, spec, target_field_names, target_pa_schema)
 
 
 def cast_to_schema(batch: pa.Table, schema: pa.Schema) -> pa.Table:
-    return batch if batch.schema == schema else batch.cast(schema)
+    from pypaimon.write.merge_transform import cast_to_schema as execute
+    return execute(batch, schema)
 
 
 def build_update_schema(
@@ -163,28 +84,19 @@ def build_update_schema(
     update_cols: Sequence[str],
     row_id_name: str,
 ) -> pa.Schema:
-    return pa.schema(
-        [pa.field(row_id_name, pa.int64(), nullable=False)]
-        + [target_pa_schema.field(col) for col in update_cols]
-    )
+    from pypaimon.write.merge_transform import build_update_schema as execute
+    return execute(target_pa_schema, update_cols, row_id_name)
 
 
 def build_delete_schema(row_id_name: str) -> pa.Schema:
-    return pa.schema([pa.field(row_id_name, pa.int64(), nullable=False)])
+    from pypaimon.write.merge_transform import build_delete_schema as execute
+    return execute(row_id_name)
 
 
 def _merge_callable_input(batch: pa.Table, on_pairs):
     # Arrow joins coalesce ON keys; callbacks still expose both SQL aliases.
-    for source, target in on_pairs:
-        source_name, target_name = "s." + source, "t." + target
-        if target_name in batch.column_names:
-            if source_name in batch.column_names:
-                batch = batch.set_column(batch.schema.get_field_index(source_name),
-                                         source_name, batch.column(target_name))
-            else:
-                batch = batch.append_column(source_name, batch.column(target_name))
-    return batch.select(sorted(name for name in batch.column_names
-                               if name.startswith(("t.", "s."))))
+    from pypaimon.write.merge_transform import _merge_callable_input as execute
+    return execute(batch, on_pairs)
 
 
 def _resolve_spec_array(
@@ -195,42 +107,5 @@ def _resolve_spec_array(
     out_type: pa.DataType,
     callable_input: Optional[pa.Table] = None,
 ):
-    if callable(val) and not isinstance(val, type):
-        # Public MERGE callbacks see the joined t./s. columns. The internal
-        # predicate-update adapter supplies its existing unqualified read view.
-        result = val(_merge_callable_input(batch, on_pairs) if callable_input is None else callable_input)
-        if not isinstance(result, (pa.Array, pa.ChunkedArray)):
-            raise ValueError(
-                "Callable SET values must return a pyarrow.Array or "
-                "pyarrow.ChunkedArray."
-            )
-        if len(result) != batch.num_rows:
-            raise ValueError(
-                "Callable SET result length must match matched row count: "
-                f"{len(result)} != {batch.num_rows}."
-            )
-        if result.type != out_type:
-            if isinstance(result, pa.ChunkedArray):
-                result = pa.chunked_array(
-                    [chunk.cast(out_type) for chunk in result.chunks],
-                    type=out_type,
-                )
-            else:
-                result = result.cast(out_type)
-        return result
-    if isinstance(val, LiteralValue):
-        return pa.array([val.value] * batch.num_rows, type=out_type)
-    if isinstance(val, SourceColumnRef):
-        ref = val.column
-        if f"s.{ref}" in available:
-            return batch.column(f"s.{ref}")
-        for sk, tk in on_pairs:
-            if sk == ref and f"t.{tk}" in available:
-                return batch.column(f"t.{tk}")
-        return pa.nulls(batch.num_rows, type=out_type)
-    if isinstance(val, TargetColumnRef):
-        col_name = f"t.{val.column}"
-        return batch.column(col_name) if col_name in available else pa.nulls(
-            batch.num_rows, type=out_type
-        )
-    raise TypeError(f"unexpected spec value type: {type(val).__name__}")
+    from pypaimon.write.merge_transform import _resolve_spec_array as execute
+    return execute(val, batch, available, on_pairs, out_type, callable_input)

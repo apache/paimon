@@ -26,7 +26,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.api.api_response import ErrorResponse
-from pypaimon.read.native_plan import _native_table, _predicate_to_native
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
 from pypaimon.table.source.primary_key_scored_result import PrimaryKeyScoredResult
 from pypaimon.tests import native_vector_search_test as vectors
@@ -96,7 +97,7 @@ def test_java_pk_archives_preserve_positions_scores_and_snapshot(source, snapsho
 @pytest.mark.parametrize('projection', [['id'], ['content', 'id'], []])
 def test_core_result_keeps_scored_selections_and_materializes_only_the_projection(source, projection):
     table, _ = source
-    result = _native(table).execute_local()
+    result = _native(table).execute()
     assert result.snapshot_id() == table.snapshot_manager().get_latest_snapshot().id
     with pytest.raises(Exception, match='physical file positions'):
         result.row_ids()
@@ -116,8 +117,8 @@ def test_captured_plan_does_not_resolve_latest_again_and_accepts_another_query(s
     table, server = source
     builder = _native(table)
     plan = builder.new_full_text_scan().scan()
-    snapshot_id = plan.snapshot_id()
-    expected = _native(table, 'Flink', 1).execute_local().positions()
+    snapshot_id = plan.snapshot().id()
+    expected = _native(table, 'Flink', 1).execute().positions()
     reader = _native(table, 'Flink', 1).new_full_text_read()
     unavailable = server._mock_response(ErrorResponse('TABLE', 'pk_text', 'snapshot unavailable', 503), 503)
     with patch.object(server, '_table_snapshot_handle', return_value=unavailable):
@@ -129,7 +130,7 @@ def test_captured_plan_does_not_resolve_latest_again_and_accepts_another_query(s
 
 def test_search_returns_metadata_without_opening_user_parquet_files(source):
     table, server = source
-    expected = _native(table).execute_local().positions()
+    expected = _native(table).execute().positions()
     files = list((Path(server.data_path) / server.warehouse / 'default' / 'pk_text' / 'bucket-0').glob('*.parquet'))
     assert expected and files
     with ExitStack() as restore:
@@ -137,33 +138,30 @@ def test_search_returns_metadata_without_opening_user_parquet_files(source):
             hidden = path.with_suffix('.held')
             path.rename(hidden)
             restore.callback(hidden.rename, path)
-        result = _native(table).execute_local()
+        result = _native(table).execute()
         assert result.positions() == expected
         with pytest.raises(Exception, match='NotFound|not found|No such file|does not exist'):
             result.new_read_builder().with_projection(['id']).read()
 
 
-@pytest.mark.parametrize('case', ['table', 'filter', 'kind', 'column'])
-def test_pk_plan_cannot_be_read_under_another_context(source, case):
+@pytest.mark.parametrize('case', ['family', 'filter', 'kind', 'column'])
+def test_pk_plan_validates_source_family_and_reader_requirements(source, case):
     table, _ = source
     plan = _native(table).new_full_text_scan().scan()
-    if case == 'table':
-        catalog = table.catalog_environment.catalog_loader.load()
-        schema = table.table_schema
-        catalog.create_table('default.other_text', Schema(
-            schema.fields, schema.partition_keys, schema.primary_keys, schema.options), False)
-        reader = _native(catalog.get_table('default.other_text')).new_full_text_read()
-        with pytest.raises(Exception, match='different table, column or filter'):
-            reader.read_plan(plan)
+    if case == 'family':
+        from pypaimon_rust.datafusion import FullTextScanPlan, RawVectorSearchSplit
+        with pytest.raises(TypeError):
+            FullTextScanPlan([RawVectorSearchSplit([(0, 1)])], plan.snapshot())
     elif case == 'filter':
         reader = _native(table)
         reader.with_filter(_predicate_to_native(table.new_read_builder().new_predicate_builder().equal('id', 1)))
-        with pytest.raises(Exception, match='non-partition filters'):
+        with pytest.raises(NotImplementedError,
+                           match='full-text row filters require a row-tracked Parquet append table'):
             reader.new_full_text_read()
     elif case == 'kind':
         changed = table.copy({'pk-full-text.index.columns': ''})
         reader = _native(changed).new_full_text_read()
-        with pytest.raises(Exception, match='different table, column or filter'):
+        with pytest.raises(Exception, match='Global full-text read requires global row-ID sources'):
             reader.read_plan(plan)
     else:
         reader = (_native_table(table).new_full_text_search_builder()

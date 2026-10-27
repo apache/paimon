@@ -24,8 +24,8 @@ from unittest.mock import patch
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.scanner.file_scanner import FileScanner
-from pypaimon.read.native_plan import _partition_fields
+from pypaimon.execution.python.read.scanner.file_scanner import (FileScanner)
+from pypaimon.execution.native.table import (_partition_fields)
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
 from pypaimon.tests import native_hybrid_search_test as hybrid
@@ -97,7 +97,7 @@ def test_core_search_result_passes_directly_to_scan_and_scored_splits_round_trip
     from pypaimon_rust.datafusion import GlobalIndexResult, Split
     table, _ = source
     native = text._native_table(table)
-    result = text._native(table).execute_local()
+    result = text._native(table).execute()
     assert isinstance(result, GlobalIndexResult)
     scan = native.new_read_builder().with_projection(['id']).new_scan().with_global_index_result(result)
     for plan in [scan.plan(), scan.plan()]:
@@ -120,7 +120,7 @@ def test_native_search_result_hands_core_selection_directly_to_scan(source, pk_v
     from pypaimon_rust.datafusion import GlobalIndexResult
     assert isinstance(result._native_result, GlobalIndexResult)
     expected = sorted(position.row_position for position in result.positions)
-    with patch('pypaimon.read.native_plan.serialize_split_v1',
+    with patch('pypaimon.read.split_serializer.serialize_split_v1',
                side_effect=AssertionError('Native result round-tripped through Python')), \
             patch.object(FileScanner, 'scan', side_effect=AssertionError('Python scan ran')):
         plan = table.new_read_builder().new_scan().with_global_index_result(result).plan()
@@ -232,7 +232,7 @@ def test_de_scored_results_align_scores_in_core(vector_table, selection):
 
 def test_de_supplied_result_preserves_explicit_incremental_window(vector_table):
     from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
-    from pypaimon.read.native_plan import native_plan
+    from pypaimon.execution.native.read.plan import (native_plan)
     table = vector_table.copy({'read.native.enabled': 'true'})
     start = table.snapshot_manager().get_latest_snapshot().id
     vectors._write(table, [{'id': 7, 'embedding': [1, 0], 'pt': 1}])
@@ -279,18 +279,18 @@ def test_all_core_searches_return_one_result_for_read_and_scan(rest_catalog, fam
     native = text._native_table(table)
     if family == 'vector':
         results = [(native.new_vector_search_builder().with_vector_column('embedding')
-                    .with_query_vector([0., 0.]).with_limit(3).execute_local())]
+                    .with_query_vector([0., 0.]).with_limit(3).execute())]
     elif family == 'batch-vector':
         results = (native.new_batch_vector_search_builder().with_vector_column('embedding')
-                   .with_query_vectors([[0., 0.], [7., 0.]]).with_limit(3).execute_batch_local())
+                   .with_query_vectors([[0., 0.], [7., 0.]]).with_limit(3).execute())
         assert len(results) == 2
     elif family == 'full-text':
-        results = [text._native(table, 'paimon', 3).execute_local()]
+        results = [text._native(table, 'paimon', 3).execute()]
     else:
         results = [(native.new_hybrid_search_builder().with_limit(3)
                     .add_vector_route('embedding', [0., 0.], 3, 1., {})
                     .add_full_text_route('content', hybrid.match_query('paimon'), 3, 1., {})
-                    .execute_local())]
+                    .execute())]
     for result in results:
         assert isinstance(result, GlobalIndexResult)
         assert result.snapshot_id() == table.snapshot_manager().get_latest_snapshot().id

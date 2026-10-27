@@ -218,6 +218,69 @@ public class JavaPyLanceE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteReadAppendTableLance() throws Exception {
+        Identifier identifier = identifier("mixed_test_append_tablej_lance");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("category", DataTypes.STRING())
+                        .column("value", DataTypes.DOUBLE())
+                        .partitionKeys("category")
+                        .option("file.format", "lance")
+                        .build();
+        catalog.dropTable(identifier, true);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            write.write(createRow(1, "Apple", "Fruit", 1.5));
+            write.write(createRow(2, "Banana", "Fruit", 0.8));
+            write.write(createRow(3, "Carrot", "Vegetable", 0.6));
+            write.write(createRow(4, "Broccoli", "Vegetable", 1.2));
+            write.write(createRow(5, "Chicken", "Meat", 5.0));
+            write.write(createRow(6, "Beef", "Meat", 8.0));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                splits,
+                                row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType())))
+                .containsExactlyInAnyOrder(
+                        "1, Apple, Fruit, 1.5",
+                        "2, Banana, Fruit, 0.8",
+                        "3, Carrot, Vegetable, 0.6",
+                        "4, Broccoli, Vegetable, 1.2",
+                        "5, Chicken, Meat, 5.0",
+                        "6, Beef, Meat, 8.0");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadAppendTableLance() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(identifier("mixed_test_append_tablep_lance"));
+        RowType readType = table.rowType().project("id", "name", "category", "value");
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                splits,
+                                row -> DataFormatTestUtil.toStringNoRowKind(row, readType)))
+                .containsExactlyInAnyOrder(
+                        "1, Apple, Fruit, 1.5",
+                        "2, Banana, Fruit, 0.8",
+                        "3, Carrot, Vegetable, 0.6",
+                        "4, Broccoli, Vegetable, 1.2",
+                        "5, Chicken, Meat, 5.0",
+                        "6, Beef, Meat, 8.0");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testJavaWriteReadPkTableLance() throws Exception {
         Identifier identifier = identifier("mixed_test_pk_tablej_lance");
         Schema schema =

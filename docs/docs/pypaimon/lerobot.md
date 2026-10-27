@@ -46,6 +46,8 @@ Missing or empty stats create no stats table. The frame table's
 pip install 'pypaimon[lerobot]'
 ```
 
+Python 3.10–3.11 uses LeRobot 0.4.x; Python 3.12+ uses LeRobot 0.6.x.
+
 ```python
 conn.load_from_lerobot(
     "robot_data",
@@ -71,6 +73,21 @@ conn.load_from_lerobot(
     },
 )
 ```
+
+For distributed import, install `pypaimon[ray,lerobot]` on each worker:
+
+```python
+import ray
+
+ray.init(address="auto")
+conn.load_from_lerobot("robot_data", "oss://source-bucket/lerobot_dataset",
+                       parallelism=8)
+```
+
+The default `parallelism=1` uses one process. Workers need source and target
+storage access; pass OSS `source_options` as above. Ray accepts FileIO URIs or
+shared directories, not Hub IDs. Keep the source unchanged during import.
+Failed imports may leave partial tables; retry with a new name.
 
 Before training, finish any related data/metadata updates and pause writes to
 this table group. Create a common named tag over the current component snapshots:
@@ -104,8 +121,9 @@ unchanged snapshots, or choose a new name after repairing the group. Existing
 tags are never moved to different snapshots. Retain or delete component tags
 together, and keep writers paused until the call returns.
 
-Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
-`ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
+Scalars map to scalar types, numeric tensors to `ARRAY` (nested for higher ranks),
+and images to `BLOB`. Tensor shapes remain in the feature metadata; images keep
+their compressed bytes. Previously imported `VECTOR` features remain readable.
 
 Video features map to `BLOB`. Each MP4 is copied once per aligned file group and indexed for range
 reads. Imports require a bucket-unaware table and check rolling before each Episode. Use
@@ -233,9 +251,26 @@ on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GO
 uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
 `video_backend` to force either decoder.
 
+With `pypaimon-rust` installed, LeRobot defaults to Rust frame lookup and table reads
+unless native read/planning options are explicitly configured. Set
+`table = table.copy({"read.native.enabled": "false"})` to use Python.
+Reads stay on the selected snapshot; unavailable or unsupported native paths use Python.
+
 Set `table = table.copy({"read.video.max-open-decoders": "8"})` before
 constructing the dataset to limit cached decoders per camera per worker (default: 16).
 Each open decoder uses memory and a file handle, so usage grows with cameras and workers.
+`read.video.decode-parallelism` limits concurrent video decodes across all cameras in each
+Dataset worker (default: 16). Set it to 1 for serial decoding. Parallel decoding
+applies to video windows without `image_transforms` and uses more CPU and memory.
+`read.video.codec-threads` controls FFmpeg threads per PyAV decoder (default: 1),
+avoiding nested codec parallelism with multiple workers and concurrent videos.
+Set it to 0 for automatic selection. It does not affect TorchCodec.
+
+`read.video.decoders-per-payload` (default: 4) also splits single-video windows across
+independent cached decoders, within those limits. Set it to 1 to disable this splitting;
+the reader automatically reduces the decoder count when overlapping windows would add
+more than 50% duplicate frame requests. Additional decoders can increase initialization
+cost and repeated reads.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 

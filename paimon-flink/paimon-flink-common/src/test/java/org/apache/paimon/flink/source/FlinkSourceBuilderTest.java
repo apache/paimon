@@ -38,7 +38,9 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -99,11 +101,23 @@ public class FlinkSourceBuilderTest {
     private Table createTable(
             String tableName, boolean hasPrimaryKey, int bucketNum, boolean bucketAppendOrdered)
             throws Exception {
+        return createTableWithOptions(
+                tableName,
+                hasPrimaryKey,
+                bucketNum,
+                "bucket-append-ordered",
+                String.valueOf(bucketAppendOrdered));
+    }
+
+    private Table createTableWithOptions(
+            String tableName, boolean hasPrimaryKey, int bucketNum, String... kvOptions)
+            throws Exception {
         Schema.Builder schemaBuilder =
-                Schema.newBuilder()
-                        .column("a", DataTypes.INT())
-                        .option("bucket", bucketNum + "")
-                        .option("bucket-append-ordered", String.valueOf(bucketAppendOrdered));
+                Schema.newBuilder().column("a", DataTypes.INT()).option("bucket", bucketNum + "");
+
+        for (int i = 0; i < kvOptions.length; i += 2) {
+            schemaBuilder.option(kvOptions[i], kvOptions[i + 1]);
+        }
 
         if (hasPrimaryKey) {
             schemaBuilder.primaryKey("a");
@@ -302,6 +316,134 @@ public class FlinkSourceBuilderTest {
         SourceTransformation<?, ?, ?> transformation =
                 (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
         assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testBuildSourceWithoutEnv() throws Exception {
+        Table table = createTable("build_source", false, -1, true);
+
+        Source<RowData, ?, ?> bounded =
+                new FlinkSourceBuilder(table).sourceBounded(true).buildSource();
+        assertThat(bounded).isInstanceOf(PaimonDataStreamSource.class);
+        assertThat(bounded.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+
+        Source<RowData, ?, ?> unbounded =
+                new FlinkSourceBuilder(table).sourceBounded(false).buildSource();
+        assertThat(unbounded).isInstanceOf(PaimonDataStreamSource.class);
+        assertThat(unbounded.getBoundedness()).isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
+    }
+
+    @Test
+    public void testBuildSourceInfersBoundednessFromEnv() throws Exception {
+        Table table = createTable("build_source_env", false, -1, true);
+
+        StreamExecutionEnvironment batchEnv = StreamExecutionEnvironment.getExecutionEnvironment();
+        batchEnv.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        Source<RowData, ?, ?> bounded = new FlinkSourceBuilder(table).env(batchEnv).buildSource();
+        assertThat(bounded.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+
+        StreamExecutionEnvironment streamingEnv =
+                StreamExecutionEnvironment.getExecutionEnvironment();
+        streamingEnv.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+        Source<RowData, ?, ?> unbounded =
+                new FlinkSourceBuilder(table).env(streamingEnv).buildSource();
+        assertThat(unbounded.getBoundedness()).isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
+    }
+
+    @Test
+    public void testBuildSourceWithoutBoundedness() throws Exception {
+        Table table = createTable("build_source_no_boundedness", false, -1, true);
+
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).buildSource())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sourceBounded");
+    }
+
+    @Test
+    public void testBuildSourceRejectsPostponeMerge() throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "build_source_postpone_merge", true, -2, "postpone.merge-on-read", "true");
+
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(true).buildSource())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("build()");
+    }
+
+    @Test
+    public void testBuildSourceSupportsPostponeMergeCompactedFull() throws Exception {
+        // COMPACTED_FULL intentionally falls back to the static source in build(),
+        // so buildSource() must not reject it either
+        Table table =
+                createTableWithOptions(
+                        "build_source_postpone_merge_compacted_full",
+                        true,
+                        -2,
+                        "postpone.merge-on-read",
+                        "true",
+                        "scan.mode",
+                        "compacted-full");
+
+        Source<RowData, ?, ?> source =
+                new FlinkSourceBuilder(table).sourceBounded(true).buildSource();
+        assertThat(source).isInstanceOf(PaimonDataStreamSource.class);
+        assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        DataStream<RowData> dataStream =
+                new FlinkSourceBuilder(table).env(env).sourceBounded(true).build();
+        assertThat(dataStream.getTransformation()).isInstanceOf(SourceTransformation.class);
+        SourceTransformation<?, ?, ?> transformation =
+                (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
+        assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+        assertThat(transformation.getSource().getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+    }
+
+    @Test
+    public void testBuildSourceRejectsDedicatedSplitGeneration() throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "build_source_dedicated_split",
+                        false,
+                        -1,
+                        "scan.dedicated-split-generation",
+                        "true");
+
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(true).buildSource())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("build()");
+    }
+
+    @Test
+    public void testBuildSourceRejectsCheckpointAlign() throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "build_source_checkpoint_align",
+                        false,
+                        -1,
+                        "source.checkpoint-align.enabled",
+                        "true");
+
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(false).buildSource())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("build()");
+    }
+
+    @Test
+    public void testBuildSourceRejectsExactlyOnceConsumer() throws Exception {
+        Table table =
+                createTableWithOptions(
+                        "build_source_exactly_once_consumer",
+                        false,
+                        -1,
+                        "consumer-id",
+                        "my-consumer",
+                        "consumer.expiration-time",
+                        "1 h");
+
+        assertThatThrownBy(() -> new FlinkSourceBuilder(table).sourceBounded(false).buildSource())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("build()");
     }
 
     @Test

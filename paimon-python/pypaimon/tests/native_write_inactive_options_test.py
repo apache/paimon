@@ -24,8 +24,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_write import NativeTableWrite, create_native_write
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.write.write_dispatch import NativeTableWrite
+from pypaimon.execution.native.write.native_write import create_native_write
 
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
@@ -55,13 +56,16 @@ def test_inactive_changelog_format_qualifies_for_native_write(
         native_rest_catalog, primary_key, stream, partition, producer):
     table = _table(native_rest_catalog, primary_key, producer)
     native_table = Mock()
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table', return_value=native_table) as create:
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch(
+                'pypaimon.execution.native.write.native_write.create_native_write_table',
+                return_value=native_table) as create:
         writer = create_native_write(table, 'job', static_partition=partition, stream=stream)
-    assert isinstance(writer, NativeTableWrite)
+    from pypaimon.execution.native.write.native_write import NativeTableWrite as NativeWrite
+    assert isinstance(writer, NativeWrite)
     create.assert_called_once_with(table)
     builder = (native_table.new_stream_write_builder.return_value.with_commit_user.return_value if stream
-               else native_table.new_batch_write_builder.return_value._with_commit_user.return_value)
+               else native_table.new_batch_write_builder.return_value.with_commit_user.return_value)
     if partition is not None:
         builder.with_overwrite.assert_called_once_with(partition)
         builder = builder.with_overwrite.return_value
@@ -73,8 +77,8 @@ def test_inactive_changelog_format_qualifies_for_native_write(
 def test_active_non_parquet_input_changelog_keeps_existing_fallback(
         native_rest_catalog, stream, partition):
     table = _table(native_rest_catalog, True, 'input')
-    with patch('pypaimon.write.native_write.native_runtime_available', return_value=True), \
-            patch('pypaimon.write.native_write.create_native_write_table') as create:
+    with patch('pypaimon.execution.native.write.native_write.native_runtime_available', return_value=True), \
+            patch('pypaimon.execution.native.write.native_write.create_native_write_table') as create:
         assert create_native_write(table, 'job', static_partition=partition, stream=stream) is None
     create.assert_not_called()
 
@@ -92,8 +96,9 @@ def _write(table, rows, stream=False, overwrite=None):
         if native:
             assert isinstance(writer, NativeTableWrite)
             for method in ('commit', 'overwrite'):
-                stack.enter_context(patch.object(
-                    commit.file_store_commit, method, side_effect=AssertionError('Python commit fallback')))
+                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.' + method,
+                                          side_effect=AssertionError('Python commit fallback')))
         try:
             messages = []
             # Stream checkpoints exercise reuse after the first prepared batch.

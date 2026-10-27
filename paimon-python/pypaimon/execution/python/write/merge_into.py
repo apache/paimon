@@ -1,0 +1,591 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Single-process Python execution for data-evolution MERGE INTO."""
+
+from typing import Any, List, Optional, Sequence
+
+import pyarrow as pa
+import pyarrow.compute as pc
+
+from pypaimon.execution.python.write.merge_transform import (
+    _build_insert_transform,
+    _build_matched_delete_transform,
+    _build_matched_transform,
+)
+from pypaimon.write.merge_transform import (
+    build_delete_schema,
+    build_update_schema,
+)
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.table.special_fields import SpecialFields
+from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.backend_dispatch import create_python_write
+from pypaimon.write.table_delete import TableDeleteByRowId
+from pypaimon.write.merge_inputs import (
+    _PrepareCtx,
+    _is_self_merge,
+    _is_table_like,
+    _normalize_memory_source,
+    _normalize_on,
+    _prepare,
+    _resolve_target_projection,
+    _union_update_cols,
+)
+from pypaimon.write.merge_types import OnSpec, SourceColumnRef, WhenMatched, WhenNotMatched, _NormalizedClause
+
+
+class PythonTableMergeInto:
+    """Execute one prepared MERGE request using the Python backend."""
+
+    def __init__(
+            self, target_table, source: Any, *, on: OnSpec,
+            when_matched: Sequence[WhenMatched] = (),
+            when_not_matched: Sequence[WhenNotMatched] = (),
+            commit_user: str, commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
+        self._target_table = target_table
+        self._source = source
+        self._on = on
+        self._when_matched = when_matched
+        self._when_not_matched = when_not_matched
+        self._commit_user = commit_user
+        self._commit_identifier = commit_identifier
+
+    def prepare_commit(self) -> List[CommitMessage]:
+        """Prepare MERGE INTO commit messages in the current Python process.
+
+        The returned messages must be committed by the caller's matching
+        ``TableCommit``.
+
+        SET and INSERT mappings may contain callables accepting an Arrow table
+        with qualified ``t.`` target and ``s.`` source columns (INSERT has only
+        source columns). Each callable evaluates the rows selected by its clause
+        and returns an Arrow Array or ChunkedArray of the same length. Empty
+        clauses do not invoke callbacks; callback errors propagate to the caller.
+        """
+        target_table = self._target_table
+        source = self._source
+        on = self._on
+        when_matched = self._when_matched
+        when_not_matched = self._when_not_matched
+        commit_user = self._commit_user
+        commit_identifier = self._commit_identifier
+        # Empty-target INSERT skips the target scan, but still needs the same
+        # unrestricted whole-table grant before any user callback or staging.
+        from pypaimon.write.update_validation import _authorize_update
+        _authorize_update(target_table)
+        if any(clause.condition is not None
+               for clauses in (when_matched, when_not_matched) for clause in clauses):
+            from pypaimon.write.merge_condition import _load_datafusion
+            _load_datafusion()
+        target_on, source_on = _normalize_on(on)
+        self_merge = _is_self_merge(target_table, source, target_on, source_on)
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        base_snapshot = TimeTravelUtil.resolve_snapshot(target_table)
+        target_table = target_table._copy_with_snapshot(base_snapshot)
+        if self_merge:
+            source = target_table
+        source_table, matched_specs, not_matched_specs, ctx = _prepare(
+            target_table,
+            source,
+            list(when_matched),
+            list(when_not_matched),
+            on,
+            source_loader=_normalize_source,
+        )
+
+        update_table, delete_table, insert_table, update_cols_union = _build_tables(
+            target_table,
+            source_table,
+            matched_specs,
+            not_matched_specs,
+            ctx,
+            base_snapshot,
+        )
+
+        return _prepare_commit_messages(
+            target_table,
+            update_table,
+            delete_table,
+            insert_table,
+            update_cols_union,
+            base_snapshot,
+            commit_user,
+            commit_identifier,
+        )
+
+
+def _build_tables(
+    target_table,
+    source_table: Optional[pa.Table],
+    matched_specs: List[_NormalizedClause],
+    not_matched_specs: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    base_snapshot,
+):
+    base_snapshot_id = base_snapshot.id if base_snapshot is not None else None
+    update_table = None
+    delete_table = None
+    insert_table = None
+    update_cols_union: List[str] = []
+
+    if ctx.is_self_merge:
+        if matched_specs and base_snapshot is not None:
+            update_cols_union = _union_update_cols(matched_specs)
+            if update_cols_union:
+                update_table = _build_self_merge_update_table(
+                    target_table,
+                    matched_specs,
+                    ctx,
+                    update_cols_union,
+                    base_snapshot_id,
+                )
+            if any(c.delete for c in matched_specs):
+                delete_table = _build_self_merge_delete_table(
+                    target_table,
+                    matched_specs,
+                    ctx,
+                    base_snapshot_id,
+                )
+        return update_table, delete_table, insert_table, update_cols_union
+
+    if matched_specs and base_snapshot is not None:
+        update_cols_union = _union_update_cols(matched_specs)
+        if not update_cols_union and not any(c.delete for c in matched_specs):
+            names = list(dict.fromkeys(ctx.target_on_cols + [SpecialFields.ROW_ID.name]))
+            target = _read_table(target_table, projection=names, snapshot_id=base_snapshot_id)
+            target = _rename_with_prefix(target, "t.")
+            _join_with_row_indices(target, _rename_with_prefix(source_table, "s."),
+                                   ["t." + name for name in ctx.target_on_cols],
+                                   ["s." + name for name in ctx.source_on_cols],
+                                   "inner", check_cardinality=True)
+        if update_cols_union:
+            update_table = _build_matched_update_table(
+                target_table,
+                source_table,
+                matched_specs,
+                ctx,
+                update_cols_union,
+                base_snapshot_id,
+            )
+        if any(c.delete for c in matched_specs):
+            delete_table = _build_matched_delete_table(
+                target_table,
+                source_table,
+                matched_specs,
+                ctx,
+                base_snapshot_id,
+            )
+
+    if not_matched_specs:
+        insert_table = _build_not_matched_insert_table(
+            target_table,
+            source_table,
+            not_matched_specs,
+            ctx,
+            base_snapshot_id,
+            target_empty=base_snapshot is None,
+        )
+
+    return update_table, delete_table, insert_table, update_cols_union
+
+
+def _build_self_merge_update_table(
+    target_table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    update_cols: Sequence[str],
+    snapshot_id: Optional[int],
+) -> pa.Table:
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = set(
+        _resolve_target_projection(
+            clauses,
+            [row_id_name],
+            update_cols,
+            ctx.full_target_field_names,
+        )
+    )
+    for clause in clauses:
+        for value in clause.spec.values():
+            if isinstance(value, SourceColumnRef):
+                needed_cols.add(value.column)
+    target_set = set(ctx.full_target_field_names)
+    for clause in clauses:
+        if clause.condition is not None:
+            from pypaimon.write.merge_condition import extract_columns
+
+            for ref in extract_columns(clause.condition):
+                prefix, col = ref.split(".", 1)
+                if prefix == "s" and col in target_set:
+                    needed_cols.add(col)
+    projection = [row_id_name] + [
+        c for c in ctx.full_target_field_names if c in needed_cols
+    ]
+
+    target = _read_table(target_table, projection=projection, snapshot_id=snapshot_id)
+    update_schema = build_update_schema(
+        ctx.update_pa_schema, update_cols, row_id_name
+    )
+    if target.num_rows == 0:
+        return update_schema.empty_table()
+
+    orig_names = list(target.schema.names)
+    target_renamed = _rename_with_prefix(target, "t.")
+    aliased = _add_self_merge_source_aliases(
+        target_renamed, orig_names, row_id_name
+    )
+    transform = _build_matched_transform(
+        clauses,
+        on_map={row_id_name: row_id_name},
+        on_pairs=[(row_id_name, row_id_name)],
+        update_cols=list(update_cols),
+        row_id_name=row_id_name,
+        update_schema=update_schema,
+    )
+    return transform(aliased)
+
+
+def _build_self_merge_delete_table(
+    target_table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    snapshot_id: Optional[int],
+) -> pa.Table:
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = set(
+        _resolve_target_projection(
+            clauses,
+            [row_id_name],
+            [],
+            ctx.full_target_field_names,
+        )
+    )
+    target_set = set(ctx.full_target_field_names)
+    for clause in clauses:
+        if clause.condition is not None:
+            from pypaimon.write.merge_condition import extract_columns
+
+            for ref in extract_columns(clause.condition):
+                prefix, col = ref.split(".", 1)
+                if prefix == "s" and col in target_set:
+                    needed_cols.add(col)
+    projection = [row_id_name] + [
+        c for c in ctx.full_target_field_names if c in needed_cols
+    ]
+
+    target = _read_table(target_table, projection=projection, snapshot_id=snapshot_id)
+    delete_schema = build_delete_schema(row_id_name)
+    if target.num_rows == 0:
+        return delete_schema.empty_table()
+
+    orig_names = list(target.schema.names)
+    target_renamed = _rename_with_prefix(target, "t.")
+    aliased = _add_self_merge_source_aliases(
+        target_renamed, orig_names, row_id_name
+    )
+    transform = _build_matched_delete_transform(
+        clauses,
+        on_map={row_id_name: row_id_name},
+        row_id_name=row_id_name,
+        delete_schema=delete_schema,
+    )
+    return transform(aliased)
+
+
+def _build_matched_update_table(
+    target_table,
+    source_table: pa.Table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    update_cols: Sequence[str],
+    snapshot_id: Optional[int],
+) -> pa.Table:
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = _resolve_target_projection(
+        clauses,
+        ctx.target_on_cols,
+        update_cols,
+        ctx.settable_field_names,
+    )
+    projection = [row_id_name] + [c for c in needed_cols if c != row_id_name]
+    target = _read_table(target_table, projection=projection, snapshot_id=snapshot_id)
+    update_schema = build_update_schema(
+        ctx.update_pa_schema, update_cols, row_id_name
+    )
+    if target.num_rows == 0 or source_table.num_rows == 0:
+        return update_schema.empty_table()
+
+    target_renamed = _rename_with_prefix(target, "t.")
+    source_renamed = _rename_with_prefix(source_table, "s.")
+    joined = _join_with_row_indices(
+        target_renamed,
+        source_renamed,
+        keys=["t.{}".format(c) for c in ctx.target_on_cols],
+        right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
+        join_type="inner",
+        check_cardinality=True,
+    )
+    transform = _build_matched_transform(
+        clauses,
+        on_map=dict(zip(ctx.source_on_cols, ctx.target_on_cols)),
+        on_pairs=list(zip(ctx.source_on_cols, ctx.target_on_cols)),
+        update_cols=list(update_cols),
+        row_id_name=row_id_name,
+        update_schema=update_schema,
+    )
+    return transform(joined)
+
+
+def _build_matched_delete_table(
+    target_table,
+    source_table: pa.Table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    snapshot_id: Optional[int],
+) -> pa.Table:
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = _resolve_target_projection(
+        clauses,
+        ctx.target_on_cols,
+        [],
+        ctx.settable_field_names,
+    )
+    projection = [row_id_name] + [c for c in needed_cols if c != row_id_name]
+    target = _read_table(target_table, projection=projection, snapshot_id=snapshot_id)
+    delete_schema = build_delete_schema(row_id_name)
+    if target.num_rows == 0 or source_table.num_rows == 0:
+        return delete_schema.empty_table()
+
+    target_renamed = _rename_with_prefix(target, "t.")
+    source_renamed = _rename_with_prefix(source_table, "s.")
+    joined = _join_with_row_indices(
+        target_renamed,
+        source_renamed,
+        keys=["t.{}".format(c) for c in ctx.target_on_cols],
+        right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
+        join_type="inner",
+        check_cardinality=not (len(clauses) == 1 and clauses[0].delete and clauses[0].condition is None),
+        deduplicate_left=len(clauses) == 1 and clauses[0].delete and clauses[0].condition is None,
+    )
+    transform = _build_matched_delete_transform(
+        clauses,
+        on_map=dict(zip(ctx.source_on_cols, ctx.target_on_cols)),
+        row_id_name=row_id_name,
+        delete_schema=delete_schema,
+    )
+    return transform(joined)
+
+
+def _build_not_matched_insert_table(
+    target_table,
+    source_table: pa.Table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    snapshot_id: Optional[int],
+    target_empty: bool = False,
+) -> pa.Table:
+    source_renamed = _rename_with_prefix(source_table, "s.")
+    if source_renamed.num_rows == 0:
+        return ctx.full_pa_schema.empty_table()
+
+    if target_empty:
+        unmatched = source_renamed
+    else:
+        target = _read_table(
+            target_table,
+            projection=list(ctx.target_on_cols),
+            snapshot_id=snapshot_id,
+        )
+        if target.num_rows == 0:
+            unmatched = source_renamed
+        else:
+            target_renamed = _rename_with_prefix(target, "t.")
+            unmatched = _join_with_row_indices(
+                source_renamed,
+                target_renamed,
+                keys=["s.{}".format(c) for c in ctx.source_on_cols],
+                right_keys=["t.{}".format(c) for c in ctx.target_on_cols],
+                join_type="left anti",
+            )
+
+    transform = _build_insert_transform(
+        clauses, ctx.full_target_field_names, ctx.full_pa_schema
+    )
+    return transform(unmatched)
+
+
+def _join_with_row_indices(left, right, keys, right_keys, join_type,
+                           check_cardinality=False, deduplicate_left=False):
+    """Keep nested payloads out of Arrow's join, then gather matched rows."""
+    key_names = ["key_%d" % index for index in range(len(keys))]
+    left_keys = left.select(keys).rename_columns(key_names).append_column(
+        "left_index", pa.array(range(left.num_rows), type=pa.int64()))
+    right_keys_table = right.select(right_keys).rename_columns(key_names)
+    if join_type == "inner":
+        right_keys_table = right_keys_table.append_column(
+            "right_index", pa.array(range(right.num_rows), type=pa.int64()))
+    indices = left_keys.join(right_keys_table, keys=key_names, join_type=join_type)
+    # Spark checks source-match cardinality before action predicates. A sole
+    # unconditional DELETE is unambiguous and may collapse duplicate matches.
+    if check_cardinality and pc.count_distinct(indices["left_index"]).as_py() != indices.num_rows:
+        raise ValueError("MERGE matched multiple source rows to the same target _ROW_ID. "
+                         "Deduplicate the source before merging.")
+    if deduplicate_left:
+        indices = indices.group_by("left_index", use_threads=False).aggregate([
+            ("right_index", "first")]).rename_columns(["left_index", "right_index"])
+    result = left.take(indices["left_index"])
+    if join_type == "inner":
+        # Match Table.join's coalesced-key schema: keep only the left keys.
+        payload = right.select([
+            name for name in right.column_names if name not in right_keys
+        ]).take(indices["right_index"])
+        for field, column in zip(payload.schema, payload.columns):
+            result = result.append_column(field, column)
+    return result
+
+
+def _prepare_commit_messages(
+    table,
+    update_table: Optional[pa.Table],
+    delete_table: Optional[pa.Table],
+    insert_table: Optional[pa.Table],
+    update_cols_union: Sequence[str],
+    base_snapshot,
+    commit_user: str,
+    commit_identifier: int,
+) -> List[CommitMessage]:
+    all_msgs: list = []
+    _validate_unique_action_row_ids(update_table, delete_table)
+
+    if update_table is not None and update_table.num_rows > 0:
+        update_snapshot_table = _copy_at_snapshot(
+            table, base_snapshot.id if base_snapshot is not None else None
+        )
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        updater = TableUpdateByRowId._from_python(
+            update_snapshot_table, commit_user, commit_identifier)
+        update_msgs = updater.update_columns(
+            update_table, list(update_cols_union)
+        )
+        all_msgs.extend(update_msgs)
+
+    if delete_table is not None and delete_table.num_rows > 0:
+        delete_snapshot_table = _copy_at_snapshot(
+            table, base_snapshot.id if base_snapshot is not None else None
+        )
+        deleter = TableDeleteByRowId._from_python(delete_snapshot_table)
+        row_id_name = SpecialFields.ROW_ID.name
+        delete_msgs = deleter.delete(
+            delete_table.column(row_id_name).to_pylist()
+        )
+        all_msgs.extend(delete_msgs)
+
+    if insert_table is not None and insert_table.num_rows > 0:
+        writer = _new_table_write(table, commit_user, commit_identifier)
+        try:
+            writer.write_arrow(insert_table)
+            if commit_identifier == BATCH_COMMIT_IDENTIFIER:
+                insert_msgs = writer.prepare_commit()
+            else:
+                insert_msgs = writer.prepare_commit(commit_identifier)
+        finally:
+            writer.close()
+        all_msgs.extend(insert_msgs)
+
+    return all_msgs
+
+
+def _new_table_write(table, commit_user: str, commit_identifier: int):
+    return create_python_write(table, commit_user, stream=commit_identifier != BATCH_COMMIT_IDENTIFIER)
+
+
+def _normalize_source(source: Any, on_columns=()) -> pa.Table:
+    if isinstance(source, pa.Table):
+        return source
+    if _is_table_like(source):
+        # Let the read resolve its branch and point-in-time selectors once.
+        # Pinning the latest snapshot here would override the source's options.
+        projection = list(dict.fromkeys(list(source.field_names) + list(on_columns)))
+        return _read_table(source, projection=projection)
+    return _normalize_memory_source(source)
+
+
+def _read_table(table, projection: Optional[List[str]] = None,
+                snapshot_id: Optional[int] = None) -> pa.Table:
+    read_table = _copy_at_snapshot(table, snapshot_id)
+    read_builder = read_table.new_read_builder()
+    if projection is not None:
+        read_builder.with_projection(projection)
+    scan = read_builder.new_scan()
+    return read_builder.new_read().to_arrow(scan.plan_all().splits())
+
+
+def _copy_at_snapshot(table, snapshot_id: Optional[int]):
+    if snapshot_id is None:
+        return table
+    from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+    snapshot = TimeTravelUtil.resolve_snapshot(table)
+    if snapshot is None or snapshot.id != snapshot_id:
+        snapshot = table.snapshot_manager().get_snapshot_by_id(snapshot_id)
+    return table._copy_with_snapshot(snapshot)
+
+
+def _validate_unique_action_row_ids(
+    update_table: Optional[pa.Table],
+    delete_table: Optional[pa.Table],
+) -> None:
+    chunks = []
+    total_rows = 0
+    row_id_name = SpecialFields.ROW_ID.name
+    for table in (update_table, delete_table):
+        if table is None or table.num_rows == 0:
+            continue
+        total_rows += table.num_rows
+        chunks.extend(table.column(row_id_name).chunks)
+    if not chunks:
+        return
+    row_ids = pa.chunked_array(chunks)
+    if pc.count_distinct(row_ids).as_py() != total_rows:
+        raise ValueError(
+            "MERGE matched multiple source rows to the same target _ROW_ID. "
+            "Deduplicate the source before merging."
+        )
+
+
+def _rename_with_prefix(table: pa.Table, prefix: str) -> pa.Table:
+    return table.rename_columns(
+        ["{}{}".format(prefix, name) for name in table.schema.names]
+    )
+
+
+def _add_self_merge_source_aliases(
+    target_renamed: pa.Table, orig_names: Sequence[str], row_id_name: str
+) -> pa.Table:
+    columns = list(target_renamed.columns)
+    names = list(target_renamed.schema.names)
+    for orig in orig_names:
+        if orig == row_id_name:
+            continue
+        target_name = "t.{}".format(orig)
+        if target_name in names:
+            idx = names.index(target_name)
+            columns.append(columns[idx])
+            names.append("s.{}".format(orig))
+    return pa.table(columns, names=names)

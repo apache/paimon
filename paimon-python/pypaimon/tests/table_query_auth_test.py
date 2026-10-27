@@ -22,6 +22,8 @@ from unittest.mock import patch
 
 import pyarrow as pa
 
+from types import SimpleNamespace
+
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.catalog.table_query_auth import (
     TableQueryAuthResult,
@@ -32,6 +34,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
+from pypaimon.read.table_scan import TableScan
 
 
 class _FakeField:
@@ -66,9 +69,11 @@ class _FakeSplit:
 class _FakeTable:
     def __init__(self, identifier=None):
         self.identifier = identifier or Identifier("db", "table")
+        self.options = SimpleNamespace(
+            native_plan_enabled=lambda: False, native_read_enabled=lambda: False, query_auth_enabled=False)
 
 
-class _FakeScan:
+class _FakeScan(TableScan):
     def __init__(self, plan, identifier=None, auth_result=None):
         self._plan = plan
         self._query_auth_fn = None
@@ -78,9 +83,6 @@ class _FakeScan:
 
     def plan(self):
         return self._plan
-
-    def _native_requested(self):
-        return False
 
     def _TableScan__auth_query(self, all_columns=False):
         return self._auth_result
@@ -389,7 +391,7 @@ class TestPlanAllFiles(unittest.TestCase):
 
         plain_plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plain_plan, auth_result=None)
-        result = TableScan.plan_all_files(scan)
+        result = TableScan.plan_all(scan)
         self.assertIs(result, plain_plan)
 
     def test_row_filter_restriction_raises(self):
@@ -399,7 +401,7 @@ class TestPlanAllFiles(unittest.TestCase):
         plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
-            TableScan.plan_all_files(scan)
+            TableScan.plan_all(scan)
 
     def test_column_masking_restriction_raises(self):
         from pypaimon.read.table_scan import TableScan
@@ -408,7 +410,7 @@ class TestPlanAllFiles(unittest.TestCase):
         plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
-            TableScan.plan_all_files(scan)
+            TableScan.plan_all(scan)
 
     def test_empty_table_with_auth_still_raises(self):
         from pypaimon.read.table_scan import TableScan
@@ -417,14 +419,14 @@ class TestPlanAllFiles(unittest.TestCase):
         empty_plan = Plan([], snapshot_id=5)
         scan = _FakeScan(empty_plan, auth_result=auth)
         with self.assertRaises(TableNoPermissionException):
-            TableScan.plan_all_files(scan)
+            TableScan.plan_all(scan)
 
     def test_no_restrictions_allows_write(self):
         from pypaimon.read.table_scan import TableScan
 
         plan = Plan([_FakeSplit()], snapshot_id=5)
         scan = _FakeScan(plan, auth_result=None)
-        result = TableScan.plan_all_files(scan)
+        result = TableScan.plan_all(scan)
         self.assertIs(result, plan)
 
 

@@ -17,51 +17,31 @@
 
 from typing import List
 
-import pyarrow.fs as pafs
-
-from pypaimon.table.format.format_table import FormatTable
-from pypaimon.table.format.format_table_scan import _is_data_file_name
 from pypaimon.table.format.format_commit_message import FormatTableCommitMessage
-
-
-def _delete_data_files_in_path(file_io, path: str) -> None:
-    try:
-        infos = file_io.list_status(path)
-    except Exception:
-        return
-    for info in infos:
-        if info.type == pafs.FileType.Directory:
-            _delete_data_files_in_path(file_io, info.path)
-        elif info.type == pafs.FileType.File:
-            name = info.path.split("/")[-1] if "/" in info.path else info.path
-            if _is_data_file_name(name):
-                try:
-                    file_io.delete(info.path, False)
-                except Exception:
-                    pass
+from pypaimon.table.format.format_table import FormatTable
 
 
 class FormatTableCommit:
-    """Commit for format table. Overwrite is applied in FormatTableWrite at write time."""
+    """Public commit API for the Python-only format-table implementation."""
 
     def __init__(self, table: FormatTable):
-        self.table = table
-        self._committed = False
+        from pypaimon.execution.python.write.format_table_commit import PythonFormatTableCommit
+
+        self._execution = PythonFormatTableCommit(table)
+
+    @property
+    def table(self):
+        return self._execution.table
+
+    @table.setter
+    def table(self, table):
+        self._execution.table = table
 
     def commit(self, commit_messages: List[FormatTableCommitMessage]) -> None:
-        if self._committed:
-            raise RuntimeError("FormatTableCommit supports only one commit.")
-        self._committed = True
-        return
+        return self._execution.commit(commit_messages)
 
     def abort(self, commit_messages: List[FormatTableCommitMessage]) -> None:
-        for msg in commit_messages:
-            for path in msg.written_paths:
-                try:
-                    if self.table.file_io.exists(path):
-                        self.table.file_io.delete(path, False)
-                except Exception:
-                    pass
+        return self._execution.abort(commit_messages)
 
     def close(self) -> None:
-        pass
+        return self._execution.close()

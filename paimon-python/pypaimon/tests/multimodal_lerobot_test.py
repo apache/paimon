@@ -54,6 +54,8 @@ from pypaimon.multimodal.lerobot.dataset import (
     _decode_video_frames,
     _decode_video_rows,
     _decode_video_windows,
+    _episode_ranges,
+    _episode_tasks,
     _image_tensor,
     _index_names,
     _open_video_decoder,
@@ -165,6 +167,81 @@ def _configure_uint8_transform_worker(unused_worker_id):
 
 class LeRobotValidationTest(unittest.TestCase):
 
+    def test_episode_validation_projects_batched_hf_metadata(self):
+        try:
+            from datasets import Dataset
+        except ImportError:
+            self.skipTest("datasets is not installed")
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+
+        rows = [{
+            "episode_index": index,
+            "dataset_from_index": index * 2,
+            "dataset_to_index": index * 2 + 2,
+            "length": 2,
+            "tasks": ["place", "pick"],
+            "stats/camera/mean": [0.5] * 32,
+        } for index in range(2050)]
+        episodes = Dataset.from_list(rows)
+        expected = [(index * 2, index * 2 + 2) for index in range(2050)]
+        with patch.object(
+                Dataset, "__getitem__",
+                side_effect=AssertionError("Do not format individual rows")):
+            self.assertEqual(expected, _episode_ranges(
+                {"episodes": episodes}, 4100, 2050))
+            self.assertEqual((("pick", "place"),) * 2050,
+                             _episode_tasks({"episodes": episodes}))
+        self.assertIn("stats/camera/mean", episodes.column_names)
+        self.assertEqual(rows[0], episodes[0])
+        self.assertEqual((None,) * 2050, _episode_tasks({
+            "episodes": episodes.remove_columns("tasks"),
+        }))
+        formatted = episodes.select(range(2)).with_format(
+            "numpy",
+            columns=["episode_index", "dataset_from_index",
+                     "dataset_to_index", "length"],
+        )
+        self.assertNotIn("tasks", formatted[0])
+        self.assertEqual([(0, 2), (2, 4)], _episode_ranges(
+            {"episodes": formatted}, 4, 2))
+        self.assertEqual((None, None), _episode_tasks(
+            {"episodes": formatted}))
+        visible = formatted.with_format(
+            "numpy", columns=formatted.format["columns"],
+            output_all_columns=True)
+        self.assertEqual((("pick", "place"),) * 2, _episode_tasks(
+            {"episodes": visible}))
+        # Preserve a selected Dataset's logical row order and range validation.
+        with self.assertRaisesRegex(ValueError, "episode_index=1"):
+            _episode_ranges({"episodes": episodes.select([1, 0])}, 4, 2)
+        with self.assertRaisesRegex(ValueError, "integer controls"):
+            _episode_ranges({"episodes": episodes.remove_columns("length")},
+                            4100, 2050)
+
+    def test_episode_validation_preserves_metadata_representations(self):
+        from pypaimon.multimodal.lerobot.dataset import (
+            _episode_ranges, _episode_tasks,
+        )
+        import pandas as pd
+
+        rows = [{
+            "episode_index": 0, "dataset_from_index": 0,
+            "dataset_to_index": 2, "length": 2, "tasks": "pick",
+        }, {
+            "episode_index": 1, "dataset_from_index": 2,
+            "dataset_to_index": 3, "length": 1, "tasks": None,
+        }]
+        for episodes in (rows, pd.DataFrame(rows)):
+            with self.subTest(type=type(episodes).__name__):
+                metadata = {"episodes": episodes}
+                self.assertEqual([(0, 2), (2, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), None), _episode_tasks(metadata))
+                with self.assertRaisesRegex(ValueError, "expected 4"):
+                    _episode_ranges(metadata, 4, 2)
+
     def test_episode_metadata_pickle_stays_small_and_usable(self):
         try:
             from datasets import Dataset
@@ -266,12 +343,41 @@ class LeRobotValidationTest(unittest.TestCase):
             0: {"camera_%d" % index: index for index in range(9)},
         }
         with patch(
-                "pypaimon.multimodal.lerobot.dataset.ThreadPoolExecutor",
+                "pypaimon.multimodal.video.ThreadPoolExecutor",
                 side_effect=executor):
             _decode_video_rows(
                 [rows], [Collator(index) for index in range(9)])
 
         self.assertEqual([8], worker_counts)
+
+    def test_video_row_fallback_preserves_torch_mode(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.video import _VideoDecodePool
+
+        class Collator:
+            video_column = "camera"
+            output_column = "frame"
+
+            def __call__(self, rows):
+                mode = (torch.is_grad_enabled(),
+                        torch.is_inference_mode_enabled())
+                return [dict(row, frame=mode) for row in rows]
+
+        pool = _VideoDecodePool()
+        try:
+            for context, expected in (
+                    (torch.enable_grad(), (True, False)),
+                    (torch.no_grad(), (False, False)),
+                    (torch.inference_mode(), (False, True))):
+                with self.subTest(expected=expected), context:
+                    rows = {0: {"camera": 1}}
+                    _decode_video_rows([rows], [Collator()], decode_pool=pool)
+                    self.assertEqual(expected, rows[0]["frame"])
+        finally:
+            pool.close()
 
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
@@ -701,7 +807,8 @@ class LeRobotValidationTest(unittest.TestCase):
 
         for configured, expected in ((None, 16), ("2", 2)):
             with self.subTest(configured=configured):
-                options = {} if configured is None else {option: configured}
+                options = {} if configured is None else {
+                    option: configured, "read.video.codec-threads": configured}
                 frames = SimpleNamespace(
                     options=CoreOptions(Options(options)))
                 rows = SimpleNamespace(
@@ -716,6 +823,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 try:
                     self.assertEqual([expected, expected], [
                         c.max_open_videos for c in dataset.reader._video_collators])
+                    self.assertEqual([1 if configured is None else 2] * 2, [
+                        c.decoder_factory.keywords["codec_threads"]
+                        for c in dataset.reader._video_collators])
                 finally:
                     dataset.reader.close()
 
@@ -898,6 +1008,35 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             collator.close()
 
+    def test_custom_episode_transform_keeps_cross_column_inputs(self):
+        try:
+            from datasets import Dataset
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        episodes = Dataset.from_dict({
+            "episode_index": [0, 1],
+            "dataset_from_index": [0, 1],
+            "dataset_to_index": [1, 3],
+            "length": [0, 0],
+            "stats": [1, 2],
+        })
+
+        def transform(batch):
+            return dict(batch, length=batch["stats"], tasks=[
+                ["pick" if index == 0 else "place"]
+                for index in batch["episode_index"]
+            ])
+
+        for source in (episodes, episodes.add_column(
+                "tasks", [["old"], ["old"]])):
+            with self.subTest(physical_tasks="tasks" in source.column_names):
+                metadata = {"episodes": source.with_transform(transform)}
+                self.assertEqual([(0, 1), (1, 3)],
+                                 _episode_ranges(metadata, 3, 2))
+                self.assertEqual((("pick",), ("place",)),
+                                 _episode_tasks(metadata))
+
     def test_dataset_requires_supported_python(self):
         with patch(
                 "pypaimon.multimodal.lerobot.dataset.sys.version_info",
@@ -990,7 +1129,12 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(_schema_from_info(info), dataset.reader.schema)
         self.assertIsNone(dataset.reader.absolute_to_relative_idx)
         self.assertTrue(repr(dataset).startswith("PaimonLeRobotDataset("))
-        sample, _ = dataset.__getitems__([1, 2])
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset._torch_row",
+                wraps=_torch_row) as convert:
+            sample, _ = dataset.__getitems__([1, 2])
+        self.assertEqual(3, convert.call_count)
+        self.assertEqual({"action"}, set(convert.call_args_list[-1][0][0]))
 
         self.assertEqual([((0, 1, 2), tuple(info["features"]))],
                          reader.calls)
@@ -1000,6 +1144,19 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
         self.assertEqual(0, dataset.meta.get_task_index("pick"))
         self.assertEqual("pick", sample["task"])
+        try:
+            from datasets import Dataset
+        except ImportError:
+            pass
+        else:
+            formatted_metadata = dict(metadata)
+            formatted_metadata["episodes"] = Dataset.from_list(
+                metadata["episodes"]).with_format(
+                    "numpy", columns=["episode_index", "dataset_from_index",
+                                      "dataset_to_index", "length"])
+            formatted_reader = Reader(formatted_metadata)
+            self.assertEqual("pick", formatted_reader[1]["task"])
+            formatted_reader.close()
         torch.testing.assert_close(
             sample["observation.state"], torch.tensor([1.0, 2.0]))
         torch.testing.assert_close(
@@ -1010,6 +1167,19 @@ class LeRobotValidationTest(unittest.TestCase):
             batch_size=2, shuffle=False, num_workers=0)))
         self.assertEqual([0, 1], batch["index"].tolist())
         self.assertEqual([2, 3], list(batch["action"].shape))
+        control_reader = Reader(
+            metadata,
+            delta_timestamps={"timestamp": [-0.1, 0.0, 0.1]},
+        )
+        torch.testing.assert_close(
+            control_reader[1]["timestamp"], torch.tensor([0.0, 0.1, 0.2]))
+        control_reader.close()
+        rows[0]["episode_index"] = 1
+        try:
+            with self.assertRaisesRegex(ValueError, "episode_index"):
+                dataset[1]
+        finally:
+            rows[0]["episode_index"] = 0
         with self.assertRaisesRegex(ValueError, "manages collate_fn"):
             dataset.to_dataloader(batch_size=2, collate_fn=lambda rows: rows)
         dataset.return_uint8 = True
@@ -2022,9 +2192,9 @@ class LeRobotValidationTest(unittest.TestCase):
             schema.names,
         )
         self.assertEqual(pa.int32(), schema.field("scalar").type)
-        self.assertEqual(pa.list_(pa.float32(), 3), schema.field("vector").type)
+        self.assertEqual(pa.list_(pa.float32()), schema.field("vector").type)
         self.assertEqual(
-            pa.list_(pa.list_(pa.float64(), 3)),
+            pa.list_(pa.list_(pa.float64())),
             schema.field("tensor").type,
         )
         self.assertEqual(pa.large_binary(), schema.field("image").type)
@@ -2043,6 +2213,20 @@ class LeRobotValidationTest(unittest.TestCase):
             pa.large_binary(),
             _schema_from_info(info).field("camera").type,
         )
+
+    def test_tensor_schema_uses_arrays_and_preserves_shape(self):
+        for shape in ([3], [2, 3], [2, 1, 3]):
+            with self.subTest(shape=shape):
+                field = _schema_from_info({"features": {
+                    "state": {"dtype": "float32", "shape": shape}
+                }}).field("state")
+                expected = pa.float32()
+                for unused_size in shape:
+                    expected = pa.list_(expected)
+                self.assertEqual(expected, field.type)
+                self.assertIn(
+                    "shape=" + json.dumps(shape, separators=(",", ":")),
+                    field.metadata[b"description"].decode("utf-8"))
 
     def test_existing_schema_preserves_lerobot_feature_contract(self):
         source = _schema_from_info({
@@ -2088,7 +2272,7 @@ class LeRobotValidationTest(unittest.TestCase):
             ),
             "array": pa.field(
                 "vector",
-                pa.list_(pa.float32()),
+                pa.list_(pa.float64()),
                 nullable=False,
                 metadata=source.field("vector").metadata,
             ),
@@ -2752,7 +2936,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 for field in table.raw_table.fields
             }
             self.assertEqual(
-                "VECTOR<FLOAT, 3> NOT NULL",
+                "ARRAY<FLOAT> NOT NULL",
                 field_types["observation.state"],
             )
             rows = table.scan().select([
@@ -2868,13 +3052,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     and ".vector." not in file.file_name
                 ),
             )
-            self.assertEqual(
-                [2, 3],
-                sorted(
-                    file.row_count for file in files
-                    if ".vector." in file.file_name
-                ),
-            )
+            self.assertFalse(any(".vector." in file.file_name for file in files))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -3453,7 +3631,7 @@ class _FailingCloseDataset:
 
 @unittest.skipUnless(
     sys.version_info >= (3, 10) and LeRobotDataset is not None,
-    "LeRobot 0.4.x requires Python 3.10+ and the lerobot extra",
+    "LeRobot requires Python 3.10+ and the lerobot extra",
 )
 class LeRobotImportTest(unittest.TestCase):
 
@@ -3536,6 +3714,70 @@ class LeRobotImportTest(unittest.TestCase):
             dataset.save_episode()
         dataset.finalize()
 
+    def test_hub_metadata_accepts_installed_lerobot_info(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+        from pypaimon.multimodal.lerobot.source import _load_hub_info
+
+        metadata = LeRobotDatasetMetadata(
+            repo_id="pypaimon/local-image-test", root=self.image_source)
+        with patch("lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata",
+                   return_value=metadata):
+            info = _load_hub_info(_LeRobotSource(
+                path="pypaimon/local-image-test", root=None,
+                repo_id="pypaimon/local-image-test"))
+        self.assertIsInstance(info, dict)
+        self.assertEqual(info["total_frames"], 5)
+        self.assertEqual(info["total_episodes"], 2)
+        self.assertEqual(info["features"]["observation.state"]["dtype"], "float32")
+
+    def test_custom_reader_accepts_installed_lerobot_metadata(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+        metadata = LeRobotDatasetMetadata(
+            repo_id="pypaimon/local-image-test", root=self.image_source)
+        reader = _ManualDatasetReader(metadata)
+        try:
+            self.assertEqual(reader.meta.info["total_frames"], 5)
+            self.assertEqual(reader.meta.info["total_episodes"], 2)
+            self.assertEqual(
+                reader.meta.features["observation.state"]["shape"], (3,))
+        finally:
+            reader.close()
+
+    def test_local_import_preserves_extended_info(self):
+        source = self.temp_dir / "extended-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["vendor_extension"] = {"labels": ["pick"], "enabled": True}
+        info_path.write_text(json.dumps(info))
+
+        self.connection.load_from_lerobot("extended_info", source)
+
+        self.assertEqual(
+            info, _catalog_metadata(self.connection, "extended_info__info"))
+
+    def test_hub_import_preserves_extended_info(self):
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+        source = self.temp_dir / "hub-source"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["vendor_extension"] = {"labels": ["pick"], "enabled": True}
+        info_path.write_text(json.dumps(info))
+        repo_id = "pypaimon/hub-image-test"
+        metadata = LeRobotDatasetMetadata(repo_id=repo_id, root=source)
+        dataset = LeRobotDataset(repo_id=repo_id, root=source)
+        with patch("lerobot.datasets.lerobot_dataset.LeRobotDatasetMetadata",
+                   return_value=metadata), patch(
+                       "pypaimon.multimodal.lerobot.source._open_dataset",
+                       return_value=dataset):
+            self.connection.load_from_lerobot("hub_info", repo_id)
+
+        self.assertEqual(
+            info, _catalog_metadata(self.connection, "hub_info__info"))
+
     def test_table_dataset_pickle_preserves_episode_metadata_and_reads(self):
         import torch
 
@@ -3567,6 +3809,26 @@ class LeRobotImportTest(unittest.TestCase):
                 else:
                     self.assertEqual(original[key], reread[key])
 
+    def test_training_reads_previously_imported_vector_features(self):
+        import torch
+
+        with patch("pypaimon.multimodal.lerobot.api._schema_from_info",
+                   side_effect=lambda info: _schema_from_info(info, legacy_vectors=True)):
+            self.connection.load_from_lerobot(
+                "legacy_vectors", self.image_source, batch_size=2)
+        table = self.connection.get_table("legacy_vectors")
+        self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", str(next(
+            field.type for field in table.raw_table.fields
+            if field.name == "observation.state")))
+        dataset = pmm.PaimonLeRobotDataset(table)
+        try:
+            row = dataset[0]
+            self.assertEqual((3,), tuple(row["observation.state"].shape))
+            self.assertEqual((2, 2), tuple(row["observation.matrix"].shape))
+            self.assertTrue(torch.equal(row["action"], torch.tensor([0.0, 0.0])))
+        finally:
+            dataset.close()
+
     def test_import_infers_schema_and_preserves_episodes(self):
         import pandas as pd
 
@@ -3578,12 +3840,12 @@ class LeRobotImportTest(unittest.TestCase):
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
         types = {field.name: str(field.type) for field in schema}
-        self.assertEqual("VECTOR<FLOAT, 3> NOT NULL", types["observation.state"])
+        self.assertEqual("ARRAY<FLOAT> NOT NULL", types["observation.state"])
         self.assertEqual(
-            "ARRAY<VECTOR<FLOAT, 2>> NOT NULL",
+            "ARRAY<ARRAY<FLOAT>> NOT NULL",
             types["observation.matrix"],
         )
-        self.assertEqual("VECTOR<FLOAT, 2> NOT NULL", types["action"])
+        self.assertEqual("ARRAY<FLOAT> NOT NULL", types["action"])
         self.assertEqual("FLOAT NOT NULL", types["timestamp"])
         self.assertEqual("BIGINT NOT NULL", types["episode_index"])
         self.assertEqual("BLOB NOT NULL", types["observation.image"])
@@ -4014,10 +4276,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "pypaimon.multimodal.blob_read.fetch_blob_bodies",
                 wraps=fetch_blob_bodies) as fetch:
             last, first = dataset.__getitems__([4, 0])
-            scanner = dataset._frame_locator._scanner
-            dataset._frame_locator.locate([2])
         self.assertEqual(0, len(scan_calls))
-        self.assertIs(scanner, dataset._frame_locator._scanner)
         self.assertEqual(1, read.call_count)
         self.assertEqual([0, 1, 3, 4], read.call_args.args[0])
         self.assertEqual(1, fetch.call_count)
@@ -4038,15 +4297,13 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([True, False, False],
                          first["action_is_pad"].tolist())
 
-        restored_locator = pickle.loads(pickle.dumps(
-            dataset._frame_locator))
-        with patch.object(TableScan, "plan", new=counted_plan):
-            restored_splits, restored_needs_filter = \
-                restored_locator.locate([2])
-        self.assertEqual(0, len(scan_calls))
-        self.assertTrue(restored_splits)
-        self.assertFalse(restored_needs_filter)
-        restored_locator.close()
+        restored_reader = pickle.loads(pickle.dumps(dataset.reader))
+        try:
+            # Both execution backends preserve indexed lookup after transport.
+            self.assertEqual(
+                [2], restored_reader.read_indices([2], ["index"])["index"].to_pylist())
+        finally:
+            restored_reader.close()
 
         worker_indices = []
         for batch in DataLoader(
@@ -4129,8 +4386,13 @@ class LeRobotImportTest(unittest.TestCase):
     def test_paimon_dataset_rejects_unavailable_frame_index(self):
         self.connection.load_from_lerobot(
             "missing_frame_index", self.image_source)
+        # Exercise the Python locator's failures explicitly; Native lookup
+        # does not open this scanner or invoke its internal hooks.
         dataset = pmm.PaimonLeRobotDataset(
-            self.connection.get_table("missing_frame_index"))
+            self.connection.get_table("missing_frame_index").copy({
+                "read.native.enabled": "false",
+                "scan.native-plan.enabled": "false",
+            }))
 
         with patch.object(
                 dataset._frame_locator, "_index_scanner",

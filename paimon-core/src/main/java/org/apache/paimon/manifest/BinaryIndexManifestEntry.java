@@ -36,6 +36,18 @@ public final class BinaryIndexManifestEntry {
 
     public static final Projection GLOBAL_INDEX_PROJECTION = createGlobalIndexProjection();
 
+    public static final Projection FILE_NAME_PROJECTION =
+            Projection.create(
+                    IndexManifestEntry.MANIFEST_ROW_TYPE.project(IndexManifestEntry.FILE_NAME));
+
+    public static final Projection FILE_PATH_PROJECTION =
+            Projection.create(
+                    IndexManifestEntry.MANIFEST_ROW_TYPE.project(
+                            IndexManifestEntry.PARTITION,
+                            IndexManifestEntry.BUCKET,
+                            IndexManifestEntry.FILE_NAME,
+                            IndexManifestEntry.EXTERNAL_PATH));
+
     private final Projection projection;
     private @Nullable InternalRow row;
 
@@ -115,6 +127,27 @@ public final class BinaryIndexManifestEntry {
         return indexType;
     }
 
+    public String fileName() {
+        BinaryString fileName =
+                current()
+                        .getString(
+                                requiredPosition(
+                                        projection.fileNamePosition, IndexManifestEntry.FILE_NAME));
+        checkState(fileName != null, "Index file name cannot be null.");
+        return fileName.toString();
+    }
+
+    @Nullable
+    public String externalPath() {
+        BinaryString externalPath =
+                current()
+                        .getString(
+                                requiredPosition(
+                                        projection.externalPathPosition,
+                                        IndexManifestEntry.EXTERNAL_PATH));
+        return externalPath == null ? null : externalPath.toString();
+    }
+
     public boolean hasGlobalIndexMeta() {
         return !current()
                 .isNullAt(
@@ -185,6 +218,8 @@ public final class BinaryIndexManifestEntry {
         private final int partitionPosition;
         private final int bucketPosition;
         private final int indexTypePosition;
+        private final int fileNamePosition;
+        private final int externalPathPosition;
         private final int globalIndexPosition;
         private final int projectedGlobalIndexFieldCount;
         private final int rowRangeStartPosition;
@@ -198,6 +233,8 @@ public final class BinaryIndexManifestEntry {
                 int partitionPosition,
                 int bucketPosition,
                 int indexTypePosition,
+                int fileNamePosition,
+                int externalPathPosition,
                 int globalIndexPosition,
                 int projectedGlobalIndexFieldCount,
                 int rowRangeStartPosition,
@@ -209,6 +246,8 @@ public final class BinaryIndexManifestEntry {
             this.partitionPosition = partitionPosition;
             this.bucketPosition = bucketPosition;
             this.indexTypePosition = indexTypePosition;
+            this.fileNamePosition = fileNamePosition;
+            this.externalPathPosition = externalPathPosition;
             this.globalIndexPosition = globalIndexPosition;
             this.projectedGlobalIndexFieldCount = projectedGlobalIndexFieldCount;
             this.rowRangeStartPosition = rowRangeStartPosition;
@@ -246,6 +285,8 @@ public final class BinaryIndexManifestEntry {
                     projectedType.getFieldIndex(IndexManifestEntry.PARTITION),
                     projectedType.getFieldIndex(IndexManifestEntry.BUCKET),
                     projectedType.getFieldIndex(IndexManifestEntry.INDEX_TYPE),
+                    projectedType.getFieldIndex(IndexManifestEntry.FILE_NAME),
+                    projectedType.getFieldIndex(IndexManifestEntry.EXTERNAL_PATH),
                     globalIndexPosition,
                     projectedGlobalIndexFieldCount,
                     rowRangeStartPosition,

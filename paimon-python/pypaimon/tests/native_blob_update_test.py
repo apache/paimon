@@ -17,7 +17,10 @@
 
 """Native updates share the Java Blob placeholder and row-id layout."""
 
-from contextlib import ExitStack
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 from urllib.parse import urlparse
 
@@ -30,12 +33,8 @@ from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
-from pypaimon.write.table_delete import TableDeleteByRowId
-from pypaimon.write.native_update import NativeTableUpdateByRowId
-from pypaimon.write.native_write import NativeTableWrite
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.native.write.native_update import NativeTableUpdateByRowId
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = pytest.mark.native_plan
 
@@ -78,19 +77,24 @@ def _read(table, descriptors=False, projection=None, resolve_views=True):
         builder.with_projection(projection)
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         return read.to_arrow(splits).sort_by('id').to_pylist()
 
 
+@contextmanager
 def _native_only():
-    stack = ExitStack()
-    for cls, method in [(TableUpdateByRowId, '_load_existing_files_info'),
-                        (TableUpdate, '_build_predicate_update_table'),
-                        (TableUpsertByKey, '_upsert_partition'),
-                        (TableUpsertByKey, '_upsert_row_partition'),
-                        (TableDeleteByRowId, 'delete')]:
-        stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
-    return stack
+    with ExitStack() as stack:
+        for cls, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                            (PythonTableUpdate, '_build_predicate_update_table'),
+                            (PythonTableUpsert, '_upsert_partition'),
+                            (PythonTableUpsert, '_upsert_row_partition'),
+                            (PythonTableUpdate, 'delete'),
+                            (PythonTableUpdate, 'delete_by_row_id')]:
+            stack.enter_context(patch.object(cls, method, side_effect=AssertionError('Python update fallback')))
+        yield
 
 
 def _commit(builder, messages, stream):
@@ -235,13 +239,13 @@ def test_native_inline_blob_updates_preserve_references(
                         else update.update_by_arrow_with_row_id(data))
         elif operation == 'incremental':
             updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
-            assert isinstance(updater, NativeTableUpdateByRowId) == native
+            assert isinstance(updater._execution, NativeTableUpdateByRowId) == native
             updater.update_columns(data.slice(0, 1), ['payload'])
             updater.update_columns(data.slice(1), ['payload'])
             messages = updater.commit_messages
         elif operation in ('row', 'rows'):
             updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
-            assert isinstance(updater, NativeTableUpdateByRowId) == native
+            assert isinstance(updater._execution, NativeTableUpdateByRowId) == native
             value = (Blob.from_view(BlobViewStruct.deserialize(replacement)) if option == 'blob-view-field'
                      else Blob.from_descriptor_bytes(replacement, file_io=table.file_io))
             rows = [GenericRow([1, 'a', 999, value], table.fields),
@@ -280,7 +284,7 @@ def test_native_inline_blob_updates_preserve_references(
 def test_raw_blob_incremental_updater_keeps_one_implementation(tmp_path):
     # One snapshot/index covers scalar and raw Blob columns chosen per call.
     table, _ = _table(tmp_path)
-    from pypaimon.write.native_update import create_native_update_by_row_id
+    from pypaimon.execution.native.write.native_update import create_native_update_by_row_id
     row_ids = {row['id']: row['_ROW_ID']
                for row in _read(table, projection=['id', '_ROW_ID'])}
     with _native_only():
@@ -344,13 +348,13 @@ def test_native_raw_blob_updates_across_existing_update_apis(tmp_path, kind, str
                 messages = update.update_by_arrow_batches_with_row_id(batches)
         elif operation == 'incremental':
             updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
-            assert isinstance(updater, NativeTableUpdateByRowId)
+            assert isinstance(updater._execution, NativeTableUpdateByRowId)
             updater.update_columns(data.slice(0, 1), ['payload'])
             updater.update_columns(data.slice(1), ['payload'])
             messages = updater.commit_messages
         elif operation in ('row', 'rows'):
             updater = update.new_update_by_row_id(7) if stream else update.new_update_by_row_id()
-            assert isinstance(updater, NativeTableUpdateByRowId)
+            assert isinstance(updater._execution, NativeTableUpdateByRowId)
             rows = [GenericRow([1, 'a', 999, replacement], table.fields),
                     GenericRow([3, 'b', 999, None], table.fields)]
             if operation == 'row':
@@ -393,7 +397,7 @@ def test_native_raw_blob_matched_updates_and_unmatched_inserts(tmp_path, kind, s
     update = builder.new_update().with_update_type(['payload'])
     with _native_only():
         if operation == 'merge':
-            with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            with patch('pypaimon.execution.python.write.merge_into._build_tables',
                        side_effect=AssertionError('Python merge orchestration')):
                 kwargs = {'commit_identifier': 7} if stream else {}
                 messages = update.merge_into(source, on=['id'], when_matched=[
@@ -496,8 +500,8 @@ def test_raw_blob_abort_preserves_prepared_files(tmp_path, published):
         paths = set(tmp_path.rglob('*.blob'))
         if published:
             _commit(builder, messages, False)
-        updater.writer._abort()
-        updater.writer._abort()
+        updater._execution.writer._abort()
+        updater._execution.writer._abort()
     assert set(tmp_path.rglob('*.blob')) == paths
     if not published:
         assert _read(table)[0]['payload'] == b'large' * 10
@@ -571,7 +575,7 @@ def test_native_blob_row_failure_preserves_prepared_columns_and_can_retry(tmp_pa
 @pytest.mark.parametrize('blob_object', [False, True])
 @pytest.mark.parametrize('kind', ['map', 'int_map'])
 def test_native_row_blob_maps_write_java_null_key_records(tmp_path, stream, blob_object, kind):
-    from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+    from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
     from pypaimon.tests.blob_table_test import _StreamingOnlyBlob
     payload_type, original, _ = _blob_values(kind)
     table, _ = _table(tmp_path, payloads=original, payload_type=payload_type,
@@ -666,8 +670,11 @@ def test_view_prescan_keeps_inline_descriptor_predicate(tmp_path, native_rest_ca
         read_builder.with_filter(PredicateBuilder(view.fields).equal('reference', reference))
         plan = read_builder.new_scan().plan()
         read = read_builder.new_read()
-        with (patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback'))
-              if native else ExitStack()):
+        guard = (patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python read fallback')
+        ) if native else ExitStack())
+        with guard:
             rows = read.to_arrow(plan.splits()).to_pylist()
             assert len(rows) == 1 and rows[0]['id'] == 0
             actual = BlobDescriptor.deserialize(rows[0]['payload'])

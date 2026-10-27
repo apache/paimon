@@ -25,9 +25,9 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.write.native_commit import _rest_catalog_supported
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 pytestmark = [pytest.mark.python_write, pytest.mark.python_commit]
 native = pytest.mark.skipif(not native_runtime_available(), reason='pypaimon-rust not installed')
@@ -72,9 +72,12 @@ def test_native_truncate_publication_error_never_retries_or_aborts(tmp_path, ope
     getattr(native_commit, operation).side_effect = cause
     try:
         with patch.object(commit, '_prepare_native_commit', return_value=(native_commit, [])), \
-                patch.object(commit.file_store_commit, 'truncate_table') as truncate, \
-                patch.object(commit.file_store_commit, 'drop_partitions') as drop, \
-                patch.object(commit.file_store_commit, 'abort') as abort:
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.truncate_table') as truncate, \
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.drop_partitions') as drop, \
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.abort') as abort:
             with pytest.raises(RuntimeError) as error:
                 getattr(commit, operation)(*args)
         assert error.value is cause
@@ -91,10 +94,13 @@ def test_abort_then_truncate_partitions_then_commit_keeps_batch_lifecycle(tmp_pa
     commit = table.new_batch_write_builder().new_commit()
     stream, batch = Mock(), Mock()
     try:
-        with patch('pypaimon.write.native_commit.create_native_commit', side_effect=[stream, batch]) as create, \
-                patch('pypaimon.write.native_commit.to_native_commit_messages', return_value=[]), \
-                patch('pypaimon.write.native_commit.native_messages_supported', return_value=True), \
-                patch.object(commit.file_store_commit, 'commit') as fallback:
+        with patch(
+                'pypaimon.execution.native.write.native_commit.create_native_commit',
+                side_effect=[stream, batch]) as create, \
+                patch('pypaimon.execution.native.write.native_commit.to_native_commit_messages', return_value=[]), \
+                patch('pypaimon.execution.native.write.native_commit.native_messages_supported', return_value=True), \
+                patch('pypaimon.execution.python.write.file_store_commit.'
+                      'FileStoreCommit.commit') as fallback:
             commit.abort([])
             commit.truncate_partitions([{'pt': 'a'}])
             # Java truncatePartitions does not consume the one-shot batch commit.
@@ -148,7 +154,7 @@ def test_builtin_fuse_is_accepted_without_relaxing_custom_file_io(tmp_path, nati
 @pytest.mark.parametrize('invalid', [None, 'source-uuid', 'source-path', 'target-path', 'target-branch'])
 def test_copied_fuse_write_uses_existing_copy_and_checks_identity(
         tmp_path, native_rest_catalog, cached, invalid):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
 
     original = _table(tmp_path, native_rest_catalog)
     _bind_fuse(original, tmp_path / 'fuse', cached)
@@ -210,7 +216,9 @@ def test_fuse_native_write_commit_and_truncate_preserve_bound_mount(
     assert isinstance(writer, NativeTableWrite)
     try:
         writer.write_arrow(pa.Table.from_pylist([{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}], schema=_SCHEMA))
-        with patch.object(commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.commit',
+                   side_effect=AssertionError('Python commit')):
             commit.commit(writer.prepare_commit())
     finally:
         writer.close()
@@ -219,10 +227,14 @@ def test_fuse_native_write_commit_and_truncate_preserve_bound_mount(
     assert _rows(table) == [{'id': 1, 'pt': 'a'}, {'id': 2, 'pt': 'b'}]
     commit = table.new_batch_write_builder().new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'drop_partitions', side_effect=AssertionError('Python truncate')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.drop_partitions',
+                   side_effect=AssertionError('Python truncate')):
             commit.truncate_partitions([{'pt': 'a'}])
         assert _rows(table) == [{'id': 2, 'pt': 'b'}]
-        with patch.object(commit.file_store_commit, 'truncate_table', side_effect=AssertionError('Python truncate')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.truncate_table',
+                   side_effect=AssertionError('Python truncate')):
             commit.truncate_table()
         assert _rows(table) == []
     finally:
@@ -255,7 +267,7 @@ def _merge_table(tmp_path, use_native):
 @pytest.mark.parametrize('dictionary_key', [False, True])
 def test_merge_callable_reads_target_source_and_coalesced_keys(tmp_path, use_native, source_key, dictionary_key):
     import pyarrow.compute as pc
-    import pypaimon.table.data_evolution_merge_into as merge_impl
+    import pypaimon.execution.python.write.merge_into as merge_impl
     from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched
     table = _merge_table(tmp_path, use_native)
     keys = pa.array([1, 3], pa.int32())
@@ -269,7 +281,7 @@ def test_merge_callable_reads_target_source_and_coalesced_keys(tmp_path, use_nat
         return pc.add(pc.add(batch['t.value'], batch['s.delta']), batch['s.' + source_key])
 
     update = table.new_batch_write_builder().new_update()
-    with patch('pypaimon.table.data_evolution_merge_into._build_tables',
+    with patch('pypaimon.execution.python.write.merge_into._build_tables',
                wraps=merge_impl._build_tables) as python_merge:
         messages = update.merge_into(
             source, on={'id': source_key},
@@ -368,7 +380,7 @@ def test_explicit_callable_read_columns_keep_self_merge_projection_narrow():
 def test_consumed_blob_rows_are_released_without_losing_unplanned_inputs():
     from pypaimon.schema.data_types import AtomicType
     from pypaimon.table.row.blob import Blob, BlobDescriptor
-    from pypaimon.write.native_blob_rows import NativeBlobRows
+    from pypaimon.execution.native.write.native_blob_rows import NativeBlobRows
     rows = NativeBlobRows()
     blob_type = AtomicType('BLOB')
     known = BlobDescriptor.deserialize(rows.encode(Blob.from_data(b'known'), blob_type)).uri
@@ -387,7 +399,7 @@ def test_consumed_blob_rows_are_released_without_losing_unplanned_inputs():
 
 @pytest.mark.parametrize('use_native', [False, pytest.param(True, marks=native)])
 def test_automatic_postpone_plan_counts_all_batches_per_partition(tmp_path, use_native):
-    from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+    from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
     schema = pa.schema([('id', pa.int64()), ('pt', pa.string())])
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'postpone')})
     catalog.create_database('default', True)
@@ -446,7 +458,9 @@ def test_native_truncate_partition_specs_use_java_typed_strings(tmp_path, native
         commit.close()
     commit = table.new_batch_write_builder().new_commit()
     try:
-        with patch.object(commit.file_store_commit, 'drop_partitions', side_effect=AssertionError('Python truncate')):
+        with patch('pypaimon.execution.python.write.file_store_commit.'
+                   'FileStoreCommit.drop_partitions',
+                   side_effect=AssertionError('Python truncate')):
             commit.truncate_partitions([{'pt': text}])
         assert [row['id'] for row in _rows(table)] == [2]
     finally:
@@ -463,16 +477,16 @@ def test_postpone_blob_row_bridge_keeps_sources_until_prepare(fail):
     from pypaimon.schema.data_types import AtomicType, DataField
     from pypaimon.table.row.blob import Blob, BlobDescriptor
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.native_write import NativePostponeFixedBucketTableWrite
+    from pypaimon.write.write_dispatch import NativePostponeFixedBucketTableWrite
 
     # Exercise the bridge's deferred input lifetime without creating a table:
     # Python catalog validation does not allow a primary-key BLOB schema.
     fields = [DataField(0, 'id', AtomicType('INT')), DataField(1, 'pt', AtomicType('STRING')),
               DataField(2, 'payload', AtomicType('BLOB'))]
     table = SimpleNamespace(
-        table_schema=SimpleNamespace(fields=fields), fields=fields,
+        table_schema=SimpleNamespace(fields=fields, primary_keys=['id', 'pt']), fields=fields,
         field_dict={field.name: field for field in fields}, partition_keys=['pt'],
-        is_primary_key_table=True,
+        is_primary_key_table=True, cross_partition_update=False,
         options=CoreOptions(Options({'bucket': '-2', 'postpone.target-row-num-per-bucket': '1'})))
     backend = Mock()
     staged, payloads = [], []

@@ -364,6 +364,17 @@ public class FlinkConnectorOptions {
                     .noDefaultValue()
                     .withDescription("Sink writer memory to control heap memory of writer.");
 
+    public static final ConfigOption<MemorySize> SINK_WRITER_MANAGED_MEMORY =
+            ConfigOptions.key("sink.writer-managed-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Managed memory resource budget for the writer slot sharing group. "
+                                    + "Must be positive and requires sink.writer-memory. This does not "
+                                    + "enable sink.use-managed-memory-allocator or change the allocation "
+                                    + "weight sink.managed.writer-buffer-memory. The actual writer buffer "
+                                    + "size depends on the slot's allocated resources and managed memory consumers.");
+
     public static final ConfigOption<Double> SINK_COMMITTER_CPU =
             ConfigOptions.key("sink.committer-cpu")
                     .doubleType()

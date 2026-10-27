@@ -27,14 +27,22 @@ from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
-from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
-from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-from pypaimon.table.source.primary_key_full_text_scan import (
-    _current_payloads, _should_read_source as _full_text_should_read_source)
-from pypaimon.table.source.primary_key_vector_read import (
-    PrimaryKeyVectorRead, _allowed, _include_row_ids)
-from pypaimon.table.source.primary_key_vector_scan import (
-    PrimaryKeyVectorScan, _bucket_splits, _should_read_source)
+from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
+from pypaimon.execution.python.read.search.primary_key_full_text_scan import PrimaryKeyFullTextScan
+from pypaimon.execution.python.read.search.primary_key_full_text_scan import (
+    _current_payloads,
+    _should_read_source as _full_text_should_read_source,
+)
+from pypaimon.execution.python.read.search.primary_key_vector_read import (
+    PrimaryKeyVectorRead,
+    _allowed,
+    _include_row_ids,
+)
+from pypaimon.execution.python.read.search.primary_key_vector_scan import (
+    PrimaryKeyVectorScan,
+    _bucket_splits,
+    _should_read_source,
+)
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition)
 from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
@@ -45,6 +53,37 @@ from pypaimon.utils.range import Range
 
 
 class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
+    def test_bucket_planners_preserve_capture_and_physical_metadata(self):
+        from pypaimon.execution.python.read.search.primary_key_full_text_scan import _full_text_bucket_splits
+        from pypaimon.table.source.deletion_file import DeletionFile
+
+        partition = GenericRow([], [])
+        files = [DataFileMeta(
+            file_name=name, file_size=10, row_count=2,
+            min_key=None, max_key=None, key_stats=None, value_stats=None,
+            min_sequence_number=0, max_sequence_number=0,
+            schema_id=0, level=1, extra_files=[], file_source=1)
+            for name in ('a.parquet', 'b.parquet')]
+        deletion = DeletionFile('dv/index', 2, 10, 1)
+        for snapshot_id in (None, 7):
+            sources = [DataSplit(
+                [file], partition, 3, snapshot_id=snapshot_id,
+                data_deletion_files=[deletion] if ordinal == 0 else None,
+                bucket_path='s3://warehouse/table/bucket-3', total_buckets=4)
+                for ordinal, file in enumerate(files)]
+            full_text = _full_text_bucket_splits(sources, [], 7)
+            vector = _bucket_splits([(source, {}) for source in sources], [], 7)
+            for planned in (full_text, vector):
+                self.assertEqual(1, len(planned))
+                data = planned[0].data_split
+                self.assertEqual(7, data.snapshot_id)
+                self.assertEqual('s3://warehouse/table/bucket-3', data.bucket_path)
+                self.assertEqual(4, data.total_buckets)
+                self.assertEqual(files, data.files)
+                self.assertEqual([deletion, None], data.data_deletion_files)
+            self.assertEqual([snapshot_id, snapshot_id], [source.snapshot_id for source in sources])
+            self.assertEqual([[files[0]], [files[1]]], [source.files for source in sources])
+
     def test_definitions_follow_schema_order(self):
         schema = TableSchema(
             fields=[DataField(0, "id", AtomicType("INT")),
@@ -238,15 +277,13 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             table, 2147483647, DataField(1, "embedding", AtomicType("VECTOR(1)")),
             [0.0], options={"ivf.refine_factor": "2"})
 
-        from pypaimon.table.source.primary_key_vector_scan import (
-            PrimaryKeyVectorScanPlan)
+        from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
         plan = PrimaryKeyVectorScanPlan(1, [])
         with self.assertRaisesRegex(ValueError, "limit overflow"):
             reader.read_plan(plan)
 
     def test_pk_vector_raw_fallback_uses_vector_search_mode(self):
-        from pypaimon.table.source.primary_key_vector_scan import (
-            PrimaryKeyVectorScanPlan)
+        from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
 
         field = DataField(1, "embedding", AtomicType("VECTOR(1)"))
         plan = PrimaryKeyVectorScanPlan(1, [])
@@ -339,6 +376,10 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
             table_schema = schema
             fields = schema.fields
 
+            def copy_without_time_travel(self, options):
+                copied_options.append(options)
+                return self
+
             def new_read_builder(self):
                 source_snapshots.append(self._read_snapshot)
                 plan = SimpleNamespace(splits=lambda: [])
@@ -370,10 +411,10 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                 return []
 
         with mock.patch(
-                "pypaimon.table.source.primary_key_vector_scan."
+                "pypaimon.execution.python.read.search.primary_key_vector_scan."
                 "TimeTravelUtil.try_travel_to_snapshot",
                 return_value=snapshot), mock.patch(
-                "pypaimon.table.source.primary_key_vector_scan.IndexFileHandler",
+                "pypaimon.execution.python.read.search.primary_key_vector_scan.IndexFileHandler",
                 _IndexHandler):
             plan = PrimaryKeyVectorScan(
                 _Table(), schema.fields[0], index_type="vindex").scan()

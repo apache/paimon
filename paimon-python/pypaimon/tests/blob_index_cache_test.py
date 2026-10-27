@@ -26,11 +26,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.write.format_file_writer import write_blob_file
 from pypaimon.common.blob_index_cache import BlobIndexCache
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader import format_blob_reader
+from pypaimon.execution.python.read.reader import format_blob_reader
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
@@ -162,7 +163,7 @@ def test_forked_blob_reader_does_not_wait_for_parent_load(tmp_path, fork_context
     file_io = LocalFileIO(str(tmp_path), Options({}))
     path = str(tmp_path / 'payload.blob')
     expected = [b'first', None, b'last']
-    file_io.write_blob(path, pa.table({'payload': expected}, schema=pa.schema([
+    write_blob_file(file_io, path, pa.table({'payload': expected}, schema=pa.schema([
         ('payload', pa.large_binary())])))
     field = DataField(0, 'payload', AtomicType('BLOB'))
     entered, release = threading.Event(), threading.Event()

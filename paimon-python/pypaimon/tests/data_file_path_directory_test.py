@@ -27,6 +27,7 @@ from unittest import mock
 
 import pyarrow as pa
 
+from pypaimon.execution.native.read.plan import NativeTableScan
 from pypaimon import CatalogFactory, Schema
 
 
@@ -102,32 +103,65 @@ class DataFilePathDirectoryTest(unittest.TestCase):
         table = self._create_with_options(
             "db.t_native", {"data-file.path-directory": "data"})
         scan = table.new_read_builder().new_scan()
-        with mock.patch("pypaimon.read.native_plan.native_runtime_available", return_value=True):
-            self.assertTrue(scan._native_plan_supported())
+        with mock.patch("pypaimon.execution.native.runtime.native_runtime_available", return_value=True):
+            self.assertTrue(NativeTableScan(scan)._native_plan_supported())
 
     def test_native_write_dispatches_with_configured_directory(self):
         table = self._create_with_options(
             "db.t_native_write", {"data-file.path-directory": "data",
                                   "write.native.enabled": "true"})
-        sentinel = object()
-        with mock.patch("pypaimon.write.native_write.create_native_write", return_value=sentinel):
-            self.assertIs(table.new_batch_write_builder()._native_write(), sentinel)
+        from pypaimon.write.write_dispatch import NativeTableWrite
+
+        adapter = mock.Mock(spec=['table', 'commit_user', 'static_partition',
+                                  'write_arrow_batch', 'prepare_commit', 'close', 'stream', '_batch_committed'])
+        builder = table.new_batch_write_builder()
+        adapter.table = table
+        adapter.commit_user = builder.commit_user
+        adapter.static_partition = None
+        adapter.stream = False
+        adapter._batch_committed = False
+        messages = []
+        adapter.prepare_commit.return_value = messages
+        with mock.patch("pypaimon.execution.native.write.native_write.create_native_write",
+                        return_value=adapter) as prepare:
+            writer = builder.new_write()
+        self.assertIsInstance(writer, NativeTableWrite)
+        prepare.assert_called_once_with(
+            table, builder.commit_user, None, False,
+            restore_snapshot_id=None, fixed_bucket=False, bucket_plan=None)
+        self.assertEqual(prepare.call_args[0][0].options.options.to_map()['data-file.path-directory'], 'data')
+        batch = pa.record_batch(
+            [pa.array([1], type=pa.int32()), ['a']], names=['id', 'v'])
+        try:
+            writer.write_arrow_batch(batch)
+            adapter.write_arrow_batch.assert_called_once_with(batch, None)
+            self.assertIs(writer.prepare_commit(), messages)
+            from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+            adapter.prepare_commit.assert_called_once_with(BATCH_COMMIT_IDENTIFIER)
+        finally:
+            writer.close()
+        adapter.close.assert_called_once_with()
 
     def test_native_commit_dispatches_with_configured_directory(self):
         table = self._create_with_options(
             "db.t_native_commit", {"data-file.path-directory": "data",
                                    "commit.native.enabled": "true"})
         commit = table.new_batch_write_builder().new_commit()
-        sentinel = object()
+        sentinel = mock.Mock()
         try:
-            with mock.patch("pypaimon.write.native_commit.native_messages_supported", return_value=True), \
-                    mock.patch("pypaimon.write.native_commit.create_native_commit", return_value=sentinel), \
-                    mock.patch("pypaimon.write.native_commit.to_native_commit_messages", return_value=[]):
-                self.assertEqual(commit._prepare_native_commit([]), (sentinel, []))
+            with mock.patch(
+                "pypaimon.execution.native.write.native_commit.native_messages_supported", return_value=True), \
+                    mock.patch(
+                        "pypaimon.execution.native.write.native_commit.create_native_commit", return_value=sentinel), \
+                    mock.patch(
+                        "pypaimon.execution.native.write.native_commit.to_native_commit_messages", return_value=[]):
+                prepared, messages = commit._prepare_native_commit([])
+                self.assertIs(prepared._native_commit, sentinel)
+                self.assertFalse(prepared._is_batch)
+                self.assertEqual(messages, [])
         finally:
-            # The sentinel represents a prepared committer, not a real resource.
-            commit._native_commit = None
             commit.close()
+        sentinel.close.assert_called_once_with()
 
     def test_default_keeps_data_files_at_bucket_root(self):
         self.catalog.create_table(

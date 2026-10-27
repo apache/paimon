@@ -17,6 +17,7 @@
 
 """Distributed native planning must preserve assignment before reader limits."""
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -27,13 +28,12 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.read.scan_distribution import java_file_name_shard
+from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.read.scan_distribution import java_file_name_shard
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.table_delete import TableDeleteByRowId
 
 
 class _DistributionFixture:
@@ -112,11 +112,14 @@ class _DistributionFixture:
             scan.with_row_ranges(row_ranges)
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError(
-                    'distributed native plan fell back to Python')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError(
+                        'distributed native plan fell back to Python')))
                 if table.is_primary_key_table and not table.options.global_index_enabled():
-                    stack.enter_context(patch.object(
-                        scan.file_scanner, '_apply_push_down_limit', side_effect=AssertionError(
+                    stack.enter_context(patch(
+                        'pypaimon.execution.python.read.scanner.file_scanner.FileScanner._apply_push_down_limit',
+                        side_effect=AssertionError(
                             'PK shard LIMIT was applied in Python')))
             plan = scan.plan()
         if native:
@@ -124,7 +127,7 @@ class _DistributionFixture:
                 getattr(split, '_native_split', None) is not None
                 for split in plan.splits()))
             read_guard = patch(
-                'pypaimon.read.table_read.TableRead._create_split_read',
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
                 side_effect=AssertionError(
                     'distributed native read fell back to Python'))
         else:
@@ -159,7 +162,7 @@ class _DistributionFixture:
         vector = BitmapDeletionVector()
         for position in deleted_positions:
             vector.delete(position)
-        entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+        entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
             GenericRow([], []), 0, {first_file.file_name: vector})
         commit = table.new_batch_write_builder().new_commit()
         try:
@@ -308,7 +311,7 @@ class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):
                         vector = BitmapDeletionVector()
                         vector.delete(0)
                         vectors[files[key].file_name] = vector
-                    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+                    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
                         GenericRow([], []), 0, vectors)
                     commit = table.new_batch_write_builder().new_commit()
                     try:

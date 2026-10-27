@@ -47,6 +47,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private final SimpleStatsEvolutions simpleStatsEvolutions;
 
     private final boolean fileIndexReadEnabled;
+    private final boolean fileIndexReadIgnoreUnknownType;
     private final boolean deletionVectorsEnabled;
     private final boolean dataEvolutionEnabled;
 
@@ -67,6 +68,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             Integer scanManifestParallelism,
             boolean fileIndexReadEnabled,
+            boolean fileIndexReadIgnoreUnknownType,
             boolean deletionVectorsEnabled,
             boolean dataEvolutionEnabled) {
         super(
@@ -80,6 +82,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         this.simpleStatsEvolutions =
                 new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.fileIndexReadIgnoreUnknownType = fileIndexReadIgnoreUnknownType;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
     }
@@ -180,7 +183,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
         try (FileIndexPredicate predicate =
                 new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
-            return predicate.evaluate(dataPredicate).remain();
+            return predicate.evaluate(dataPredicate, fileIndexReadIgnoreUnknownType).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking predicate.", e);
         }

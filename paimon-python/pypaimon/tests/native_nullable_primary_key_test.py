@@ -29,7 +29,7 @@ from pypaimon import Schema
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 rest_catalog = native_plan_rest_test.rest_catalog
 pytestmark = pytest.mark.native_plan
@@ -90,9 +90,14 @@ def _read(table, native, null_field=None, all_files=False):
     with ExitStack() as stack:
         if native:
             if not all_files:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-            stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
-        splits = (scan.plan_all_files() if all_files else scan.plan()).splits()
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Python scan')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read')
+            ))
+        splits = (scan.plan_all() if all_files else scan.plan()).splits()
         rows = read.to_arrow(splits).to_pylist()
     # All values in these fixtures are non-negative except the seeded MERGE target.
     return sorted((tuple(row[name] for name in _SCHEMA.names) for row in rows),
@@ -141,9 +146,9 @@ def test_nullable_primary_key_source_uses_sql_merge_equality(rest_catalog, nativ
     builder = target.new_stream_write_builder() if stream else target.new_batch_write_builder()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python merge')))
         messages = builder.new_update().merge_into(
             source, on=['pt', 'id'], when_matched=[WhenMatched.update({'value': source_col('value')})],
@@ -203,8 +208,13 @@ def test_nullable_scalar_key_distinguishes_null_from_default_value(rest_catalog,
         scan, read = builder.new_scan(), builder.new_read()
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('Python scan')))
-                stack.enter_context(patch.object(read, '_create_split_read', side_effect=AssertionError('Python read')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Python scan')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python read')
+                ))
             rows = read.to_arrow(scan.plan().splits()).to_pylist()
         assert sorted(rows, key=lambda row: row['id'] is not None) == [
             {'id': None, 'value': 30}, {'id': zero, 'value': 200}]
@@ -224,15 +234,15 @@ def test_null_key_restores_nonzero_dynamic_bucket(rest_catalog, first_native):
 
 
 def test_null_partition_requires_complete_dynamic_bucket_index(rest_catalog):
-    from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+    from pypaimon.execution.python.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
     table = _table(rest_catalog[0], 'missing_hash', -1)
-    builder = table.new_batch_write_builder()
+    builder = table.copy({'write.native.enabled': 'false'}).new_batch_write_builder()
     writer, commit = builder.new_write(), builder.new_commit()
     try:
         # Simulate existing data whose HASH metadata is incomplete. Restoring
         # this partition must fail instead of assigning its keys new buckets.
-        writer.row_key_extractor = DynamicBucketRowKeyExtractor(table.table_schema)
+        writer._execution.row_key_extractor = DynamicBucketRowKeyExtractor(table.table_schema)
         writer.write_arrow(pa.Table.from_arrays([
             pa.array([None], type=pa.int32()), pa.array([None], type=pa.int32()),
             pa.array([10], type=pa.int32())], schema=_SCHEMA))

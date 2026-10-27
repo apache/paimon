@@ -51,6 +51,7 @@ class CdcActionCommonUtilsTest {
                 .hasMessageContaining("Duplicate table configuration");
     }
 
+    @Test
     void testRejectSinkConfiguration() {
         assertThatThrownBy(
                         () ->

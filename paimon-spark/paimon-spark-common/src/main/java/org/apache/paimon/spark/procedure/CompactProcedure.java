@@ -669,6 +669,7 @@ public class CompactProcedure extends BaseProcedure {
         }
         AtomicReference<DataEvolutionCompactCoordinator> coordinatorRef = new AtomicReference<>();
         Set<String> completedNormalFiles = new HashSet<>();
+        Set<String> completedVectorFiles = new HashSet<>();
         Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
                 planningSnapshot -> {
                     DataEvolutionCompactCoordinator coordinator = coordinatorRef.get();
@@ -680,34 +681,41 @@ public class CompactProcedure extends BaseProcedure {
                                                 table,
                                                 partitionPredicate,
                                                 table.coreOptions().blobCompactionEnabled(),
-                                                false,
+                                                table.coreOptions().vectorCompactionEnabled(),
                                                 planningSnapshot)
                                         : new DataEvolutionCompactCoordinator(
                                                 table,
                                                 partitionPredicate,
                                                 table.coreOptions().blobCompactionEnabled(),
-                                                false,
+                                                table.coreOptions().vectorCompactionEnabled(),
                                                 planningSnapshot,
                                                 candidateFilesPerBatch);
-                        coordinator.withCompletedNormalFiles(completedNormalFiles);
+                        coordinator
+                                .withCompletedNormalFiles(completedNormalFiles)
+                                .withCompletedVectorFiles(completedVectorFiles);
                         coordinatorRef.set(coordinator);
                     }
                     return filterIdlePartitions(
                             coordinator.plan(), table, partitionPredicate, partitionIdleTime);
                 };
+        boolean trackNormalFiles = table.coreOptions().dataEvolutionCompactionSplitLargeFiles();
+        boolean trackVectorFiles = table.coreOptions().vectorCompactionEnabled();
         Consumer<List<CommitMessage>> commitObserver = null;
-        if (table.coreOptions().dataEvolutionCompactionSplitLargeFiles()) {
+        if (trackNormalFiles || trackVectorFiles) {
             commitObserver =
                     messages -> {
                         // Output sizes can still trigger splitting or small-file merging.
-                        // Skip bins containing only this invocation's completed normal outputs.
+                        // Skip bins and vector groups containing only this invocation's outputs.
                         for (CommitMessage message : messages) {
                             for (DataFileMeta file :
                                     ((CommitMessageImpl) message)
                                             .compactIncrement()
                                             .compactAfter()) {
-                                if (!isBlobFile(file.fileName())
-                                        && !isVectorStoreFile(file.fileName())) {
+                                if (isVectorStoreFile(file.fileName())) {
+                                    if (trackVectorFiles) {
+                                        completedVectorFiles.add(file.fileName());
+                                    }
+                                } else if (trackNormalFiles && !isBlobFile(file.fileName())) {
                                     completedNormalFiles.add(file.fileName());
                                 }
                             }

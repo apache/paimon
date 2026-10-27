@@ -27,7 +27,8 @@ import pytest
 
 from pypaimon import Schema
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.native_plan import _native_table, native_runtime_available
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.tests import native_plan_rest_test, native_query_auth_test
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
 
@@ -65,7 +66,7 @@ def _append(table, rows, schema, overwrite=False):
 
 
 def _native_explain(builder, verbose=False):
-    with patch('pypaimon.read.scanner.file_scanner.FileScanner.scan_with_stats',
+    with patch('pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
                side_effect=AssertionError('explain fell back to Python')):
         result = builder.explain(verbose)
     assert result.native_planned
@@ -128,7 +129,9 @@ def test_native_explain_preserves_limit_stopping_without_row_filter(rest_catalog
     if limit is not None:
         reader.with_limit(limit)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.entries_after_stats is None
     assert stats.planning_counters['final_files'] == expected_files
@@ -185,7 +188,9 @@ def test_native_empty_incremental_window_has_zero_statistics(rest_catalog, windo
     if limit is not None:
         reader.with_limit(limit)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert plan.splits() == []
     assert plan.snapshot_id is None
@@ -313,7 +318,9 @@ def test_native_incremental_explain_reports_only_the_selected_window(rest_catalo
     assert result.snapshot_id == 3
     assert result.file_count == 2
     scan = selected.new_read_builder().new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
     assert stats.planning_counters['manifest_entries_read'] == stats.planning_counters['final_files'] == 2
@@ -342,7 +349,9 @@ def test_native_data_evolution_explain_tracks_projection_with_limit(rest_catalog
     if limit is not None:
         reader.with_limit(limit)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
     assert stats.entries_potential_total is None
@@ -364,12 +373,16 @@ def test_native_explain_preserves_the_authorized_plan_and_captured_policy(guarde
     reader = table.new_read_builder().with_projection(['id', 'value'])
     reader.with_filter(PredicateBuilder(table.fields).equal('value', 'ab')).with_limit(1)
     scan = reader.new_scan()
-    with patch.object(scan.file_scanner, 'scan_with_stats', side_effect=AssertionError('Python stats ran')):
+    with patch(
+            'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan_with_stats',
+            side_effect=AssertionError('Python stats ran')):
         plan, stats = scan.scan_with_stats()
     assert stats.native_planned
     assert plan.splits()
     assert all(getattr(split, '_native_split', None) is not None for split in plan.splits())
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse()
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native authorized read fell back')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native authorized read fell back')
+    ):
         assert reader.new_read().to_arrow(plan.splits()).to_pylist() == [{'id': 2, 'value': 'ab'}]

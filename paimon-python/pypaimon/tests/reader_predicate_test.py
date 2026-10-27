@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
 import os
 import shutil
 import tempfile
@@ -35,10 +36,9 @@ from pypaimon.schema.data_types import AtomicType, DataField
 @pytest.mark.parametrize('batch_size', [1, 1024])
 def test_predicate_preserves_deletion_vector_positions(tmp_path, mode, batch_size):
     from dataclasses import replace
-    from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
+    from pypaimon.execution.python.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
     from pypaimon.table.row.generic_row import GenericRow
     from pypaimon.write.commit_message import CommitMessage
-    from pypaimon.write.table_delete import TableDeleteByRowId
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', False)
@@ -68,7 +68,7 @@ def test_predicate_preserves_deletion_vector_positions(tmp_path, mode, batch_siz
         commit.close()
     vector = BitmapDeletionVector()
     vector.delete(1)
-    entry = TableDeleteByRowId(table)._write_deletion_vector_index(
+    entry = PythonTableDeleteByRowId().initialize(table)._write_deletion_vector_index(
         GenericRow([], []), messages[0].bucket, {messages[0].new_files[0].file_name: vector})
     commit = builder.new_commit()
     try:

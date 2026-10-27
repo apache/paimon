@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,7 @@ public class ChainSplitTest {
         Map<String, String> fileBucketPathMapping = new HashMap<>();
         Map<String, String> fileBranchMapping = new HashMap<>();
         for (DataFileMeta dataFile : dataFiles) {
-            fileBucketPathMapping.put(dataFile.fileName(), "dt=20251202/bucket_0");
+            fileBucketPathMapping.put(dataFile.fileName(), "dt=20251202/bucket-7");
             fileBranchMapping.put(dataFile.fileName(), "branch_0");
         }
         ChainSplit split =
@@ -68,6 +69,7 @@ public class ChainSplitTest {
         assertThat(fileBucketPathMapping).isEqualTo(newSplit.fileBucketPathMapping());
         assertThat(fileBranchMapping).isEqualTo(newSplit.fileBranchMapping());
         assertThat(newSplit.deletionFiles()).isEmpty();
+        assertThat(newSplit.bucket()).isEqualTo(7);
         assertThat(newSplit).isEqualTo(split);
     }
 
@@ -89,7 +91,7 @@ public class ChainSplitTest {
                         null,
                         new DeletionFile("dv3", 0, 50, 1L));
         for (DataFileMeta dataFile : dataFiles) {
-            fileBucketPathMapping.put(dataFile.fileName(), "dt=20251202/bucket_0");
+            fileBucketPathMapping.put(dataFile.fileName(), "dt=20251202/bucket-7");
             fileBranchMapping.put(dataFile.fileName(), "branch_0");
         }
         ChainSplit split =
@@ -106,6 +108,21 @@ public class ChainSplitTest {
         assertThat(fileBranchMapping).isEqualTo(newSplit.fileBranchMapping());
         assertThat(newSplit.deletionFiles().isPresent());
         assertThat(newSplit.deletionFiles().get()).isEqualTo(deletionFiles);
+        assertThat(newSplit.bucket()).isEqualTo(7);
         assertThat(newSplit).isEqualTo(split);
+    }
+
+    @Test
+    public void testBucketFromDataSplit() {
+        DataFileMeta file = DataFileTestDataGenerator.builder().build().next().meta;
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(3)
+                        .withBucketPath(
+                                "file:/warehouse/branch/branch-snapshot/dt=20251202/bucket-3")
+                        .withDataFiles(Collections.singletonList(file))
+                        .build();
+        assertThat(ChainSplit.from(dataSplit, "snapshot").bucket()).isEqualTo(3);
     }
 }

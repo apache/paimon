@@ -17,18 +17,20 @@
 
 """End-to-end coverage of the optional native batch row-ID update bridge."""
 
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
 from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.native_update import create_native_delete, create_native_update
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.native.write.native_update import create_native_delete, create_native_update
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.read.table_read import TableRead
-from pypaimon.write.table_update import BatchTableUpdate, StreamTableUpdate
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.write.backend_dispatch import native_row_id_update_selected
 
 
 pytestmark = pytest.mark.native_plan
@@ -38,7 +40,6 @@ pytestmark = pytest.mark.native_plan
 def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, stream):
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.native_update import NativeTableUpdateByRowId
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
@@ -58,10 +59,11 @@ def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, 
     commit_id = 27 if stream else BATCH_COMMIT_IDENTIFIER
     # Factory configuration must not fix columns for this incremental API.
     update = builder.new_update().with_update_type(['id'])
-    with patch.object(TableUpdateByRowId, '_load_existing_files_info',
+    with patch.object(PythonTableUpdateByRowId, '_load_existing_files_info',
                       side_effect=AssertionError('Python loaded the file index')):
         updater = update.new_update_by_row_id(commit_id) if stream else update.new_update_by_row_id()
-        assert isinstance(updater, NativeTableUpdateByRowId)
+        assert isinstance(updater, TableUpdateByRowId)
+        assert native_row_id_update_selected(updater)
         assert updater.commit_user == builder.commit_user
         assert updater.commit_identifier == commit_id
         assert updater.commit_messages == []
@@ -90,7 +92,6 @@ def test_incremental_row_id_updater_uses_core_and_accumulates_columns(tmp_path, 
 
 @pytest.mark.parametrize('stream', [False, True])
 def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
-    from pypaimon.write.native_update import NativeTableUpdateByRowId
     from pypaimon.table.row.generic_row import GenericRow
 
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
@@ -109,7 +110,7 @@ def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     update = builder.new_update()
     input_rows = pa.table({'p': ['a', 'c', None], 'id': [1, 1, 1], 'v': [11, 40, 31]}, schema=schema)
-    with patch.object(TableUpsertByKey, '_upsert_partition',
+    with patch.object(PythonTableUpsert, '_upsert_partition',
                       side_effect=AssertionError('Python partition upsert selected')):
         messages = (update.upsert_by_arrow_with_key(input_rows, ['id'], 1) if stream
                     else update.upsert_by_arrow_with_key(input_rows, ['id']))
@@ -118,7 +119,7 @@ def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
     commit.close()
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     update = builder.new_update()
-    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+    with patch.object(PythonTableUpsert, '_upsert_row_partition',
                       side_effect=AssertionError('Python partition row upsert selected')):
         rows = [GenericRow(['a', 1, 12], table.fields)]
         messages = (update.upsert_by_key(rows, ['id'], 2) if stream
@@ -132,7 +133,8 @@ def test_partitioned_upsert_and_incremental_update_use_core(tmp_path, stream):
     current = read.new_read().to_arrow(read.new_scan().plan().splits())
     selected = current.filter(pa.compute.equal(current['p'], 'a'))
     updater = update.new_update_by_row_id(3) if stream else update.new_update_by_row_id()
-    assert isinstance(updater, NativeTableUpdateByRowId)
+    assert isinstance(updater, TableUpdateByRowId)
+    assert native_row_id_update_selected(updater)
     messages = updater.update_columns(selected.select(['p', '_ROW_ID']), ['p'])
     commit = builder.new_commit()
     commit.commit(messages, 3) if stream else commit.commit(messages)
@@ -166,7 +168,7 @@ def test_batch_row_id_update_uses_rust_and_python_commit(tmp_path):
     pinned = table.copy({
         'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
     })
-    assert create_native_update(pinned, builder.commit_user, ['name']) is None
+    assert create_native_update(pinned, builder.commit_user, ['name']) is not None
 
     update_builder = table.new_batch_write_builder()
     update = update_builder.new_update().with_update_type(['name', 'age'])
@@ -219,7 +221,7 @@ def test_batch_row_id_delete_uses_rust_deletion_vectors(tmp_path):
     pinned = table.copy({
         'scan.snapshot-id': str(table.snapshot_manager().get_latest_snapshot().id),
     })
-    assert create_native_delete(pinned, builder.commit_user) is None
+    assert create_native_delete(pinned, builder.commit_user) is not None
 
     with patch.object(TableDeleteByRowId, 'delete',
                       side_effect=AssertionError('Python delete was selected')):
@@ -272,7 +274,7 @@ def test_stream_update_and_delete_use_native_writers(tmp_path):
     committer.commit(messages, 10)
 
     predicate = table.new_read_builder().new_predicate_builder()
-    with patch.object(StreamTableUpdate, '_build_predicate_update_table',
+    with patch.object(PythonTableUpdate, '_build_predicate_update_table',
                       side_effect=AssertionError('Python assignments selected')), \
             patch.object(TableRead, 'to_arrow',
                          side_effect=AssertionError('Python predicate read selected')):
@@ -324,7 +326,7 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
         pa.record_batch([pa.array([1], type=pa.int64()), pa.array([22])],
                         names=['_ROW_ID', 'age']),
     ])
-    with patch.object(BatchTableUpdate, '_update_by_arrow_batches_with_row_id',
+    with patch.object(PythonTableUpdate, '_update_by_arrow_batches_with_row_id',
                       side_effect=AssertionError('Python batch update selected')):
         with pytest.raises(ValueError, match='overlapping first_row_ids.*0'):
             table.new_batch_write_builder().new_update().with_update_type(
@@ -371,7 +373,7 @@ def test_native_batch_update_preserves_input_table_boundaries(tmp_path):
         concurrent.new_commit().commit(changed.update_by_arrow_with_row_id(
             pa.Table.from_pydict({'_ROW_ID': [1], 'age': [23]})))
 
-    with patch.object(BatchTableUpdate, '_update_by_arrow_batches_with_row_id',
+    with patch.object(PythonTableUpdate, '_update_by_arrow_batches_with_row_id',
                       side_effect=AssertionError('Python batch update selected')):
         staged = (table.new_batch_write_builder().new_update()
                   .with_update_type(['age'])
@@ -405,9 +407,9 @@ def test_native_predicate_update_invokes_callable_by_file_group(tmp_path):
     seen = []
     predicate = table.new_read_builder().new_predicate_builder().greater_or_equal('id', 2)
     builder = table.new_batch_write_builder()
-    with patch.object(BatchTableUpdate, '_build_predicate_update_table',
+    with patch.object(PythonTableUpdate, '_build_predicate_update_table',
                       side_effect=AssertionError('Python assignments selected')), \
-            patch.object(BatchTableUpdate, '_matched_update_scan_table',
+            patch.object(PythonTableUpdate, '_matched_update_scan_table',
                          side_effect=AssertionError('Python scan planning selected')):
         messages = builder.new_update().update_by_predicate(
             predicate,
@@ -450,12 +452,12 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         'id': [1, 1, 3], 'age': [100, 101, 30],
     }, schema=schema)
     builder = table.new_batch_write_builder()
-    with patch.object(TableUpsertByKey, '_upsert_partition',
+    with patch.object(PythonTableUpsert, '_upsert_partition',
                       side_effect=AssertionError('Python upsert selected')):
         messages = builder.new_update().upsert_by_arrow_with_key(updates, ['id'])
     builder.new_commit().commit(messages)
     builder = table.new_batch_write_builder()
-    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+    with patch.object(PythonTableUpsert, '_upsert_row_partition',
                       side_effect=AssertionError('Python row upsert selected')):
         messages = builder.new_update().upsert_by_key([
             GenericRow([1, 201], table.fields),
@@ -474,7 +476,7 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     stream_updates = pa.Table.from_pydict({
         'id': [2, 5], 'age': [25, 50],
     }, schema=schema)
-    with patch.object(TableUpsertByKey, '_upsert_partition',
+    with patch.object(PythonTableUpsert, '_upsert_partition',
                       side_effect=AssertionError('Python stream selected')):
         messages = stream.new_update().upsert_by_arrow_with_key(
             stream_updates, ['id'], 77)
@@ -496,8 +498,8 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
     fallback_updates = pa.Table.from_pydict({
         'id': [2, 6], 'age': [26, 60],
     }, schema=schema)
-    with patch('pypaimon.write.native_update.create_native_upsert', return_value=None), \
-            patch('pypaimon.write.native_update.create_native_update', return_value=None):
+    with patch('pypaimon.execution.native.write.native_update.create_native_upsert', return_value=None), \
+            patch('pypaimon.execution.native.write.native_update.create_native_update', return_value=None):
         messages = builder.new_update().upsert_by_arrow_with_key(fallback_updates, ['id'])
     builder.new_commit().commit(messages)
     read_builder = table.new_read_builder()
@@ -509,13 +511,13 @@ def test_native_upsert_matches_duplicate_source_and_target_keys(tmp_path):
         'age': [201, 201, 26, 30, 40, 50, 60],
     }
 
-    from pypaimon.write.native_update import NativeTableUpsert
+    from pypaimon.execution.native.write.native_update import NativeTableUpsert
     before = set(tmp_path.rglob('*.parquet'))
     snapshot_id = table.snapshot_manager().get_latest_snapshot().id
     with patch.object(NativeTableUpsert, 'upsert', side_effect=RuntimeError('core upsert failed')), \
-            patch.object(TableUpsertByKey, '_upsert_partition',
+            patch.object(PythonTableUpsert, '_upsert_partition',
                          side_effect=AssertionError('retried as Python Arrow upsert')), \
-            patch.object(TableUpsertByKey, '_upsert_row_partition',
+            patch.object(PythonTableUpsert, '_upsert_row_partition',
                          side_effect=AssertionError('retried as Python row upsert')):
         with pytest.raises(RuntimeError, match='core upsert failed'):
             builder.new_update().upsert_by_arrow_with_key(fallback_updates, ['id'])
@@ -680,7 +682,7 @@ def test_predicate_assignment_order_with_later_partial_file(
 
     assignment = assign if callable_assignment else pa.chunked_array(
         [[101], [102, 103, 104]], type=pa.int32())
-    guard = (patch.object(BatchTableUpdate, '_matched_update_scan_table',
+    guard = (patch.object(PythonTableUpdate, '_matched_update_scan_table',
                           side_effect=AssertionError('Python planning selected'))
              if native else nullcontext())
     with guard:
@@ -726,7 +728,7 @@ def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_pa
     ])
     builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
     update = builder.new_update().with_update_type(['age'])
-    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+    with patch.object(PythonTableUpsert, '_upsert_row_partition',
                       side_effect=AssertionError('Python upsert selected')):
         if stream:
             messages = update.upsert_by_key(rows, ['id', 'part'], 88)
@@ -745,7 +747,7 @@ def test_native_row_upsert_uses_public_operation_with_composite_null_keys(tmp_pa
 @pytest.mark.parametrize('case', ['partial', 'float-key', 'empty-columns'])
 def test_row_upsert_input_capabilities(tmp_path, case):
     from pypaimon.table.row.generic_row import GenericRow
-    from pypaimon.write.native_update import NativeTableUpsert
+    from pypaimon.execution.native.write.native_update import NativeTableUpsert
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([
@@ -784,8 +786,7 @@ def test_row_upsert_input_capabilities(tmp_path, case):
             'id': [1, 2], 'age': [10, 20], 'region': ['east', 'west'],
         }
         return
-    from pypaimon.write.table_upsert_by_key import TableUpsertByKey
-    with patch.object(TableUpsertByKey, '_upsert_row_partition',
+    with patch.object(PythonTableUpsert, '_upsert_row_partition',
                       side_effect=AssertionError('Python upsert fallback')):
         messages = builder.new_update().with_update_type(['age']).upsert_by_key(rows, ['id'])
     builder.new_commit().commit(messages)
@@ -866,7 +867,7 @@ def test_native_row_id_input_conversion_matches_python(
         return updater.update_by_arrow_with_row_id(data)
 
     try:
-        expected = TableUpdateByRowId._coerce_column(values, target).to_pylist()
+        expected = PythonTableUpdateByRowId._coerce_column(values, target).to_pylist()
     except (ValueError, pa.ArrowException):
         with pytest.raises((ValueError, pa.ArrowException)):
             prepare()
@@ -935,7 +936,7 @@ def test_row_id_update_rejects_only_referenced_duplicate_columns(tmp_path, nativ
                              mask=pa.array([True, False])), pa.map_(pa.string(), pa.int32())),
 ])
 def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path, native, values, target):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('default', True)
     schema = pa.schema([('id', pa.int32()), ('value', target)])
@@ -954,7 +955,7 @@ def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path,
     data = pa.table({'_ROW_ID': list(range(len(values))), 'value': values})
     before = set(tmp_path.rglob('*.parquet'))
     try:
-        expected = TableUpdateByRowId._coerce_column(values, target).to_pylist()
+        expected = PythonTableUpdateByRowId._coerce_column(values, target).to_pylist()
     except (ValueError, pa.ArrowException):
         with pytest.raises((ValueError, pa.ArrowException)):
             builder.new_update().update_by_arrow_with_row_id(data)
@@ -973,8 +974,8 @@ def test_core_nested_row_update_uses_whole_column_constructor_fallback(tmp_path,
 ])
 @pytest.mark.parametrize('operation', ['row', 'predicate'])
 def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, operation):
-    from pypaimon.write.native_commit import create_native_write_table
-    from pypaimon.write.native_update import NativeBatchTableUpdate, NativePredicateTableUpdate
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_update import NativeBatchTableUpdate, NativePredicateTableUpdate
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('default', True)
     part_type = {'float': pa.float32(), 'double': pa.float64(), 'external-binary': pa.binary()}.get(
@@ -1015,8 +1016,8 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
         native_calls.append(operation)
         return original(*args, **kwargs)
 
-    # Check a second update too: fallback outputs must remain readable on the
-    # next operation, and canonical files must continue using native updates.
+    # Check a second update too: outputs must remain readable and all supported
+    # partition layouts must continue using native updates.
     with patch.object(wrapper, method, track):
         for value in [11, 12]:
             builder = table.new_batch_write_builder()
@@ -1029,5 +1030,4 @@ def test_update_dispatch_preserves_existing_partition_paths(tmp_path, layout, op
             read = table.new_read_builder()
             actual = read.new_read().to_arrow(read.new_scan().plan().splits()).sort_by('id')
             assert actual.to_pydict() == {'id': [1, 2], 'part': parts, 'value': [value, value]}
-    expected_calls = 0 if layout == 'external-binary' else 2
-    assert len(native_calls) == expected_calls
+    assert len(native_calls) == 2

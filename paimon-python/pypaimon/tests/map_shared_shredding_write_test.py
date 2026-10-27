@@ -190,7 +190,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr.decode('utf-8', 'replace'))
 
     def check_nested_non_nullable_map_values(self):
-        from pypaimon.write.map_shared_shredding_writer import _to_python_values
+        from pypaimon.execution.python.write.map_shared_shredding_writer import _to_python_values
 
         inner = pa.map_(pa.string(), pa.field('value', pa.int64(), nullable=False))
         for value_type, value in [
@@ -263,14 +263,14 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
 
     def test_reject_char_keys(self):
         from pypaimon.schema.data_types import AtomicType, DataField, MapType
-        from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
+        from pypaimon.execution.python.write.map_shared_shredding_writer import MapSharedShreddingWriter
 
         with self.assertRaisesRegex(ValueError, 'STRING keys'):
             MapSharedShreddingWriter._validate_field(DataField(
                 0, 'metrics', MapType(True, AtomicType('CHAR(4)', False), AtomicType('BIGINT'))))
 
     def test_streams_physical_batches(self):
-        from pypaimon.write.map_shared_shredding_writer import _MapFieldConverter
+        from pypaimon.execution.python.write.map_shared_shredding_writer import _MapFieldConverter
 
         table = self._create_table('parquet', 256, {'write.native.enabled': 'false'})
         data = pa.Table.from_pydict({
@@ -302,7 +302,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         self.assertEqual([None] * 4999 + [2], result.column('metrics_late').to_pylist())
 
     def test_failed_stream_removes_partial_file(self):
-        from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
+        from pypaimon.execution.python.write.map_shared_shredding_writer import MapSharedShreddingWriter
 
         table = self._create_table('parquet', 2, {'file.block-size': '1 kb'})
         converter = MapSharedShreddingWriter(table.fields, table.options, 'parquet', None)
@@ -358,7 +358,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
             self.assertEqual(layouts[0], layouts[1])
 
     def test_physical_row_group_byte_and_row_limits(self):
-        from pypaimon.write.map_shared_shredding_writer import _physical_row_groups
+        from pypaimon.execution.python.write.map_shared_shredding_writer import _physical_row_groups
 
         data = pa.table({'id': pa.array(range(25), type=pa.int64())})
         for chunks in ([data], [data.slice(i, 3) for i in range(0, 25, 3)]):
@@ -370,7 +370,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 self.assertTrue(pa.concat_tables(groups).equals(data))
 
     def test_physical_row_groups_empty_nulls_and_oversized_row(self):
-        from pypaimon.write.map_shared_shredding_writer import _physical_row_groups
+        from pypaimon.execution.python.write.map_shared_shredding_writer import _physical_row_groups
 
         self.assertEqual([], list(_physical_row_groups(iter([]), 100)))
         data = pa.table({'value': [None, 'x' * 300, '', 'tail']})
@@ -380,7 +380,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         self.assertEqual([1, 1, 2], [g.num_rows for g in groups])
 
     def test_physical_row_groups_release_input_on_close(self):
-        from pypaimon.write.map_shared_shredding_writer import _physical_row_groups
+        from pypaimon.execution.python.write.map_shared_shredding_writer import _physical_row_groups
 
         closed = []
 
@@ -397,7 +397,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         self.assertEqual([True], closed)
 
     def test_physical_row_groups_preserve_nested_shredding_metadata(self):
-        from pypaimon.write.map_shared_shredding_writer import _physical_row_groups
+        from pypaimon.execution.python.write.map_shared_shredding_writer import _physical_row_groups
 
         table = self._create_table('parquet', 2, {
             'write.native.enabled': 'false', 'read.native.enabled': 'false',
@@ -414,7 +414,7 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 self.assertTrue(is_shared_shredding(group.schema.field('metrics')))
                 yield group
 
-        with patch('pypaimon.write.map_shared_shredding_writer._physical_row_groups', collect):
+        with patch('pypaimon.execution.python.write.map_shared_shredding_writer._physical_row_groups', collect):
             messages = self._write(table, data)
         self.assertTrue(all(size <= 4096 or rows == 1 for rows, size in captured))
         metadata = pq.read_metadata(messages[0].new_files[0].file_path)
@@ -425,14 +425,14 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
         self.assertEqual(maps, actual['metrics'].to_pylist())
 
     def test_reject_nonpositive_row_group_target(self):
-        from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
+        from pypaimon.execution.python.write.map_shared_shredding_writer import MapSharedShreddingWriter
 
         table = self._create_table('parquet', 2, {'file.block-size': '0 b'})
         with self.assertRaisesRegex(ValueError, 'file.block-size must be positive'):
             MapSharedShreddingWriter(table.fields, table.options, 'parquet', None)
 
     def test_reject_postpone_with_fixed_output_bucket(self):
-        from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+        from pypaimon.execution.python.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
         table = self._create_table('parquet', 2, {'bucket': '-2'})
         with self.assertRaisesRegex(ValueError, 'postpone bucket'):

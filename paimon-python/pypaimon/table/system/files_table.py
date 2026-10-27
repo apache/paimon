@@ -66,8 +66,8 @@ def _render_value(value, data_type=None) -> str:
     if value is None:
         return "null"
     if data_type is not None:
-        from pypaimon.casting.row_to_string import cast_value_to_string
-        from pypaimon.casting.numeric_utils import java_floating_string
+        from pypaimon.utils.row_to_string import cast_value_to_string
+        from pypaimon.utils.numeric_utils import java_floating_string
         type_name = str(getattr(data_type, 'type', data_type)).upper()
         if type_name in ('FLOAT', 'REAL', 'DOUBLE'):
             return java_floating_string(value, type_name != 'DOUBLE')
@@ -75,8 +75,8 @@ def _render_value(value, data_type=None) -> str:
             from pypaimon.utils.file_store_path_factory import _decode_java_utf8
             return _decode_java_utf8(value)
         if 'TIMESTAMP_LTZ' in type_name or 'WITH LOCAL TIME ZONE' in type_name:
-            from pypaimon.casting.temporal_string import format_timestamp_parts
-            from pypaimon.casting.temporal_utils import _epoch_day_to_date, _local_offset
+            from pypaimon.utils.temporal_string import format_timestamp_parts
+            from pypaimon.utils.temporal_utils import _epoch_day_to_date, _local_offset
             from pypaimon.table.row.generic_row import (
                 _datetime_to_millis_and_nanos, _normalize_ltz, _parse_type_precision_scale)
             # BinaryRow timestamps need not fit Arrow's i64 nanosecond range.
@@ -87,7 +87,7 @@ def _render_value(value, data_type=None) -> str:
             year, month, day = _epoch_day_to_date(day)
             hour, second_of_day = divmod(second_of_day, 3600)
             minute, second = divmod(second_of_day, 60)
-            nanos += millis % 1000 * 1000000 + getattr(value, 'nanosecond', 0)
+            nanos += millis % 1000 * 1000000
             precision, _ = _parse_type_precision_scale(data_type)
             return format_timestamp_parts(year, month, day, hour, minute, second, nanos, precision)
         return cast_value_to_string(value, data_type)
@@ -184,7 +184,7 @@ def _render_null_counts(null_counts: Optional[List[int]], columns: List[str]) ->
 
 
 def _file_stats(table, meta):
-    from pypaimon.casting.schema_evolution import cast_array_for_schema_evolution
+    from pypaimon.execution.python.casting.schema_evolution import cast_array_for_schema_evolution
     from pypaimon.schema.data_types import PyarrowFieldParser
     file_schema = table.schema_manager.get_schema(meta.schema_id)
     physical = {field.id: field for field in file_schema.data_file_fields(meta.write_cols)}

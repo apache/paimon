@@ -17,7 +17,7 @@
 
 """Explicit search plans keep native work and transportable source metadata."""
 
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from copy import copy
 import pickle
 from unittest.mock import patch
@@ -25,15 +25,16 @@ from unittest.mock import patch
 import pytest
 import pyarrow as pa
 
-from pypaimon.read.native_plan import native_runtime_available
-from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
-from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
-from pypaimon.table.source.primary_key_full_text_read import PrimaryKeyFullTextRead
-from pypaimon.table.source.primary_key_full_text_scan import PrimaryKeyFullTextScan
-from pypaimon.table.source.primary_key_vector_read import PrimaryKeyVectorRead
-from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScan
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl, DataEvolutionVectorRead
-from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.table.source.search_dispatch import python_search_reader
+from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
+from pypaimon.execution.python.read.search.full_text_scan import DataEvolutionFullTextScan
+from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
+from pypaimon.execution.python.read.search.primary_key_full_text_scan import PrimaryKeyFullTextScan
+from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
+from pypaimon.execution.python.read.search.primary_key_vector_scan import PrimaryKeyVectorScan
+from pypaimon.execution.python.read.search.vector_search_read import BatchVectorSearchReadImpl, DataEvolutionVectorRead
+from pypaimon.execution.python.read.search.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.tests import native_hybrid_search_test as hybrid
 from pypaimon.tests import native_pk_full_text_search_test as text
 from pypaimon.tests import native_sorted_index_build_test as indexes
@@ -137,26 +138,22 @@ def test_explicit_native_plan_and_read_avoid_python_search(table, family, mode, 
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
-@pytest.mark.parametrize('transport', ['pickle-plan', 'pickle-reader', 'split-list'])
+@pytest.mark.parametrize('transport', ['pickle-plan', 'pickle-reader', 'pickle-both', 'python-plan'])
 def test_transported_plan_uses_captured_snapshot_without_replanning(table, family, transport):
     native = _builder(table, family, native=True, limit=20)
-    plan = _scan(native, family).scan()
+    planner = _builder(table, family, limit=20) if transport == 'python-plan' else native
+    plan = _scan(planner, family).scan()
     reader = _reader(native, family)
     expected = _read(reader, family, plan)
     snapshot = plan.snapshot().id
     captured = pickle.dumps(plan.splits())
     indexes._append(table, hybrid._rows(12, 4), hybrid.SCHEMA)
-    if transport == 'pickle-plan':
+    if transport in ('pickle-plan', 'pickle-both'):
         plan = pickle.loads(pickle.dumps(plan))
-    elif transport == 'pickle-reader':
+    if transport in ('pickle-reader', 'pickle-both'):
         reader = pickle.loads(pickle.dumps(reader))
-    with patch.object(DataEvolutionVectorScan, 'scan', side_effect=AssertionError('Replanned vector search')), \
-            patch.object(DataEvolutionFullTextScan, 'scan', side_effect=AssertionError('Replanned full-text search')):
-        if transport == 'split-list':
-            classic = _reader(_builder(table._copy_with_snapshot(plan.snapshot()), family, limit=20), family)
-            actual = classic.read_batch(plan.splits()) if family == 'batch' else [classic.read(plan.splits())]
-        else:
-            actual = _read(reader, family, plan)
+    with _native_only():
+        actual = _read(reader, family, plan)
     assert plan.snapshot().id == snapshot
     assert pickle.dumps(plan.splits()) == captured
     _assert_results(actual, expected)
@@ -168,17 +165,37 @@ def test_modified_plan_and_shallow_alias_observe_current_split_selection(table, 
     plan = _scan(builder, family).scan()
     alias = copy(plan)
     alias.splits().clear()
-    results = _read(_reader(builder, family), family, plan)
+    with _native_only():
+        results = _read(_reader(builder, family), family, plan)
     assert len(results) == (2 if family == 'batch' else 1)
     assert all(result.is_empty() for result in results)
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
-def test_read_plan_context_errors_do_not_retry_python(table, family):
-    plan = _scan(_builder(table, family, native=True), family).scan()
-    reader = _reader(_builder(table, family, native=True, filtered=True), family)
-    with _native_only(), pytest.raises(Exception, match='same table|same.*filter|different table|different.*filter'):
-        _read(reader, family, plan)
+def test_subset_of_python_sources_remains_authoritative_for_native(table, family):
+    classic = _builder(table, family, limit=20)
+    plan = _scan(classic, family).scan()
+    assert len(plan.splits()) > 1
+    plan.splits()[:] = plan.splits()[:1]
+    expected = _read(_reader(classic, family), family, plan)
+    sources = pickle.dumps(plan.splits())
+    reader = _reader(_builder(table, family, native=True, limit=20), family)
+    with _native_only():
+        actual = _read(pickle.loads(pickle.dumps(reader)), family, pickle.loads(pickle.dumps(plan)))
+    _assert_results(actual, expected)
+    assert pickle.dumps(plan.splits()) == sources
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
+def test_reader_filter_applies_to_explicit_sources_without_replanning(table, family):
+    plan = _scan(_builder(table, family, native=True, limit=20), family).scan()
+    captured_sources = pickle.dumps(plan.splits())
+    expected = _read(_reader(_builder(table, family, filtered=True, limit=20), family), family, plan)
+    reader = _reader(_builder(table, family, native=True, filtered=True, limit=20), family)
+    with _native_only():
+        actual = _read(reader, family, pickle.loads(pickle.dumps(plan)))
+    _assert_results(actual, expected)
+    assert pickle.dumps(plan.splits()) == captured_sources
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
@@ -237,7 +254,7 @@ def test_raw_native_plans_use_java_configured_indexer_default(rest_catalog, fami
         plan = _scan(builder, family).scan()
         actual = _read(_reader(builder, family), family, plan)
     assert all(split.index_type == index_type.strip().lower() for split in plan.splits())
-    expected = _read(_reader(builder, family)._python, family, pickle.loads(pickle.dumps(plan)))
+    expected = _read(python_search_reader(_reader(builder, family)), family, pickle.loads(pickle.dumps(plan)))
     _assert_results(actual, expected)
     assert all(set(_scores(result)) == ({6, 7} if metric is None else {1, 2}) for result in actual)
 
@@ -265,7 +282,7 @@ def test_persisted_vector_family_ignores_other_columns_metric(table, family):
         plan = _scan(builder, family).scan()
         actual = _read(_reader(builder, family), family, plan)
         implicit = builder.execute_batch_local() if family == 'batch' else [builder.execute_local()]
-    expected = _read(_reader(builder, family)._python, family, pickle.loads(pickle.dumps(plan)))
+    expected = _read(python_search_reader(_reader(builder, family)), family, pickle.loads(pickle.dumps(plan)))
     _assert_results(actual, expected)
     _assert_results(implicit, expected)
 
@@ -281,7 +298,9 @@ def test_empty_native_plans_remain_transportable(rest_catalog, family):
     assert plan.snapshot() is None
     assert plan.splits() == []
     assert all(result.is_empty() for result in results)
-    _assert_results(_read(_reader(builder, family), family, pickle.loads(pickle.dumps(plan))), results)
+    with _native_only():
+        copied_reader = pickle.loads(pickle.dumps(_reader(builder, family)))
+        _assert_results(_read(copied_reader, family, pickle.loads(pickle.dumps(plan))), results)
 
 
 def test_vector_scan_does_not_require_query_or_limit(table):
@@ -305,11 +324,13 @@ def test_full_text_scan_does_not_require_limit(table):
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
-def test_native_plan_is_query_independent_and_pickle_keeps_original_handle(table, family):
+def test_native_plan_is_query_independent_and_pickle_keeps_plain_sources(table, family):
     builder = _builder(table, family, native=True, limit=1)
     plan = _scan(builder, family).scan()
-    pickle.dumps(plan)
-    assert plan._unchanged_native_plan() is not None
+    captured = pickle.dumps(plan)
+    assert not hasattr(plan, '_native_plan')
+    assert not hasattr(plan, '_native_fingerprint')
+    assert pickle.dumps(pickle.loads(captured)) == captured
     if family == 'full-text':
         builder.with_query('content', text.match_query('lake'))
     elif family == 'batch':
@@ -317,7 +338,7 @@ def test_native_plan_is_query_independent_and_pickle_keeps_original_handle(table
     else:
         builder.with_query_vector([7., 0.]).with_options({'ivf.nprobe': '1'})
     builder.with_limit(4)
-    classic = _reader(builder, family)._python
+    classic = python_search_reader(_reader(builder, family))
     expected = _read(classic, family, pickle.loads(pickle.dumps(plan)))
     with _native_only():
         actual = _read(_reader(builder, family), family, plan)
@@ -326,53 +347,39 @@ def test_native_plan_is_query_independent_and_pickle_keeps_original_handle(table
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
 def test_ray_accepts_native_reader_and_transports_captured_sources(table, family):
-    # Run the real Ray adapters and workers with in-process serialized task
-    # dispatch. This exercises their reader qualification and metadata contract
-    # without starting another cluster in the native CI jobs.
+    # Exercise the real Native task bridge with process-style serialization,
+    # without rebuilding the SDK or starting another cluster in Native CI.
     from pypaimon.ray import vector_search, batch_vector_search, full_text_search
-    module, reader_type, execute, method = {
-        'vector': (vector_search, vector_search._RayVectorSearchRead,
-                   vector_search._execute_vector_search, 'read_plan'),
-        'batch': (batch_vector_search, batch_vector_search._RayBatchVectorSearchRead,
-                  batch_vector_search._execute_batch_vector_search, 'read_batch_plan'),
-        'full-text': (full_text_search, full_text_search._RayFullTextRead,
-                      full_text_search._execute_full_text_search, 'read_plan'),
+    from pypaimon.table.source.search_execution import SearchTaskExecutor
+    module, execute = {
+        'vector': (vector_search, vector_search._execute_vector_search),
+        'batch': (batch_vector_search, batch_vector_search._execute_batch_vector_search),
+        'full-text': (full_text_search, full_text_search._execute_full_text_search),
     }[family]
     classic = _builder(table, family, limit=20)
     expected = _read(_reader(classic, family), family, _scan(classic, family).scan())
-    original_read = getattr(reader_type, method)
+    appended = []
 
-    def read_after_append(reader, plan):
-        captured = plan.snapshot().id
-        transported = pickle.loads(pickle.dumps(plan))
-        assert plan._unchanged_native_plan() is not None
-        indexes._append(table, hybrid._rows(12, 4), hybrid.SCHEMA)
-        assert transported.snapshot().id == captured
-        return original_read(reader, transported)
+    class SerializedExecutor(SearchTaskExecutor):
+        def map(self, tasks, ordered=False):
+            assert ordered
+            if not appended:
+                indexes._append(table, hybrid._rows(12, 4), hybrid.SCHEMA)
+                appended.append(True)
+            for ordinal, task in enumerate(tasks):
+                transported = pickle.loads(pickle.dumps(task))
+                assert not transported.dependencies
+                yield ordinal, transported.execute()
 
-    def dispatch(worker, context, items, *args):
-        for ordinal, item in enumerate(items):
-            yield ordinal, worker(pickle.loads(pickle.dumps(context)), pickle.loads(pickle.dumps(item)))
-
-    @contextmanager
-    def scalar_filters(*args):
-        yield None
-
-    with ExitStack() as stack:
-        stack.enter_context(patch.object(module, '_require_ray'))
-        stack.enter_context(patch.object(module, '_map_tasks', dispatch))
-        stack.enter_context(patch.object(reader_type, method, read_after_append))
-        if family != 'full-text':
-            stack.enter_context(patch.object(module, '_shared_scalar_filters', scalar_filters))
-        for cls in (DataEvolutionVectorScan, DataEvolutionFullTextScan):
-            stack.enter_context(patch.object(cls, 'scan', side_effect=AssertionError('Python search scan ran')))
+    with _native_only(), patch.object(module, 'RaySearchTaskExecutor', return_value=SerializedExecutor()):
         actual = execute(_builder(table, family, native=True, limit=20))
     _assert_results(actual if family == 'batch' else [actual], expected)
+    assert appended
 
 
 @pytest.mark.parametrize('family', ['vector', 'full-text'])
 @pytest.mark.parametrize('filtered', [False, True])
-def test_pk_native_plans_export_physical_sources_for_python_readers(source, pk_vector_table, family, filtered):
+def test_pk_plans_round_trip_between_backends(source, pk_vector_table, family, filtered):
     table = source[0] if family == 'full-text' else pk_vector_table
 
     def builder(native):
@@ -383,9 +390,11 @@ def test_pk_native_plans_export_physical_sources_for_python_readers(source, pk_v
         return query
 
     classic = builder(False)
-    expected = _read(_reader(classic, family), family, _scan(classic, family).scan())
+    python_plan = _scan(classic, family).scan()
+    expected = _read(_reader(classic, family), family, python_plan)
     native = builder(True)
     with _native_only():
+        _assert_results(_read(_reader(native, family), family, pickle.loads(pickle.dumps(python_plan))), expected)
         plan = _scan(native, family).scan()
         actual = _read(_reader(native, family), family, plan)
     assert plan.snapshot_id == expected[0].snapshot_id
@@ -423,8 +432,35 @@ def test_pk_plan_retains_snapshot_and_sources_after_primary_key_update(source, p
     assert table.snapshot_manager().get_latest_snapshot().id > captured
     with _native_only():
         actual = _read(_reader(builder, family), family, plan)
-    transported = _read(_reader(builder, family), family, pickle.loads(pickle.dumps(plan)))
+    with _native_only():
+        transported = _read(pickle.loads(pickle.dumps(_reader(builder, family))), family,
+                            pickle.loads(pickle.dumps(plan)))
     _assert_results(actual, expected)
     _assert_results(transported, expected)
     assert vectors._rows(table, actual[0]).to_pylist() == expected_rows
     assert vectors._rows(table, transported[0]).to_pylist() == expected_rows
+
+
+@pytest.mark.parametrize('family', ['vector', 'batch', 'full-text'])
+def test_public_sdk_plan_constructs_from_typed_sources_and_snapshot(table, family):
+    from pypaimon_rust import datafusion as sdk
+    from pypaimon.execution.native.read.native_search_plan import _plan_from_native, _plan_to_native
+
+    builder = _builder(table, family, native=True)
+    with _native_only():
+        source = _scan(builder, family).scan()
+        reader = _reader(builder, family)
+        expected = _read(reader, family, source)
+        full_text = family == 'full-text'
+        native = _plan_to_native(pickle.loads(pickle.dumps(source)), full_text)
+        cls = sdk.FullTextScanPlan if full_text else sdk.VectorScanPlan
+        reconstructed = cls(native.splits(), native.snapshot())
+        assert reconstructed.snapshot().id() == source.snapshot().id
+        assert all(isinstance(split, (sdk.IndexFullTextSearchSplit, sdk.RawFullTextSearchSplit))
+                   if full_text else isinstance(split, (sdk.IndexVectorSearchSplit, sdk.RawVectorSearchSplit))
+                   for split in reconstructed.splits())
+        assert not hasattr(reconstructed, 'metadata') and not hasattr(reconstructed, 'snapshot_id')
+        transported = _plan_from_native(table, reconstructed, full_text, False)
+        actual = _read(pickle.loads(pickle.dumps(reader)), family, pickle.loads(pickle.dumps(transported)))
+    assert pickle.dumps(transported.splits()) == pickle.dumps(source.splits())
+    _assert_results(actual, expected)

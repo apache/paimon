@@ -76,8 +76,10 @@ def _read(table, native, projection, predicate=None, limit=None):
     reader = builder.new_read()
     with ExitStack() as stack:
         if native:
-            stack.enter_context(patch.object(reader, '_create_split_read',
-                                             side_effect=AssertionError('Python read fallback')))
+            stack.enter_context(patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ))
         return reader.to_arrow(builder.new_scan().plan().splits(), parallelism=1)
 
 
@@ -184,7 +186,7 @@ def test_case_sensitive_user_column_does_not_shadow_metadata(tmp_path, native):
 @pytest.mark.parametrize('user_field,metadata', [
     ('_sequence_number', '_SEQUENCE_NUMBER'), ('_row_id', '_ROW_ID')])
 def test_insensitive_metadata_name_collision_is_ambiguous(tmp_path, user_field, metadata):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
 
     table = _create_table(tmp_path, pa.schema([(user_field, pa.int32())]), {
         'row-tracking.enabled': 'true', 'write.native.enabled': 'true'})

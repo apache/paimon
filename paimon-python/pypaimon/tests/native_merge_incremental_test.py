@@ -64,9 +64,9 @@ def _merge(target, source, stream, native, value_column='value'):
         if native:
             stack.enter_context(patch.object(source, 'snapshot_manager',
                                              side_effect=AssertionError('Python source snapshot resolution')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._normalize_source',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._normalize_source',
                                       side_effect=AssertionError('Python source materialization')))
-            stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
                                       side_effect=AssertionError('Python MERGE matching')))
         messages = builder.new_update().merge_into(
             source, on=['id'], when_matched=[WhenMatched.update({'value': source_col(value_column)})],

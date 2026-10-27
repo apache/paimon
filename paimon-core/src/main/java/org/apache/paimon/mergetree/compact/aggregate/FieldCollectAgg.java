@@ -97,24 +97,19 @@ public class FieldCollectAgg extends FieldAggregator {
 
     @Override
     public Object aggReversed(Object accumulator, Object inputField) {
-        if (countLimit != Integer.MAX_VALUE) {
-            // order is important with limit
-            return agg(inputField, accumulator, true);
-        } else {
-            // we don't need to actually do the reverse here for this agg
-            // because accumulator has been distinct, just let accumulator be accumulator will speed
-            // up
-            // distinct process
-            return agg(accumulator, inputField, false);
-        }
+        return agg(inputField, true, accumulator, false);
     }
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        return agg(accumulator, inputField, false);
+        return agg(accumulator, false, inputField, true);
     }
 
-    private Object agg(Object accumulator, Object inputField, boolean accumulatorHasDuplicate) {
+    private Object agg(
+            Object accumulator,
+            boolean accumulatorHasDuplicate,
+            Object inputField,
+            boolean inputHasDuplicate) {
         InternalArray accumulatorArray = (InternalArray) accumulator;
         InternalArray inputArray = (InternalArray) inputField;
 
@@ -130,16 +125,21 @@ public class FieldCollectAgg extends FieldAggregator {
             return inputArray;
         }
 
-        boolean removeDuplicate = distinct && equaliser != null;
         Collection<Object> collection =
                 distinct && equaliser == null ? new LinkedHashSet<>() : new ArrayList<>();
         if (countLimit >= 0) {
-            collect(collection, accumulatorArray, removeDuplicate && accumulatorHasDuplicate);
-            collect(collection, inputArray, removeDuplicate);
+            collect(
+                    collection,
+                    accumulatorArray,
+                    checkDuplicateUntil(accumulatorHasDuplicate, collection));
+            collect(collection, inputArray, checkDuplicateUntil(inputHasDuplicate, collection));
             return new GenericArray(collection.toArray());
         } else {
-            collect(collection, inputArray, removeDuplicate);
-            collect(collection, accumulatorArray, removeDuplicate);
+            collect(collection, inputArray, checkDuplicateUntil(inputHasDuplicate, collection));
+            collect(
+                    collection,
+                    accumulatorArray,
+                    checkDuplicateUntil(accumulatorHasDuplicate, collection));
             List<Object> result =
                     collection instanceof List
                             ? (List<Object>) collection
@@ -149,8 +149,20 @@ public class FieldCollectAgg extends FieldAggregator {
         }
     }
 
+    private int checkDuplicateUntil(boolean hasDuplicate, Collection<Object> collection) {
+        if (distinct && equaliser != null) {
+            if (hasDuplicate) {
+                return Integer.MAX_VALUE;
+            } else {
+                return collection.size();
+            }
+        } else {
+            return 0;
+        }
+    }
+
     private void collect(
-            Collection<Object> collection, @Nullable InternalArray array, boolean removeDuplicate) {
+            Collection<Object> collection, @Nullable InternalArray array, int checkDuplicateUntil) {
         if (array == null) {
             return;
         }
@@ -160,20 +172,25 @@ public class FieldCollectAgg extends FieldAggregator {
             Object element =
                     elementGetter.getElementOrNull(
                             array, countLimit < 0 ? array.size() - 1 - i : i);
-            if (!(removeDuplicate && contains(collection, element))) {
+            if (!contains(collection, element, checkDuplicateUntil)) {
                 collection.add(element);
             }
         }
     }
 
-    private boolean contains(Collection<Object> list, @Nullable Object element) {
-        if (element == null) {
-            return list.contains(null);
+    private boolean contains(
+            Collection<Object> list, @Nullable Object element, int checkDuplicateUntil) {
+        if (checkDuplicateUntil <= 0) {
+            return false;
         }
 
         for (Object o : list) {
             if (equals(o, element)) {
                 return true;
+            }
+            checkDuplicateUntil--;
+            if (checkDuplicateUntil <= 0) {
+                break;
             }
         }
         return false;

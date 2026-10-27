@@ -19,17 +19,25 @@
 package org.apache.paimon;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.table.SpecialFields.LEVEL;
 import static org.apache.paimon.table.SpecialFields.SEQUENCE_NUMBER;
@@ -191,13 +199,80 @@ public class KeyValue {
     }
 
     public static String rowDataToString(InternalRow row, RowType type) {
-        return IntStream.range(0, type.getFieldCount())
-                .mapToObj(
-                        i ->
-                                String.valueOf(
-                                        InternalRowUtils.createNullCheckingFieldGetter(
-                                                        type.getTypeAt(i), i)
-                                                .getFieldOrNull(row)))
-                .collect(Collectors.joining(", "));
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            DataType fieldType = type.getTypeAt(i);
+            builder.append(
+                    valueToString(
+                            InternalRowUtils.createNullCheckingFieldGetter(fieldType, i)
+                                    .getFieldOrNull(row),
+                            fieldType));
+        }
+        return builder.toString();
+    }
+
+    /**
+     * Converts a value of the given type to a string. Complex values are converted field by field
+     * instead of with {@link Object#toString()}, which is not supported by internal data structures
+     * like {@code ColumnarRow}.
+     */
+    private static String valueToString(@Nullable Object value, DataType type) {
+        if (value == null) {
+            return "null";
+        }
+        switch (type.getTypeRoot()) {
+            case ARRAY:
+                return arrayToString((InternalArray) value, ((ArrayType) type).getElementType());
+            case MULTISET:
+                // a multiset is internally a map from element to INT multiplicity
+                return mapToString(
+                        (InternalMap) value,
+                        ((MultisetType) type).getElementType(),
+                        new IntType(false));
+            case MAP:
+                return mapToString(
+                        (InternalMap) value,
+                        ((MapType) type).getKeyType(),
+                        ((MapType) type).getValueType());
+            case ROW:
+                return "(" + rowDataToString((InternalRow) value, (RowType) type) + ")";
+            case BINARY:
+            case VARBINARY:
+                return Arrays.toString((byte[]) value);
+            default:
+                return String.valueOf(value);
+        }
+    }
+
+    private static String arrayToString(InternalArray array, DataType elementType) {
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(elementType);
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < array.size(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(valueToString(elementGetter.getElementOrNull(array, i), elementType));
+        }
+        return builder.append(']').toString();
+    }
+
+    private static String mapToString(InternalMap map, DataType keyType, DataType valueType) {
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        InternalArray.ElementGetter keyGetter = InternalArray.createElementGetter(keyType);
+        InternalArray.ElementGetter valueGetter = InternalArray.createElementGetter(valueType);
+        StringBuilder builder = new StringBuilder("{");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(valueToString(keyGetter.getElementOrNull(keys, i), keyType));
+            builder.append('=');
+            builder.append(valueToString(valueGetter.getElementOrNull(values, i), valueType));
+        }
+        return builder.append('}').toString();
     }
 }

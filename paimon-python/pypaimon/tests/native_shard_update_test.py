@@ -68,6 +68,46 @@ def _rows(table):
     return builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pydict()
 
 
+@pytest.mark.parametrize('operation', ['update', 'delete', 'shard'])
+def test_direct_public_mutation_constructors_select_native(native_rest_catalog, operation):
+    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+    from pypaimon.write.table_delete import TableDeleteByRowId
+    from pypaimon.write.table_update import ShardTableUpdator
+    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+    table, _ = _table(native_rest_catalog, [
+        dict(p='a', id=1, value=10), dict(p='a', id=2, value=20)])
+    builder = table.new_batch_write_builder()
+    if operation == 'update':
+        with patch('pypaimon.execution.python.write.table_update_by_row_id.PythonTableUpdateByRowId.initialize',
+                   side_effect=AssertionError('Direct update initialized Python')):
+            update = TableUpdateByRowId(table, builder.commit_user, BATCH_COMMIT_IDENTIFIER)
+            messages = update.update_columns(pa.table({'_ROW_ID': [0], 'value': [11]}), ['value'])
+            assert len(update.commit_messages) == len(messages)
+        expected = dict(p=['a', 'a'], id=[1, 2], value=[11, 20])
+    elif operation == 'delete':
+        with patch('pypaimon.execution.python.write.table_delete.PythonTableDeleteByRowId.initialize',
+                   side_effect=AssertionError('Direct delete initialized Python')):
+            messages = TableDeleteByRowId(table).delete([0, 0])
+        expected = dict(p=['a'], id=[2], value=[20])
+    else:
+        with patch('pypaimon.execution.python.write.table_update.ShardTableUpdator.__init__',
+                   side_effect=AssertionError('Direct shard initialized Python')):
+            update = ShardTableUpdator(table, ['id'], ['value'], builder.commit_user, 0, 1)
+            try:
+                with update.arrow_reader() as reader:
+                    for batch in reader:
+                        update.update_by_arrow_batch(pa.record_batch([
+                            pc.multiply(batch['id'], 100)], names=['value']))
+                messages = update.prepare_commit()
+            finally:
+                update.close()
+        expected = dict(p=['a', 'a'], id=[1, 2], value=[100, 200])
+    assert messages and all(message.check_from_snapshot == 1 for message in messages)
+    builder.new_commit().commit(messages)
+    assert _rows(table) == expected
+
+
 @pytest.mark.parametrize('stream', [False, True])
 def test_native_shard_updates_use_the_captured_reader_order(native_rest_catalog, stream):
     table, schema = _table(native_rest_catalog, [
@@ -211,10 +251,20 @@ def test_native_empty_shard_and_configuration_validation(native_rest_catalog):
         _updater(table, columns=())
 
 
-def test_native_shard_rejects_partition_column_updates(native_rest_catalog):
-    table, _ = _table(native_rest_catalog, partitions=True)
-    with pytest.raises(NotImplementedError, match='partition column'):
-        _updater(table, columns=('p',))
+def test_native_shard_rejects_changing_partition_values(native_rest_catalog):
+    table, _ = _table(native_rest_catalog, [dict(p='a', id=1, value=10)], partitions=True)
+    updater = _updater(table, columns=('p',))
+    try:
+        with updater.arrow_reader() as reader:
+            assert sum(batch.num_rows for batch in reader) == 1
+        # Validation may run when a file group flushes or when preparing.
+        with pytest.raises(ValueError, match='Cannot change partition column'):
+            updater.update_by_arrow_batch(pa.record_batch([pa.array(['changed'])], names=['p']))
+            updater.prepare_commit()
+    finally:
+        updater.close()
+    assert table.snapshot_manager().get_latest_snapshot().id == 1
+    assert _rows(table) == dict(p=['a'], id=[1], value=[10])
 
 
 @pytest.mark.parametrize('data_type, original, replacement', [
@@ -296,7 +346,7 @@ def test_native_shard_read_type_preserves_nested_map_and_alias_outputs(
 
 
 def test_native_shard_rejects_malformed_read_type_before_starting(native_rest_catalog):
-    from pypaimon.write.native_commit import create_native_write_table
+    from pypaimon.execution.native.write.native_commit import create_native_write_table
     table, _ = _table(native_rest_catalog, [dict(p='a', id=1, value=10)])
     native = create_native_write_table(table)
     update = native.new_batch_write_builder().new_update().with_update_type(['value'])

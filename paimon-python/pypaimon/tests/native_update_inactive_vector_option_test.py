@@ -17,7 +17,9 @@
 
 """An unused vector format must not disable Parquet/Blob Native mutations."""
 
-from contextlib import ExitStack
+from pypaimon.execution.python.write.table_update_by_row_id import PythonTableUpdateByRowId
+from pypaimon.execution.python.write.table_delete import PythonTableDeleteByRowId
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -25,15 +27,13 @@ import pyarrow.compute as pc
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.data_evolution_merge_into import WhenMatched, WhenNotMatched, source_col
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_update import _native_update_formats_supported
-from pypaimon.write.table_delete import TableDeleteByRowId
-from pypaimon.write.table_update import TableUpdate
-from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_upsert_by_key import TableUpsertByKey
+from pypaimon.execution.native.write.native_update import _native_update_formats_supported
+from pypaimon.execution.python.write.table_update import PythonTableUpdate
+from pypaimon.execution.python.write.table_upsert_by_key import PythonTableUpsert
 
 
 rest_catalog = native_plan_rest_test.rest_catalog
@@ -80,18 +80,19 @@ def _read(table):
     return builder.new_read().to_arrow(builder.new_scan().plan().splits()).sort_by('id').to_pylist()
 
 
+@contextmanager
 def _native_only(native):
-    stack = ExitStack()
-    if native:
-        for owner, method in [(TableUpdateByRowId, '_load_existing_files_info'),
-                              (TableUpsertByKey, '_upsert_partition'),
-                              (TableUpsertByKey, '_upsert_row_partition'),
-                              (TableUpdate, '_build_predicate_update_table'),
-                              (TableDeleteByRowId, '_scan_anchor_ranges')]:
-            stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python mutation fallback')))
-        stack.enter_context(patch('pypaimon.table.data_evolution_merge_into._build_tables',
-                                  side_effect=AssertionError('Python MERGE fallback')))
-    return stack
+    with ExitStack() as stack:
+        if native:
+            for owner, method in [(PythonTableUpdateByRowId, '_load_existing_files_info'),
+                                  (PythonTableUpsert, '_upsert_partition'),
+                                  (PythonTableUpsert, '_upsert_row_partition'),
+                                  (PythonTableUpdate, '_build_predicate_update_table'),
+                                  (PythonTableDeleteByRowId, '_scan_anchor_ranges')]:
+                stack.enter_context(patch.object(owner, method, side_effect=AssertionError('Python mutation fallback')))
+            stack.enter_context(patch('pypaimon.execution.python.write.merge_into._build_tables',
+                                      side_effect=AssertionError('Python MERGE fallback')))
+        yield
 
 
 @pytest.mark.parametrize('native', _ENGINES, ids=['python', 'native'])
@@ -156,8 +157,9 @@ def test_inactive_vector_option_preserves_parquet_blob_mutations(rest_catalog, n
     try:
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(
-                    commit.file_store_commit, 'commit', side_effect=AssertionError('Python commit fallback')))
+                stack.enter_context(patch('pypaimon.execution.python.write.file_store_commit.'
+                                          'FileStoreCommit.commit',
+                                          side_effect=AssertionError('Python commit fallback')))
             commit.commit(messages, 7) if stream else commit.commit(messages)
     finally:
         commit.close()

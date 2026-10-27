@@ -17,12 +17,16 @@
 
 import unittest
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+import pytest
 from parameterized import parameterized
 
+from pypaimon.write.backend_dispatch import python_commit
+from pypaimon.execution.python.write.table_commit import PythonTableCommit
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_options import CommitDedup
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 
@@ -36,7 +40,6 @@ class TestTableCommit(unittest.TestCase):
     ])
     def test_writer_abort_preserves_files_after_commit_exception(self, mode, stream, published):
         import pyarrow as pa
-        from unittest.mock import patch
         from pypaimon import CatalogFactory, Schema
 
         with TemporaryDirectory(prefix='paimon-uncertain-commit-') as warehouse:
@@ -68,14 +71,14 @@ class TestTableCommit(unittest.TestCase):
                         tuple(entry.partition.values), entry.bucket, entry.index_file)
                         for message in messages for entry in message.index_adds)
                 self.assertTrue(paths)
-                publish = commit.file_store_commit.commit
+                publish = python_commit(commit).file_store_commit.commit
 
                 def fail_commit(*args, **kwargs):
                     if published:
                         publish(*args, **kwargs)
                     raise OSError('Commit outcome is unknown')
 
-                with patch.object(commit.file_store_commit, 'commit', side_effect=fail_commit):
+                with patch.object(python_commit(commit).file_store_commit, 'commit', side_effect=fail_commit):
                     with self.assertRaisesRegex(OSError, 'Commit outcome is unknown'):
                         commit.commit(messages, 1) if stream else commit.commit(messages)
                 # An unknown commit outcome must never trigger explicit commit abort.
@@ -96,7 +99,7 @@ class TestTableCommit(unittest.TestCase):
     def test_empty_append_snapshot_is_opt_in_and_can_be_tagged(self):
         import pyarrow as pa
         import pypaimon.multimodal as pmm
-        from pypaimon.casting.schema_evolution import read_arrow_schema
+        from pypaimon.schema.arrow_schema import read_arrow_schema
 
         with TemporaryDirectory(prefix="paimon-empty-commit-") as warehouse:
             connection = pmm.connect(options={"warehouse": warehouse})
@@ -147,11 +150,11 @@ class TestTableCommit(unittest.TestCase):
         commit.table.options.native_commit_enabled.return_value = False
         commit.commit_user = 'test_user'
         commit.overwrite_partition = overwrite_partition
-        commit.file_store_commit = Mock()
-        commit.batch_committed = False
+        commit._python_commit = PythonTableCommit(Mock(), overwrite_partition)
+        commit._batch_committed = False
         commit._commit_callbacks = []
         commit._native_commit = None
-        return commit, commit.file_store_commit
+        return commit, python_commit(commit).file_store_commit
 
     # -- Overwrite mode: should always call overwrite(), even with empty messages --
 
@@ -254,12 +257,51 @@ class TestTableCommit(unittest.TestCase):
             snapshot_properties={"checkpoint": "42"},
         )
 
+    @parameterized.expand([
+        (stream, on_first_attempt)
+        for stream in (False, True)
+        for on_first_attempt in (False, True)
+    ])
+    @pytest.mark.python_commit
+    def test_dedup_identity_survives_lazy_backend_initialization(self, stream, on_first_attempt):
+        import pyarrow as pa
+        from pypaimon import CatalogFactory, Schema
+
+        with TemporaryDirectory(prefix='paimon-lazy-commit-') as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', True)
+            catalog.create_table('default.t', Schema.from_pyarrow_schema(
+                pa.schema([('id', pa.int64())]),
+                options={'commit.native.enabled': 'false'}), False)
+            table = catalog.get_table('default.t')
+            builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+            dedup = CommitDedup(
+                on_first_attempt=on_first_attempt, base_snapshot_id=7, base_file_millis=123)
+
+            with patch.object(table, 'new_snapshot_commit', wraps=table.new_snapshot_commit) as snapshot_commit:
+                commit = builder.new_commit(dedup=dedup)
+                try:
+                    self.assertIsNone(commit._python_commit)
+                    self.assertIs(commit._dedup, dedup)
+                    self.assertFalse(hasattr(commit, 'file_store_commit'))
+                    snapshot_commit.assert_not_called()
+
+                    execution = python_commit(commit)
+
+                    self.assertIsInstance(execution, PythonTableCommit)
+                    self.assertIs(commit._python_commit, execution)
+                    self.assertIs(commit._dedup, dedup)
+                    self.assertIs(execution.file_store_commit.dedup, dedup)
+                    self.assertIs(python_commit(commit), execution)
+                    self.assertFalse(hasattr(commit, 'file_store_commit'))
+                    snapshot_commit.assert_called_once_with()
+                finally:
+                    commit.close()
+
     def test_native_commit_raises_when_first_attempt_dedup_requested(self):
         """actor mode + native commit is unsupported: the native committer
         has no dedup scan, so a replayed commit would publish the same files
         twice. Initialising the commit must raise NotImplementedError."""
-        from pypaimon.write.file_store_commit import CommitDedup
-
         table = Mock()
         table.identifier = 'default.test_table'
         table.new_snapshot_commit.return_value = Mock()
@@ -275,8 +317,6 @@ class TestTableCommit(unittest.TestCase):
 
     def test_native_commit_does_not_raise_without_first_attempt_dedup(self):
         """native commit without actor-mode dedup is fine."""
-        from pypaimon.write.file_store_commit import CommitDedup
-
         table = Mock()
         table.identifier = 'default.test_table'
         table.new_snapshot_commit.return_value = Mock()

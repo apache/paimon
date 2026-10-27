@@ -26,7 +26,7 @@ from pypaimon.common.options import CoreOptions, Options
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
-from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
+from pypaimon.schema.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         DataType, MapType, MultisetType, RowType,
                                         is_array_blob_type, is_blob_file_field,

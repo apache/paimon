@@ -32,6 +32,7 @@ from pypaimon.catalog.catalog_exception import (
     TableNotExistException, DatabaseAlreadyExistException,
     TableAlreadyExistException, DatabaseNotExistException,
     TableNoPermissionException, DatabaseNoPermissionException,
+    TableIdNotExistException, TableIdNoPermissionException,
     FunctionNotExistException, FunctionAlreadyExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
@@ -249,6 +250,22 @@ class RESTCatalog(Catalog):
         if identifier.is_system_table():
             return self._load_system_table(identifier)
         return self._load_data_table(identifier)
+
+    def get_table_by_id(self, table_id: str) -> Table:
+        try:
+            response = self.rest_api.get_table_by_id(table_id)
+        except NoSuchResourceException as e:
+            raise TableIdNotExistException(table_id) from e
+        except ForbiddenException as e:
+            raise TableIdNoPermissionException(table_id) from e
+        database = response.get_database()
+        identifier = Identifier.create(database, response.get_name())
+        return self.load_table(
+            identifier,
+            lambda path: self.file_io_for_data(path, identifier),
+            self.file_io_from_options,
+            lambda _: self.to_table_metadata(database, response),
+        )
 
     def _load_data_table(self, identifier: Identifier) -> Union[FormatTable, IcebergTable, ObjectTable, FileStoreTable]:
         return self.load_table(

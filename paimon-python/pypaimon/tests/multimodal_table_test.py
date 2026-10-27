@@ -28,6 +28,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 import pypaimon.multimodal as pmm
+from pypaimon.execution.python.read.table_read import PythonTableRead
 from pypaimon.multimodal import source_col
 from pypaimon.common.json_util import JSON
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -995,7 +996,7 @@ class MultimodalTableTest(unittest.TestCase):
             for key in ("other/a", "other/b", "images/a", "images/b", "images/c", "images/d")
         ])
         store = table.blobs(column="image")
-        original = TableRead._arrow_batch_generator
+        original = PythonTableRead._arrow_batch_generator
         batches, closed = [], []
 
         def tracked_read(read, *args, **kwargs):
@@ -1009,7 +1010,7 @@ class MultimodalTableTest(unittest.TestCase):
                 closed.append(True)
 
         with patch.object(TableRead, "to_arrow", side_effect=AssertionError("full read")), \
-                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+                patch.object(PythonTableRead, "_arrow_batch_generator", tracked_read):
             self.assertEqual([], store.list_objects(limit=0))
             self.assertEqual([], batches)
             listed = store.list_objects(prefix="images/", limit=1, columns=["owner"])
@@ -1549,9 +1550,9 @@ class MultimodalTableTest(unittest.TestCase):
                 closed.append(True)
 
         with patch(
-                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                "pypaimon.execution.python.read.table_read.PythonTableRead._arrow_batch_generator",
                 new=batches), patch(
-                    "pypaimon.read.table_read."
+                    "pypaimon.read.read_support."
                     "_RECORD_BATCH_READER_FROM_STREAM", None):
             reader = users.scan().select("id").to_arrow_batch_reader()
             reader.read_next_batch()
@@ -1560,7 +1561,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         closed.clear()
         with patch(
-                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                "pypaimon.execution.python.read.table_read.PythonTableRead._arrow_batch_generator",
                 new=batches):
             reader = users.scan().select("id").to_arrow_batch_reader()
             reader.read_next_batch()
@@ -1570,7 +1571,7 @@ class MultimodalTableTest(unittest.TestCase):
         read_builder = users.raw_table.new_read_builder()
         splits = read_builder.new_scan().plan().splits()
         with patch(
-                "pypaimon.read.table_read."
+                "pypaimon.read.read_support."
                 "_RECORD_BATCH_READER_FROM_STREAM", None):
             reader = read_builder.new_read().to_arrow_batch_reader(splits)
         self.assertIsInstance(reader, pa.RecordBatchReader)
@@ -2176,14 +2177,12 @@ class MultimodalTableTest(unittest.TestCase):
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
 
     def test_scan_stream_blobs_closes_underlying_iterator(self):
-        from pypaimon.read.table_read import TableRead
-
         table = self.conn.create_table(
             "stream_cleanup", schema=_schema({
                 "id": pa.int32(), "image": pa.large_binary(),
             }), options=dict(_PARQUET_OPTIONS, **{"read.batch-size": "1"}))
         table.add([{"id": i, "image": b"body"} for i in range(3)])
-        original = TableRead._arrow_batch_generator
+        original = PythonTableRead._arrow_batch_generator
         closed = []
 
         def tracked_read(read, *args, **kwargs):
@@ -2194,8 +2193,8 @@ class MultimodalTableTest(unittest.TestCase):
                 reader.close()
                 closed.append(True)
 
-        with patch.object(TableRead, "_try_native_batches", return_value=None), \
-                patch.object(TableRead, "_arrow_batch_generator", tracked_read):
+        with patch("pypaimon.read.read_dispatch._native_read_execution", return_value=None), \
+                patch.object(PythonTableRead, "_arrow_batch_generator", tracked_read):
             stream = table.scan().stream_blobs("image")
             next(stream)
             stream.close()

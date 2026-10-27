@@ -1,0 +1,1524 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+import logging
+import random
+import time
+import uuid
+from typing import Dict, List, Optional, Tuple
+
+from pypaimon.build_info import full_version as build_full_version
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.file_entry import FileEntry
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+
+from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
+                                               SnapshotCommit)
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.utils.file_store_path_factory import canonical_data_file_path
+from pypaimon.execution.python.write.commit.commit_scanner import CommitScanner
+from pypaimon.execution.python.write.commit.conflict_detection import (
+    ConflictDetection,
+    RowIdExistenceConflict,
+)
+from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import (
+    RowIdConflictRewriter,
+    RowIdRewriteResult,
+)
+from pypaimon.execution.python.write.commit.overwrite_changes_provider import OverwriteChanges, OverwriteChangesProvider
+from pypaimon.table.special_fields import SpecialFields
+from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
+from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_file_check import check_commit_files
+from pypaimon.write.commit_options import CommitDedup
+from pypaimon.execution.python.write.partition_spec import _UNREPRESENTABLE_PARTITION_VALUE, _partition_spec_value
+
+logger = logging.getLogger(__name__)
+
+# How many times the duplicate-commit scan re-reads a window it could not fully
+# inspect before giving up. A snapshot can be unreadable transiently (it is
+# being written, or an eventually-consistent listing has not caught up), and a
+# retry is far cheaper than failing a commit that would have been recognised.
+DEDUP_RESCAN_ATTEMPTS = 3
+DEDUP_RESCAN_WAIT_SECONDS = 0.2
+
+
+class DedupEvidenceMissing(RuntimeError):
+    """The duplicate-commit scan could not establish whether this commit landed.
+
+    Raised instead of committing: a commit that may already be on the table must
+    not be written a second time, and the scan cannot prove it is not there.
+    """
+
+
+def _row_id_check_from_messages(messages: List[CommitMessage]) -> Optional[int]:
+    """Check conflicts from the earliest baseline, matching the native committer."""
+    check_from_snapshot = None
+    for message in messages:
+        snapshot = message.check_from_snapshot
+        if snapshot is None:
+            continue
+        if snapshot < 0:
+            raise ValueError('Invalid row-id check snapshot: %s' % snapshot)
+        check_from_snapshot = (snapshot if check_from_snapshot is None
+                               else min(check_from_snapshot, snapshot))
+    if check_from_snapshot is not None:
+        for message in messages:
+            if message.check_from_snapshot is not None:
+                continue
+            if any(file.first_row_id is not None
+                   for file in message.new_files + message.deleted_files):
+                raise ValueError(
+                    'A row-id commit message is missing its check-from snapshot.')
+    return check_from_snapshot
+
+
+def _reject_compact_increment(messages: List[CommitMessage]):
+    # Java commits this increment as a separate COMPACT snapshot.
+    for message in messages:
+        if (message.compact_before or message.compact_after or
+                message.compact_changelog_files or
+                message.compact_index_adds or message.compact_index_deletes):
+            raise NotImplementedError(
+                'Committing a compact increment requires a separate COMPACT snapshot.')
+
+
+class CommitResult:
+    """Base class for commit results."""
+
+    def is_success(self) -> bool:
+        """Returns True if commit was successful."""
+        raise NotImplementedError
+
+
+class SuccessResult(CommitResult):
+    """Result indicating successful commit."""
+
+    def is_success(self) -> bool:
+        return True
+
+
+class RetryResult(CommitResult):
+
+    def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
+                 base_data_files: Optional[List[ManifestEntry]] = None,
+                 commit_result_may_be_uncertain: bool = False):
+        self.latest_snapshot = latest_snapshot
+        self.exception = exception
+        self.commit_result_may_be_uncertain = commit_result_may_be_uncertain
+        # Base entries as of latest_snapshot, carried so the next attempt reuses
+        # them and reads only the incremental changes.
+        self.base_data_files = base_data_files
+
+    def is_success(self) -> bool:
+        return False
+
+
+class CommitFailRetryResult(RetryResult):
+    """Retry after an atomic snapshot commit failed, matching Java."""
+
+
+class RewriteResult(CommitResult):
+
+    def __init__(self, rewrite: RowIdRewriteResult):
+        self.rewrite = rewrite
+
+    def is_success(self) -> bool:
+        return False
+
+
+class FileStoreCommit:
+    """
+    Core commit logic for file store operations.
+
+    This class provides atomic commit functionality similar to
+    org.apache.paimon.operation.FileStoreCommitImpl in Java.
+    """
+
+    def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
+                 commit_callbacks: Optional[List[CommitCallback]] = None,
+                 close_commit_callbacks: bool = True,
+                 dedup: Optional[CommitDedup] = None):
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        self.snapshot_commit = snapshot_commit
+        self.table: FileStoreTable = table
+        self.commit_user = commit_user
+        self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
+        self.dedup = dedup if dedup is not None else CommitDedup()
+        self.close_commit_callbacks = close_commit_callbacks
+
+        self.snapshot_manager = table.snapshot_manager()
+        self.manifest_file_manager = ManifestFileManager(table)
+        self.manifest_list_manager = ManifestListManager(table)
+
+        self.manifest_target_size = table.options.manifest_target_size()
+
+        self.commit_max_retries = table.options.commit_max_retries()
+        self.commit_timeout = table.options.commit_timeout()
+        self.commit_min_retry_wait = table.options.commit_min_retry_wait()
+        self.commit_max_retry_wait = table.options.commit_max_retry_wait()
+
+        self.row_id_conflict_rewrite_max_size = (
+            table.options.data_evolution_row_id_conflict_rewrite_max_size()
+        )
+
+        self.commit_scanner = CommitScanner(table, self.manifest_list_manager)
+
+        self.conflict_detection = ConflictDetection(
+            data_evolution_enabled=table.options.data_evolution_enabled(),
+            snapshot_manager=self.snapshot_manager,
+            manifest_list_manager=self.manifest_list_manager,
+            table=table,
+            commit_scanner=self.commit_scanner
+        )
+
+    def _set_fixed_bucket_commit_check(self, messages):
+        from pypaimon.execution.python.write.commit.fixed_bucket_commit_check import FixedBucketCommitCheck
+
+        self.conflict_detection.fixed_bucket_commit_check = (
+            FixedBucketCommitCheck(messages)
+            if any(message.total_buckets is not None for message in messages)
+            else None)
+
+    def commit(
+            self,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
+        """Commit the given commit messages in normal append mode."""
+        ignore_empty_commit = self.table.options.snapshot_ignore_empty_commit()
+        if not commit_messages and ignore_empty_commit:
+            return
+
+        _reject_compact_increment(commit_messages)
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
+        # A committer can be reused; an untagged commit clears the prior baseline.
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
+
+        logger.info(
+            "Ready to commit to table %s, number of commit messages: %d",
+            self.table.identifier,
+            len(commit_messages),
+        )
+        commit_entries = self._collect_manifest_entries(commit_messages)
+        changelog_entries = self._collect_changelog_entries(commit_messages)
+
+        logger.info("Finished collecting changes, including: %d entries, %d changelog entries",
+                    len(commit_entries), len(changelog_entries))
+
+        index_deletes = []
+        index_adds = []
+        for msg in commit_messages:
+            index_deletes.extend(msg.index_deletes)
+            index_adds.extend(msg.index_adds)
+        from pypaimon.execution.python.write.global_index_update_checker import (
+            _updated_columns_for_commit, apply_global_index_update_action,
+        )
+        updated_cols, written_partitions = _updated_columns_for_commit(self.table, commit_messages)
+        if updated_cols:
+            snapshot = self.snapshot_manager.get_latest_snapshot()
+            index_msgs = apply_global_index_update_action(
+                self.table, snapshot, list(updated_cols), written_partitions, index_deletes,
+            )
+            for m in index_msgs:
+                index_deletes.extend(m.index_deletes)
+
+        commit_kind = "APPEND"
+        detect_conflicts = False
+        if self.conflict_detection.should_be_overwrite_commit(
+                commit_entries, index_adds + index_deletes):
+            commit_kind = "OVERWRITE"
+            detect_conflicts = True
+        if self.conflict_detection.has_row_id_check_from_snapshot():
+            detect_conflicts = True
+        if self.conflict_detection.has_global_index_additions(index_adds):
+            detect_conflicts = True
+        if self.conflict_detection.has_hash_index_changes(
+                index_adds + index_deletes):
+            detect_conflicts = True
+        if any(message.total_buckets is not None
+               for message in commit_messages):
+            # Detect concurrent bucket-count changes in postpone APPENDs.
+            detect_conflicts = True
+
+        self._try_commit(commit_kind=commit_kind,
+                         commit_identifier=commit_identifier,
+                         commit_entries_plan=lambda snapshot: commit_entries,
+                         changelog_entries=changelog_entries,
+                         detect_conflicts=detect_conflicts,
+                         index_deletes=index_deletes,
+                         index_adds=index_adds,
+                         snapshot_properties=snapshot_properties,
+                         allow_empty_commit=not ignore_empty_commit)
+
+    def overwrite(
+            self,
+            overwrite_partition,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
+        """Commit the given commit messages in overwrite mode."""
+        _reject_compact_increment(commit_messages)
+        check_from_snapshot = _row_id_check_from_messages(commit_messages)
+        self._set_fixed_bucket_commit_check(commit_messages)
+        self.conflict_detection._row_id_check_from_snapshot = check_from_snapshot
+        logger.info(
+            "Ready to overwrite to table %s, number of commit messages: %d",
+            self.table.identifier,
+            len(commit_messages),
+        )
+        skip_overwrite = False
+        partition_filter = None
+
+        # Partition filter is built from dynamic or static partition according to options.
+        if len(self.table.partition_keys) > 0 and self.table.options.dynamic_partition_overwrite():
+            data_messages = [message for message in commit_messages
+                             if message.new_files or message.deleted_files]
+            if not data_messages:
+                # Java derives dynamic overwrite targets from table-file
+                # changes. Index/changelog-only messages do not replace data.
+                skip_overwrite = True
+            else:
+                partition_filter = self._create_dynamic_partition_filter(data_messages)
+        else:
+            partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
+
+        if not skip_overwrite:
+            provider = self._overwrite_changes_provider(partition_filter, commit_messages)
+            self._try_commit(
+                commit_kind="OVERWRITE",
+                commit_identifier=commit_identifier,
+                commit_entries_plan=provider.provide,
+                changelog_entries=[],
+                detect_conflicts=True,
+                snapshot_properties=snapshot_properties,
+                # Java records static/table overwrite even when no files match.
+                allow_empty_commit=True,
+            )
+
+    def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        partition_predicates = []
+        for part in partitions:
+            pred = self._create_partition_spec_filter(part)
+            if pred is not None:
+                partition_predicates.append(pred)
+        if not partition_predicates:
+            raise RuntimeError("Failed to build partition filter for drop_partitions.")
+
+        partition_filter = predicate_builder.or_predicates(partition_predicates)
+
+        self.drop_by_partition_filter(partition_filter, commit_identifier)
+
+    def drop_by_partition_filter(self, partition_filter, commit_identifier: int) -> None:
+        if partition_filter is None:
+            raise RuntimeError("Failed to build partition filter.")
+
+        provider = self._overwrite_changes_provider(partition_filter, [])
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=provider.provide,
+            detect_conflicts=True,
+            # Java records a partition overwrite even when no files match.
+            allow_empty_commit=True,
+        )
+
+    def truncate_table(self, commit_identifier: int) -> None:
+        """Truncate the entire table, deleting all data."""
+        provider = self._overwrite_changes_provider(None, [])
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=provider.provide,
+            detect_conflicts=True,
+            allow_empty_commit=True,
+        )
+
+    def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
+                    detect_conflicts=False, index_deletes=None,
+                    index_adds=None, changelog_entries=None,
+                    snapshot_properties: Optional[Dict[str, str]] = None,
+                    allow_empty_commit=False):
+
+        retry_count = 0
+        retry_result = None
+        commit_result_may_be_uncertain = False
+        uncertain_commit_exception = None
+        rewritten_commit_entries = None
+        start_time_ms = int(time.time() * 1000)
+        while True:
+            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            self._validate_dedup_anchor(latest_snapshot, retry_result)
+            if self._is_duplicate_commit(
+                    retry_result,
+                    latest_snapshot,
+                    commit_identifier,
+                    commit_kind,
+                    notify_callbacks=True,
+                    commit_result_may_be_uncertain=commit_result_may_be_uncertain):
+                break
+            changes = (
+                rewritten_commit_entries
+                if rewritten_commit_entries is not None
+                else commit_entries_plan(latest_snapshot)
+            )
+            if isinstance(changes, OverwriteChanges):
+                commit_entries = changes.table_files
+                attempt_index_adds = changes.index_adds
+                attempt_index_deletes = changes.index_deletes
+            else:
+                commit_entries = changes
+                attempt_index_adds = index_adds
+                attempt_index_deletes = index_deletes
+
+            # Callers opt in when the operation records an empty snapshot.
+            if (not allow_empty_commit and not commit_entries and not changelog_entries
+                    and not attempt_index_deletes and not attempt_index_adds):
+                break
+
+            if (self.dedup.on_first_attempt
+                    or isinstance(retry_result, CommitFailRetryResult)):
+                check_commit_files(
+                    self.table, commit_entries, changelog_entries or (),
+                    attempt_index_adds or ())
+
+            result = self._try_commit_once(
+                retry_result=retry_result,
+                commit_kind=commit_kind,
+                commit_entries=commit_entries,
+                changelog_entries=changelog_entries or [],
+                commit_identifier=commit_identifier,
+                latest_snapshot=latest_snapshot,
+                detect_conflicts=detect_conflicts,
+                index_deletes=attempt_index_deletes,
+                index_adds=attempt_index_adds,
+                commit_result_may_be_uncertain=commit_result_may_be_uncertain,
+                snapshot_properties=snapshot_properties,
+            )
+
+            if isinstance(result, RewriteResult):
+                rewritten_commit_entries = result.rewrite.commit_entries
+                self.conflict_detection._row_id_check_from_snapshot = (
+                    latest_snapshot.id
+                )
+                # No snapshot commit was attempted for the conflicting files,
+                # so the rewritten attempt is still deterministic.
+                retry_result = None
+                logger.info(
+                    "Rewrote %d stale row-id file(s) against snapshot %d "
+                    "before retrying commit to table %s.",
+                    result.rewrite.rewritten_file_count,
+                    latest_snapshot.id,
+                    self.table.identifier,
+                )
+            elif result.is_success():
+                commit_duration_ms = int(time.time() * 1000) - start_time_ms
+                if commit_kind == "OVERWRITE":
+                    logger.info(
+                        "Finished overwrite to table %s, duration %d ms",
+                        self.table.identifier,
+                        commit_duration_ms,
+                    )
+                else:
+                    logger.info(
+                        "Finished commit to table %s, duration %d ms",
+                        self.table.identifier,
+                        commit_duration_ms,
+                    )
+                break
+            else:
+                retry_result = result
+                if result.commit_result_may_be_uncertain:
+                    commit_result_may_be_uncertain = True
+                    if uncertain_commit_exception is None:
+                        uncertain_commit_exception = result.exception
+
+            elapsed_ms = int(time.time() * 1000) - start_time_ms
+            if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
+                if commit_kind == "OVERWRITE":
+                    logger.info(
+                        "Finished (Uncertain of success) overwrite to table %s, duration %d ms",
+                        self.table.identifier,
+                        elapsed_ms,
+                    )
+                else:
+                    logger.info(
+                        "Finished (Uncertain of success) commit to table %s, duration %d ms",
+                        self.table.identifier,
+                        elapsed_ms,
+                    )
+                error_msg = (
+                    f"Commit failed {latest_snapshot.id + 1 if latest_snapshot else 1} "
+                    f"after {elapsed_ms} millis with {retry_count} retries, "
+                    f"there maybe exist commit conflicts between multiple jobs."
+                )
+                if commit_result_may_be_uncertain:
+                    raise RuntimeError(error_msg) from uncertain_commit_exception
+                if retry_result is not None and retry_result.exception:
+                    raise RuntimeError(error_msg) from retry_result.exception
+                else:
+                    raise RuntimeError(error_msg)
+
+            self._commit_retry_wait(retry_count)
+            retry_count += 1
+
+    def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
+                         commit_entries: List[ManifestEntry],
+                         changelog_entries: List[ManifestEntry],
+                         commit_identifier: int,
+                         latest_snapshot: Optional[Snapshot],
+                         detect_conflicts: bool = False,
+                         index_deletes=None,
+                         index_adds=None,
+                         commit_result_may_be_uncertain: bool = False,
+                         snapshot_properties: Optional[Dict[str, str]] = None
+                         ) -> CommitResult:
+        """Prepare and publish an attempt authorized by the commit loop."""
+        start_millis = int(time.time() * 1000)
+        unique_id = uuid.uuid4()
+        base_manifest_list = f"manifest-list-{unique_id}-0"
+        delta_manifest_list = f"manifest-list-{unique_id}-1"
+
+        # process new_manifest
+        new_manifest_file = f"manifest-{str(uuid.uuid4())}"
+        new_index_manifest = None
+        # process snapshot
+        new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
+        index_entries = (index_deletes or []) + (index_adds or [])
+
+        # Base entries for conflict detection. On retry, reuse the previous
+        # attempt's base + read only the incremental changes (mirrors Java).
+        base_data_files = None
+        if detect_conflicts:
+            incremental = None
+            commit_fail_retry = (
+                retry_result
+                if isinstance(retry_result, CommitFailRetryResult)
+                else None
+            )
+            if (latest_snapshot is not None
+                    and commit_fail_retry is not None
+                    and commit_fail_retry.latest_snapshot is not None
+                    and commit_fail_retry.base_data_files is not None):
+                incremental = self.commit_scanner.read_incremental_changes(
+                    commit_fail_retry.latest_snapshot,
+                    latest_snapshot,
+                    commit_entries,
+                    index_entries)
+            if incremental is not None:
+                base_data_files = list(commit_fail_retry.base_data_files)
+                if incremental:
+                    base_data_files.extend(incremental)
+                    base_data_files = FileEntry.merge_entries(base_data_files)
+            elif latest_snapshot is not None:
+                # First attempt, or incremental could not be built (missing
+                # snapshot): scan the changed partitions in full.
+                base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
+                    latest_snapshot, commit_entries, index_entries)
+            else:
+                base_data_files = []
+
+            conflict_exception = self.conflict_detection.check_conflicts(
+                latest_snapshot,
+                base_data_files,
+                commit_entries,
+                commit_kind,
+                index_entries,
+            )
+
+            if conflict_exception is not None:
+                rewrite_result = self._try_rewrite_row_id_conflict(
+                    commit_result_may_be_uncertain,
+                    conflict_exception,
+                    latest_snapshot,
+                    base_data_files,
+                    commit_entries,
+                    commit_kind,
+                    commit_identifier,
+                    changelog_entries,
+                )
+                if rewrite_result is not None:
+                    return RewriteResult(rewrite_result)
+                # Automatic rollback can delete snapshots and tags already used by readers.
+                raise conflict_exception
+
+        # Apply row tracking logic after conflict detection (matches Java ordering)
+        row_tracking_enabled = self.table.options.row_tracking_enabled()
+        next_row_id = None
+        if row_tracking_enabled:
+            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+            group_by_partition = (
+                self.table.options.row_tracking_partition_group_on_commit())
+            if group_by_partition:
+                commit_entries = self._group_commit_entries_by_partition(
+                    commit_entries)
+            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
+            commit_entries, next_row_id = self._assign_row_tracking_meta(
+                first_row_id_start, commit_entries)
+
+        changelog_manifest_list_name = None
+        changelog_manifest_list_size = None
+        changelog_record_count = None
+        try:
+            new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
+            delta_manifest_list_size = self.manifest_list_manager.write(
+                delta_manifest_list, new_manifest_file_metas)
+
+            # Write changelog manifest if changelog entries exist
+            if changelog_entries:
+                changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog"
+                changelog_manifest_file_metas = self._write_manifest_files(
+                    changelog_entries, changelog_manifest_file)
+                changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
+                changelog_manifest_list_size = self.manifest_list_manager.write(
+                    changelog_manifest_list_name, changelog_manifest_file_metas)
+                # kind==0 means ADD; pypaimon producers only support additions currently
+                changelog_record_count = sum(
+                    entry.file.row_count for entry in changelog_entries if entry.kind == 0)
+
+            # Manifest compaction is handled by external maintenance.
+            existing_manifests = []
+            total_record_count = 0
+            if latest_snapshot:
+                existing_manifests = self.manifest_list_manager.read_all(
+                    latest_snapshot)
+                previous_record_count = latest_snapshot.total_record_count
+                if previous_record_count:
+                    total_record_count += previous_record_count
+
+            base_manifest_list_size = self.manifest_list_manager.write(
+                base_manifest_list, existing_manifests)
+
+            delta_record_count = 0
+            for entry in commit_entries:
+                if entry.kind == 0:
+                    delta_record_count += entry.file.row_count
+                else:
+                    delta_record_count -= entry.file.row_count
+
+            total_record_count += delta_record_count
+            index_manifest = latest_snapshot.index_manifest if latest_snapshot else None
+            if index_deletes or index_adds:
+                from pypaimon.manifest.index_manifest_file import IndexManifestFile
+                previous_index_manifest = index_manifest
+                index_manifest = IndexManifestFile(self.table).combine_changes(
+                    previous_index_manifest, index_adds or [], index_deletes or [])
+                if index_manifest != previous_index_manifest:
+                    new_index_manifest = index_manifest
+
+            snapshot_data = Snapshot(
+                version=3,
+                id=new_snapshot_id,
+                schema_id=self.table.schema_manager.latest().id,
+                base_manifest_list=base_manifest_list,
+                base_manifest_list_size=base_manifest_list_size,
+                delta_manifest_list=delta_manifest_list,
+                delta_manifest_list_size=delta_manifest_list_size,
+                changelog_manifest_list=changelog_manifest_list_name,
+                changelog_manifest_list_size=changelog_manifest_list_size,
+                changelog_record_count=changelog_record_count,
+                total_record_count=total_record_count,
+                delta_record_count=delta_record_count,
+                commit_user=self.commit_user,
+                writer_version=build_full_version(),
+                commit_identifier=commit_identifier,
+                commit_kind=commit_kind,
+                time_millis=int(time.time() * 1000),
+                watermark=(
+                    latest_snapshot.watermark if latest_snapshot else None),
+                next_row_id=next_row_id,
+                index_manifest=index_manifest,
+                properties=self._build_snapshot_properties(snapshot_properties),
+            )
+            # Generate partition statistics for the commit
+            statistics = self._generate_partition_statistics(commit_entries)
+        except Exception as e:
+            try:
+                self._clean_up_tmp_manifests(
+                    base_manifest_list, delta_manifest_list,
+                    changelog_manifest_list_name, new_index_manifest)
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up temporary files: {cleanup_err}",
+                               exc_info=True)
+            logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to prepare snapshot: {e}")
+
+        # Use SnapshotCommit for atomic commit
+        try:
+            with self.snapshot_commit:
+                success = self.snapshot_commit.commit(
+                    latest_snapshot.uuid if latest_snapshot else None,
+                    snapshot_data,
+                    statistics,
+                )
+                if not success:
+                    commit_time_s = (int(time.time() * 1000) - start_millis) / 1000
+                    logger.warning(
+                        "Atomic commit failed for snapshot #%d by user %s "
+                        "with identifier %s and kind %s after %.0f seconds. Try again.",
+                        new_snapshot_id,
+                        self.commit_user,
+                        commit_identifier,
+                        commit_kind,
+                        commit_time_s,
+                    )
+                    return CommitFailRetryResult(
+                        latest_snapshot,
+                        None,
+                        base_data_files=base_data_files,
+                    )
+        except Exception as e:
+            # Commit exception, not sure about the situation and should not clean up the files
+            logger.warning("Retry commit for exception.", exc_info=True)
+            return CommitFailRetryResult(
+                latest_snapshot,
+                e,
+                base_data_files=base_data_files,
+                commit_result_may_be_uncertain=True,
+            )
+
+        logger.info(
+            "Successfully commit snapshot %d to table %s by user %s "
+            "with identifier %s and kind %s.",
+            new_snapshot_id,
+            self.table.identifier,
+            self.commit_user,
+            commit_identifier,
+            commit_kind,
+        )
+
+        self._notify_commit_callbacks(
+            snapshot_data, commit_entries, commit_identifier)
+
+        return SuccessResult()
+
+    def _try_rewrite_row_id_conflict(
+            self,
+            commit_result_may_be_uncertain,
+            conflict_exception,
+            latest_snapshot,
+            base_data_files,
+            commit_entries,
+            commit_kind,
+            commit_identifier,
+            changelog_entries):
+        if not isinstance(conflict_exception, RowIdExistenceConflict):
+            return None
+        if commit_kind != "APPEND" or changelog_entries:
+            return None
+        if commit_result_may_be_uncertain:
+            return None
+
+        non_compaction_conflict = (
+            self.conflict_detection.check_row_id_from_snapshot(
+                latest_snapshot,
+                commit_entries,
+                check_compaction=False,
+            )
+        )
+        if non_compaction_conflict is not None:
+            raise RuntimeError(
+                str(non_compaction_conflict)
+            ) from non_compaction_conflict
+
+        try:
+            return RowIdConflictRewriter(
+                self.table,
+                self.commit_user,
+                commit_identifier,
+                self.row_id_conflict_rewrite_max_size,
+            ).rewrite(
+                latest_snapshot,
+                base_data_files,
+                commit_entries,
+            )
+        except RuntimeError as rewrite_error:
+            raise RuntimeError(
+                "{} {}".format(conflict_exception, rewrite_error)
+            ) from conflict_exception
+
+    def _write_manifest_files(self, commit_entries, base_name):
+        return self.manifest_file_manager.rolling_write(
+            commit_entries, self.manifest_target_size, base_name)
+
+    def _build_snapshot_properties(
+            self,
+            snapshot_properties: Optional[Dict[str, str]]
+    ) -> Optional[Dict[str, str]]:
+        """Merge commit.metadata.* options into the snapshot's properties.
+
+        Keys under ``commit.metadata.`` are re-prefixed with ``paimon.`` and
+        written into the committed snapshot, so a caller can tag a commit with
+        its own metadata without the table schema knowing about it. The options
+        are read from ``table.options``, which already carries whatever
+        ``WriteBuilder.with_options()`` applied via ``table.copy()``.
+
+        Properties passed explicitly to ``commit()`` are the most specific
+        source and win over anything derived from options.
+        """
+        properties = {}
+        for key, value in self.table.options.options.to_map().items():
+            if key.startswith(CoreOptions.COMMIT_METADATA_PREFIX) and value is not None:
+                properties[CoreOptions.SNAPSHOT_COMMIT_PREFIX + key] = str(value)
+        if snapshot_properties:
+            properties.update(snapshot_properties)
+        return properties or None
+
+    def _dedup_scan_window(self, retry_result, end_id: int) -> Tuple[int, bool]:
+        """Lowest snapshot id our own commit could occupy, and whether the
+        history reaching back that far is still intact.
+
+        The second return value is False when snapshots that could have held our
+        commit are no longer readable, or when the anchor that would prove the
+        window's integrity is gone. The caller must not treat an empty scan of
+        such a window as "not a duplicate".
+        """
+        if isinstance(retry_result, CommitFailRetryResult):
+            # Optimistic-lock retry: the failed attempt already saw a snapshot,
+            # so only snapshots after it can hold our (re-)committed result --
+            # provided that snapshot is still the one this process read. A
+            # numerically equal or higher latest id does not prove that: a
+            # rollback followed by other writers regrowing the id line puts a
+            # *different* snapshot at the observed id. Identity decides, not
+            # ids.
+            observed = retry_result.latest_snapshot
+            if observed is None:
+                return 1, True  # Snapshot.FIRST_SNAPSHOT_ID
+            identity = self._observed_snapshot_identity(observed)
+            if identity == "different":
+                # Unambiguous rollback-and-regrow; also caught by
+                # _validate_dedup_anchor before the scan, kept here so the
+                # window computation can never outrun that check.
+                self._raise_history_regression(observed.id, end_id)
+            if identity == "same":
+                # The very snapshot this process observed moments ago is
+                # still there, so ids above it were handed out normally and
+                # the window above it is intact.
+                return observed.id + 1, True
+            # The observed snapshot is gone: benign expiry and an expired
+            # regrown history look identical, exactly as with a missing
+            # pinned anchor. Scan the window anyway -- finding our commit is
+            # still decisive -- but report the evidence as incomplete so an
+            # empty scan refuses rather than re-publishing.
+            return observed.id + 1, False
+
+        base_id = self.dedup.base_snapshot_id
+        if base_id is None:
+            return 1, True
+        if base_id == 0:
+            # The branch had no snapshot when this write started, so every
+            # snapshot on it is a candidate and none is missing from below.
+            return 1, True
+        if self.dedup.base_file_millis is None:
+            # Bound without the mtime that validates it: cannot tell a normal id
+            # line from a rolled-back one, so scan everything.
+            return 1, base_id <= end_id
+
+        base_millis = self.snapshot_manager.snapshot_file_millis(base_id)
+        if base_millis == self.dedup.base_file_millis:
+            # The bound still names the same file, so ids above it were handed
+            # out normally and our commit, if any, is among them. Expiry trims
+            # the oldest snapshots first, so a surviving base also proves the
+            # window above it was not expired out from under us -- whatever was
+            # dropped below it could never have held this write's commit.
+            return base_id + 1, True
+        if base_millis is None and base_id <= end_id:
+            # The base file is gone while the id line still runs above it. That
+            # is what benign expiry looks like -- but also what a rollback below
+            # the base looks like once other writers regrow the id line and the
+            # *recreated* base file is itself expired: the mtime comparison
+            # above can only catch a recreated file that still exists. The two
+            # histories leave identical on-disk state, and under the rolled-back
+            # one the ids above the base were reused, so our own commit can sit
+            # at a reused id below the window with its files still live. Scan
+            # the window anyway -- finding our commit is still decisive -- but
+            # report the evidence as incomplete, so an empty scan refuses
+            # instead of declaring "not a duplicate" and publishing the same
+            # rows a second time.
+            return base_id + 1, False
+        # Either the file at base_id exists with a different mtime (the id was
+        # reused after the snapshot line was rolled back and re-written from a
+        # lower watermark), or it is gone while the latest id sits below the
+        # base (the line was rolled back past it). Files committed before the
+        # rollback may have been deleted; continuing would risk publishing on
+        # top of deleted files or silently double-committing. Refuse outright
+        # instead of probing further, consistent with Flink's policy (stop
+        # writers before rolling back).
+        self._raise_rollback_detected(base_millis, end_id)
+
+    def _raise_rollback_detected(self, current_millis, end_id: int) -> None:
+        raise RuntimeError(
+            f"Detected snapshot rollback or ID reset on table "
+            f"{self.table.identifier}: the snapshot file at id "
+            f"{self.dedup.base_snapshot_id} has been removed or overwritten "
+            f"(expected mtime {self.dedup.base_file_millis}, got "
+            f"{current_millis}; latest id is {end_id}). Rolling back the "
+            f"table while a write is in progress is unsupported. Stop all "
+            f"writes, roll back the table, then restart the write from a "
+            f"clean state."
+        )
+
+    def _observed_snapshot_identity(self, observed, current=None) -> str:
+        """Whether the snapshot this process once read is still the one on disk.
+
+        Returns ``"same"``, ``"different"`` or ``"missing"``. Identity, not
+        the id, is what survives a rollback: after a rollback other writers
+        regrow the id line, so the same id -- or a higher latest -- can name a
+        completely different history. Compared by the snapshot's durable
+        ``uuid`` when both sides carry one, else by the persisted commit
+        fields and manifest references.
+        """
+        if current is None:
+            try:
+                current = self.snapshot_manager.get_snapshot_by_id(observed.id)
+            except FileNotFoundError:
+                current = None
+        if current is None:
+            return "missing"
+        if observed.uuid is not None and current.uuid is not None:
+            return "same" if current.uuid == observed.uuid else "different"
+        # Legacy snapshots without a uuid: the commit fields alone are not an
+        # identity -- commit_user/identifier/kind can recur on a replay and
+        # time_millis is wall-clock. The manifest list names are generated
+        # per commit and persisted in the snapshot, so two distinct commits
+        # cannot share them; they are the durable content identity.
+        same = (current.commit_user == observed.commit_user
+                and current.commit_identifier == observed.commit_identifier
+                and current.commit_kind == observed.commit_kind
+                and current.time_millis == observed.time_millis
+                and current.base_manifest_list == observed.base_manifest_list
+                and current.delta_manifest_list
+                == observed.delta_manifest_list)
+        return "same" if same else "different"
+
+    def _validate_observed_latest(self, observed, current) -> bool:
+        """Return whether the observation is intact, rejecting changed history.
+
+        Missing metadata is incomplete evidence, not permission to publish.
+        Compare the actual latest observation, never the scan high watermark.
+        A freshly read snapshot at the same id supplies its identity directly.
+        """
+        if observed is None:
+            return True
+        current_id = current.id if current is not None else 0
+        if current_id < observed.id:
+            self._raise_history_regression(observed.id, current_id)
+        identity = self._observed_snapshot_identity(
+            observed, current if current_id == observed.id else None)
+        if identity == "different":
+            self._raise_history_regression(observed.id, current_id)
+        return identity == "same"
+
+    def _raise_history_regression(self, observed_id: int,
+                                  current_id: int) -> None:
+        raise RuntimeError(
+            f"Detected snapshot rollback on table {self.table.identifier}: "
+            f"the snapshot history this commit observed "
+            f"(latest id {observed_id}) is no longer the table's history "
+            f"(latest id {current_id}, and the snapshot at id {observed_id} "
+            f"is not the one previously read). Rolling back the table while "
+            f"a write is in progress is unsupported. Stop all writes, roll "
+            f"back the table, then restart the write from a clean state."
+        )
+
+    def _validate_dedup_anchor(self, latest_snapshot,
+                               retry_result=None) -> None:
+        """Fail the commit when the pinned bound no longer describes the table.
+
+        Runs on every commit attempt, independent of whether a duplicate scan
+        is needed: the scan is legitimately skipped for vouched first
+        attempts, optimistic-lock retries and empty tables, but a bound pinned
+        at id >= 1 proves the table held that snapshot when this write
+        started. A history now empty, shorter than the bound, or with a
+        different file at the bound's id was rolled back or reset underneath
+        the write, and the files its messages reference may be gone --
+        committing would publish a snapshot whose reads fail, or silently
+        double-commit. No scan can make that safe, so refuse outright.
+
+        A retry carries a second boundary: the latest snapshot its failed
+        attempt observed. The history is validated against that snapshot's
+        *identity*, not just its id -- expiry removes the oldest snapshots,
+        never the latest, so the latest id regressing below an observed id is
+        unambiguous rollback; and a latest id back at or above the observed
+        one proves nothing unless the observed snapshot itself is still the
+        one this process read, since a rollback followed by other writers
+        regrowing the id line satisfies every numeric comparison while
+        naming a different history. Checked whatever the bound says,
+        including when no bound was taken at all.
+        """
+        if (retry_result is not None
+                and getattr(retry_result, 'latest_snapshot', None) is not None):
+            self._validate_observed_latest(
+                retry_result.latest_snapshot, latest_snapshot)
+        base_id = self.dedup.base_snapshot_id
+        base_millis = self.dedup.base_file_millis
+        if not base_id or base_millis is None:
+            # No bound, or one taken on an empty branch: any history is
+            # consistent with it.
+            return
+        end_id = latest_snapshot.id if latest_snapshot is not None else 0
+        current_millis = self.snapshot_manager.snapshot_file_millis(base_id)
+        if end_id >= base_id and (current_millis == base_millis
+                                  or current_millis is None):
+            # Same file, or gone under a still-higher id line. The latter is
+            # ambiguous (benign expiry, or a rollback whose recreated anchor
+            # was itself expired); the files this write references are not
+            # provably gone, so the commit may proceed -- replay safety for
+            # the ambiguous case is the dedup scan's job, which treats such a
+            # window as incomplete evidence.
+            return
+        self._raise_rollback_detected(current_millis, end_id)
+
+    def _find_own_commit(
+            self,
+            start_id: int,
+            end_id: int,
+            commit_identifier,
+            commit_kind,
+            notify_callbacks: bool = False) -> Tuple[bool, List[int]]:
+        """Scan [start_id, end_id] for a snapshot this committer already wrote.
+
+        Returns ``(found, unreadable_ids)``. Ids that could not be read are
+        reported rather than skipped, so the caller can tell a window that
+        proves nothing landed from one that simply could not be inspected.
+        """
+        unreadable = []
+        for snapshot_id in range(start_id, end_id + 1):
+            try:
+                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            except FileNotFoundError:
+                # The file disappeared between the existence check and the read.
+                # Same situation as a missing file, and just as rescannable.
+                # Only this one exception: a permission or parse error is not
+                # something a retry fixes, and must not be read as a hole.
+                snapshot = None
+            if snapshot is None:
+                unreadable.append(snapshot_id)
+                continue
+            if (snapshot.commit_user == self.commit_user and
+                    snapshot.commit_identifier == commit_identifier and
+                    snapshot.commit_kind == commit_kind):
+                logger.info(
+                    f"Commit already completed (snapshot {snapshot_id}), "
+                    f"user: {self.commit_user}, identifier: {commit_identifier}"
+                )
+                if notify_callbacks and self.commit_callbacks:
+                    entries = []
+                    for manifest in self.manifest_list_manager.read_delta(
+                            snapshot):
+                        entries.extend(self.manifest_file_manager.read(
+                            manifest.file_name, drop_stats=False,
+                            file_size=manifest.file_size))
+                    for entry in entries:
+                        file = entry.file
+                        file.file_path = file.physical_path() if file.external_path else canonical_data_file_path(
+                            self.table, tuple(entry.partition.values), entry.bucket, file.file_name)
+                    self._notify_commit_callbacks(
+                        snapshot, entries, commit_identifier)
+                return True, []
+        return False, unreadable
+
+    def _latest_snapshot_is_unreadable(self) -> bool:
+        """Whether LATEST names a snapshot whose metadata cannot be read.
+
+        An empty table has no LATEST at all, so this separates "nothing has
+        ever been committed here" -- where there is nothing to dedup against --
+        from "what was committed can no longer be inspected", where reading the
+        table as empty would let a replay commit a second time.
+        """
+        manager = self.snapshot_manager
+        if not manager.file_io.exists(manager.latest_file):
+            return False
+        try:
+            latest_id = int(manager.file_io.read_file_utf8(manager.latest_file).strip())
+        except (ValueError, AttributeError, TypeError, RuntimeError):
+            return True
+        try:
+            return manager.get_snapshot_by_id(latest_id) is None
+        except FileNotFoundError:
+            return True
+
+    def _is_duplicate_commit(
+            self,
+            retry_result,
+            latest_snapshot,
+            commit_identifier,
+            commit_kind,
+            notify_callbacks=False,
+            commit_result_may_be_uncertain=False) -> bool:
+        """Check replays and possibly published attempts against persisted commits.
+
+        Uncertainty covers the complete retry history, not just the last
+        attempt: a later definite CAS failure cannot clear an earlier unknown
+        outcome. Fresh commits with only definite failures need no scan.
+        """
+        if not self.dedup.on_first_attempt and not commit_result_may_be_uncertain:
+            return False
+        # Otherwise this may be a replay carrying a stable commit_user (e.g. a
+        # Ray committer-actor task retried after the actor died mid-commit), so
+        # scan the window this write could have committed into.
+
+        if latest_snapshot is None:
+            if not self._latest_snapshot_is_unreadable():
+                return False
+            raise DedupEvidenceMissing(
+                f"Cannot determine whether commit_user {self.commit_user} already "
+                f"committed to {self.table.identifier}: LATEST names a snapshot "
+                f"that cannot be read, so the table cannot be treated as empty. "
+                f"Refusing to commit rather than risk writing it a second time."
+            )
+
+        end_id = latest_snapshot.id
+        last_observation = latest_snapshot
+        unreadable = []
+        for attempt in range(DEDUP_RESCAN_ATTEMPTS + 1):
+            if attempt:
+                time.sleep(DEDUP_RESCAN_WAIT_SECONDS)
+                refreshed = self.snapshot_manager.get_latest_snapshot()
+                self._validate_observed_latest(last_observation, refreshed)
+                last_observation = refreshed
+                if refreshed is not None:
+                    end_id = max(end_id, refreshed.id)
+
+            start_id, evidence_complete = self._dedup_scan_window(retry_result, end_id)
+            found, unreadable = self._find_own_commit(
+                start_id, end_id, commit_identifier, commit_kind,
+                notify_callbacks=notify_callbacks)
+            if found:
+                return True
+            if evidence_complete and not unreadable:
+                refreshed = self.snapshot_manager.get_latest_snapshot()
+                self._validate_observed_latest(last_observation, refreshed)
+                latest_intact = self._validate_observed_latest(
+                    latest_snapshot, refreshed)
+                last_observation = refreshed
+                if refreshed is not None:
+                    end_id = max(end_id, refreshed.id)
+                if latest_intact:
+                    return False
+
+        raise DedupEvidenceMissing(
+            f"Cannot determine whether commit_user {self.commit_user} "
+            f"(identifier {commit_identifier}, kind {commit_kind}) already "
+            f"committed to {self.table.identifier}: the snapshots it could "
+            f"occupy are no longer readable"
+            + (f" (unreadable ids: {unreadable[:10]})" if unreadable else
+               " (the history no longer reaches back far enough)")
+            + ". Refusing to commit rather than risk writing it a second time."
+        )
+
+    def _notify_commit_callbacks(
+            self, snapshot, commit_entries, commit_identifier):
+        if not self.commit_callbacks:
+            return
+        context = CommitCallbackContext(
+            snapshot=snapshot,
+            commit_entries=commit_entries,
+            identifier=commit_identifier,
+        )
+        for callback in self.commit_callbacks:
+            callback.call(context)
+
+    def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
+        """Build a partition filter from the unique partitions present in commit_messages."""
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        predicates = []
+        seen_partitions = set()
+        for msg in commit_messages:
+            partition_values = tuple(msg.partition)
+            if partition_values not in seen_partitions:
+                seen_partitions.add(partition_values)
+                equalities = []
+                for name, value in zip(self.table.partition_keys, msg.partition):
+                    if value is None:
+                        equalities.append(predicate_builder.is_null(name))
+                    else:
+                        equalities.append(predicate_builder.equal(name, value))
+                predicates.append(predicate_builder.and_predicates(equalities))
+        return predicate_builder.or_predicates(predicates)
+
+    def _create_static_partition_filter(self, overwrite_partition, commit_messages: List[CommitMessage]):
+        """Build a partition filter from the explicit overwrite_partition spec."""
+        partition_filter = self._create_partition_spec_filter(overwrite_partition)
+        if partition_filter is None:
+            return None
+        for msg in commit_messages:
+            row = OffsetRow(msg.partition, 0, len(msg.partition))
+            if not partition_filter.test(row):
+                raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
+                                   f"in {msg.partition} does not belong to this partition")
+        return partition_filter
+
+    def _create_partition_spec_filter(self, partition_spec):
+        """Convert textual spec values before matching manifest rows or stats."""
+        if not partition_spec:
+            return None
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        fields = {field.name: field for field in self.table.partition_keys_fields}
+        default_part_value = self.table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
+        equalities = []
+        for key, value in partition_spec.items():
+            if key not in fields:
+                raise ValueError(f"Partition spec key '{key}' is not a partition column. "
+                                 f"Partition keys are: {list(self.table.partition_keys)}.")
+            if value is None or (isinstance(value, str) and value == default_part_value):
+                equalities.append(predicate_builder.is_null(key))
+            else:
+                try:
+                    value = _partition_spec_value(value, fields[key].type)
+                except (ValueError, TypeError, OverflowError) as error:
+                    raise ValueError("Invalid partition value for '%s': %r" % (key, value)) from error
+                if value is _UNREPRESENTABLE_PARTITION_VALUE:
+                    # Keep valid Java values outside Python's partition range
+                    # unmatched, without wrapping a TIME into another day.
+                    equalities.append(predicate_builder.and_predicates([
+                        predicate_builder.is_null(key), predicate_builder.is_not_null(key)]))
+                else:
+                    equalities.append(predicate_builder.is_null(key) if value is None
+                                      else predicate_builder.equal(key, value))
+        return predicate_builder.and_predicates(equalities)
+
+    def _overwrite_changes_provider(self, partition_filter, commit_messages):
+        """Build a stateful provider of OVERWRITE commit entries that caches the
+        existing files of the target partitions across retries (see
+        OverwriteChangesProvider). One instance per overwrite operation."""
+        return OverwriteChangesProvider(
+            self.table,
+            self.manifest_list_manager,
+            self.snapshot_manager,
+            partition_filter,
+            commit_messages,
+        )
+
+    def _commit_retry_wait(self, retry_count: int):
+
+        retry_wait_ms = min(
+            self.commit_min_retry_wait * (2 ** retry_count),
+            self.commit_max_retry_wait
+        )
+
+        jitter_ms = random.randint(0, max(1, int(retry_wait_ms * 0.2)))
+        total_wait_ms = retry_wait_ms + jitter_ms
+
+        time.sleep(total_wait_ms / 1000.0)
+
+    def _collect_changelog_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        changelog_entries = []
+        for msg in commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
+            for file in msg.changelog_files:
+                changelog_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=total_buckets,
+                    file=file
+                ))
+        return changelog_entries
+
+    def _collect_manifest_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        commit_entries = []
+        for msg in commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
+            for file in msg.new_files:
+                commit_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=total_buckets,
+                    file=file,
+                ))
+            for file in msg.deleted_files:
+                commit_entries.append(ManifestEntry(
+                    kind=1,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=total_buckets,
+                    file=file,
+                ))
+        return commit_entries
+
+    def _clean_up_tmp_manifests(
+            self,
+            base_manifest_list: Optional[str],
+            delta_manifest_list: Optional[str],
+            changelog_manifest_list: Optional[str],
+            index_manifest: Optional[str] = None):
+        """Delete files created while preparing a snapshot, preserving base manifests."""
+        manifest_path = self.manifest_list_manager.manifest_path
+        if base_manifest_list:
+            self.table.file_io.delete_quietly(f"{manifest_path}/{base_manifest_list}")
+        for ml_name in (delta_manifest_list, changelog_manifest_list):
+            if ml_name:
+                try:
+                    for meta in self.manifest_list_manager.read(ml_name):
+                        self.table.file_io.delete_quietly(
+                            f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
+                except Exception:
+                    pass
+                self.table.file_io.delete_quietly(f"{manifest_path}/{ml_name}")
+        if index_manifest:
+            self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
+
+    def abort(self, commit_messages: List[CommitMessage]):
+        """Delete files for an explicitly abandoned, known-uncommitted write.
+
+        Mirrors Java FileStoreCommitImpl.abort: delete new data, changelog,
+        compaction outputs and added indexes, preserving deleted inputs.
+        Never call after a commit whose outcome is unknown. Internal error
+        paths must preserve prepared files instead of calling this method.
+        """
+        for message in commit_messages:
+            for file in (list(message.new_files) + list(message.changelog_files)
+                         + list(message.compact_after)
+                         + list(message.compact_changelog_files)):
+                path = None
+                try:
+                    if not file.physical_path():
+                        file.file_path = canonical_data_file_path(
+                            self.table, tuple(message.partition), message.bucket, file.file_name)
+                    for path in file.collect_files():
+                        self.table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up file %s during abort: %s",
+                        path,
+                        error,
+                    )
+            for entry in message.index_adds + message.compact_index_adds:
+                file_name = None
+                try:
+                    index_file = entry.index_file
+                    file_name = index_file.file_name
+                    if index_file.index_type in ('DELETION_VECTORS', 'HASH'):
+                        path = self.table.path_factory().bucket_index_path(
+                            tuple(entry.partition.values), entry.bucket, index_file)
+                    else:
+                        path = (
+                            index_file.external_path
+                            or self.table.path_factory()
+                            .global_index_path_factory()
+                            .to_path(file_name)
+                        )
+                    self.table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up index file %s during abort: %s",
+                        file_name,
+                        error,
+                    )
+
+    def close(self):
+        """Close the FileStoreCommit and release resources."""
+        if self.close_commit_callbacks:
+            for callback in self.commit_callbacks:
+                try:
+                    callback.close()
+                except Exception:
+                    pass
+        if hasattr(self.snapshot_commit, 'close'):
+            self.snapshot_commit.close()
+
+    def _generate_partition_statistics(self, commit_entries: List[ManifestEntry]) -> List[PartitionStatistics]:
+        """
+        Generate partition statistics from commit entries.
+
+        This method follows the Java implementation pattern from
+        org.apache.paimon.manifest.PartitionEntry.fromManifestEntry() and
+        PartitionEntry.merge() methods.
+
+        Args:
+            commit_entries: List of commit entries to analyze
+
+        Returns:
+            List of PartitionStatistics for each unique partition
+        """
+        partition_stats = {}
+        path_factory = self.table.path_factory()
+
+        for entry in commit_entries:
+            partition_value = tuple(entry.partition.values)
+            if len(partition_value) != len(self.table.partition_keys):
+                raise ValueError('Partition row does not match the table partition keys')
+            # Java PartitionEntry.toPartitionStatistics reuses the path value
+            # computer, without path escaping. Group by serialized partition rows:
+            # NULL and whitespace remain distinct even if their names coincide.
+            partition_spec = dict(zip(self.table.partition_keys, path_factory._canonical_partition(partition_value)))
+            partition_key = GenericRowSerializer.to_bytes(entry.partition)
+
+            file_meta = entry.file
+            file_creation_time = (file_meta.creation_time_epoch_millis()
+                                  if file_meta.creation_time is not None else int(time.time() * 1000))
+
+            if partition_key not in partition_stats:
+                partition_stats[partition_key] = {
+                    'partition_spec': partition_spec,
+                    'record_count': 0,
+                    'file_count': 0,
+                    'file_size_in_bytes': 0,
+                    # Java starts with the first entry, including times before
+                    # the epoch, rather than clamping negative times to zero.
+                    'last_file_creation_time': file_creation_time,
+                    'total_buckets': entry.total_buckets
+                }
+            partition_stats[partition_key]['total_buckets'] = (
+                entry.total_buckets)
+
+            # Following Java implementation: PartitionEntry.fromDataFile()
+            # Extract actual file metadata (following Java DataFileMeta pattern)
+            record_count = file_meta.row_count if entry.kind == 0 else file_meta.row_count * -1
+            file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
+            file_count = 1 if entry.kind == 0 else -1
+
+            # Accumulate statistics (following Java PartitionEntry.merge() logic)
+            partition_stats[partition_key]['record_count'] += record_count
+            partition_stats[partition_key]['file_size_in_bytes'] += file_size_in_bytes
+            partition_stats[partition_key]['file_count'] += file_count
+
+            # Keep the latest creation time
+            partition_stats[partition_key]['last_file_creation_time'] = max(
+                partition_stats[partition_key]['last_file_creation_time'],
+                file_creation_time
+            )
+
+        # Convert to PartitionStatistics objects
+        # Following Java PartitionEntry.toPartitionStatistics() pattern
+        return [
+            PartitionStatistics.create(
+                partition_spec=stats['partition_spec'],
+                record_count=stats['record_count'],
+                file_count=stats['file_count'],
+                file_size_in_bytes=stats['file_size_in_bytes'],
+                last_file_creation_time=stats['last_file_creation_time'],
+                total_buckets=stats['total_buckets']
+            )
+            for stats in partition_stats.values()
+        ]
+
+    def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        """Replace pending sequence numbers as in Java RowTrackingCommitUtils."""
+        result = []
+        for entry in commit_entries:
+            if entry.file.min_sequence_number == 0:
+                result.append(entry.assign_sequence_number(snapshot_id, snapshot_id))
+            elif entry.file.max_sequence_number == 0:
+                result.append(entry.assign_sequence_number(
+                    entry.file.min_sequence_number, snapshot_id))
+            else:
+                result.append(entry)
+        return result
+
+    def _get_next_row_id_start(self, latest_snapshot) -> int:
+        """Get the next row ID start from the latest snapshot."""
+        if latest_snapshot and hasattr(latest_snapshot, 'next_row_id') and latest_snapshot.next_row_id is not None:
+            return latest_snapshot.next_row_id
+        return 0
+
+    @staticmethod
+    def _group_commit_entries_by_partition(
+            commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        grouped = {}
+        for entry in commit_entries:
+            key = tuple(entry.partition.values)
+            grouped.setdefault(key, []).append(entry)
+        return [
+            entry
+            for entries in grouped.values()
+            for entry in entries
+        ]
+
+    def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
+        """Assign row tracking metadata (first_row_id) to new files.
+
+        Aligned with Java RowTrackingCommitUtils.assignRowTrackingMeta.
+        """
+        if not commit_entries:
+            return commit_entries, first_row_id_start
+
+        row_id_assigned = []
+        start = first_row_id_start
+        blob_start_default = first_row_id_start
+        blob_starts = {}
+        vector_store_start = first_row_id_start
+
+        for entry in commit_entries:
+            assert entry.file.file_source is not None, \
+                f"file_source must be present for row-tracking table, file={entry.file.file_name}"
+
+            write_cols = entry.file.write_cols
+            contains_row_id = (
+                write_cols is not None
+                and SpecialFields.ROW_ID.name in write_cols
+            )
+
+            if (entry.file.file_source == 0
+                    and entry.file.first_row_id is None
+                    and not contains_row_id):
+                row_count = entry.file.row_count
+
+                if DataFileMeta.is_blob_file(entry.file.file_name):
+                    blob_field_name = entry.file.write_cols[0]
+                    blob_start = blob_starts.get(blob_field_name, blob_start_default)
+                    if blob_start >= start:
+                        raise RuntimeError(
+                            f"This is a bug, blobStart {blob_start} should be less than "
+                            f"start {start} when assigning a blob entry file."
+                        )
+                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
+                    blob_starts[blob_field_name] = blob_start + row_count
+
+                elif DataFileMeta.is_vector_file(entry.file.file_name):
+                    if vector_store_start >= start:
+                        raise RuntimeError(
+                            f"This is a bug, vectorStoreStart {vector_store_start} should be "
+                            f"less than start {start} when assigning a vector-store entry file."
+                        )
+                    row_id_assigned.append(entry.assign_first_row_id(vector_store_start))
+                    vector_store_start += row_count
+
+                else:
+                    row_id_assigned.append(entry.assign_first_row_id(start))
+                    blob_start_default = start
+                    blob_starts.clear()
+                    start += row_count
+            else:
+                row_id_assigned.append(entry)
+
+        return row_id_assigned, start

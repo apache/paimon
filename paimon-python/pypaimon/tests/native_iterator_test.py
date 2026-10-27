@@ -81,7 +81,8 @@ def _rows(read, splits):
 
 
 @pytest.mark.parametrize('mode', ['append', 'de', 'pk'])
-@pytest.mark.parametrize('projection', [None, ['v', 'id'], ['id', 'id'], []])
+@pytest.mark.parametrize('projection', [
+    None, ['v', 'id'], ['id', 'id'], [], {'value': 'v', 'key': 'id', 'copy': 'id'}])
 @pytest.mark.parametrize('limit', [None, 0, 1, 5])
 def test_iterator_uses_native_read(tmp_path, mode, projection, limit):
     table, _ = _table(tmp_path, mode)
@@ -101,10 +102,56 @@ def test_iterator_uses_native_read(tmp_path, mode, projection, limit):
     python.with_filter(predicate)
     expected = _rows(python.new_read(), splits)
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python read fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python read fallback')
+    ):
         actual = _rows(read, splits)
     assert [row for row, _ in actual] == [row for row, _ in expected]
     assert all(kind == RowKind.INSERT for _, kind in actual)
+
+
+@pytest.mark.parametrize('method_name', [
+    'to_arrow', 'to_arrow_batch_reader', '_to_managed_arrow_batch_reader',
+])
+def test_native_arrow_modes_share_limit_and_materialized_keeps_split_prefix(tmp_path, method_name):
+    table, _ = _table(tmp_path)
+    predicate = table.new_read_builder().new_predicate_builder().greater_than('v', 10)
+    builder = table.new_read_builder().with_projection(['id']).with_filter(predicate)
+    splits = list(reversed(builder.new_scan().plan().splits()))
+    assert len(splits) >= 2
+    python = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
+    python_read = python.new_read_builder().with_projection(['id']).with_filter(predicate).new_read()
+    expected = []
+    for split in splits:
+        expected.extend(python_read.to_arrow([split], parallelism=1).column('id').to_pylist())
+    assert len(expected) == 2
+    for limit in [None, 1]:
+        for parallelism in [1, 4]:
+            limited = table.new_read_builder().with_projection(['id']).with_filter(predicate)
+            if limit is not None:
+                limited.with_limit(limit)
+            read = limited.new_read()
+            with patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python read fallback')
+            ):
+                result = getattr(read, method_name)(splits, parallelism=parallelism)
+                if method_name != 'to_arrow':
+                    try:
+                        result_table = result.read_all()
+                    finally:
+                        result.close()
+                else:
+                    result_table = result
+            values = result_table.column('id').to_pylist()
+            count = len(expected) if limit is None else limit
+            assert len(values) == count
+            if method_name == 'to_arrow' or parallelism == 1:
+                assert values == expected[:count]
+            else:
+                assert len(set(values)) == len(values)
+                assert set(values).issubset(expected)
 
 
 def test_append_iterator_row_kind_is_insert(tmp_path):
@@ -138,20 +185,29 @@ def _batch(ids, kinds=None):
         pa.array(kinds or ['+I'] * len(ids)), pa.array(ids, type=pa.int32())], names=['rowkind', 'id'])
 
 
-def _planned_read(tmp_path, limit=None):
+def _planned_read(tmp_path, limit=None, projection=None):
     table, _ = _table(tmp_path)
-    builder = table.new_read_builder().with_projection(['id'])
+    builder = table.new_read_builder().with_projection(['id'] if projection is None else projection)
     if limit is not None:
         builder.with_limit(limit)
-    return builder.new_read(), builder.new_scan().plan().splits()
+    splits = builder.new_scan().plan().splits()
+    # Transport tests mock native_read itself; opaque retained split tokens
+    # keep their lifetime assertions independent of Native split construction.
+    for split in splits:
+        split._native_split = object()
+    return builder.new_read(), splits
 
 
 @pytest.mark.parametrize('consume', [False, True])
-def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume):
-    read, splits = _planned_read(tmp_path)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}])
+def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume, projection):
+    read, splits = _planned_read(tmp_path, projection=projection)
     batches = _Batches([_batch([1, 2]), RuntimeError('must not fetch next batch')])
-    with patch('pypaimon.read.native_plan._prepare_native_read', return_value=lambda _: batches) as prepare, \
-            patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as prepare, \
+            patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python fallback')
+    ):
         iterator = read.to_iterator(splits)
         prepare.assert_not_called()
         if consume:
@@ -165,14 +221,18 @@ def test_iterator_is_lazy_and_close_stops_native_input(tmp_path, consume):
 
 
 @pytest.mark.parametrize('failure', ['read', 'schema', 'kind'])
-def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_path, failure):
-    read, splits = _planned_read(tmp_path)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}])
+def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_path, failure, projection):
+    read, splits = _planned_read(tmp_path, projection=projection)
     bad = (RuntimeError('native read failed') if failure == 'read' else
            pa.record_batch([pa.array(['+I']), pa.array(['wrong type'])], names=['rowkind', 'id'])
            if failure == 'schema' else _batch([2], ['invalid']))
     batches = _Batches([_batch([1]), bad])
-    with patch('pypaimon.read.native_plan._prepare_native_read', return_value=lambda _: batches), \
-            patch.object(read, '_create_split_read', side_effect=AssertionError('Python replay')):
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches), \
+            patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python replay')
+    ):
         iterator = read.to_iterator(splits)
         assert next(iterator).get_field(0) == 1
         with pytest.raises((RuntimeError, TypeError, ValueError)):
@@ -180,32 +240,29 @@ def test_iterator_closes_native_input_on_failure_without_replaying_python(tmp_pa
     assert batches.closed
 
 
-def test_iterator_spends_limit_before_opening_next_split(tmp_path):
-    read, splits = _planned_read(tmp_path, limit=3)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}])
+def test_iterator_delegates_ordered_global_limit_in_one_native_read(tmp_path, projection):
+    read, splits = _planned_read(tmp_path, limit=3, projection=projection)
     assert len(splits) >= 2
-    prepared = []
-    opened = []
-    readers = []
-
-    def prepare(table, **kwargs):
-        prepared.append(kwargs['limit'])
-
-        def open_split(group):
-            assert len(group) == 1
-            assert not readers or readers[-1].closed
-            opened.append(group[0])
-            reader = _Batches([_batch(list(range(min(2, kwargs['limit']))))])
-            readers.append(reader)
-            return reader
-        return open_split
-
-    with patch('pypaimon.read.native_plan._prepare_native_read', side_effect=prepare), \
-            patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    batches = _Batches([_batch([1, 2]), _batch([3])])
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as native, \
+            patch(
+                'pypaimon.execution.native.read.split_adapter.native_split_from_python',
+                side_effect=lambda split, **kwargs: split), \
+            patch(
+                'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                side_effect=AssertionError('Python fallback')
+    ):
         result = _rows(read, splits + splits)
-    assert len(result) == 3
-    assert prepared == [3, 1]
-    assert opened == [splits[0]._native_split, splits[1]._native_split]
-    assert all(reader.closed for reader in readers)
+    assert result == [((value,), RowKind.INSERT) for value in [1, 2, 3]]
+    native.assert_called_once()
+    transported = [getattr(split, '_native_split', split) for split in splits + splits]
+    assert native.call_args.args == (read.table, transported)
+    assert native.call_args.kwargs['limit'] == 3
+    assert native.call_args.kwargs['parallelism'] == 1
+    assert native.call_args.kwargs['ordered'] is True
+    assert native.call_args.kwargs['include_row_kind'] is True
+    assert batches.closed
     assert read.limit == 3
 
 
@@ -213,26 +270,28 @@ def test_iterator_setup_failure_falls_back_before_native_rows(tmp_path):
     read, splits = _planned_read(tmp_path)
     expected = _rows(read.table.copy({'read.native.enabled': 'false'}).new_read_builder()
                      .with_projection(['id']).new_read(), splits)
-    with patch('pypaimon.read.native_plan._prepare_native_read', side_effect=RuntimeError('setup failed')):
+    with patch('pypaimon.execution.native.read.table_read.native_read', side_effect=RuntimeError('setup failed')):
         assert _rows(read, splits) == expected
 
 
 def test_iterator_qualifies_every_split_before_starting_native(tmp_path):
     read, splits = _planned_read(tmp_path)
-    with patch.object(read, '_native_split_files_supported', side_effect=[True, False]), \
-            patch('pypaimon.read.native_plan._prepare_native_read') as prepare:
+    with patch('pypaimon.execution.native.read.table_read.NativeTableRead._split_files_supported',
+               side_effect=[True, False]), \
+            patch('pypaimon.execution.native.read.table_read.native_read') as prepare:
         assert len(_rows(read, splits)) == 3
     prepare.assert_not_called()
 
 
 @pytest.mark.parametrize('limit', [0, 1, None])
-def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, limit):
-    read, splits = _planned_read(tmp_path, limit)
+@pytest.mark.parametrize('projection', [['id'], {'identifier': 'id'}, {'rowkind': 'id'}])
+def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, limit, projection):
+    read, splits = _planned_read(tmp_path, limit, projection)
     kinds = ['+I', '-U', '+U', '-D']
-    batches = _Batches([_batch([1, 2, 3, 4], kinds)])
-    with patch('pypaimon.read.native_plan._prepare_native_read', return_value=lambda _: batches) as prepare:
-        rows = _rows(read, splits[:1])
     count = 4 if limit is None else limit
+    batches = _Batches([_batch([1, 2, 3, 4][:count], kinds[:count])])
+    with patch('pypaimon.execution.native.read.table_read.native_read', return_value=batches) as prepare:
+        rows = _rows(read, splits[:1])
     assert rows == [((i + 1,), RowKind.from_string(kind)) for i, kind in enumerate(kinds[:count])]
     assert prepare.call_count == int(limit != 0)
     assert batches.closed == (limit != 0)
@@ -240,7 +299,10 @@ def test_iterator_preserves_all_row_kinds_and_hides_transport_column(tmp_path, l
 
 @pytest.mark.parametrize('mode', ['append', 'pk'])
 @pytest.mark.parametrize('projection', [
-    ['profile.score', 'id'], ["attrs['a']", 'id'], ['profile', 'profile.score', 'id']])
+    ['profile.score', 'id'], ["attrs['a']", 'id'], ['profile', 'profile.score', 'id'],
+    {'score': 'profile.score'}, {'value': "attrs['a']"},
+    {'score': 'profile.score', 'key': 'id', 'value': "attrs['a']", 'copy': 'profile.score'},
+    {'v': 'id', 'id': 'v', 'score': 'profile.score'}])
 def test_iterator_nested_projection_and_filter_only_inputs(tmp_path, mode, projection):
     table, _ = _table(tmp_path, mode)
     predicate = table.new_read_builder().new_predicate_builder().greater_than('v', 10)
@@ -249,10 +311,29 @@ def test_iterator_nested_projection_and_filter_only_inputs(tmp_path, mode, proje
     expected = _rows(table.copy({'read.native.enabled': 'false'}).new_read_builder()
                      .with_projection(projection).with_filter(predicate).new_read(), splits)
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         actual = _rows(read, splits)
     assert actual == expected
     assert actual and all(len(values) == len(projection) for values, _ in actual)
+
+
+@pytest.mark.parametrize('mode', ['append', 'pk'])
+@pytest.mark.parametrize('first', [None, 42])
+def test_named_iterator_map_key_preserves_first_match(tmp_path, mode, first):
+    table, schema = _table(tmp_path, mode)
+    _write(table, [{'id': 4, 'p': 'c', 'attrs': [('a', first), ('a', 99)]}], schema)
+    builder = table.new_read_builder().with_projection({
+        'value': "attrs['a']", 'copy': "attrs['a']", 'key': 'id',
+    }).with_filter(table.new_read_builder().new_predicate_builder().equal('id', 4))
+    read, splits = builder.new_read(), builder.new_scan().plan().splits()
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
+        assert _rows(read, splits) == [((first, first, 4), RowKind.INSERT)]
 
 
 @pytest.mark.parametrize('mode', ['append', 'de', 'pk'])
@@ -262,7 +343,10 @@ def test_duplicate_arrow_outputs_align_metadata_by_position(tmp_path, mode, proj
     builder = table.new_read_builder().with_projection(projection)
     splits = builder.new_scan().plan().splits()
     read = builder.new_read()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         for result in (read.to_arrow(splits), read.to_arrow_batch_reader(splits).read_all()):
             assert result.schema.names == projection
             assert result.column(0).to_pylist() == result.column(1 if len(projection) == 2 else 2).to_pylist()
@@ -286,7 +370,10 @@ def test_iterator_schema_evolution_keeps_current_nested_types(tmp_path, mode):
     read = builder.new_read()
     expected = _rows(table.copy({'read.native.enabled': 'false'}).new_read_builder()
                      .with_projection(['profile', 'v', 'id']).new_read(), splits)
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert _rows(read, splits) == expected
 
 
@@ -307,7 +394,10 @@ def test_iterator_blob_accessors_survive_projection_and_close(tmp_path, descript
     builder = table.new_read_builder().with_projection(projection)
     read, splits = builder.new_read(), builder.new_scan().plan().splits()
     result = []
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         iterator = read.to_iterator(splits)
         for row in iterator:
             result.append((row.get_field(2), [row.get_blob(index) for index in [0, 1] + ([3] if duplicate else [])]))
@@ -331,7 +421,10 @@ def test_iterator_pk_blob_respects_payload_mode_and_limit(tmp_path, descriptors)
     ])
     builder = table.new_read_builder().with_projection(['id', 'output']).with_limit(1)
     read, splits = builder.new_read(), builder.new_scan().plan().splits()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         iterator = read.to_iterator(splits)
         row = next(iterator)
         assert row.get_field(0) == 1
@@ -341,7 +434,7 @@ def test_iterator_pk_blob_respects_payload_mode_and_limit(tmp_path, descriptors)
 
 
 @pytest.mark.parametrize('native_write', [False, True])
-@pytest.mark.parametrize('projection', [['value', 'key'], []])
+@pytest.mark.parametrize('projection', [['value', 'key'], [], {'amount': 'value', 'identifier': 'key'}])
 def test_iterator_reads_actual_incremental_changelog_kinds(tmp_path, native_write, projection):
     from pypaimon.tests.native_changelog_batch_test import _table as changelog_table, _write as write
 
@@ -354,7 +447,10 @@ def test_iterator_reads_actual_incremental_changelog_kinds(tmp_path, native_writ
                         'read.native.enabled': 'true', 'scan.native-plan.enabled': 'true'})
     builder = table.new_read_builder().with_projection(projection)
     read, splits = builder.new_read(), builder.new_scan().plan().splits()
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         rows = _rows(read, splits)
     assert sorted((values, kind.value) for values, kind in rows) == sorted([
         ((index, 1) if projection else (), kind.value)
@@ -380,7 +476,10 @@ def test_iterator_user_row_kind_column_does_not_collide_with_transport(tmp_path,
         python.with_projection(projection)
     read, splits = builder.new_read(), builder.new_scan().plan().splits()
     expected = _rows(python.new_read(), splits)
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         assert _rows(read, splits) == expected
 
 
@@ -394,7 +493,10 @@ def test_iterator_reads_parquet_vector_sidecars_and_keeps_typed_accessors(tmp_pa
     builder = table.new_read_builder().with_projection(projection)
     read, splits = builder.new_read(), builder.new_scan().plan().splits()
     result = []
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         for row in read.to_iterator(splits):
             id_ = row.get_field(1)
             result.append(id_)
@@ -433,13 +535,16 @@ def test_iterator_keeps_plan_authorization_across_splits_and_fallback(rest_catal
     server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse()
     read = builder.new_read()
     if mode == 'native':
-        context = patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback'))
+        context = patch(
+            'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+            side_effect=AssertionError('Python fallback')
+        )
     else:
         failure = RuntimeError('setup failed')
         if mode == 'wire-fallback':
             splits = [deserialize_split_v1(serialize_split_v1(split), []) for split in splits]
             failure = AssertionError('Serialized rules must not mint a native grant')
-        context = patch('pypaimon.read.native_plan._prepare_native_read', side_effect=failure)
+        context = patch('pypaimon.execution.native.read.table_read.native_read', side_effect=failure)
     with context:
         assert sorted(_rows(read, splits), key=lambda row: row[0]) == [
             ((2,), RowKind.INSERT), ((3,), RowKind.INSERT)]
@@ -463,7 +568,10 @@ def test_iterator_data_evolution_applies_partial_updates_and_deletion_vectors(tm
     read, splits = builder.new_read(), builder.new_scan().plan().splits()
     expected = _rows(table.copy({'read.native.enabled': 'false'}).new_read_builder()
                      .with_projection(projection).new_read(), splits)
-    with patch.object(read, '_create_split_read', side_effect=AssertionError('Python fallback')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Python fallback')
+    ):
         actual = _rows(read, splits)
     assert actual == expected
     assert {row[0]: row[1] for row, _ in actual} == (
@@ -488,8 +596,10 @@ def test_iterator_map_blob_leaf_keeps_blob_accessor(tmp_path, descriptors, dupli
         values = []
         with ExitStack() as stack:
             if native:
-                stack.enter_context(patch.object(
-                    read, '_create_split_read', side_effect=AssertionError('Python fallback')))
+                stack.enter_context(patch(
+                    'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+                    side_effect=AssertionError('Python fallback')
+                ))
             for row in read.to_iterator(splits):
                 assert len(row) == len(projection)
                 blob = row.get_blob(0)

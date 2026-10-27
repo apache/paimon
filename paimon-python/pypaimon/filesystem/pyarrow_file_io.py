@@ -25,7 +25,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
 from itertools import islice
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional
@@ -36,16 +35,13 @@ import pyarrow.fs as pafs
 from packaging.version import parse
 from pyarrow._fs import FileSystem
 
-from pypaimon.common.file_io import FileIO, create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path, normalize_naive_datetimes
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem import oss_user_agent
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
-from pypaimon.schema.data_types import (AtomicType, DataField,
-                                        PyarrowFieldParser)
-from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 def _pyarrow_lt_7():
@@ -558,6 +554,7 @@ class PyArrowFileIO(FileIO):
                     raise OSError(f"Directory {path} is not empty")
                 bucket, key = self._split_s3_path(path_str)
                 if key:
+                    self._ensure_s3_parent_exists(self._get_s3_delete_client(), bucket, key)
                     self._get_s3_delete_client().delete_object(
                         Bucket=bucket, Key=key.rstrip("/") + "/")
                 return True
@@ -582,17 +579,34 @@ class PyArrowFileIO(FileIO):
         if prefix:
             prefix += "/"
         deadline = time.monotonic() + _S3_DELETE_TIMEOUT_SECONDS
-        # Finish listing before deleting: mutating a paginated listing may skip keys.
+        root_schema = prefix + "schema/schema-0"
+        has_root_schema = False
+        # Finish listing before deleting; retain only the root schema-0.
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as listed:
             for name in self._list_s3_keys(client, bucket, prefix, deadline, path_str):
-                listed.write(json.dumps(name) + "\n")
+                if name == root_schema:
+                    has_root_schema = True
+                else:
+                    listed.write(json.dumps(name) + "\n")
             listed.seek(0)
             self._delete_s3_objects(
                 client, bucket, (json.loads(line) for line in listed),
                 deadline, path_str)
-        if any(self._list_s3_keys(client, bucket, prefix, deadline, path_str)):
-            raise OSError(f"S3 directory {path_str} changed during deletion")
+        for name in self._list_s3_keys(client, bucket, prefix, deadline, path_str):
+            if not has_root_schema or name != root_schema:
+                raise OSError(f"S3 directory {path_str} changed during deletion")
+        self._check_s3_delete_deadline(deadline, path_str)
+        self._ensure_s3_parent_exists(client, bucket, key)
+        if has_root_schema:
+            self._delete_s3_objects(client, bucket, [root_schema], deadline, path_str)
         return True
+
+    @staticmethod
+    def _ensure_s3_parent_exists(client, bucket: str, key: str):
+        parent, _, _ = key.rstrip("/").rpartition("/")
+        if parent:
+            client.put_object(Bucket=bucket, Key=parent + "/", Body=b"",
+                              ContentType="application/x-directory")
 
     def _list_s3_keys(self, client, bucket: str, prefix: str,
                       deadline: float, path_str: str):
@@ -671,7 +685,14 @@ class PyArrowFileIO(FileIO):
         if self._s3_delete_client is not None:
             return self._s3_delete_client
 
-        import boto3
+        try:
+            import boto3
+        except ModuleNotFoundError as error:
+            if error.name != "boto3":
+                raise
+            raise ImportError(
+                "S3/OSS batch deletion requires pypaimon[s3] or pypaimon[oss]."
+            ) from error
         from botocore.config import Config
 
         if self._is_oss:
@@ -935,9 +956,7 @@ class PyArrowFileIO(FileIO):
                 record = {}
                 for col in records_dict.keys():
                     value = records_dict[col][i]
-                    if isinstance(value, datetime) and value.tzinfo is None:
-                        value = value.replace(tzinfo=timezone.utc)
-                    record[col] = value
+                    record[col] = normalize_naive_datetimes(value)
                 yield record
 
         records = record_generator()
@@ -965,25 +984,6 @@ class PyArrowFileIO(FileIO):
                 kwargs['codec_compression_level'] = zstd_level
             fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
 
-    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import lance
-
-            from pypaimon.read.reader.lance_utils import to_lance_specified
-            file_path_for_lance, storage_options = to_lance_specified(self, path)
-
-            writer = lance.file.LanceFileWriter(
-                file_path_for_lance, data.schema, storage_options=storage_options, **kwargs)
-            try:
-                # Write all batches
-                for batch in data.to_batches():
-                    writer.write_batch(batch)
-            finally:
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
-
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import mosaic
@@ -992,62 +992,6 @@ class PyArrowFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
-
-    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            import vortex
-            from vortex import store
-
-            from pypaimon.read.reader.vortex_utils import to_vortex_specified
-            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
-
-            if store_kwargs:
-                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
-                vortex_store.write(vortex.array(data))
-            else:
-                from vortex._lib.io import write as vortex_write
-                vortex_write(vortex.array(data), file_path_for_vortex)
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
-
-    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
-        try:
-            from pypaimon.write.writer.format_row_writer import FormatRowWriter
-
-            if fields is None:
-                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
-
-            with self.new_output_stream(path) as output_stream:
-                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
-                writer.write_table(data)
-                writer.close()
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
-
-    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
-        try:
-            if data.num_columns != 1:
-                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
-            field = data.schema[0]
-            if pyarrow.types.is_large_binary(field.type):
-                fields = [DataField(0, field.name, AtomicType("BLOB"))]
-            else:
-                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
-                fields = [DataField(0, field.name, paimon_type)]
-            records_dict = data.to_pydict()
-            num_rows = data.num_rows
-            field_name = fields[0].name
-            with self.new_output_stream(path) as output_stream:
-                writer = BlobFormatWriter(output_stream)
-                for i in range(num_rows):
-                    writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
-                writer.close()
-
-        except Exception as e:
-            self.delete_quietly(path)
-            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
     def to_filesystem_path(self, path: str) -> str:
         import re

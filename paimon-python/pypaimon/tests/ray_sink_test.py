@@ -213,7 +213,7 @@ class RaySinkTest(unittest.TestCase):
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
         dataset = Mock()
-        with patch('pypaimon.write.postpone_bucket.PostponeBucketPlanner') as planner, \
+        with patch('pypaimon.write.backend_dispatch.create_postpone_bucket_planner') as planner, \
                 patch('pypaimon.write.ray_datasink._write_primary_key_groups') as grouped:
             planner.return_value.current_plan.return_value.contains.return_value = True
             write_paimon_dataset(dataset, table, options={
@@ -631,10 +631,8 @@ class RaySinkTest(unittest.TestCase):
             mock_write.abort.assert_called_once()
 
     def test_postpone_worker_uses_driver_bucket_plan_without_manifest_scan(self):
-        from pypaimon.write.postpone_bucket import (
-            PostponeBucketPlan,
-            PostponeBucketPlanner,
-        )
+        from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
+        from pypaimon.write.postpone_bucket import PostponeBucketPlan
 
         pa_schema = pa.schema([
             pa.field('id', pa.int64(), nullable=False),
@@ -662,7 +660,7 @@ class RaySinkTest(unittest.TestCase):
         }, schema=pa_schema)
 
         with patch.object(
-            PostponeBucketPlanner,
+            PythonPostponeBucketPlanner,
             '_load_bucket_metadata',
             side_effect=AssertionError("worker must not scan manifests"),
         ) as load:
@@ -674,7 +672,7 @@ class RaySinkTest(unittest.TestCase):
 
     @pytest.mark.python_write
     def test_write_failure_preserves_prepared_dedicated_files(self):
-        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+        from pypaimon.execution.python.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
         pa_schema = pa.schema([
             ('id', pa.int32()),

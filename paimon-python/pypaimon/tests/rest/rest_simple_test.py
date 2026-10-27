@@ -21,14 +21,13 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.casting.schema_evolution import read_arrow_schema
+from pypaimon.schema.arrow_schema import read_arrow_schema
 from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
     DatabaseNotExistException, TableNotExistException
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor, \
-    UnawareBucketRowKeyExtractor
 
 if sys.version_info[:2] == (3, 6):
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by
@@ -133,7 +132,7 @@ class RESTSimpleTest(RESTBaseTest):
 
         # Write data with single partition
         table_write = write_builder.new_write()
-        self.assertIsInstance(table_write.row_key_extractor, UnawareBucketRowKeyExtractor)
+        self.assertEqual(table.bucket_mode(), BucketMode.BUCKET_UNAWARE)
 
         table_commit = write_builder.new_commit()
         data = {
@@ -613,7 +612,7 @@ class RESTSimpleTest(RESTBaseTest):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        self.assertIsInstance(table_write.row_key_extractor, DynamicBucketRowKeyExtractor)
+        self.assertEqual(table.bucket_mode(), BucketMode.HASH_DYNAMIC)
 
         pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
@@ -643,7 +642,7 @@ class RESTSimpleTest(RESTBaseTest):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        self.assertIsInstance(table_write.row_key_extractor, FixedBucketRowKeyExtractor)
+        self.assertEqual(table.bucket_mode(), BucketMode.HASH_FIXED)
 
         pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
@@ -659,14 +658,9 @@ class RESTSimpleTest(RESTBaseTest):
 
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
-        data_expected = {
-            'user_id': [4, 6, 2, 8, 10],
-            'item_id': [1002, 1003, 1001, 1004, 1005],
-            'behavior': ['b', 'c', 'a', 'd', 'e'],
-            'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-12', '2025-08-13']
-        }
-        expected = pa.Table.from_pydict(data_expected, schema=read_arrow_schema(table.fields))
-        self.assertEqual(actual.combine_chunks(), expected.combine_chunks())
+        expected_sorted = table_sort_by(self.expected.cast(read_arrow_schema(table.fields)), 'user_id')
+        actual_sorted = table_sort_by(actual, 'user_id')
+        self.assertEqual(actual_sorted, expected_sorted)
 
     def test_with_shard_uniform_division(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

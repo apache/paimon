@@ -68,9 +68,15 @@ CALL sys.compact(`table` => 'default.target_table');
 ```
 
 BLOB compaction is separately controlled by `blob-compaction.enabled`
-(default `false`). Dedicated vector-file compaction is not currently
-supported. See [Dedicated Compaction](../maintenance/dedicated-compaction)
-for scheduling compaction jobs.
+(default `false`). Dedicated vector-file compaction is separately controlled by
+`vector-compaction.enabled` (default `false`). It merges the vector files
+contained in one normal range, or in normal files merged by the same task, into
+files sized by `vector.target-file-size`, keeping the latest value of every
+vector column for each row. A group is skipped when some vector column is
+missing for part of the group's row range, or when its files neither overlap
+nor include more than one file smaller than `vector.target-file-size`. See
+[Dedicated Compaction](../maintenance/dedicated-compaction) for scheduling
+compaction jobs.
 
 Ordinary compaction **does not physically remove rows hidden by deletion
 vectors**. Removing their positions would change the alignment with untouched

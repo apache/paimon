@@ -24,7 +24,7 @@ import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.utils.range import Range

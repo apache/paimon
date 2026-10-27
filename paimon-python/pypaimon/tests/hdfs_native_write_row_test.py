@@ -22,8 +22,9 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.filesystem.hdfs_native_file_io import HdfsNativeFileIO
-from pypaimon.read.reader.format_row_reader import FormatRowReader
+from pypaimon.execution.python.read.reader.format_row_reader import (FormatRowReader)
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.execution.python.write.format_file_writer import write_row_file
 
 
 class _LocalReadIO:
@@ -35,9 +36,7 @@ class _LocalReadIO:
 
 
 class HdfsNativeWriteRowTest(unittest.TestCase):
-    """HdfsNativeFileIO is the default hdfs:// backend and must implement
-    write_row; before this it inherited FileIO.write_row's NotImplementedError,
-    so FILE_FORMAT_ROW / data-evolution sidecar writes on native HDFS crashed."""
+    """The Python row codec requires only the HDFS FileIO stream contract."""
 
     def test_write_row_roundtrips(self):
         fields = [DataField(0, "id", AtomicType("INT")),
@@ -45,15 +44,15 @@ class HdfsNativeWriteRowTest(unittest.TestCase):
         table = pa.table({"id": pa.array([1, 2, 3], pa.int32()),
                           "name": ["a", "b", "c"]})
 
-        # Bypass the HDFS __init__; write_row only needs new_output_stream
-        # (and delete_quietly on failure), which we point at the local FS.
+        # Bypass HDFS initialization and exercise the output stream contract
+        # against local storage, without starting an HDFS service.
         fio = object.__new__(HdfsNativeFileIO)
         fio.new_output_stream = lambda p: open(p, 'wb')
         fio.delete_quietly = lambda p: None
 
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "data.row")
-            fio.write_row(path, table, fields=fields)
+            write_row_file(fio, path, table, fields=fields)
 
             reader = FormatRowReader(_LocalReadIO(), path,
                                      [f.name for f in fields], fields, None)

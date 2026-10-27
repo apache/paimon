@@ -17,27 +17,21 @@
 
 """Builder to build hybrid search."""
 
-import heapq
+import ctypes
 import math
-from copy import copy
 from abc import ABC, abstractmethod
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from pypaimon.catalog.table_query_auth import reject_search_under_query_auth
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import (
-    DictBasedScoredIndexResult,
     ScoredGlobalIndexResult,
 )
 
 RRF_RANKER = "rrf"
 WEIGHTED_SCORE_RANKER = "weighted_score"
 MRR_RANKER = "mrr"
-_RRF_K = 60.0
-_MAX_ROUTE_WORKERS = 4
 
 
 def _check_full_text_options(options: Dict[str, str]):
@@ -82,6 +76,7 @@ class HybridSearchRoute:
                 "Query cannot be None for full-text route")
         if self.limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self.limit)
+        self.weight = ctypes.c_float(float(self.weight)).value
         if not math.isfinite(self.weight) or self.weight <= 0:
             raise ValueError(
                 "Weight must be finite and positive, got: %s" % self.weight)
@@ -141,7 +136,11 @@ class HybridSearchRouteResult:
 
 
 class HybridSearchRouteBuilder:
-    """A route plus its configured search builder."""
+    """A route retaining the search builder used by every execute_local() call.
+
+    Reconfigure search_builder to change subsequent executions of this route.
+    The builder keeps the read view captured by route_builders().
+    """
 
     def __init__(self, route, search_builder):
         self.route = route
@@ -232,39 +231,15 @@ class HybridSearchBuilder(ABC):
         pass
 
     def execute_local(self) -> ScoredGlobalIndexResult:
-        """Execute hybrid index search locally."""
-        route_builders = self.route_builders()
-        if len(route_builders) <= 1:
-            return self.rank([
-                self.to_route_result(
-                    route_builder, route_builder.execute_local())
-                for route_builder in route_builders
-            ])
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self)
 
-        workers = min(len(route_builders), _MAX_ROUTE_WORKERS)
-        with ThreadPoolExecutor(
-                max_workers=workers,
-                thread_name_prefix="paimon-hybrid-search") as executor:
-            futures = [
-                executor.submit(route_builder.execute_local)
-                for route_builder in route_builders
-            ]
-            done, pending = wait(futures, return_when=FIRST_EXCEPTION)
-            failed = next(
-                (future for future in futures
-                 if future in done and future.exception() is not None),
-                None,
-            )
-            if failed is not None:
-                for future in pending:
-                    future.cancel()
-                failed.result()
-
-            route_results = [
-                self.to_route_result(route_builder, future.result())
-                for route_builder, future in zip(route_builders, futures)
-            ]
-        return self.rank(route_results)
+    def execute(self, executor=None) -> ScoredGlobalIndexResult:
+        """Execute complete routes with an optional search-task scheduler."""
+        if executor is None:
+            return self.execute_local()
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self, executor)
 
 
 class HybridSearchBuilderImpl(HybridSearchBuilder):
@@ -279,12 +254,14 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         self._partition_filter = None
 
     def execute_local(self) -> ScoredGlobalIndexResult:
-        from pypaimon.table.source.native_hybrid_search import try_native_hybrid_search
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self)
 
-        result = try_native_hybrid_search(self)
-        if result is not None:
-            return result
-        return super().execute_local()
+    def execute(self, executor=None) -> ScoredGlobalIndexResult:
+        if executor is None:
+            return self.execute_local()
+        from pypaimon.table.source.search_dispatch import execute_hybrid_search
+        return execute_hybrid_search(self, executor)
 
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':
         self._limit = limit
@@ -321,27 +298,14 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         return self
 
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
-        reject_search_under_query_auth(self._table)
-        self._validate_search()
-        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-        execution = copy(self)
-        execution._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
-        builders = []
-        for route in self._routes:
-            if route.is_vector():
-                builders.append(
-                    HybridSearchRouteBuilder(
-                        route, execution._new_vector_search_builder(route)))
-            else:
-                builders.append(
-                    HybridSearchRouteBuilder(
-                        route, execution._new_full_text_search_builder(route)))
-        return builders
+        from pypaimon.table.source.search_dispatch import hybrid_route_builders
+        return hybrid_route_builders(self)
 
     def to_route_result(
-            self,
-            route_builder: HybridSearchRouteBuilder,
+            self, route_builder: HybridSearchRouteBuilder,
             result: GlobalIndexResult) -> HybridSearchRouteResult:
+        # This is public result-type validation, independent of execution. Keep
+        # scored objects intact, including custom score getters and metadata.
         if isinstance(result, ScoredGlobalIndexResult):
             scored = result
         elif result.results().is_empty():
@@ -352,19 +316,9 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
                 % result.__class__.__name__)
         return HybridSearchRouteResult(route_builder.route, scored)
 
-    def rank(
-            self,
-            route_results: List[HybridSearchRouteResult]) -> ScoredGlobalIndexResult:
-        self._validate_search()
-        non_empty = [
-            route_result for route_result in route_results
-            if not route_result.result.results().is_empty()
-        ]
-        if self._ranker == WEIGHTED_SCORE_RANKER:
-            return self._weighted_score(non_empty)
-        if self._ranker == MRR_RANKER:
-            return self._mrr(non_empty)
-        return self._rrf(non_empty)
+    def rank(self, route_results: List[HybridSearchRouteResult]) -> ScoredGlobalIndexResult:
+        from pypaimon.table.source.search_dispatch import rank_hybrid_results
+        return rank_hybrid_results(self, route_results)
 
     def _validate_search(self):
         if not self._routes:
@@ -397,50 +351,6 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         if self._filter is not None:
             builder.with_filter(self._filter)
         return builder
-
-    def _rrf(self, route_results):
-        scores = {}
-        for route_result in route_results:
-            for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
-                contribution = route_result.route.weight / (_RRF_K + rank + 1.0)
-                scores[row_id] = scores.get(row_id, 0.0) + contribution
-        return _top_k(scores, self._limit)
-
-    def _mrr(self, route_results):
-        scores = {}
-        for route_result in route_results:
-            for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
-                contribution = route_result.route.weight / (rank + 1.0)
-                scores[row_id] = scores.get(row_id, 0.0) + contribution
-        return _top_k(scores, self._limit)
-
-    def _weighted_score(self, route_results):
-        scores = {}
-        for route_result in route_results:
-            result = route_result.result
-            weight = route_result.route.weight
-            score_getter = result.score_getter()
-
-            # Route score scales are heterogeneous (e.g. bounded vector similarity
-            # vs unbounded BM25), so raw scores are not comparable across routes.
-            # Min-max normalize each route into [0, 1] before weighting, so that
-            # weights -- not a route's numeric magnitude -- decide its influence on
-            # the fused score. This mirrors the Java HybridSearchRanker.
-            route_scores = {
-                row_id: (score_getter(row_id) or 0.0)
-                for row_id in result.results()
-            }
-            if not route_scores:
-                continue
-            min_score = min(route_scores.values())
-            score_range = max(route_scores.values()) - min_score
-            for row_id, raw in route_scores.items():
-                # No spread within the route (single hit or all ties) carries no
-                # relative signal, so every hit maps to 1.0 rather than zeroed out.
-                normalized = (
-                    (raw - min_score) / score_range if score_range > 0.0 else 1.0)
-                scores[row_id] = scores.get(row_id, 0.0) + weight * normalized
-        return _top_k(scores, self._limit)
 
     def _split_partition_filter(self, predicate):
         partition_keys = list(self._table.partition_keys or [])
@@ -493,24 +403,3 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
                 [cls._rebuild_leaf_indices_by_name(c, name_to_idx)
                  for c in (predicate.literals or [])])
         return predicate.new_index(name_to_idx[predicate.field])
-
-
-def _ranked_row_ids(result):
-    score_getter = result.score_getter()
-    return sorted(
-        result.results(),
-        key=lambda row_id: (-(score_getter(row_id) or 0.0), row_id))
-
-
-def _top_k(scores, limit):
-    if not scores:
-        return ScoredGlobalIndexResult.create_empty()
-    heap = []
-    for row_id, score in scores.items():
-        item = (score, -row_id)
-        if len(heap) < limit:
-            heapq.heappush(heap, item)
-        elif item > heap[0]:
-            heapq.heapreplace(heap, item)
-    top_scores = {-neg_row_id: score for score, neg_row_id in heap}
-    return DictBasedScoredIndexResult(top_scores)

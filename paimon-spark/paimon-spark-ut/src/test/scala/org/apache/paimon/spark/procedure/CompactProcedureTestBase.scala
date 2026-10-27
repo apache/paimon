@@ -1803,6 +1803,49 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: compact partitions keep leading zeros of string values") {
+    def checkCompactedPartition(
+        hhType: String,
+        hhValues: Seq[String],
+        partitions: String,
+        expectedFileCounts: Seq[Row]): Unit = {
+      withTable("T") {
+        spark.sql(s"""
+                     |CREATE TABLE T (id INT, hh $hhType)
+                     |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                     |PARTITIONED BY (hh)
+                     |""".stripMargin)
+        hhValues.foreach {
+          hh =>
+            spark.sql(s"INSERT INTO T VALUES (1, $hh)")
+            spark.sql(s"INSERT INTO T VALUES (2, $hh)")
+        }
+        checkAnswer(
+          spark.sql(
+            s"CALL sys.compact(table => 'T', partitions => '$partitions', options => 'compaction.min.file-num=2')"),
+          Row(true) :: Nil)
+        checkAnswer(
+          spark.sql("SELECT partition, count(*) FROM `T$files` GROUP BY partition"),
+          expectedFileCounts)
+      }
+    }
+
+    // an unquoted value of a string partition is kept as written
+    checkCompactedPartition(
+      "STRING",
+      Seq("'08'", "'8'"),
+      "hh=08",
+      Row("{08}", 1L) :: Row("{8}", 2L) :: Nil)
+    // a quoted value of a string partition is still unquoted
+    checkCompactedPartition(
+      "STRING",
+      Seq("'08'", "'8'"),
+      "hh=\"08\"",
+      Row("{08}", 1L) :: Row("{8}", 2L) :: Nil)
+    // a numeric partition still matches by value
+    checkCompactedPartition("INT", Seq("8", "9"), "hh=08", Row("{8}", 1L) :: Row("{9}", 2L) :: Nil)
+  }
+
   test("Paimon Procedure: compact with invalid partition key") {
     withTable("T") {
       spark.sql(s"""
@@ -1884,6 +1927,73 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       checkAnswer(
         sql("SELECT id, value, pt FROM T ORDER BY id, pt"),
         (0 until 100).flatMap(id => Seq("p0", "p1").map(pt => Row(id, s"value-$id", pt))))
+    }
+  }
+
+  test("Paimon Procedure: data evolution vector compaction does not recompact rolled output") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, embedding ARRAY<FLOAT>)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'vector.file.format' = 'parquet',
+            |  'vector-field' = 'embedding',
+            |  'field.embedding.vector-dim' = '2',
+            |  'vector-compaction.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      for (start <- Seq(0, 1250)) {
+        sql(s"""
+               |INSERT INTO T SELECT /*+ REPARTITION(1) */
+               |CAST(id AS INT), array(CAST(id AS FLOAT), 0.0f) FROM range($start, ${start + 1250})
+               |""".stripMargin)
+      }
+      // Non-overlapping files are only rewritten when small; overlap them with an update.
+      sql("""
+            |MERGE INTO T USING (SELECT CAST(id AS INT) AS id FROM range(0, 1250)) S
+            |ON T.id = S.id
+            |WHEN MATCHED THEN UPDATE SET T.embedding = array(CAST(S.id AS FLOAT), 0.0f)
+            |""".stripMargin)
+      sql("ALTER TABLE T SET TBLPROPERTIES ('vector.target-file-size' = '1 b')")
+
+      def vectorRanges(): Seq[Range] = loadTable("T")
+        .newSnapshotReader()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+        .filter(_.fileName().contains(".vector."))
+        .map(_.nonNullRowIdRange())
+        .sortBy(_.from)
+        .toSeq
+      assert(
+        vectorRanges() == Seq(new Range(0, 1249), new Range(0, 1249), new Range(1250, 2499)),
+        vectorRanges())
+
+      val table = loadTable("T")
+      val beforeSnapshot = lastSnapshotId(table)
+      val attempts = new AtomicInteger()
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        null,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => assert(attempts.incrementAndGet() <= 1, "Recompacted this invocation's output")
+      )
+
+      assert(lastSnapshotId(table) == beforeSnapshot + 1)
+      // The rolling writer checks the target size every 1000 rows.
+      assert(
+        vectorRanges() == Seq(new Range(0, 999), new Range(1000, 1999), new Range(2000, 2499)),
+        vectorRanges())
+      checkAnswer(
+        sql("SELECT id, embedding[0] FROM T ORDER BY id"),
+        (0 until 2500).map(id => Row(id, id.toFloat)))
     }
   }
 

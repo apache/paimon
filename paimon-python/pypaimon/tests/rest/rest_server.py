@@ -73,7 +73,7 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
                                                 TagAlreadyExistException)
-from pypaimon.casting import data_type_casts as casts
+from pypaimon.schema import data_type_casts as casts
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
@@ -935,7 +935,9 @@ class RESTCatalogServer:
         self.server = HTTPServer(('localhost', 0), handler)
         self.port = self.server.server_port
 
-        self.server_thread = threading.Thread(target=self.server.serve_forever)
+        # A short poll keeps per-test shutdowns from waiting for the 0.5s default.
+        self.server_thread = threading.Thread(
+            target=self.server.serve_forever, kwargs={'poll_interval': 0.01})
         self.server_thread.daemon = True
         self.server_thread.start()
 
@@ -1101,6 +1103,9 @@ class RESTCatalogServer:
                                  self.resource_paths.grant_permission(),
                                  self.resource_paths.revoke_permission()):
                 return self._permissions_handle(method, resource_path, data, parameters)
+
+            if method == "GET" and resource_path.startswith(self.resource_paths.table_by_id("")):
+                return self._table_by_id_handle(resource_path)
 
             database = resource_path.split("/")[4]
             # Database-specific endpoints
@@ -2052,6 +2057,17 @@ class RESTCatalogServer:
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
+    def _table_by_id_handle(self, resource_path: str) -> Tuple[str, int]:
+        table_id = RESTUtil.decode_string(resource_path.rsplit("/", 1)[-1])
+        for full_name, table_metadata in self.table_metadata_store.items():
+            if str(table_metadata.uuid) == table_id:
+                identifier = self._table_identifier(full_name)
+                if full_name in self.no_permission_tables:
+                    raise TableNoPermissionException(identifier)
+                return self._table_handle("GET", "", identifier)
+        return self._mock_response(
+            ErrorResponse(ErrorResponse.RESOURCE_TYPE_TABLE, table_id, "Table not exist.", 404), 404)
+
     def _table_query_auth_handle(self, method, data, identifier):
         if method != "POST":
             return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
@@ -2716,6 +2732,7 @@ class RESTCatalogServer:
                    schema: Schema) -> GetTableResponse:
         return GetTableResponse(
             id=str(table_metadata.uuid),
+            database=identifier.get_database_name(),
             name=identifier.get_object_name(),
             path=path,
             is_external=table_metadata.is_external,

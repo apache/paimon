@@ -16,6 +16,7 @@
 # under the License.
 
 import io
+import pickle
 from fractions import Fraction
 import struct
 import sys
@@ -29,6 +30,31 @@ from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
 class VideoKeyframeIndexTest(unittest.TestCase):
+
+    def test_deserialize_materializes_keyframes_only_when_used(self):
+        index = VideoKeyframeIndex([(0, 10)], [(0, -100, 20), (12, 120, 200)])
+        data = index.serialize()
+        entry = VideoKeyframeIndex.ENTRY
+        with mock.patch.object(VideoKeyframeIndex, 'ENTRY', mock.Mock(
+                size=entry.size, iter_unpack=mock.Mock(wraps=entry.iter_unpack))):
+            restored = VideoKeyframeIndex.deserialize(data, 1000)
+            self.assertEqual(index.metadata_ranges, restored.metadata_ranges)
+            restored = pickle.loads(pickle.dumps(restored))
+            VideoKeyframeIndex.ENTRY.iter_unpack.assert_not_called()
+
+            self.assertEqual(index.keyframes, restored.keyframes)
+            self.assertIs(restored.keyframes, restored.keyframes)
+            VideoKeyframeIndex.ENTRY.iter_unpack.assert_called_once()
+        self.assertEqual(data, restored.serialize())
+
+    def test_replace_unmaterialized_keyframes(self):
+        index = VideoKeyframeIndex([(0, 10)], [(0, 0, 20), (12, 120, 200)])
+        restored = VideoKeyframeIndex.deserialize(index.serialize(), 1000)
+        restored.keyframes = ((0, 100, 30),)
+        self.assertEqual(
+            restored.keyframes,
+            VideoKeyframeIndex.deserialize(restored.serialize()).keyframes,
+        )
 
     def test_iso_bmff_metadata_ranges_exclude_padding_bodies(self):
         def box(box_type, body):
@@ -96,6 +122,92 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             VideoKeyframeIndex.deserialize(
                 header + zlib.compress(struct.pack('<qqq', 0, 1, 2)))
+
+    def test_deserialize_matches_streaming_validation(self):
+        def encode(entries, count=None, compressed=None):
+            return VideoKeyframeIndex.HEADER.pack(
+                VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC,
+                0, len(entries) if count is None else count,
+            ) + (zlib.compress(b''.join(
+                VideoKeyframeIndex.ENTRY.pack(*entry) for entry in entries
+            )) if compressed is None else compressed)
+
+        valid = [(0, -(2 ** 63), 0), (2 ** 63 - 1, 2 ** 63 - 1, 99)]
+        for entries in ([(0, -10, 0)], valid):
+            data = encode(entries)
+            VideoKeyframeIndex.validate(data, 100)
+            restored = VideoKeyframeIndex.deserialize(data, 100)
+            self.assertEqual(tuple(entries), restored.keyframes)
+            self.assertTrue(all(type(value) is int
+                                for entry in restored.keyframes
+                                for value in entry))
+
+        invalid = [
+            encode([(1, 0, 0)]),
+            encode([(0, 0, -1)]),
+            encode([(0, 0, 0), (0, 1, 1)]),
+            encode([(0, 0, 0), (-1, 1, 1)]),
+            encode([(0, 1, 0), (1, 1, 1)]),
+            encode([(0, 1, 0), (1, -1, 1)]),
+            encode([(0, 0, 1), (1, 1, 1)]),
+            encode([(0, 0, 1), (1, 1, 0)]),
+            encode([(0, 0, 100)]),
+            encode(valid, count=1),
+            encode(valid, count=3),
+            encode(valid)[:-1],
+            encode(valid) + b'trailing',
+            encode(valid) + zlib.compress(b''),
+            encode(valid, compressed=b'not zlib'),
+            encode(valid, compressed=zlib.compress(b'partial entry')),
+        ]
+        for data in invalid:
+            with self.subTest(data=data):
+                for read in (VideoKeyframeIndex.validate,
+                             VideoKeyframeIndex.deserialize):
+                    with self.assertRaises(ValueError):
+                        read(data, 100)
+
+    def test_deserialize_preserves_metadata_normalization(self):
+        data = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 3, 1
+        ) + b''.join(VideoKeyframeIndex.METADATA_RANGE.pack(*entry)
+                     for entry in [(0, 2), (2, 3), (8, 2)])
+        data += zlib.compress(VideoKeyframeIndex.ENTRY.pack(0, -1, 10))
+        restored = VideoKeyframeIndex.deserialize(data, 11)
+        self.assertEqual(((0, 5), (8, 2)), restored.metadata_ranges)
+        self.assertEqual(((0, -1, 10),), restored.keyframes)
+
+    def test_deserialize_bounds_output_before_materializing_entries(self):
+        data = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, 1
+        ) + zlib.compress(b'\0' * (4 * 1024 * 1024))
+        real_decompressobj = zlib.decompressobj
+        output_sizes = []
+
+        class TrackingDecompressor:
+            def __init__(self):
+                self._delegate = real_decompressobj()
+
+            def decompress(self, value, max_length=0):
+                output = self._delegate.decompress(value, max_length)
+                output_sizes.append(len(output))
+                return output
+
+            def __getattr__(self, name):
+                return getattr(self._delegate, name)
+
+        with mock.patch.object(keyframe_index_module.zlib, 'decompressobj',
+                               side_effect=TrackingDecompressor):
+            with self.assertRaises(ValueError):
+                VideoKeyframeIndex.deserialize(data)
+        self.assertEqual([VideoKeyframeIndex.ENTRY.size + 1], output_sizes)
+
+    def test_deserialize_at_entry_limit(self):
+        entries = tuple((value, value - 100, value * 2)
+                        for value in range(VideoKeyframeIndex.MAX_KEYFRAME_COUNT))
+        index = VideoKeyframeIndex([], entries)
+        restored = VideoKeyframeIndex.deserialize(index.serialize())
+        self.assertEqual(entries, restored.keyframes)
 
     def test_validate_rejects_ranges_outside_video_payload(self):
         metadata_outside = VideoKeyframeIndex(

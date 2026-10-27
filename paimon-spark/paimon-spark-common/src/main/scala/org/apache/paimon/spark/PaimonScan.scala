@@ -163,6 +163,7 @@ case class PaimonScan(
     // Multi-primary keys are fine:
     // `Array(a, b)` satisfies the required ordering `Array(a)`
     primaryKeys
+      .map(quote)
       .map(Expressions.identity)
       .map {
         sortExpr =>

@@ -19,11 +19,34 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+
+
+class ShardUpdateValidationTest(unittest.TestCase):
+
+    def test_empty_update_columns_are_rejected_before_selecting_a_backend(self):
+        from pypaimon.write.table_update import BatchTableUpdate, StreamTableUpdate
+
+        for update_type in (BatchTableUpdate, StreamTableUpdate):
+            for native in (False, True):
+                with self.subTest(update_type=update_type.__name__, native=native):
+                    table = SimpleNamespace(
+                        field_names=['value'],
+                        options=SimpleNamespace(native_write_enabled=lambda: native))
+                    update = update_type(table, 'writer').with_update_type([])
+                    with patch('pypaimon.write.update_dispatch.prepare_native_write_operation',
+                               side_effect=AssertionError('Prepared a backend for invalid columns')) as prepare, \
+                            patch('pypaimon.write.backend_dispatch.create_python_shard_updator',
+                                  side_effect=AssertionError('Created a Python shard updater')) as python:
+                        with self.assertRaisesRegex(ValueError, 'Shard update columns must not be empty'):
+                            update.new_shard_updator(0, 1)
+                    prepare.assert_not_called()
+                    python.assert_not_called()
 
 
 class ShardTableUpdatorTest(unittest.TestCase):
@@ -592,7 +615,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             % actual_columns
         )
 
-    def test_shard_update_passes_allow_rollback_true(self):
+    def test_shard_update_enables_conflict_detection(self):
         table_schema = pa.schema([
             ('a', pa.int32()),
             ('b', pa.int32()),
@@ -601,7 +624,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             table_schema,
             options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
         )
-        name = self._create_unique_table_name('rollback')
+        name = self._create_unique_table_name('conflict_detection')
         self.catalog.create_table(name, schema, False)
         table = self.catalog.get_table(name)
 
@@ -628,7 +651,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
             ))
         commit_messages = shard.prepare_commit()
 
-        from pypaimon.write.file_store_commit import FileStoreCommit
+        from pypaimon.execution.python.write.file_store_commit import FileStoreCommit
         original_try_commit = FileStoreCommit._try_commit
         captured_args = {}
 
@@ -641,11 +664,6 @@ class ShardTableUpdatorTest(unittest.TestCase):
             tc2.commit(commit_messages)
             tc2.close()
 
-        self.assertTrue(
-            captured_args.get('allow_rollback', False),
-            "Row-id-check commits must pass allow_rollback=True so that "
-            "concurrent COMPACT snapshots can be rolled back on conflict."
-        )
         self.assertTrue(
             captured_args.get('detect_conflicts', False),
             "Row-id-check commits must enable conflict detection."

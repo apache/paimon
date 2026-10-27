@@ -31,6 +31,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_read import PythonTableRead
 
 
 class LimitPushdownTest(unittest.TestCase):
@@ -214,7 +215,7 @@ class LimitPushdownTest(unittest.TestCase):
         LimitedRecordBatchReader (inherits RecordBatchReader) when limit
         is set, so the arrow-batch read path is taken."""
         from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
+        from pypaimon.execution.python.read.reader.limited_record_reader import (LimitedRecordBatchReader)
 
         table = self._create_ao_table('limit_ao_split_read')
         self._write_ao_partitions(table, [('p1', list(range(10)))])
@@ -223,7 +224,7 @@ class LimitPushdownTest(unittest.TestCase):
         splits = rb.new_scan().plan().splits()
         self.assertGreater(len(splits), 0)
         for split in splits:
-            split_read = table_read._create_split_read(split)
+            split_read = PythonTableRead(table_read)._create_split_read(split)
             self.assertEqual(split_read.limit, 3)
             reader = split_read.create_reader()
             self.assertIsInstance(reader, LimitedRecordBatchReader,
@@ -242,7 +243,7 @@ class LimitPushdownTest(unittest.TestCase):
         table_read = rb.new_read()
         splits = rb.new_scan().plan().splits()
         self.assertEqual(len(splits), 1)
-        split_read = table_read._create_split_read(splits[0])
+        split_read = PythonTableRead(table_read)._create_split_read(splits[0])
         reader = split_read.create_reader()
         # Drain the reader directly, bypassing TableRead-level control
         total_rows = 0

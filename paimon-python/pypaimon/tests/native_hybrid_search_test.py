@@ -17,7 +17,7 @@
 
 """Whole-operation native hybrid execution against REST, vector and text indexes."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -25,10 +25,14 @@ import pytest
 
 from pypaimon.api.api_response import ErrorResponse, GetTableSnapshotResponse
 from pypaimon.multimodal.table import MultimodalTable, text_route, vector_route
-from pypaimon.read.native_plan import _native_table, native_runtime_available, _predicate_to_native
+from pypaimon.execution.native.table import (_native_table)
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilderImpl
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult, ScoredGlobalIndexResult
+from pypaimon.table.source.hybrid_search_builder import HybridSearchRoute, HybridSearchRouteBuilder
 from pypaimon.tests import native_sorted_index_build_test as indexes
 from pypaimon.tests.native_full_text_search_test import _scores
 from pypaimon.tests.vector_search_filter_test import match_query, boost_query
@@ -237,9 +241,9 @@ def test_core_binding_rejects_invalid_configuration_before_empty_search(rest_cat
     table = indexes._create(catalog, schema=SCHEMA, partitioned=True, options={'read.native.enabled': 'true'})
     native = _native_table(table)
     with pytest.raises(Exception, match='Routes cannot be empty'):
-        native.new_hybrid_search_builder().with_limit(2).execute_local()
+        native.new_hybrid_search_builder().with_limit(2).execute()
     with pytest.raises(Exception, match='Limit must be positive'):
-        native.new_hybrid_search_builder().add_vector_route('embedding', [0., 0.], 2).execute_local()
+        native.new_hybrid_search_builder().add_vector_route('embedding', [0., 0.], 2).execute()
     with pytest.raises(Exception, match='Unsupported hybrid ranker'):
         native.new_hybrid_search_builder().with_ranker('unknown')
     with pytest.raises(Exception, match='Limit must be positive'):
@@ -267,10 +271,151 @@ def test_manual_route_and_rank_api_remains_available(rest_catalog, native):
     catalog, _ = rest_catalog
     table = _table(catalog, {'read.native.enabled': str(native).lower()})
     builder = _builder(table)
-    routes = builder.route_builders()
-    results = [builder.to_route_result(route, route.execute_local()) for route in routes]
-    assert _scores(builder.rank(results)) == pytest.approx(_scores(builder.execute_local()), abs=1e-6)
+    with ExitStack() as stack:
+        if native:
+            for phase in ('route_builders', 'rank'):
+                stack.enter_context(patch('pypaimon.execution.python.read.search.hybrid_search.' + phase,
+                                          side_effect=AssertionError('Python hybrid ' + phase)))
+        routes = builder.route_builders()
+        results = [builder.to_route_result(route, route.execute_local()) for route in routes]
+        assert _scores(builder.rank(results)) == pytest.approx(_scores(builder.execute_local()), abs=1e-6)
     assert indexes._ids(table) == list(range(8))
+
+
+@pytest.mark.parametrize('ranker', ['rrf', 'weighted_score', 'mrr'])
+def test_rank_external_results_does_not_access_table_or_validate_unused_queries(rest_catalog, ranker):
+    catalog, _ = rest_catalog
+    table = _table(catalog, indexed=False).copy({'query-auth.enabled': 'true'})
+    builder = _builder(table, ranker=ranker, limit=2)
+    # Route metadata is not a request to execute these queries. Both empty
+    # vectors and empty text queries are valid public route descriptions.
+    routes = [HybridSearchRouteBuilder(HybridSearchRoute.vector_route('absent', [], 10, weight=2.0), None),
+              HybridSearchRouteBuilder(HybridSearchRoute.full_text_route('absent', '', 10), None)]
+    results = [builder.to_route_result(routes[0], DictBasedScoredIndexResult({1: 10., 2: None, 3: 5.})),
+               builder.to_route_result(routes[1], DictBasedScoredIndexResult({2: 50., 3: 50.}))]
+    classic = _builder(table.copy({'read.native.enabled': 'false'}), ranker=ranker, limit=1)
+    with patch('pypaimon.execution.native.read.native_hybrid_search._native_table',
+               side_effect=AssertionError('Rank accessed table metadata')), \
+            patch('pypaimon.execution.python.read.search.hybrid_search.rank',
+                  side_effect=AssertionError('Native rank used Python fusion')):
+        actual = _scores(builder.rank(results))
+        assert _scores(builder.rank([])) == {}
+        builder.with_limit(1)
+        reduced = _scores(builder.rank([results[1], results[0], results[0]]))
+    expected = classic.with_limit(2).rank(results)
+    assert actual == pytest.approx(_scores(expected), abs=1e-6)
+    classic.with_limit(1)
+    assert reduced == pytest.approx(_scores(classic.rank([results[1], results[0], results[0]])), abs=1e-6)
+    assert all(isinstance(result.result, ScoredGlobalIndexResult) for result in results)
+
+
+def test_manual_routes_pin_one_snapshot_and_keep_public_scan_read_api(rest_catalog):
+    catalog, server = rest_catalog
+    table = _table(catalog)
+    builder = _builder(table)
+    with patch.object(server, '_table_snapshot_handle', wraps=server._table_snapshot_handle) as latest, \
+            patch('pypaimon.execution.python.read.search.hybrid_search.route_builders',
+                  side_effect=AssertionError('Python route capture')):
+        routes = builder.route_builders()
+    assert latest.call_count == 1
+    snapshots = [route.search_builder._table._read_snapshot for route in routes]
+    assert snapshots[0].id == snapshots[1].id
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    with patch.object(server, '_table_snapshot_handle', side_effect=AssertionError('Re-resolved captured view')):
+        vector = routes[0].search_builder
+        text = routes[1].search_builder
+        vector_result = vector.new_vector_search_read().read_plan(vector.new_vector_search_scan().scan())
+        text_result = text.new_full_text_read().read_plan(text.new_full_text_scan().scan())
+        results = [builder.to_route_result(route, result)
+                   for route, result in zip(routes, [vector_result, text_result])]
+        ranked = _scores(builder.with_limit(4).with_weighted_score_ranker().rank(results))
+    assert ranked
+    assert set(ranked).issubset(set(range(8)))
+    assert 11 in _scores(_builder(table).execute_local())
+
+
+def test_manual_empty_routes_remain_empty_after_first_commit(rest_catalog):
+    catalog, server = rest_catalog
+    table = indexes._create(catalog, schema=SCHEMA, options={'read.native.enabled': 'true'})
+    builder = _builder(table)
+    routes = builder.route_builders()
+    assert all(route.search_builder._table._read_snapshot is None for route in routes)
+    indexes._append(table, _rows(), schema=SCHEMA)
+    with patch.object(server, '_table_snapshot_handle', side_effect=AssertionError('Re-resolved empty view')):
+        results = [builder.to_route_result(route, route.execute_local()) for route in routes]
+        assert _scores(builder.rank(results)) == {}
+    assert _scores(_builder(table).execute_local())
+
+
+def test_manual_routes_allow_completing_queries_after_capture(rest_catalog):
+    catalog, _ = rest_catalog
+    table = _table(catalog)
+    builder = (table.new_hybrid_search_builder().with_limit(16)
+               .add_vector_route('embedding', [], 16)
+               .add_full_text_route('content', '', 16))
+    with patch('pypaimon.execution.python.read.search.hybrid_search.route_builders',
+               side_effect=AssertionError('Python incomplete route capture')):
+        routes = builder.route_builders()
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    routes[0].search_builder.with_query_vector([0., 0.])
+    routes[1].search_builder.with_query('content', match_query('paimon'))
+    results = [builder.to_route_result(route, route.execute_local()) for route in routes]
+    actual = _scores(builder.rank(results))
+    assert actual
+    assert set(actual).issubset(set(range(8)))
+
+
+def test_sdk_route_mutations_affect_route_execute_and_keep_the_captured_view(rest_catalog):
+    catalog, _ = rest_catalog
+    table = _table(catalog, indexed=False)
+    table.create_global_index('content', index_type='full-text')
+    native = _native_table(table).new_hybrid_search_builder()
+    native.add_vector_route('embedding', [0., 0.], 16)
+    native.add_full_text_route('content', match_query('paimon'), 16).with_limit(16)
+    vector_route, text_route = native.route_builders()
+    vector, text = vector_route.search_builder(), text_route.search_builder()
+    assert vector is vector_route.search_builder()
+    assert text is text_route.search_builder()
+
+    # A commit after route capture must not enter either reconfigured query.
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    pb = table.new_read_builder().new_predicate_builder()
+    keep = _predicate_to_native(pb.greater_than('id', 4))
+    vector.with_query_vector([6., 0.]).with_limit(1).with_filter(keep)
+    text.with_query('content', match_query('lake')).with_limit(1).with_filter(keep)
+    vector_result, text_result = vector_route.execute(), text_route.execute()
+    assert set(vector_result.row_ids()) == {6}
+    assert set(text_result.row_ids()) == {5}
+    assert vector_result.row_ids() == vector.execute().row_ids()
+    assert text_result.row_ids() == text.execute().row_ids()
+    assert vector_result.snapshot_id() == vector_route.snapshot().id()
+    assert text_result.snapshot_id() == text_route.snapshot().id()
+
+    # Repeated getters share the same state, including later reconfiguration.
+    vector_route.search_builder().with_limit(2)
+    assert set(vector_route.execute().row_ids()) == {5, 6}
+    ranked = native.rank([native.to_route_result(vector_route, vector_result),
+                          native.to_route_result(text_route, text_result)])
+    batches = ranked.new_read_builder().with_projection(['id']).read()
+    assert sorted(pa.Table.from_batches(batches)['id'].to_pylist()) == [5, 6]
+
+
+@pytest.mark.parametrize('native', [False, True])
+def test_public_route_uses_mutated_search_builder(rest_catalog, native):
+    catalog, _ = rest_catalog
+    table = _table(catalog, {'read.native.enabled': str(native).lower()}, indexed=False)
+    table.create_global_index('content', index_type='full-text')
+    builder = _builder(table)
+    vector_route, text_route = builder.route_builders()
+    vector, text = vector_route.search_builder, text_route.search_builder
+    indexes._append(table, _rows(8, 4), schema=SCHEMA)
+    pb = table.new_read_builder().new_predicate_builder()
+    vector.with_query_vector([6., 0.]).with_limit(1).with_filter(pb.greater_than('id', 4))
+    text.with_query('content', match_query('lake')).with_limit(1).with_filter(pb.greater_than('id', 4))
+    assert set(_scores(vector_route.execute_local())) == {6}
+    assert set(_scores(text_route.execute_local())) == {5}
+    vector.with_limit(2)
+    assert set(_scores(vector_route.execute_local())) == {5, 6}
 
 
 def _multimodal_query(table, catalog, **kwargs):
@@ -313,13 +458,13 @@ def test_multimodal_search_and_row_lookup_share_resolved_metadata(rest_catalog, 
 
 
 def test_unsupported_literal_qualifies_before_core_execution(rest_catalog):
+    from pypaimon.execution.python.read.search import hybrid_search
     catalog, _ = rest_catalog
     table = _table(catalog)
     predicate = table.new_read_builder().new_predicate_builder().equal('id', 1.0)
     classic = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
     expected = _scores(_builder(classic, predicate=predicate).execute_local())
-    original = HybridSearchBuilderImpl.route_builders
-    with patch.object(HybridSearchBuilderImpl, 'route_builders', autospec=True, side_effect=original) as fallback:
+    with patch.object(hybrid_search, 'route_builders', wraps=hybrid_search.route_builders) as fallback:
         actual = _scores(_builder(table, predicate=predicate).execute_local())
     fallback.assert_called_once()
     assert set(actual) == {1}
@@ -332,7 +477,7 @@ def test_query_auth_rejects_hybrid_before_native_table_access(rest_catalog, nati
     catalog, _ = rest_catalog
     table = _table(catalog)
     table = table.copy({'query-auth.enabled': 'true', 'read.native.enabled': str(native).lower()})
-    with patch('pypaimon.table.source.native_hybrid_search._native_table',
+    with patch('pypaimon.execution.native.read.native_hybrid_search._native_table',
                side_effect=AssertionError('Native table access before authorization')):
         with pytest.raises(Exception, match='query-auth'):
             _builder(table).execute_local()

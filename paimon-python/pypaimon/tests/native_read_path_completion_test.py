@@ -31,8 +31,12 @@ from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
-from pypaimon.read.native_plan import (
-    _NativeRestTableCache, _catalog_context_options, _with_native_resolved_schema, native_runtime_available)
+from pypaimon.execution.native.runtime import native_runtime_available
+from pypaimon.execution.native.table import (
+    _NativeRestTableCache,
+    _catalog_context_options,
+    _with_native_resolved_schema,
+)
 from pypaimon.read.split_serializer import deserialize_split_v1, serialize_split_v1
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests import native_query_auth_test
@@ -57,7 +61,7 @@ def test_historical_schema_resolution_reuses_the_captured_snapshot(schema_id):
     native.copy.return_value = native
     native.copy_with_pinned_snapshot.return_value = native
     resolved = json.dumps({'options': {'query-auth.enabled': 'true', 'scan.snapshot-id': '1'}})
-    with patch('pypaimon.read.native_plan._resolved_schema_json', return_value=resolved), \
+    with patch('pypaimon.execution.native.table._resolved_schema_json', return_value=resolved), \
             patch('pypaimon.common.json_util.JSON.to_json', return_value='captured'):
         _with_native_resolved_schema(table, native)
     native.copy.assert_not_called()
@@ -69,7 +73,7 @@ def test_copied_branch_does_not_rebind_an_existing_fuse_mount(tmp_path):
     from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
     from pypaimon.common.identifier import Identifier
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import _native_table
     from pypaimon.schema.table_schema import TableSchema
     from pypaimon.table.file_store_table import FileStoreTable
 
@@ -91,7 +95,7 @@ def test_copied_branch_does_not_rebind_an_existing_fuse_mount(tmp_path):
     native_table.branch.return_value = 'dev'
     native_table.copy.return_value = native_table
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
-            patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
+            patch('pypaimon.execution.native.table._with_native_resolved_schema', return_value=native_table):
         assert _native_table(branch) is native_table
     native_table.copy.assert_called_once_with({'branch': 'dev'})
     module.PaimonCatalog.return_value.get_table.assert_called_once_with(('default', 't'))
@@ -106,7 +110,7 @@ def test_copied_fuse_view_reconstructs_original_non_main_binding(tmp_path, targe
     from pypaimon.common.identifier import Identifier
     from pypaimon.common.options.options import Options
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import _native_table
     from pypaimon.schema.table_schema import TableSchema
     from pypaimon.table.file_store_table import FileStoreTable
 
@@ -129,7 +133,7 @@ def test_copied_fuse_view_reconstructs_original_non_main_binding(tmp_path, targe
     native_table.branch.return_value = target_branch
     module.Table.from_rest_response.return_value = native_table
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
-            patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
+            patch('pypaimon.execution.native.table._with_native_resolved_schema', return_value=native_table):
         assert _native_table(table) is native_table
     assert module.Table.from_rest_response.call_args[1]['table'] == 't$branch_dev'
     native_table.copy.assert_called_once_with({'branch': target_branch})
@@ -140,7 +144,7 @@ def test_native_fuse_binding_rejects_unreconstructible_mount_before_catalog_io(t
     from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
     from pypaimon.common.identifier import Identifier
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import _native_table
     from pypaimon.schema.table_schema import TableSchema
     from pypaimon.table.file_store_table import FileStoreTable
 
@@ -151,7 +155,7 @@ def test_native_fuse_binding_rejects_unreconstructible_mount_before_catalog_io(t
     environment = CatalogEnvironment(identifier=identifier, catalog_loader=loader)
     table = FileStoreTable(FuseLocalFileIO(location, str(tmp_path / 'custom')), identifier,
                            location, TableSchema(), environment)
-    with patch('pypaimon.read.native_plan._load_native_table') as load:
+    with patch('pypaimon.execution.native.table._load_native_table') as load:
         with pytest.raises(RuntimeError, match='cannot reconstruct'):
             _native_table(table)
     load.assert_not_called()
@@ -167,7 +171,7 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     from pypaimon.common.options.options import Options
     from pypaimon.filesystem.caching_file_io import CachingFileIO
     from pypaimon.filesystem.local_file_io import FuseLocalFileIO
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import _native_table
     from pypaimon.schema.table_schema import TableSchema
     from pypaimon.table.file_store_table import FileStoreTable
 
@@ -190,7 +194,7 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     native_table.location.return_value = location
     native_table.branch.return_value = branch
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}), \
-            patch('pypaimon.read.native_plan._with_native_resolved_schema', return_value=native_table):
+            patch('pypaimon.execution.native.table._with_native_resolved_schema', return_value=native_table):
         assert _native_table(table) is native_table
     module.PaimonCatalog.return_value.get_table.assert_called_once_with(
         ('default', table.identifier.get_object_name()))
@@ -200,18 +204,21 @@ def test_native_catalog_preserves_a_reconstructible_fuse_binding(tmp_path, mode,
     assert module.PaimonCatalog.call_args[0][0]['fuse.enabled'] == 'true'
 
 
-@pytest.mark.parametrize('transport', ['same-view', 'copy', 'pickle'])
+@pytest.mark.parametrize('transport', ['same-view', 'copy-before', 'copy', 'pickle'])
 def test_pinned_rest_view_reuses_core_snapshot_validation(guarded_table, transport):
     import pickle
-    from pypaimon.read.native_plan import _native_table
+    from pypaimon.execution.native.table import _native_table
 
     table, _ = guarded_table
     snapshot = table.snapshot_manager().get_snapshot_by_id(1)
     fixed = table._copy_with_snapshot(snapshot)
-    with patch('pypaimon.read.native_plan._load_native_table') as load, \
-            patch('pypaimon.read.native_plan._with_native_resolved_schema', side_effect=lambda table, native: native), \
-            patch('pypaimon.read.native_plan._with_native_read_snapshot', side_effect=lambda table, native: native):
-        native = _native_table(fixed)
+    with patch('pypaimon.execution.native.table._load_native_table') as load, \
+            patch('pypaimon.execution.native.table._with_native_resolved_schema',
+                  side_effect=lambda table, native: native), \
+            patch('pypaimon.execution.native.table._with_native_read_snapshot',
+                  side_effect=lambda table, native: native):
+        first_view = fixed.copy({'read.batch-size': '64'}) if transport == 'copy-before' else fixed
+        native = _native_table(first_view)
         if transport == 'copy':
             fixed = fixed.copy({'read.batch-size': '64'})
         elif transport == 'pickle':
@@ -262,8 +269,10 @@ def test_authorized_python_and_serialized_splits_use_native_reader(guarded_table
                   for split in splits]
     assert all(getattr(split, '_native_split', None) is None for split in splits)
     builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(['id', 'value'])
-    with patch('pypaimon.read.table_read.TableRead._create_split_read',
-               side_effect=AssertionError('Native read fell back')):
+    with patch(
+        'pypaimon.execution.python.read.table_read.PythonTableRead._create_split_read',
+        side_effect=AssertionError('Native read fell back')
+    ):
         rows = builder.new_read().to_arrow(splits).sort_by([('id', 'ascending')]).to_pylist()
     assert rows == [{'id': 2, 'value': 'ABCABC'}, {'id': 3, 'value': ''}, {'id': 4, 'value': None}]
 
@@ -333,10 +342,10 @@ def test_native_write_plan_preserves_custom_authorization(guarded_table):
     table.catalog_environment = custom
     scan = table.new_read_builder().new_scan()
     from pypaimon.read.plan import Plan
-    with patch('pypaimon.read.native_plan.native_plan', return_value=Plan([])) as planner, \
-            patch('pypaimon.read.native_plan.native_runtime_available', return_value=True):
+    with patch('pypaimon.execution.native.read.plan.native_plan', return_value=Plan([])) as planner, \
+            patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=True):
         with pytest.raises(TableNoPermissionException):
-            scan.plan_all_files()
+            scan.plan_all()
         planner.assert_not_called()
 
 
@@ -406,8 +415,9 @@ def test_native_write_plan_restores_all_de_column_files_for_callable_updates(res
     try:
         with ExitStack() as guards:
             if native:
-                guards.enter_context(patch('pypaimon.read.scanner.file_scanner.FileScanner.scan',
-                                           side_effect=AssertionError('Native write plan fell back')))
+                guards.enter_context(patch(
+                    'pypaimon.execution.python.read.scanner.file_scanner.FileScanner.scan',
+                    side_effect=AssertionError('Native write plan fell back')))
             messages = update.update_by_predicate(
                 predicate, {'b': lambda data: pc.multiply(data['a'], 10)}, read_columns=['a'])
         commit.commit(messages)

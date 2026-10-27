@@ -297,6 +297,12 @@ under the License.
             <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
         </tr>
         <tr>
+            <td><h5>commit.auto-rollback.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Allow Java writers to roll back compaction on write conflicts. May delete snapshots and tags. Does not affect explicit rollback or Python writers.</td>
+        </tr>
+        <tr>
             <td><h5>commit.callback.#.param</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -739,6 +745,12 @@ under the License.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether enabled read file index.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.read.ignore-unknown-type</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore unregistered file index types when reading. If true, skip these indexes with a warning and retain all rows for them. Other indexes can still filter rows. If false, fail when reading an unregistered non-empty index.</td>
         </tr>
         <tr>
             <td><h5>file-operation.thread-num</h5></td>
@@ -1950,6 +1962,12 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-compaction.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to compact vector-store files when compacting a data evolution table.</td>
         </tr>
         <tr>
             <td><h5>vector-field</h5></td>

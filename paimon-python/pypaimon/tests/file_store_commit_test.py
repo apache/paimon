@@ -38,14 +38,14 @@ from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
-from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
+from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import (
-    CommitDedup,
+from pypaimon.write.commit_options import CommitDedup
+from pypaimon.execution.python.write.file_store_commit import (
     CommitFailRetryResult,
     DedupEvidenceMissing,
     FileStoreCommit,
-    RollbackRetryResult,
     RewriteResult,
     _reject_compact_increment,
     _row_id_check_from_messages,
@@ -151,8 +151,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_snapshot_commit = Mock()
 
     def _create_file_store_commit(self):
-        with patch('pypaimon.write.file_store_commit.ManifestFileManager'), \
-                patch('pypaimon.write.file_store_commit.ManifestListManager'):
+        with patch('pypaimon.execution.python.write.file_store_commit.ManifestFileManager'), \
+                patch('pypaimon.execution.python.write.file_store_commit.ManifestListManager'):
             return FileStoreCommit(
                 snapshot_commit=self.mock_snapshot_commit,
                 table=self.mock_table,
@@ -353,8 +353,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         )
 
 
-@patch('pypaimon.write.file_store_commit.ManifestFileManager')
-@patch('pypaimon.write.file_store_commit.ManifestListManager')
+@patch('pypaimon.execution.python.write.file_store_commit.ManifestFileManager')
+@patch('pypaimon.execution.python.write.file_store_commit.ManifestListManager')
 class TestFileStoreCommit(unittest.TestCase):
     """Test cases for FileStoreCommit class."""
 
@@ -439,62 +439,7 @@ class TestFileStoreCommit(unittest.TestCase):
             'a snapshot with the same commit fields but different manifest '
             'references was treated as the one previously read')
 
-    def test_conflict_rollback_retry_skips_history_and_rescans_base(
-            self, mock_manifest_list_manager, mock_manifest_file_manager):
-        file_store_commit = self._create_file_store_commit()
-        conflict = RuntimeError("conflicting compaction")
-        read_all = Mock(return_value=[])
-        file_store_commit.commit_scanner.read_all_entries_from_changed_partitions = read_all
-        file_store_commit.conflict_detection.check_conflicts = Mock(
-            return_value=conflict
-        )
-        file_store_commit.rollback = Mock()
-        file_store_commit.rollback.try_to_rollback.return_value = True
-
-        result = file_store_commit._try_commit_once(
-            retry_result=None,
-            commit_kind="APPEND",
-            commit_entries=[Mock()],
-            changelog_entries=[],
-            commit_identifier=11,
-            latest_snapshot=Mock(id=3),
-            detect_conflicts=True,
-            allow_rollback=True,
-        )
-
-        self.assertIsInstance(result, RollbackRetryResult)
-        self.assertIs(result.exception, conflict)
-
-        file_store_commit.snapshot_manager.get_snapshot_by_id.side_effect = (
-            AssertionError("rollback retry must not scan snapshot history")
-        )
-        file_store_commit.commit_scanner.read_incremental_changes = Mock(
-            side_effect=AssertionError(
-                "rollback retry must not reuse the previous conflict base"
-            )
-        )
-        read_all.reset_mock()
-        file_store_commit.conflict_detection.check_conflicts.return_value = (
-            RuntimeError("conflict after rollback retry")
-        )
-
-        with self.assertRaisesRegex(
-                RuntimeError, "conflict after rollback retry"):
-            file_store_commit._try_commit_once(
-                retry_result=result,
-                commit_kind="APPEND",
-                commit_entries=[Mock()],
-                changelog_entries=[],
-                commit_identifier=11,
-                latest_snapshot=Mock(id=2),
-                detect_conflicts=True,
-            )
-
-        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_not_called()
-        file_store_commit.commit_scanner.read_incremental_changes.assert_not_called()
-        read_all.assert_called_once()
-
-    def test_conflict_rollback_failure_preserves_original_conflict(
+    def test_conflict_preserves_committed_snapshot_without_rollback(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         file_store_commit = self._create_file_store_commit()
         conflict = RuntimeError("conflicting compaction")
@@ -505,8 +450,8 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit.conflict_detection.check_conflicts = Mock(
             return_value=conflict
         )
-        file_store_commit.rollback = Mock()
-        file_store_commit.rollback.try_to_rollback.return_value = False
+        rollback = file_store_commit.table.catalog_environment.catalog_table_rollback
+        rollback.reset_mock()
 
         with self.assertRaises(RuntimeError) as failure:
             file_store_commit._try_commit_once(
@@ -517,11 +462,10 @@ class TestFileStoreCommit(unittest.TestCase):
                 commit_identifier=11,
                 latest_snapshot=latest_snapshot,
                 detect_conflicts=True,
-                allow_rollback=True,
             )
 
         self.assertIs(failure.exception, conflict)
-        file_store_commit.rollback.try_to_rollback.assert_called_once_with(latest_snapshot)
+        rollback.assert_not_called()
         self.mock_snapshot_commit.commit.assert_not_called()
         mock_manifest_file_manager.return_value.write.assert_not_called()
         mock_manifest_list_manager.return_value.write.assert_not_called()
@@ -1264,7 +1208,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
     def test_definite_cas_failure_retries_after_observation_expires(self):
         committer, messages = self._prepare(4)
-        file_store_commit = committer.file_store_commit
+        file_store_commit = python_commit(committer).file_store_commit
         snapshot_committer = file_store_commit.snapshot_commit
         original_commit = snapshot_committer.commit
         outcomes = []
@@ -1287,7 +1231,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
     def test_unknown_cas_outcome_with_expired_observation_fails_closed(self):
         committer, messages = self._prepare(4)
-        snapshot_committer = committer.file_store_commit.snapshot_commit
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
 
         def lose_ack(base_uuid, snapshot, statistics):
             self._append(2)
@@ -1295,7 +1239,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
             raise OSError('commit acknowledgement unavailable')
 
         with patch.object(snapshot_committer, 'commit', side_effect=lose_ack) as publish, \
-                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
             with self.assertRaises(DedupEvidenceMissing):
                 committer.commit(messages)
 
@@ -1304,7 +1248,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
     def test_replay_still_requires_evidence_after_a_definite_cas_failure(self):
         committer, messages = self._prepare(4, CommitDedup(on_first_attempt=True))
-        snapshot_committer = committer.file_store_commit.snapshot_commit
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
         original_commit = snapshot_committer.commit
 
         def race_commit(base_uuid, snapshot, statistics):
@@ -1315,7 +1259,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
             return result
 
         with patch.object(snapshot_committer, 'commit', side_effect=race_commit) as publish, \
-                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
             with self.assertRaises(DedupEvidenceMissing):
                 committer.commit(messages)
 
@@ -1324,7 +1268,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
     def test_unknown_cas_outcome_acknowledges_a_persisted_commit(self):
         committer, messages = self._prepare(4)
-        snapshot_committer = committer.file_store_commit.snapshot_commit
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
         original_commit = snapshot_committer.commit
 
         def lose_ack(base_uuid, snapshot, statistics):
@@ -1333,8 +1277,8 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
             raise OSError('commit acknowledgement unavailable')
 
         with patch.object(snapshot_committer, 'commit', side_effect=lose_ack) as publish, \
-                patch.object(committer.file_store_commit, '_commit_retry_wait'), \
-                patch('pypaimon.write.file_store_commit.check_commit_files') as check_files:
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'), \
+                patch('pypaimon.execution.python.write.file_store_commit.check_commit_files') as check_files:
             committer.commit(messages)
 
         self.assertEqual(publish.call_count, 1)
@@ -1343,7 +1287,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
     def test_unknown_outcome_survives_a_later_definite_cas_failure(self):
         committer, messages = self._prepare(4)
-        snapshot_committer = committer.file_store_commit.snapshot_commit
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
         original_commit = snapshot_committer.commit
         attempts = []
 
@@ -1360,7 +1304,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
             return result
 
         with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
-                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
             with self.assertRaises(DedupEvidenceMissing):
                 committer.commit(messages)
 
@@ -1369,7 +1313,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
 
     def test_definite_cas_failure_still_checks_prepared_files(self):
         committer, messages = self._prepare(4)
-        snapshot_committer = committer.file_store_commit.snapshot_commit
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
         original_commit = snapshot_committer.commit
         outcomes = []
 
@@ -1385,7 +1329,7 @@ class TestFileStoreCommitRecovery(unittest.TestCase):
             return result
 
         with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
-                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
             with self.assertRaisesRegex(RuntimeError, 'required file is missing'):
                 committer.commit(messages)
 
@@ -1418,7 +1362,7 @@ def test_overwrite_recovery_checks_prepared_indexes(tmp_path, on_first_attempt):
                 table.file_io.delete(table.path_factory().bucket_index_path(
                     tuple(entry.partition.values), entry.bucket, entry.index_file))
 
-        snapshot_committer = committer.file_store_commit.snapshot_commit
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
         original_commit = snapshot_committer.commit
         attempts = []
 
@@ -1432,7 +1376,7 @@ def test_overwrite_recovery_checks_prepared_indexes(tmp_path, on_first_attempt):
         if on_first_attempt:
             remove_indexes()
         with patch.object(snapshot_committer, 'commit', side_effect=fail_first_commit), \
-                patch.object(committer.file_store_commit, '_commit_retry_wait'):
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
             with pytest.raises(RuntimeError, match='required file is missing'):
                 committer.commit(messages)
         assert len(attempts) == (0 if on_first_attempt else 1)

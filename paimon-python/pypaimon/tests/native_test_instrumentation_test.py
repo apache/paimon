@@ -18,15 +18,46 @@
 """Native CI instrumentation preserves the public mutation API."""
 
 import importlib.util
+import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.table_commit import BatchTableCommit, TableCommit
 
 pytestmark = [pytest.mark.python_plan, pytest.mark.python_read,
               pytest.mark.python_write, pytest.mark.python_commit]
+
+
+def test_native_write_tracking_preserves_signature_and_forwards_bucket(monkeypatch):
+    from pypaimon.execution.native.write.native_write import NativeTableWrite
+
+    path = Path(__file__).resolve().parents[2] / 'conftest.py'
+    spec = importlib.util.spec_from_file_location('native_write_instrumentation', str(path))
+    instrumentation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(instrumentation)
+    for key in ('PLAN', 'READ', 'COMMIT', 'UPDATE'):
+        monkeypatch.setenv('PYPAIMON_TEST_NATIVE_' + key, '0')
+    monkeypatch.setenv('PYPAIMON_TEST_NATIVE_WRITE', '1')
+    calls = []
+    result = object()
+
+    def write_arrow_batch(self, data, bucket=None):
+        calls.append((data, bucket))
+        return result
+
+    monkeypatch.setattr(NativeTableWrite, 'write_arrow_batch', write_arrow_batch)
+    instrumentation.pytest_configure(Mock())
+    instrumentation._force_native_write_for_test = True
+    assert inspect.signature(NativeTableWrite.write_arrow_batch) == inspect.signature(write_arrow_batch)
+    data = SimpleNamespace(num_rows=1)
+    writer = SimpleNamespace(_native_writer=object())
+    assert NativeTableWrite.write_arrow_batch(writer, data, bucket=7) is result
+    assert calls == [(data, 7)]
+    assert instrumentation._native_write_count == 1
 
 
 @pytest.mark.parametrize('operation,args', [
@@ -54,8 +85,9 @@ def test_native_commit_tracking_forwards_batch_truncate(monkeypatch, operation, 
     instrumentation.pytest_configure(Mock())
     instrumentation._force_native_commit_for_test = True
     commit = object.__new__(BatchTableCommit)
-    commit.batch_committed = False
-    commit.file_store_commit = Mock()
+    commit._batch_committed = False
+    commit.overwrite_partition = None
+    commit._python_commit = Mock()
     error = RuntimeError('snapshot may already have published')
     if fail:
         getattr(backend, operation).side_effect = error
@@ -66,6 +98,6 @@ def test_native_commit_tracking_forwards_batch_truncate(monkeypatch, operation, 
         getattr(commit, operation)(*args)
     assert calls == [([], True)]
     assert instrumentation._native_commit_count == 1
-    getattr(backend, operation).assert_called_once_with(*args)
-    commit.file_store_commit.truncate_table.assert_not_called()
-    commit.file_store_commit.drop_partitions.assert_not_called()
+    getattr(backend, operation).assert_called_once_with(*args, BATCH_COMMIT_IDENTIFIER)
+    commit._python_commit.truncate_table.assert_not_called()
+    commit._python_commit.truncate_partitions.assert_not_called()

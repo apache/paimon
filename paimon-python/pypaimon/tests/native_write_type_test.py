@@ -26,10 +26,11 @@ import pyarrow as pa
 import pytest
 
 from pypaimon import Schema
-from pypaimon.read.native_plan import native_runtime_available
+from pypaimon.execution.native.runtime import (native_runtime_available)
+from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.tests import native_plan_rest_test
-from pypaimon.write.native_write import NativeTableWrite
+from pypaimon.write.write_dispatch import NativeTableWrite
 
 
 rest_catalog = native_plan_rest_test.rest_catalog
@@ -173,7 +174,7 @@ def test_full_input_routes_before_projecting_unwritten_routing_fields(
     data = pa.Table.from_pylist([
         dict(id=1, pt=7, value=42), dict(id=None, pt=None, value=43),
     ], schema=_SCHEMA)
-    partitions, bucket_ids = table.create_row_key_extractor().extract_partition_bucket_batch(data.to_batches()[0])
+    partitions, bucket_ids = create_row_key_extractor(table).extract_partition_bucket_batch(data.to_batches()[0])
     expected_buckets = dict(zip(partitions, bucket_ids))
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
@@ -210,7 +211,7 @@ def test_rows_route_with_unwritten_columns_without_requiring_other_fields(
     values = dict(id=1, pt=7, value=42, unwritten=blob if unwritten_blob else 999)
     row = GenericRow([values[name] for name in names], [fields[name] for name in names])
     full_input = pa.Table.from_pylist([dict(values, unwritten=None)], schema=schema).to_batches()[0]
-    _, buckets = table.create_row_key_extractor().extract_partition_bucket_batch(full_input)
+    _, buckets = create_row_key_extractor(table).extract_partition_bucket_batch(full_input)
     builder = table.new_batch_write_builder()
     writer = builder.new_write()
     try:

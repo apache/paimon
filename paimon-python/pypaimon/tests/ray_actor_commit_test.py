@@ -28,10 +28,14 @@ import pytest
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.execution.python.read.table_scan import PythonTableScan
+from pypaimon.execution.python.write.file_store_commit import (
+    DedupEvidenceMissing,
+    FileStoreCommit,
+)
 from pypaimon.utils.file_store_path_factory import canonical_data_file_path
-from pypaimon.write.file_store_commit import (CommitDedup,
-                                              DedupEvidenceMissing,
-                                              FileStoreCommit)
+from pypaimon.write.backend_dispatch import python_commit
+from pypaimon.write.commit_options import CommitDedup
 from pypaimon.write.ray_datasink import (PaimonActorDatasink,
                                          PaimonCommitterActor,
                                          write_paimon_dataset)
@@ -706,7 +710,7 @@ class RayActorCommitTest(unittest.TestCase):
             filtered = builder.new_read().to_arrow(splits)
             filtered_ids.extend(filtered.column('id').to_pylist())
         self.assertEqual(filtered_ids, expected_ids)
-        scanner = branch.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(branch.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.manifest_file_manager.read_entries_parallel(
             manifests, max_workers=branch.options.scan_manifest_parallelism())
@@ -782,7 +786,7 @@ class RayActorCommitTest(unittest.TestCase):
             rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
             filtered_ids.extend(rows.column('id').to_pylist())
         self.assertEqual(filtered_ids, expected_ids)
-        scanner = reloaded.new_read_builder().new_scan().file_scanner
+        scanner = PythonTableScan(reloaded.new_read_builder().new_scan())._file_scanner()
         manifests, _ = scanner.manifest_scanner()
         entries = scanner.manifest_file_manager.read_entries_parallel(
             manifests, max_workers=reloaded.options.scan_manifest_parallelism())
@@ -1000,7 +1004,7 @@ class RayActorCommitTest(unittest.TestCase):
             base_snapshot_id=pinned_base['snapshot_id'],
             base_file_millis=pinned_base['file_millis'],
         ))
-        fsc = commit.file_store_commit
+        fsc = python_commit(commit).file_store_commit
         original_cas = fsc.snapshot_commit.commit
         state = {'failed_once': False}
         test = self
@@ -1074,7 +1078,7 @@ class RayActorCommitTest(unittest.TestCase):
                     base_snapshot_id=pinned_base['snapshot_id'],
                     base_file_millis=pinned_base['file_millis'],
                 ))
-                fsc = commit.file_store_commit
+                fsc = python_commit(commit).file_store_commit
                 original_cas = fsc.snapshot_commit.commit
                 state = {'failed_once': False}
                 test = self
@@ -1170,7 +1174,7 @@ class RayActorCommitTest(unittest.TestCase):
             base_snapshot_id=pinned_base['snapshot_id'],
             base_file_millis=pinned_base['file_millis'],
         ))
-        fsc = commit.file_store_commit
+        fsc = python_commit(commit).file_store_commit
         manager = fsc.snapshot_manager
         original_get = manager.get_snapshot_by_id
         state = {'raced': False}
@@ -1231,7 +1235,7 @@ class RayActorCommitTest(unittest.TestCase):
                     on_first_attempt=True,
                     base_snapshot_id=pinned['snapshot_id'],
                     base_file_millis=pinned['file_millis']))
-                manager = commit.file_store_commit.snapshot_manager
+                manager = python_commit(commit).file_store_commit.snapshot_manager
                 original_read = manager.file_io.read_file_utf8
                 snapshot_path = manager.get_snapshot_path(1)
                 reads = []
@@ -1279,9 +1283,9 @@ class RayActorCommitTest(unittest.TestCase):
         builder = table.new_batch_write_builder()
         builder.commit_user = 'task'
         commit = builder.new_commit(dedup=CommitDedup(on_first_attempt=True))
-        manager = commit.file_store_commit.snapshot_manager
+        manager = python_commit(commit).file_store_commit.snapshot_manager
         original_read = manager.file_io.read_file_utf8
-        original_cas = commit.file_store_commit.snapshot_commit.commit
+        original_cas = python_commit(commit).file_store_commit.snapshot_commit.commit
         snapshot_path = manager.get_snapshot_path(1)
         reads = []
 
@@ -1303,7 +1307,7 @@ class RayActorCommitTest(unittest.TestCase):
         try:
             with patch.object(manager.file_io, 'read_file_utf8',
                               side_effect=expire_observation_before_authorization):
-                with patch.object(commit.file_store_commit.snapshot_commit,
+                with patch.object(python_commit(commit).file_store_commit.snapshot_commit,
                                   'commit', wraps=original_cas) as publish:
                     with self.assertRaises(DedupEvidenceMissing):
                         commit.commit(messages)
@@ -1347,7 +1351,7 @@ class RayActorCommitTest(unittest.TestCase):
         messages = self._prepare_commit_messages(
             table, {'id': [42], 'value': ['task']})
         commit = table.new_batch_write_builder().new_commit()
-        original_cas = commit.file_store_commit.snapshot_commit.commit
+        original_cas = python_commit(commit).file_store_commit.snapshot_commit.commit
         attempts = []
 
         def fail_before_publication(base_uuid, snapshot, statistics):
@@ -1362,7 +1366,7 @@ class RayActorCommitTest(unittest.TestCase):
             return original_cas(base_uuid, snapshot, statistics)
 
         try:
-            with patch.object(commit.file_store_commit.snapshot_commit, 'commit',
+            with patch.object(python_commit(commit).file_store_commit.snapshot_commit, 'commit',
                               side_effect=fail_before_publication):
                 with self.assertRaisesRegex(RuntimeError, 'missing|deleted'):
                     commit.commit(messages)
@@ -1388,7 +1392,7 @@ class RayActorCommitTest(unittest.TestCase):
                 builder = table.new_batch_write_builder()
                 builder.commit_user = 'task'
                 commit = builder.new_commit(dedup=CommitDedup(on_first_attempt=True))
-                original_cas = commit.file_store_commit.snapshot_commit.commit
+                original_cas = python_commit(commit).file_store_commit.snapshot_commit.commit
                 attempts = []
 
                 def lose_ack_after_expiry(base_uuid, snapshot, statistics):
@@ -1410,7 +1414,7 @@ class RayActorCommitTest(unittest.TestCase):
                 messages = self._prepare_commit_messages(
                     table, {'id': [42], 'value': ['task']})
                 try:
-                    with patch.object(commit.file_store_commit.snapshot_commit, 'commit',
+                    with patch.object(python_commit(commit).file_store_commit.snapshot_commit, 'commit',
                                       side_effect=lose_ack_after_expiry):
                         if landed:
                             commit.commit(messages)

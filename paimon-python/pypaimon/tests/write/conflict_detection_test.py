@@ -27,7 +27,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.commit.conflict_detection import (
+from pypaimon.execution.python.write.commit.conflict_detection import (
     ConflictDetection,
     RowIdColumnConflictChecker,
 )
