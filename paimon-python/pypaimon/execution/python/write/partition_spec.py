@@ -15,8 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Java TypeUtils conversions for private overwrite and truncate specs."""
+"""Java partition value conversions."""
 
+import math
 import re
 import struct
 from calendar import monthrange
@@ -27,13 +28,51 @@ _UNREPRESENTABLE_PARTITION_VALUE = object()
 _JAVA_WHITESPACE = ''.join(chr(value) for value in range(33))
 
 
-def _partition_spec_value(value, data_type):
+def _partition_value_to_string(value, data_type, legacy):
+    from pypaimon.schema.data_types import AtomicType
+    from pypaimon.utils.file_store_path_factory import _format_partition_value
+
+    name = str(data_type).upper().split('(', 1)[0].split()[0]
+    if not isinstance(data_type, AtomicType) or name not in (
+            'BOOLEAN', 'TINYINT', 'SMALLINT', 'INT', 'INTEGER', 'BIGINT', 'FLOAT', 'DOUBLE',
+            'DECIMAL', 'CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES',
+            'DATE', 'TIME', 'TIMESTAMP', 'TIMESTAMP_LTZ'):
+        raise NotImplementedError('Unsupported format table partition type: %s' % data_type)
+    if name == 'FLOAT' and isinstance(value, float) and math.isfinite(value):
+        # The exact value, as before, which every Java reads. Float.toString changed in Java 19, and Java rejects the
+        # other JDK's name of a value (#11164).
+        return str(value)
+    return _format_partition_value(value, data_type, legacy, None)
+
+
+def _partition_spec_value(value, data_type, legacy_ltz=False, directory=False):
     """TypeUtils.castFromString for the scalar types accepted as partitions.
 
     Partition specs are not SQL casts: integer text must be integral and
     DECIMAL uses HALF_UP with precision overflow represented as NULL.
     Already typed Python values retain the existing public API contract.
+
+    ``directory`` reads a directory name, which other writers name differently:
+    Float.toString names a FLOAT differently before and since JDK 19, such as
+    2.68873286E11 and 2.6887329E11, and Java reads only its own JDK's name.
+    Earlier PyPaimon versions named directories with str() of the values, such
+    as inf or an LTZ value with its offset, which read as those versions read
+    them.
     """
+    try:
+        return _cast_partition_text(value, data_type, legacy_ltz, directory)
+    except ValueError as error:
+        if not directory or not isinstance(value, str):
+            raise
+        import pyarrow as pa
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        try:
+            return pa.array([value], pa.string()).cast(PyarrowFieldParser.from_paimon_type(data_type))[0].as_py()
+        except (pa.ArrowInvalid, pa.ArrowNotImplementedError, pa.ArrowTypeError):
+            raise error
+
+
+def _cast_partition_text(value, data_type, legacy_ltz, directory):
     if not isinstance(value, str):
         return value
     import pyarrow as pa
@@ -89,7 +128,8 @@ def _partition_spec_value(value, data_type):
                 single = struct.unpack('>f', struct.pack('>f', result))[0]
             except OverflowError:
                 single = float('-inf') if result < 0 else float('inf')
-            if result != single and java_floating_string(result) != java_floating_string(single, True):
+            if (not directory and result != single
+                    and java_floating_string(result) != java_floating_string(single, True)):
                 raise ValueError('Partition value cannot be cast to FLOAT due to precision loss')
             return single
         return result
@@ -219,7 +259,7 @@ def _partition_spec_value(value, data_type):
         nanos = nanos // 10 ** (9 - precision) * 10 ** (9 - precision)
         epoch = whole - datetime(1970, 1, 1)
         seconds = epoch.days * 86400 + epoch.seconds
-        if target.tz is not None:
+        if target.tz is not None and not legacy_ltz:
             seconds = _local_to_utc_seconds(seconds)
         ticks_per_second = {'s': 1, 'ms': 1000, 'us': 1000000, 'ns': 1000000000}[target.unit]
         return pa.scalar(seconds * ticks_per_second + nanos // (1000000000 // ticks_per_second), type=target).as_py()

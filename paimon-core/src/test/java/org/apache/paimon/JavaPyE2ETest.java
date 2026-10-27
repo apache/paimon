@@ -71,6 +71,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -706,6 +707,43 @@ public class JavaPyE2ETest {
                 }
             }
         }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonFloatFormatTable() throws Exception {
+        // Written by test_py_write_float_format_table. Java reads a FLOAT partition name only when
+        // it parses to the value, or when Float.toString of the value equals Double.toString of
+        // the parsed name on this JVM.
+        FormatTable table =
+                FormatTable.builder()
+                        .fileIO(LocalFileIO.create())
+                        .identifier(identifier("py_float_format_table"))
+                        .rowType(
+                                RowType.builder()
+                                        .field("id", DataTypes.INT())
+                                        .field("pt", DataTypes.FLOAT())
+                                        .build())
+                        .partitionKeys(Collections.singletonList("pt"))
+                        .location(
+                                tempDir.resolve("warehouse")
+                                        .resolve("py_float_format_table")
+                                        .toString())
+                        .format(FormatTable.Format.PARQUET)
+                        .options(new HashMap<>())
+                        .build();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        row -> row.getInt(0) + ":" + Float.floatToIntBits(row.getFloat(1)));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "1:" + Float.floatToIntBits(0.1f),
+                        "2:" + Float.floatToIntBits(268873285632f),
+                        "3:" + Float.floatToIntBits(1e23f),
+                        "4:" + Float.floatToIntBits((float) Math.pow(2, 90)));
     }
 
     @Test
