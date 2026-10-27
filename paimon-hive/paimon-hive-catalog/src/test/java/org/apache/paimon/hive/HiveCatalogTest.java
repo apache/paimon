@@ -34,6 +34,8 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.object.ObjectTable;
@@ -56,6 +58,8 @@ import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -303,6 +307,56 @@ public class HiveCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAlterAndDropTableWithInvalidOptions(boolean external) throws Exception {
+        String database = "legacy_options_db";
+        Identifier identifier = Identifier.create(database, "legacy_table");
+        catalog.createDatabase(database, false);
+        Path externalPath = new Path(warehouse, "external-data");
+        fileIO.mkdirs(externalPath);
+        fileIO.overwriteFileUtf8(new Path(externalPath, "data"), "data");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option("EXTERNAL", Boolean.toString(external))
+                        .option(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), externalPath.toString())
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = table.schemaManager();
+        TableSchema schema = schemaManager.latest().get();
+        Map<String, String> invalidOptions = new HashMap<>(schema.options());
+        invalidOptions.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing");
+        // Simulate options persisted before the corresponding runtime validation was added.
+        fileIO.overwriteFileUtf8(
+                schemaManager.toSchemaPath(schema.id()), schema.copy(invalidOptions).toString());
+
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("missing");
+        catalog.alterTable(
+                identifier,
+                SchemaChange.removeOption(CoreOptions.RECORD_LEVEL_TIME_FIELD.key()),
+                false);
+        assertThat(catalog.getTable(identifier).options())
+                .doesNotContainKey(CoreOptions.RECORD_LEVEL_TIME_FIELD.key());
+        TableSchema repairedSchema = schemaManager.latest().get();
+        assertThat(repairedSchema.id()).isEqualTo(schema.id() + 1);
+
+        fileIO.overwriteFileUtf8(
+                schemaManager.toSchemaPath(repairedSchema.id()),
+                repairedSchema.copy(invalidOptions).toString());
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(IllegalArgumentException.class);
+        catalog.dropTable(identifier, false);
+
+        assertThat(catalog.listTables(database)).doesNotContain(identifier.getTableName());
+        assertThat(fileIO.exists(table.location())).isEqualTo(external);
+        assertThat(fileIO.exists(externalPath)).isEqualTo(external);
     }
 
     @Test
