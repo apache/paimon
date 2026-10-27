@@ -39,12 +39,17 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.graph.StreamNode;
+import org.apache.flink.table.api.bridge.java.StreamStatementSet;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.config.ExecutionConfigOptions.UidGeneration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.ExternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.file.Path;
@@ -287,6 +292,39 @@ class OperatorUidSuffixTest {
                                         0,
                                         true)))
                 .isEqualTo(crossPartition);
+    }
+
+    /** The planner neither drops nor replaces the uids Paimon sets, whatever its uid mode. */
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(
+            value = UidGeneration.class,
+            names = {"PLAN_ONLY", "ALWAYS"})
+    void testSqlInsertKeepsTheUids(UidGeneration uidGeneration) {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
+        tEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_UID_GENERATION, uidGeneration);
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG paimon WITH ('type' = 'paimon', 'warehouse' = '%s')",
+                        warehouse.resolve("sql-" + uidGeneration)));
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE paimon.`default`.%s (k INT, v BIGINT, pt STRING) WITH "
+                                + "('%s' = '%s', '%s' = 'true')",
+                        TABLE_NAME,
+                        SINK_OPERATOR_UID_SUFFIX.key(),
+                        UID_SUFFIX,
+                        SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS.key()));
+        StreamStatementSet statements = tEnv.createStatementSet();
+        statements.addInsertSql(
+                "INSERT INTO paimon.`default`." + TABLE_NAME + " VALUES (1, 2, 'a')");
+        statements.attachAsDataStream();
+
+        assertThat(uidsByOperatorName(env.getStreamGraph()))
+                .as("table.exec.uid.generation=%s", uidGeneration)
+                .containsEntry("Writer : tbl", "Writer_tbl_test-uid")
+                .containsEntry("Global Committer : tbl", "Global Committer_tbl_test-uid")
+                .containsEntry("end: Writer", "end_tbl_test-uid");
     }
 
     // ------------------------------------------------------------------------
