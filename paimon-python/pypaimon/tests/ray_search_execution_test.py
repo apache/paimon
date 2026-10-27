@@ -205,15 +205,26 @@ def test_cancellation_scope_reaches_native_callbacks_on_another_thread():
         cancel.assert_called_once_with('pending')
 
 
-@pytest.mark.parametrize('family', ['vector', 'full-text'])
-def test_python_primary_key_readers_reject_unsupported_executor_explicitly(family):
+def test_python_primary_key_full_text_rejects_unsupported_executor_explicitly():
     from pypaimon.execution.python.read.search.primary_key_full_text_read import PrimaryKeyFullTextRead
-    from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
 
-    reader_type = PrimaryKeyVectorRead if family == 'vector' else PrimaryKeyFullTextRead
-    reader = object.__new__(reader_type)
-    with pytest.raises(ValueError, match='Ray %s search supports only data-evolution tables' % family):
+    reader = object.__new__(PrimaryKeyFullTextRead)
+    with pytest.raises(ValueError, match='Ray full-text search supports only data-evolution tables'):
         reader.read_plan(object(), executor=RaySearchTaskExecutor(2))
+
+
+def test_python_primary_key_vector_read_accepts_executor():
+    from pypaimon.common.options.core_options import GlobalIndexSearchMode
+    from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
+    from pypaimon.table.source.search_types import PrimaryKeyVectorScanPlan
+
+    table = SimpleNamespace(options=SimpleNamespace(
+        primary_key_vector_index_type=lambda column: 'ivf-flat',
+        vector_index_search_mode=lambda: GlobalIndexSearchMode.FAST))
+    reader = PrimaryKeyVectorRead(table, 1, SimpleNamespace(name='embedding'), [1.])
+    result = reader.read_plan(PrimaryKeyVectorScanPlan(0, []), executor=RaySearchTaskExecutor(2))
+    assert result.snapshot_id == 0
+    assert not result.positions
 
 
 class _CallbackDriver:

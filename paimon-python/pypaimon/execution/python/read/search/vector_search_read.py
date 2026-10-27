@@ -685,6 +685,16 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
                          options=options)
         self._query_vector = query_vector
 
+    def _new_distributed_reader(self, executor):
+        if type(self) is not DataEvolutionVectorRead:
+            raise ValueError("Custom vector readers must define their own distributed execution.")
+        if not self._table.options.data_evolution_enabled():
+            raise ValueError("Ray vector search supports only data-evolution tables for this reader.")
+        from pypaimon.execution.python.read.search.distributed_search import validate_query_vectors
+        from pypaimon.execution.python.read.search.distributed_vector_search import DistributedVectorSearchRead
+        validate_query_vectors([self._query_vector])
+        return DistributedVectorSearchRead(self, executor)
+
     def _read(self, splits, snapshot):
         self._index_metric = None
         index_splits, raw_splits = self._prepare_search_splits(splits, snapshot)
@@ -731,6 +741,16 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                          partition_filter=partition_filter,
                          options=options)
         self._query_vectors = list(query_vectors)
+
+    def _new_distributed_reader(self, executor):
+        if type(self) is not BatchVectorSearchReadImpl:
+            raise ValueError("Custom vector readers must define their own distributed execution.")
+        if not self._table.options.data_evolution_enabled():
+            raise ValueError("Ray vector search supports only data-evolution tables for this reader.")
+        from pypaimon.execution.python.read.search.distributed_search import validate_query_vectors
+        from pypaimon.execution.python.read.search.distributed_vector_search import DistributedBatchVectorSearchRead
+        validate_query_vectors(self._query_vectors)
+        return DistributedBatchVectorSearchRead(self, executor)
 
     def _read_batch(self, splits, snapshot):
         self._index_metric = None

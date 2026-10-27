@@ -199,9 +199,16 @@ data. Historical snapshot and deletion semantics remain the same. Plain
 ## Distributed Vector Search
 
 Use `execution="ray"` to execute vector queries across Ray workers and return
-Arrow results to the driver. This supports single and batch vector queries on
-data-evolution tables; primary-key tables are not supported by this execution
-mode. Full-text and hybrid queries are described below.
+Arrow results to the driver. Single and batch vector queries are supported on
+data-evolution tables and, with the Python read backend, on primary-key tables.
+Batch queries return one Arrow table per input vector, in input order.
+Full-text and hybrid queries are described below.
+
+For primary-key tables, enable the Python read backend with
+`read.native.enabled=false` and `scan.native-plan.enabled=false`. Search
+parallelism is limited by the number of matching buckets; refinement and result
+lookup run on the driver. Primary-key vector queries do not support Native Ray
+execution, Ray Dataset results (`to_ray()`), `with_score()`, or `order_by_score()`.
 
 Install the same PyPaimon and index dependencies on the driver and workers:
 
@@ -261,8 +268,8 @@ batch_neighbors = (
 )
 ```
 
-Each batch task handles all query vectors for one split: index workers reuse
-an open shard across bounded query blocks, and raw workers stream each data
+For data-evolution tables, each batch task handles all query vectors for one split:
+index workers reuse an open shard across bounded query blocks, and raw workers stream each data
 split once with a separate top-k for each query. For refinement, the driver
 selects each query's global candidates, then workers stream their union once per
 read split, scoring each row only for the queries that selected it. Shared final
@@ -270,8 +277,8 @@ row lookup runs on the driver. The entire batch uses one read snapshot.
 Candidate traffic and result memory grow with the number of query vectors;
 split large query collections into smaller batches when necessary.
 
-The driver fixes one read snapshot and plans the query. Workers search individual
-index shards and, when required by the table's search mode, scan unindexed data.
+For data-evolution tables, the driver fixes one read snapshot and plans the query.
+Workers search individual index shards and, when required by the table's search mode, scan unindexed data.
 They return candidate row IDs and scores. For vector queries with
 refinement enabled, the driver first selects the global candidate set, then
 workers read and score those candidate vectors using the index's persisted
@@ -280,8 +287,9 @@ filtering and final row lookup.
 In particular, `pre_filter` filters candidates before ranking; `where()` filters
 the selected rows and can return fewer than the requested number of results.
 
-For indexed vector searches using the Python backend, workers evaluate scalar predicates and build
-live-row filters at the query snapshot. Tasks using the same scalar index files
+For indexed searches on data-evolution tables using the Python backend, workers
+evaluate scalar predicates and build live-row filters at the query snapshot.
+Tasks using the same scalar index files
 share one Ray scalar-index evaluation; its result is passed directly to dependent
 tasks without materializing the bitmap on the driver. Candidate verification
 reads only filter columns and row IDs in the task's shard range, without scanning
@@ -302,15 +310,15 @@ All workers must be able to access the table's storage. Local filesystem paths
 are suitable for a local Ray cluster; multiple nodes require shared storage.
 Each index task searches one shard, while its native index I/O settings still
 apply. Raw-scan parallelism is limited by the number of planned read splits,
-controlled by the table's `source.split.target-size` option. Refinement also
-uses planned read splits; workers return scores for merging.
+controlled by the table's `source.split.target-size` option. For data-evolution
+tables, refinement also uses planned read splits; workers return scores for merging.
 Final row lookup runs on the driver. Candidate traffic grows
 with the number of index shards and the configured refinement budget, so Ray
 execution is most useful when shard search or raw scanning outweighs scheduling
 and transfer costs. Small queries can be faster locally.
 
-Local and Ray index searches merge shard results incrementally in plan order.
-The concurrency limit bounds running tasks plus completed results waiting for
+For data-evolution tables, local and Ray index searches merge shard results
+incrementally in plan order. The concurrency limit bounds running tasks plus completed results waiting for
 earlier shards, so a slow shard can delay further submissions. Global top-k
 selection still uses all merged candidate scores, whose storage grows with the
 number of unique candidate rows per query.
