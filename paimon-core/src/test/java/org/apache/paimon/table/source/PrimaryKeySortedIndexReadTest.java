@@ -42,6 +42,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
@@ -89,10 +90,30 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
                                 .newIndexFileHandler()
                                 .scanSourceIndexes(compactedSnapshot, BinaryRow.EMPTY_ROW, 0))
                 .isNotEmpty();
-        write(
-                table,
-                ioManager,
-                GenericRow.ofKind(org.apache.paimon.types.RowKind.DELETE, 3, 10, keep));
+        FileStoreTable writeOnlyTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+        write(writeOnlyTable, ioManager, GenericRow.ofKind(RowKind.DELETE, 3, 10, keep));
+
+        // Verify that the indexed value is cleared in the persisted DELETE before compaction.
+        List<Integer> deletedIds = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                writeOnlyTable
+                        .newRead()
+                        .forceKeepDelete()
+                        .createReader(
+                                writeOnlyTable
+                                        .newScan()
+                                        .withLevelFilter(level -> level == 0)
+                                        .plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        assertThat(row.getRowKind()).isEqualTo(RowKind.DELETE);
+                        assertThat(row.isNullAt(1)).isTrue();
+                        deletedIds.add(row.getInt(0));
+                    });
+        }
+        assertThat(deletedIds).containsExactly(3);
+        compact(table, BinaryRow.EMPTY_ROW, 0, ioManager, false);
 
         Snapshot snapshot = table.store().snapshotManager().latestSnapshot();
         List<IndexFileMeta> payloads =

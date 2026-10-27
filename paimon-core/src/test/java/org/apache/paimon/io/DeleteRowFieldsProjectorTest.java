@@ -44,7 +44,8 @@ class DeleteRowFieldsProjectorTest {
         options.set(CoreOptions.RECORD_LEVEL_TIME_FIELD, "expire");
         options.set(CoreOptions.CLUSTERING_COLUMNS, "cluster");
         options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "vector_index");
-        options.set(CoreOptions.PK_BTREE_INDEX_COLUMNS, "btree_index");
+        options.set(
+                CoreOptions.PK_BTREE_INDEX_COLUMNS, "btree_index,key,not_null,seq,expire,cluster");
         options.set(CoreOptions.PK_BITMAP_INDEX_COLUMNS, "bitmap_index");
         options.set(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS, "multivalue_index");
         options.set(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS, "fulltext_index");
@@ -53,7 +54,7 @@ class DeleteRowFieldsProjectorTest {
         assertThat(
                         DeleteRowFieldsProjector.createProjection(
                                 tableSchema(), new CoreOptions(options)))
-                .containsExactly(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1);
+                .containsExactly(0, 1, 2, 3, 4, -1, -1, -1, -1, -1, -1, -1);
     }
 
     @Test

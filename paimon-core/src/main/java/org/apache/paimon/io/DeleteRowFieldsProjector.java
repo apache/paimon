@@ -47,12 +47,6 @@ final class DeleteRowFieldsProjector {
             requiredFields.add(options.recordLevelTimeField());
         }
         requiredFields.addAll(options.clusteringColumns());
-        requiredFields.addAll(options.primaryKeyVectorIndexColumns());
-        requiredFields.addAll(options.primaryKeyBTreeIndexColumns());
-        requiredFields.addAll(options.primaryKeyBitmapIndexColumns());
-        requiredFields.addAll(options.primaryKeyMultiValueIndexColumns());
-        requiredFields.addAll(options.primaryKeyFullTextIndexColumns());
-        requiredFields.addAll(options.primaryKeyFMIndexColumns());
         for (DataField field : schema.fields()) {
             if (!field.type().isNullable()) {
                 requiredFields.add(field.name());
