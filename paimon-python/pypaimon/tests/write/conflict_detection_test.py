@@ -17,7 +17,11 @@
 
 import unittest
 from dataclasses import dataclass
+from datetime import date
 from typing import List
+from unittest.mock import Mock
+
+from parameterized import parameterized
 
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
@@ -27,6 +31,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.execution.python.write.commit.conflict_detection import (
     ConflictDetection,
     RowIdColumnConflictChecker,
@@ -327,6 +332,61 @@ class TestOverwriteConflictDetection(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIn("Total buckets", str(result))
+
+
+class TestFileDeletionConflictDiagnostics(unittest.TestCase):
+
+    @parameterized.expand([
+        ("string", [("dt", "STRING")], ["2026-10-26"], False, "dt=2026-10-26"),
+        ("multiple", [("dt", "STRING"), ("hr", "INT")], ["2026-10-26", 12], False,
+         "dt=2026-10-26/hr=12"),
+        ("escaped", [("a/b", "STRING"), ("hr", "STRING")], ["x/y=z", None], False,
+         "a%2Fb=x%2Fy%3Dz/hr=MISSING"),
+        ("null", [("dt", "STRING")], [None], False, "dt=MISSING"),
+        ("empty", [("dt", "STRING")], [""], False, "dt=MISSING"),
+        ("date", [("dt", "DATE")], [date(2026, 10, 26)], False, "dt=2026-10-26"),
+        ("legacy_date", [("dt", "DATE")], [date(1970, 1, 2)], True, "dt=1"),
+        ("non_partitioned", [], [], False, "<non-partitioned>"),
+    ])
+    def test_missing_file_reports_partition_and_bucket(
+            self, _, field_types, values, legacy, expected):
+        fields = [DataField(i, name, AtomicType(type_name))
+                  for i, (name, type_name) in enumerate(field_types)]
+        table = Mock()
+        table.path_factory.return_value = FileStorePathFactory(
+            root="/table", partition_keys=[f.name for f in fields],
+            partition_types=[f.type for f in fields], default_part_value="MISSING",
+            format_identifier="parquet", data_file_prefix="data-",
+            changelog_file_prefix="changelog-", legacy_partition_name=legacy,
+            file_suffix_include_compression=False, file_compression="zstd",
+            data_file_path_directory="data")
+
+        result = self._missing_file_conflict(table, fields, values)
+
+        self.assertIsInstance(result, RuntimeError)
+        self.assertIn("Trying to delete file missing.parquet which is not previously added", str(result))
+        self.assertIn("partition={}, bucket=3".format(expected), str(result))
+        if not fields:
+            table.path_factory.assert_not_called()
+
+    def test_partition_formatting_failure_preserves_conflict(self):
+        table = Mock()
+        table.path_factory.return_value._canonical_partition.side_effect = ValueError("invalid partition")
+
+        result = self._missing_file_conflict(
+            table, [DataField(0, "dt", AtomicType("STRING"))], ["2026-10-26"])
+
+        self.assertIsInstance(result, RuntimeError)
+        self.assertIn("Trying to delete file missing.parquet which is not previously added", str(result))
+        self.assertIn("partition=('2026-10-26',), bucket=3", str(result))
+        self.assertNotIn("invalid partition", str(result))
+
+    @staticmethod
+    def _missing_file_conflict(table, fields, values):
+        entry = _make_entry("missing.parquet", kind=1, bucket=3)
+        entry.partition = GenericRow(values, fields)
+        detection = ConflictDetection(False, None, None, table, None)
+        return detection.check_conflicts(None, [], [entry], "OVERWRITE")
 
 
 class _FakeSnapshot:
