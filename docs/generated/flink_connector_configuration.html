@@ -303,16 +303,16 @@ under the License.
             <td>Weight of writer buffer in managed memory, Flink will compute the memory size for writer according to the weight, the actual memory used depends on the running environment.</td>
         </tr>
         <tr>
-            <td><h5>sink.operator-uid.cover-all-operators</h5></td>
+            <td><h5>sink.operator-uid.cover-table-sink-operators</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, 'sink.operator-uid.suffix' also names every other operator a streaming write adds: the row conversions, the local merge, the compaction operators, the partition statistics operators, the index bootstrap and the final sink. Without it those operators take their uid from the shape of the stream graph, so a change elsewhere in the job orphans their checkpoint state. Has no effect unless 'sink.operator-uid.suffix' is set. Turning it on for a running job changes those uids, see the migration steps in the Flink savepoint documentation.</td>
+            <td>If true, 'sink.operator-uid.suffix' also names every other operator the table sink adds: the row conversions, the local merge, the compaction operators, the partition statistics operators, the index bootstrap and the final sink. Operators the CDC sync actions add before the table sink are not covered. Without it those operators take their uid from the shape of the stream graph, so a change elsewhere in the job orphans their checkpoint state. Has no effect unless 'sink.operator-uid.suffix' is set. Turning it on for a running job changes those uids, see the migration steps in the Flink savepoint documentation.</td>
         </tr>
         <tr>
             <td><h5>sink.operator-uid.suffix</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes.</td>
+            <td>Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes. Other operators the table sink adds keep generated uids unless 'sink.operator-uid.cover-table-sink-operators' is true.</td>
         </tr>
         <tr>
             <td><h5>sink.parallelism</h5></td>
@@ -405,16 +405,16 @@ under the License.
             <td>If the new snapshot has not been generated when the checkpoint starts to trigger, the enumerator will block the checkpoint and wait for the new snapshot. Set the maximum waiting time to avoid infinite waiting, if timeout, the checkpoint will fail. Note that it should be set smaller than the checkpoint timeout.</td>
         </tr>
         <tr>
-            <td><h5>source.operator-uid.cover-all-operators</h5></td>
+            <td><h5>source.operator-uid.cover-table-source-operators</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, 'source.operator-uid.suffix' also names every other operator a streaming read adds: the split monitor, the split reader, the watermark assigner and the DataStream row conversion. Without it those operators take their uid from the shape of the stream graph, so a change elsewhere in the job orphans their checkpoint state. Has no effect unless 'source.operator-uid.suffix' is set. Turning it on for a running job changes those uids, see the migration steps in the Flink savepoint documentation.</td>
+            <td>If true, 'source.operator-uid.suffix' also names every other operator the table source adds: the split monitor, the split reader, the watermark assigner and the DataStream row conversion. Without it those operators take their uid from the shape of the stream graph, so a change elsewhere in the job orphans their checkpoint state. Has no effect unless 'source.operator-uid.suffix' is set. Turning it on for a running job changes those uids, see the migration steps in the Flink savepoint documentation.</td>
         </tr>
         <tr>
             <td><h5>source.operator-uid.suffix</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Set the uid suffix for the source operators. After setting, the uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes.</td>
+            <td>Set the uid suffix for the source operators. After setting, the uid format is ${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will automatically generate the operator uid, which may be incompatible when the topology changes. Other operators the table source adds keep generated uids unless 'source.operator-uid.cover-table-source-operators' is true.</td>
         </tr>
         <tr>
             <td><h5>unaware-bucket.compaction.parallelism</h5></td>

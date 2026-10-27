@@ -79,7 +79,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_ALL_OPERATORS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -88,7 +88,7 @@ import static org.assertj.core.api.Assertions.fail;
 
 /**
  * Steps 3 and 4 of the migration {@code docs/docs/flink/savepoint.md} prescribes for turning {@code
- * sink.operator-uid.cover-all-operators} on under a running job.
+ * sink.operator-uid.cover-table-sink-operators} on under a running job.
  *
  * <p>Restores go through {@code execution.state-recovery.path}, which {@code
  * Checkpoints.loadAndValidateCheckpoint} guards: unlike the high-availability store it skips an
@@ -370,7 +370,7 @@ class OperatorUidMigrationITCase {
         Options options = new Options();
         options.set(PATH, warehouse.resolve(directory).resolve(TABLE_NAME).toString());
         options.set(SINK_OPERATOR_UID_SUFFIX, UID_SUFFIX);
-        options.set(SINK_OPERATOR_UID_COVER_ALL_OPERATORS, coverAll);
+        options.set(SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS, coverAll);
         if (partitionDynamic) {
             options.set(
                     CoreOptions.PARTITION_SINK_STRATEGY,

@@ -27,9 +27,9 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 
 import javax.annotation.Nullable;
 
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_ALL_OPERATORS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_COVER_ALL_OPERATORS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_COVER_TABLE_SOURCE_OPERATORS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 
@@ -39,8 +39,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
  *
  * <p>An operator without a uid takes its id from the shape of the stream graph, so a change
  * elsewhere in the job moves the id and orphans the checkpoint entry behind it. Assigning one is
- * opt-in: the table has to set both {@code cover-all-operators} and the matching uid suffix. A job
- * that sets neither builds the same graph as before.
+ * opt-in: the table has to set both a cover option and the matching uid suffix. A job that sets
+ * neither builds the same graph as before.
  *
  * <p>A {@code *_NAME} constant passed here is a uid prefix, frozen once released.
  */
@@ -58,11 +58,15 @@ public class OperatorUidAssigner {
     }
 
     public static OperatorUidAssigner forSink(@Nullable Table table) {
-        return create(table, SINK_OPERATOR_UID_COVER_ALL_OPERATORS, SINK_OPERATOR_UID_SUFFIX);
+        return create(
+                table, SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS, SINK_OPERATOR_UID_SUFFIX);
     }
 
     public static OperatorUidAssigner forSource(@Nullable Table table) {
-        return create(table, SOURCE_OPERATOR_UID_COVER_ALL_OPERATORS, SOURCE_OPERATOR_UID_SUFFIX);
+        return create(
+                table,
+                SOURCE_OPERATOR_UID_COVER_TABLE_SOURCE_OPERATORS,
+                SOURCE_OPERATOR_UID_SUFFIX);
     }
 
     private static OperatorUidAssigner create(

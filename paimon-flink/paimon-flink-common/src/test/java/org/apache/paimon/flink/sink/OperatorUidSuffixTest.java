@@ -58,7 +58,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_ALL_OPERATORS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.OperatorUidGraphs.TEST_UID_PREFIX;
@@ -70,8 +70,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
 /**
- * Asserts that with {@code sink.operator-uid.cover-all-operators} every operator a streaming write
- * adds carries a uid, one shape per site that adds operators.
+ * Asserts that with {@code sink.operator-uid.cover-table-sink-operators} every operator the table
+ * sink adds carries a uid, one shape per site that adds operators.
  */
 class OperatorUidSuffixTest {
 
@@ -424,7 +424,7 @@ class OperatorUidSuffixTest {
             if (uidSuffix != null) {
                 options.set(SINK_OPERATOR_UID_SUFFIX, uidSuffix);
             }
-            options.set(SINK_OPERATOR_UID_COVER_ALL_OPERATORS, coverAll);
+            options.set(SINK_OPERATOR_UID_COVER_TABLE_SINK_OPERATORS, coverAll);
             try {
                 new FileSystemSchemaManager(LocalFileIO.create(), path)
                         .createTable(

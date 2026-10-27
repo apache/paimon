@@ -55,7 +55,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_COVER_ALL_OPERATORS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_COVER_TABLE_SOURCE_OPERATORS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.OperatorUidGraphs.TEST_UID_PREFIX;
 import static org.apache.paimon.flink.OperatorUidGraphs.operatorsWithoutUid;
@@ -66,8 +66,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
 /**
- * Asserts that with {@code source.operator-uid.cover-all-operators} every operator a streaming read
- * adds carries a uid, one shape per route {@link FlinkSourceBuilder} can take.
+ * Asserts that with {@code source.operator-uid.cover-table-source-operators} every operator the
+ * table source adds carries a uid, one shape per route {@link FlinkSourceBuilder} can take.
  */
 class SourceOperatorUidSuffixTest {
 
@@ -304,7 +304,7 @@ class SourceOperatorUidSuffixTest {
             if (uidSuffix != null) {
                 options.set(SOURCE_OPERATOR_UID_SUFFIX, uidSuffix);
             }
-            options.set(SOURCE_OPERATOR_UID_COVER_ALL_OPERATORS, coverAll);
+            options.set(SOURCE_OPERATOR_UID_COVER_TABLE_SOURCE_OPERATORS, coverAll);
             try {
                 new FileSystemSchemaManager(LocalFileIO.create(), path)
                         .createTable(

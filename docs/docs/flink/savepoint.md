@@ -94,20 +94,22 @@ graph. Adding an operator upstream, or changing a parallelism that alters operat
 gives it a new id and orphans its checkpoint entry.
 
 A Paimon source or sink is several operators. The suffix options name some of them; the
-cover-all options name the rest:
+cover options name the rest:
 
 | Option | Operators named |
 | --- | --- |
 | `sink.operator-uid.suffix` | Writer, Global Committer, dynamic-bucket-assigner |
-| `sink.operator-uid.cover-all-operators` | Also the row conversions, `local merge`, the compaction operators, `Collect Statistics` and `Strip Statistics`, `INDEX_BOOTSTRAP` and `cross-partition-bucket-assigner`, and the final `end` sink |
+| `sink.operator-uid.cover-table-sink-operators` | Also the row conversions, `local merge`, the compaction operators, `Collect Statistics` and `Strip Statistics`, `INDEX_BOOTSTRAP` and `cross-partition-bucket-assigner`, and the final `end` sink |
 | `source.operator-uid.suffix` | The source |
-| `source.operator-uid.cover-all-operators` | Also the split monitor and reader used by dedicated split generation and exactly-once consumers, the watermark assigner, and the DataStream row conversion |
+| `source.operator-uid.cover-table-source-operators` | Also the split monitor and reader used by dedicated split generation and exactly-once consumers, the watermark assigner, and the DataStream row conversion |
 
 Each UID is `<operator>_<table name>_<suffix>`. The table name does not include the database, so
 two tables with the same name and the same suffix in one job collide. Flink then rejects the job
 with `Hash collision on user-specified ID`. Give each table its own suffix.
 
-The `cover-all-operators` options are off by default and do nothing without the matching suffix.
+The CDC sync actions are not covered: the operators they add around the table sink, such as Side Output, Schema Evolution and Case-insensitive Convert, and the shared operators of a database sync keep generated ids. Such jobs cannot run with `pipeline.auto-generate-uids=false`.
+
+The cover options are off by default and do nothing without the matching suffix.
 Set the sink pair on a table before the first streaming job that writes it, and the source pair
 before the first streaming job that reads it. The example below sets all four, for a table used
 both ways:
@@ -115,9 +117,9 @@ both ways:
 ```sql
 ALTER TABLE my_table SET (
     'sink.operator-uid.suffix' = 'my_table_v1',
-    'sink.operator-uid.cover-all-operators' = 'true',
+    'sink.operator-uid.cover-table-sink-operators' = 'true',
     'source.operator-uid.suffix' = 'my_table_v1',
-    'source.operator-uid.cover-all-operators' = 'true'
+    'source.operator-uid.cover-table-source-operators' = 'true'
 );
 ```
 
@@ -147,7 +149,7 @@ the job is restored:
 
 ### Migrate a running job
 
-Turning `cover-all-operators` on changes the ids of the operators it newly covers, so their
+Turning a cover option on changes the ids of the operators it newly covers, so their
 entries in the job's existing checkpoints become unclaimed. Migrate through a savepoint, never
 through a `last-state` upgrade or a JobManager failover.
 
@@ -179,7 +181,7 @@ through a `last-state` upgrade or a JobManager failover.
 
 5. **Reads with dedicated split generation or an exactly-once consumer hold their position in
    the split monitor.** Only these read routes gain operators from
-   `source.operator-uid.cover-all-operators`. Every other read already carries its UID on the
+   `source.operator-uid.cover-table-source-operators`. Every other read already carries its UID on the
    source. A DataStream job that calls `buildForRow` gains the row conversion operator on every
    route. The monitor's entry holds the next snapshot to read, so step 3 rejects it the same
    way. Restart with `allowNonRestoredState`, and one of the dropped entries is the monitor's.
