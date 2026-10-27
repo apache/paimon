@@ -592,6 +592,65 @@ class TorchReadTest(unittest.TestCase):
         actual = pa.Table.from_batches(list(dataset)).sort_by('id')
         self.assertEqual(actual.to_pylist(), expected)
 
+    @parameterized.expand(['append', 'pk'])
+    def test_torch_streaming_named_paths(self, mode):
+        table, values = self._create_named_projection_table('default.named_paths_' + mode, mode)
+        projections = [
+            ({'user_id': 'id'}, [0]),
+            ({'city': 'profile.city'}, [1]),
+            ({'source': "attributes['source']"}, [2]),
+            ({'city': 'profile.city', 'source': "attributes['source']", 'user_id': 'id',
+              'city_again': 'profile.city', 'id_again': 'id',
+              'source_again': "attributes['source']"}, [1, 2, 0, 1, 0, 2]),
+        ]
+        for projection, positions in projections:
+            builder = table.new_read_builder().with_projection(projection)
+            read, splits = builder.new_read(), builder.new_scan().plan().splits()
+            if mode == 'append':
+                self.assertGreater(len(splits), 1)
+            expected = [dict(zip(projection, (row[i] for i in positions))) for row in values]
+            for options in [{}, {'prefetch_concurrency': 2},
+                            {'shuffle': True, 'seed': 17, 'buffer_size': 2, 'max_buffer_input_splits': 1},
+                            {'shuffle': True, 'seed': 17, 'buffer_size': 2, 'max_buffer_input_splits': 3}]:
+                with self.subTest(projection=projection, options=options):
+                    dataset = read.to_torch(splits, streaming=True, batch_format='row', **options)
+                    actual = list(DataLoader(dataset, batch_size=None, num_workers=0))
+                    self.assertEqual(sorted(actual, key=repr), sorted(expected, key=repr))
+                    self.assertTrue(all(list(row) == list(projection) for row in actual))
+
+    @parameterized.expand(['append', 'pk'])
+    def test_torch_streaming_named_paths_filter_limit_and_empty_input(self, mode):
+        table, _ = self._create_named_projection_table('default.named_filter_' + mode, mode)
+        predicate = table.new_read_builder().new_predicate_builder().greater_than('v', 20)
+        for limit in [0, 1, 3, None]:
+            with self.subTest(limit=limit):
+                builder = table.new_read_builder().with_projection({
+                    'v': 'id', 'city': 'profile.city', 'source': "attributes['source']",
+                }).with_filter(predicate)
+                if limit is not None:
+                    builder.with_limit(limit)
+                read, splits = builder.new_read(), builder.new_scan().plan().splits()
+                actual = list(read.to_torch(splits, streaming=True, batch_format='row'))
+                expected = [{'v': 3, 'city': None, 'source': None},
+                            {'v': 4, 'city': 'Shenzhen', 'source': None},
+                            {'v': 5, 'city': 'Beijing', 'source': None}]
+                self.assertEqual(len(actual), len(expected) if limit is None else limit)
+                if limit is None or limit == 3:
+                    self.assertCountEqual(actual, expected)
+                else:
+                    self.assertTrue(all(row in expected for row in actual))
+                self.assertEqual(list(read.to_torch([], streaming=True, batch_format='row')), [])
+
+    def test_torch_streaming_named_map_keeps_authorization_boundary(self):
+        table, _ = self._create_named_projection_table('default.named_map_auth', 'append')
+        auth = TableQueryAuthResult(filter=None, column_masking={'attributes': '{"name":"NULL"}'})
+        with patch.object(table.catalog_environment, 'table_query_auth', return_value=lambda select: auth):
+            builder = table.new_read_builder().with_projection({'source': "attributes['source']"})
+            read, splits = builder.new_read(), builder.new_scan().plan().splits()
+            dataset = read.to_torch(splits, streaming=True, batch_format='row')
+            with self.assertRaisesRegex(NotImplementedError, 'with query authorization'):
+                list(dataset)
+
     @parameterized.expand([True, False])
     def test_torch_read(self, is_streaming: bool = False):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
@@ -2130,6 +2189,44 @@ class TorchReadTest(unittest.TestCase):
                 shuffle=True,
                 max_buffer_input_splits=0,
             )
+
+    def _create_named_projection_table(self, identifier, mode):
+        schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False), ('v', pa.int64()),
+            ('profile', pa.struct([('city', pa.string())])),
+            ('attributes', pa.map_(pa.string(), pa.string())),
+        ])
+        self.catalog.create_table(identifier, Schema.from_pyarrow_schema(
+            schema, primary_keys=['id'] if mode == 'pk' else None,
+            partition_keys=['id'] if mode == 'append' else [],
+            options={'bucket': '1' if mode == 'pk' else '-1', 'read.native.enabled': 'false',
+                     'scan.native-plan.enabled': 'false', 'write.native.enabled': 'false'}), False)
+        table = self.catalog.get_table(identifier)
+        rows = [
+            {'id': 1, 'v': 10, 'profile': {'city': 'Hangzhou'},
+             'attributes': [('source', 'web'), ('source', 'mobile')]},
+            {'id': 2, 'v': 20, 'profile': None,
+             'attributes': [('source', None), ('source', 'later')]},
+            {'id': 3, 'v': 30, 'profile': {'city': None}, 'attributes': [('other', 'value')]},
+            {'id': 4, 'v': 40, 'profile': {'city': 'Shenzhen'}, 'attributes': None},
+            {'id': 5, 'v': 50, 'profile': {'city': 'Beijing'}, 'attributes': []},
+        ]
+        expected = [(1, 'Hangzhou', 'web'), (2, None, None), (3, None, None),
+                    (4, 'Shenzhen', None), (5, 'Beijing', None)]
+        writes = [rows]
+        if mode == 'pk':
+            writes.append([dict(rows[0], profile={'city': 'Suzhou'}, attributes=[('source', 'api')])])
+            expected[0] = (1, 'Suzhou', 'api')
+        for values in writes:
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(pa.Table.from_pylist(values, schema=schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+        return table, expected
 
     def _create_shuffle_append_table(
         self,
