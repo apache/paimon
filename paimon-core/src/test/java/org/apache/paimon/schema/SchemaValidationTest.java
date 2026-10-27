@@ -28,6 +28,9 @@ import org.apache.paimon.types.DataTypes;
 import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -37,6 +40,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
@@ -54,6 +58,105 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SchemaValidationTest {
+
+    @ParameterizedTest
+    @CsvSource({
+        "deduplicate, 1",
+        "deduplicate, -1",
+        "partial-update, 1",
+        "partial-update, -1",
+        "aggregation, 1",
+        "aggregation, -1"
+    })
+    void testDeleteRowThinModeSupportedMergeEngines(String mergeEngine, int bucket) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETE_ROW_THIN_MODE.key(), "true");
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
+        options.put(BUCKET.key(), String.valueOf(bucket));
+        if (mergeEngine.equals("partial-update")) {
+            options.put(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(), "true");
+        } else if (mergeEngine.equals("aggregation")) {
+            options.put(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE.key(), "true");
+        }
+
+        // All fields are required, so enabling the option is valid even without fields to project.
+        assertThatCode(() -> validateTableSchema(deleteRowThinModeSchema(options, true)))
+                .doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @MethodSource("unsupportedDeleteRowThinModeMergeEngines")
+    void testDeleteRowThinModeRequiresWholeRecordDeletes(String mergeEngine, String message) {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine);
+        assertThatCode(() -> validateTableSchema(deleteRowThinModeSchema(options, true)))
+                .doesNotThrowAnyException();
+        options.put(CoreOptions.DELETE_ROW_THIN_MODE.key(), "false");
+        assertThatCode(() -> validateTableSchema(deleteRowThinModeSchema(options, true)))
+                .doesNotThrowAnyException();
+
+        options.put(CoreOptions.DELETE_ROW_THIN_MODE.key(), "true");
+        assertThatThrownBy(() -> validateTableSchema(deleteRowThinModeSchema(options, true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+    }
+
+    private static Stream<Arguments> unsupportedDeleteRowThinModeMergeEngines() {
+        return Stream.of(
+                Arguments.of(
+                        "partial-update",
+                        "'delete-row.thin-mode' requires 'partial-update.remove-record-on-delete' = true when 'merge-engine' = 'partial-update'."),
+                Arguments.of(
+                        "aggregation",
+                        "'delete-row.thin-mode' requires 'aggregation.remove-record-on-delete' = true when 'merge-engine' = 'aggregation'."),
+                Arguments.of(
+                        "first-row",
+                        "'delete-row.thin-mode' does not support merge engine 'first-row'."));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "input"})
+    void testDeleteRowThinModeRejectsPostponeBucket(String changelogProducer) {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-2");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
+        assertThatCode(() -> validateTableSchema(deleteRowThinModeSchema(options, true)))
+                .doesNotThrowAnyException();
+
+        options.put(CoreOptions.DELETE_ROW_THIN_MODE.key(), "true");
+        assertThatThrownBy(() -> validateTableSchema(deleteRowThinModeSchema(options, true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'delete-row.thin-mode' does not support postpone bucket tables (bucket = -2).");
+    }
+
+    @Test
+    void testDeleteRowThinModeRequiresPrimaryKey() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        assertThatCode(() -> validateTableSchema(deleteRowThinModeSchema(options, false)))
+                .doesNotThrowAnyException();
+
+        options.put(CoreOptions.DELETE_ROW_THIN_MODE.key(), "true");
+        assertThatThrownBy(() -> validateTableSchema(deleteRowThinModeSchema(options, false)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "'delete-row.thin-mode' can only be enabled for a table with primary keys.");
+    }
+
+    private TableSchema deleteRowThinModeSchema(Map<String, String> options, boolean primaryKey) {
+        return new TableSchema(
+                0,
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT().notNull()),
+                        new DataField(1, "value", DataTypes.INT().notNull())),
+                1,
+                emptyList(),
+                primaryKey ? singletonList("id") : emptyList(),
+                options,
+                "");
+    }
 
     @Test
     void testNullablePrimaryKeyRequiresPrimaryKeyTable() {

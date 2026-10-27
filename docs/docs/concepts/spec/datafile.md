@@ -139,9 +139,12 @@ _SEQUENCE_NUMBER | _VALUE_KIND | a | b | c
 
 With `delete-row.thin-mode = true`, for a primary-key merge engine where `DELETE` removes the
 whole record, Paimon keeps the primary-key, sequence, record-level time, clustering, and non-null
-fields in data-file DELETE rows, and writes null for other nullable value fields. This applies to
-deduplicate tables, partial-update tables with `partial-update.remove-record-on-delete`, and
-aggregation tables with `aggregation.remove-record-on-delete`. The physical schema is unchanged.
+fields in data-file DELETE rows, and writes null for other nullable value fields. Enabling this option
+requires a primary-key table using deduplicate, partial-update with
+`partial-update.remove-record-on-delete = true`, or aggregation with
+`aggregation.remove-record-on-delete = true`. Postpone bucket tables (`bucket = -2`) are not supported.
+Unsupported configurations are rejected during schema validation. If all fields must be retained,
+the configuration is valid but no fields are projected. The physical schema is unchanged.
 Changelog files are not projected by this optimization.
 
 This option defaults to `false` and is independent of `data-file.thin-mode`. When enabled, readers

@@ -37,9 +37,7 @@ final class DeleteRowFieldsProjector {
     private final KeyValue reused = new KeyValue();
 
     static @Nullable int[] createProjection(TableSchema schema, CoreOptions options) {
-        if (!options.deleteRowThinMode()
-                || schema.primaryKeys().isEmpty()
-                || !removeWholeRecordOnDelete(options)) {
+        if (!options.deleteRowThinMode()) {
             return null;
         }
 
@@ -63,19 +61,6 @@ final class DeleteRowFieldsProjector {
             }
         }
         return Arrays.stream(projection).anyMatch(field -> field < 0) ? projection : null;
-    }
-
-    private static boolean removeWholeRecordOnDelete(CoreOptions options) {
-        switch (options.mergeEngine()) {
-            case DEDUPLICATE:
-                return true;
-            case PARTIAL_UPDATE:
-                return options.partialUpdateRemoveRecordOnDelete();
-            case AGGREGATE:
-                return options.aggregationRemoveRecordOnDelete();
-            default:
-                return false;
-        }
     }
 
     DeleteRowFieldsProjector(int[] projection) {

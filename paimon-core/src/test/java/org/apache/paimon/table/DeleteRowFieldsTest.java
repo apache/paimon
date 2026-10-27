@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -28,11 +29,13 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -41,9 +44,52 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for storing only required fields in primary-key DELETE rows. */
 public class DeleteRowFieldsTest extends TableTestBase {
+
+    @Test
+    public void testPostponeBucketRejectsDeleteRowThinMode() throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("value", DataTypes.INT())
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "-2")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option(CoreOptions.DELETE_ROW_THIN_MODE.key(), "true");
+        String message =
+                "'delete-row.thin-mode' does not support postpone bucket tables (bucket = -2).";
+        assertThatThrownBy(() -> catalog.createTable(identifier(), builder.build(), false))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(message);
+        assertThatThrownBy(() -> catalog.getTable(identifier()))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        builder.option(CoreOptions.DELETE_ROW_THIN_MODE.key(), "false");
+        catalog.createTable(identifier(), builder.build(), false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.setOption(
+                                                CoreOptions.DELETE_ROW_THIN_MODE.key(), "true"),
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+        assertThat(((FileStoreTable) catalog.getTable(identifier())).schema())
+                .isEqualTo(table.schema());
+
+        assertThatThrownBy(
+                        () ->
+                                table.copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.DELETE_ROW_THIN_MODE.key(), "true")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+    }
 
     @ParameterizedTest
     @CsvSource({

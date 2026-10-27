@@ -69,23 +69,22 @@ class DeleteRowFieldsProjectorTest {
     }
 
     @Test
-    void testOnlyWholeRecordDeletesAreProjected() {
+    void testNoFieldsToProject() {
         Options options = new Options();
         options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
-        assertThat(createProjection(options)).isNotNull();
-
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
-        assertThat(createProjection(options)).isNull();
-        options.set(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE, true);
-        assertThat(createProjection(options)).isNotNull();
-
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.AGGREGATE);
-        assertThat(createProjection(options)).isNull();
-        options.set(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE, true);
-        assertThat(createProjection(options)).isNotNull();
-
-        options.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.FIRST_ROW);
-        assertThat(createProjection(options)).isNull();
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        Arrays.asList(
+                                new DataField(0, "key", DataTypes.INT().notNull()),
+                                new DataField(1, "value", DataTypes.STRING().notNull())),
+                        1,
+                        Collections.emptyList(),
+                        Collections.singletonList("key"),
+                        options.toMap(),
+                        "");
+        assertThat(DeleteRowFieldsProjector.createProjection(schema, new CoreOptions(options)))
+                .isNull();
     }
 
     @Test

@@ -654,7 +654,7 @@ under the License.
             <td><h5>delete-row.thin-mode</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Enable thin mode for whole-record DELETE rows in primary-key data files. Non-essential nullable value fields are stored as null. Only applies to deduplicate, or partial-update and aggregation with remove-record-on-delete enabled. Changelog files are unaffected.</td>
+            <td>Enable thin mode for whole-record DELETE rows in primary-key data files. Non-essential nullable value fields are stored as null. Requires a primary-key table using deduplicate, or partial-update and aggregation with remove-record-on-delete enabled. Postpone bucket tables (bucket = -2) are not supported. Unsupported configurations are rejected. Changelog files are unaffected.</td>
         </tr>
         <tr>
             <td><h5>delete.force-produce-changelog</h5></td>

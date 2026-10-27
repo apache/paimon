@@ -2434,8 +2434,10 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Enable thin mode for whole-record DELETE rows in primary-key data files. "
                                     + "Non-essential nullable value fields are stored as null. "
-                                    + "Only applies to deduplicate, or partial-update and aggregation "
-                                    + "with remove-record-on-delete enabled. Changelog files are unaffected.");
+                                    + "Requires a primary-key table using deduplicate, or partial-update "
+                                    + "and aggregation with remove-record-on-delete enabled. "
+                                    + "Postpone bucket tables (bucket = -2) are not supported. "
+                                    + "Unsupported configurations are rejected. Changelog files are unaffected.");
 
     public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
             key("partition.idle-time-to-report-statistic")
