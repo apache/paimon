@@ -32,6 +32,7 @@ import java.io.IOException;
 public class CsvFileReader extends AbstractTextFileReader {
 
     private final boolean includeHeader;
+    private final boolean skipEmptyLines;
     private final CsvParser csvParser;
 
     private boolean headerSkipped = false;
@@ -47,6 +48,7 @@ public class CsvFileReader extends AbstractTextFileReader {
             throws IOException {
         super(fileIO, filePath, projectedRowType, options.lineDelimiter(), offset, length);
         this.includeHeader = options.includeHeader();
+        this.skipEmptyLines = options.skipEmptyLines();
         this.csvParser =
                 new CsvParser(
                         rowReadType,
@@ -55,7 +57,13 @@ public class CsvFileReader extends AbstractTextFileReader {
     }
 
     @Override
+    @Nullable
     protected InternalRow parseLine(String line) {
+        // Same test as Spark's CSV source (String#trim drops chars <= U+0020). Returning null
+        // makes the text reader move on to the next line.
+        if (skipEmptyLines && line.trim().isEmpty()) {
+            return null;
+        }
         return csvParser.parse(line);
     }
 
