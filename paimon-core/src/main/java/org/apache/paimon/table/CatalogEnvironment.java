@@ -131,9 +131,13 @@ public class CatalogEnvironment implements Serializable {
         return SchemaModification.create(catalog, identifier);
     }
 
-    /** Create a publisher owning the writer's lock and its catalog resources. */
+    /**
+     * Create a publisher owning the writer's lock and its catalog resources. Callers that only need
+     * the lock pass a null commit user; locks that require a writer identity, such as REST commit
+     * leases, reject it.
+     */
     public SnapshotCommit snapshotCommit(
-            SnapshotManager snapshotManager, CoreOptions options, String commitUser) {
+            SnapshotManager snapshotManager, CoreOptions options, @Nullable String commitUser) {
         Identifier lockIdentifier =
                 identifier == null
                         ? null
