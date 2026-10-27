@@ -1228,11 +1228,14 @@ class PaimonActorDatasink(_DatasinkBase):
             )
             return [{"row_count": total_rows}]
         finally:
-            # Only reached with the writer still open when we failed before
-            # the commit. Abort-on-close may delete this task's files, which
-            # is correct here because nothing was committed; swallow so the
-            # original failure is the one that propagates.
             if table_write is not None and not writer_closed:
+                try:
+                    table_write.abort()
+                except Exception as abort_error:
+                    logger.warning(
+                        f"Error aborting worker-side table_write: {abort_error}",
+                        exc_info=abort_error,
+                    )
                 try:
                     table_write.close()
                 except Exception as e:

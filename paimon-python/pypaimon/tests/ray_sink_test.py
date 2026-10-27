@@ -491,6 +491,120 @@ class RaySinkTest(unittest.TestCase):
                     kill.assert_called_once_with(handle)
                     self.assertIsNone(sink._actor)
 
+    def test_actor_input_failure_aborts_owned_output(self):
+        for rolled in (False, True):
+            with self.subTest(rolled=rolled):
+                table, sink = self._new_actor_bucket_sink(
+                    'test_actor_input_failure_' + str(rolled),
+                    options={'target-file-size': '1 b'} if rolled else None)
+                sink._actor = Mock()
+                error = RuntimeError('Input iterator failed')
+                data = pa.table({
+                    'id': pa.array([1, 1], type=pa.int32()),
+                    'other_id': [2, 2],
+                    'value': ['a', 'b'],
+                })
+
+                def blocks():
+                    yield data
+                    self.assertEqual(bool(self._data_files_under(table)), rolled)
+                    raise error
+
+                with self.assertRaises(RuntimeError) as raised:
+                    sink.write(blocks(), Mock(spec=TaskContext, task_idx=0))
+
+                self.assertIs(raised.exception, error)
+                sink._actor.commit.remote.assert_not_called()
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                self.assertEqual(self._data_files_under(table), [])
+
+    def test_actor_prepare_failure_aborts_owned_output(self):
+        from pypaimon.execution.python.write.writer.data_writer import DataWriter
+
+        table, sink = self._new_actor_bucket_sink('test_actor_prepare_failure')
+        sink._actor = Mock()
+        error = RuntimeError('Prepare failed')
+        data = pa.table({
+            'id': pa.array([1], type=pa.int32()), 'other_id': [2], 'value': ['a'],
+        })
+        original_prepare = DataWriter.prepare_commit
+
+        def fail_prepare(writer):
+            original_prepare(writer)
+            self.assertTrue(self._data_files_under(table))
+            raise error
+
+        with patch.object(DataWriter, 'prepare_commit', fail_prepare):
+            with self.assertRaises(RuntimeError) as raised:
+                sink.write([data], Mock(spec=TaskContext, task_idx=0))
+
+        self.assertIs(raised.exception, error)
+        sink._actor.commit.remote.assert_not_called()
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(self._data_files_under(table), [])
+
+    def test_actor_cleanup_errors_preserve_write_failure(self):
+        for close_fails in (False, True):
+            with self.subTest(close_fails=close_fails):
+                _, sink = self._new_actor_bucket_sink('test_actor_cleanup_error_' + str(close_fails))
+                sink._actor = Mock()
+                error = RuntimeError('Write failed')
+                writer = Mock()
+                writer.write_arrow.side_effect = error
+                writer.abort.side_effect = RuntimeError('Abort failed')
+                if close_fails:
+                    writer.close.side_effect = RuntimeError('Close failed')
+                data = pa.table({
+                    'id': pa.array([1], type=pa.int32()), 'other_id': [2], 'value': ['a'],
+                })
+
+                with patch.object(sink.table, 'new_batch_write_builder') as new_builder:
+                    new_builder.return_value.new_write.return_value = writer
+                    with self.assertRaises(RuntimeError) as raised:
+                        sink.write([data], Mock(spec=TaskContext, task_idx=0))
+
+                self.assertIs(raised.exception, error)
+                self.assertEqual([entry[0] for entry in writer.method_calls],
+                                 ['write_arrow', 'abort', 'close'])
+                sink._actor.commit.remote.assert_not_called()
+
+    def test_actor_rpc_failure_preserves_prepared_output(self):
+        from pypaimon.write.ray_datasink import PaimonCommitterActor
+
+        for committed in (False, True):
+            with self.subTest(committed=committed):
+                table, sink = self._new_actor_bucket_sink('test_actor_rpc_failure_' + str(committed))
+                data = pa.table({
+                    'id': pa.array([1], type=pa.int32()), 'other_id': [2], 'value': ['a'],
+                })
+                error = RuntimeError('Commit acknowledgement lost')
+                with patch('pypaimon.write.ray_datasink._is_first_actor_incarnation', return_value=False):
+                    committer = PaimonCommitterActor(
+                        {'warehouse': self.warehouse_path}, table.identifier.get_full_name())
+                sink._dedup_base = committer.dedup_base()
+                sink._actor = Mock()
+                if committed:
+                    sink._actor.commit.remote.side_effect = committer.commit
+
+                with patch('pypaimon.write.ray_datasink._current_job_id', return_value='test-job'), \
+                        patch('pypaimon.write.ray_datasink.ray.get', side_effect=error), \
+                        patch.object(TableWrite, 'abort', autospec=True) as abort:
+                    with self.assertRaises(RuntimeError) as raised:
+                        sink.write([data], Mock(spec=TaskContext, task_idx=0))
+                    abort.assert_not_called()
+
+                self.assertIs(raised.exception, error)
+                sink._actor.commit.remote.assert_called_once()
+                self.assertTrue(self._data_files_under(table))
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot() is not None, committed)
+
+                arguments, keywords = sink._actor.commit.remote.call_args
+                committer.commit(*arguments, **keywords)
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 1)
+                read_builder = table.new_read_builder()
+                splits = read_builder.new_scan().plan().splits()
+                self.assertEqual(read_builder.new_read().to_arrow(splits).to_pydict(), data.to_pydict())
+
     def test_on_write_start(self):
         """Test on_write_start with normal and overwrite modes."""
         datasink = PaimonDatasink(self.table, overwrite=False)
