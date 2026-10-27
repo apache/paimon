@@ -177,23 +177,34 @@ public class TagManager {
         ReentrantLock coordinationLock = coordinationLock();
         coordinationLock.lock();
         try {
-            if (tagExists(tagName)) {
+            while (true) {
+                if (tagExists(tagName)) {
+                    checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
+                    if (awaitSettledTag(tagName)) {
+                        return;
+                    }
+                }
+                Runnable beforeCommit = beforeTagCommit;
+                if (beforeCommit != null) {
+                    beforeCommit.run();
+                }
+                ensureSnapshotRetained(snapshot, tagName, false);
+                validateNoAutoTag(tagName, snapshot);
+                String owner = UUID.randomUUID().toString();
+                createPendingTagMarker(tagName, owner);
+                if (createOrReplaceTag(
+                        snapshot,
+                        tagName,
+                        timeRetained,
+                        callbacks,
+                        pendingTagMarkerPath(tagName, owner))) {
+                    return;
+                }
+                // A competing publisher owns the tag. Drop our fence before waiting for theirs.
                 checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
                 if (awaitSettledTag(tagName)) {
                     return;
                 }
-            }
-            Runnable beforeCommit = beforeTagCommit;
-            if (beforeCommit != null) {
-                beforeCommit.run();
-            }
-            ensureSnapshotRetained(snapshot, tagName, false);
-            String owner = UUID.randomUUID().toString();
-            createPendingTagMarker(tagName, owner);
-            try {
-                createOrReplaceTag(snapshot, tagName, timeRetained, callbacks, true);
-            } finally {
-                fileIO.deleteQuietly(pendingTagMarkerPath(tagName, owner));
             }
         } finally {
             coordinationLock.unlock();
@@ -384,15 +395,15 @@ public class TagManager {
                 callbacks.stream()
                         .filter(callback -> callback instanceof IcebergCommitCallback)
                         .collect(Collectors.toList()),
-                false);
+                null);
     }
 
-    private void createOrReplaceTag(
+    private boolean createOrReplaceTag(
             Snapshot snapshot,
             String tagName,
             @Nullable Duration timeRetained,
             @Nullable List<TagCallback> callbacks,
-            boolean rollbackIfSnapshotExpired) {
+            @Nullable Path pendingMarker) {
         validateNoAutoTag(tagName, snapshot);
 
         // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
@@ -406,7 +417,12 @@ public class TagManager {
         Path tagPath = tagPath(tagName);
 
         try {
-            fileIO.overwriteFileUtf8(tagPath, content);
+            if (pendingMarker == null) {
+                fileIO.overwriteFileUtf8(tagPath, content);
+            } else if (!fileIO.tryToWriteAtomic(tagPath, content)) {
+                fileIO.deleteQuietly(pendingMarker);
+                return false;
+            }
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -416,13 +432,26 @@ public class TagManager {
                     e);
         }
 
-        if (rollbackIfSnapshotExpired) {
+        if (pendingMarker != null) {
             try {
                 ensureSnapshotRetained(snapshot, tagName, true);
             } catch (RuntimeException e) {
-                fileIO.deleteQuietly(tagPath);
+                try {
+                    fileIO.deleteQuietly(tagPath);
+                    if (!fileIO.exists(tagPath)) {
+                        fileIO.deleteQuietly(pendingMarker);
+                    }
+                } catch (IOException | RuntimeException checkFailure) {
+                    if (checkFailure != e) {
+                        e.addSuppressed(checkFailure);
+                    }
+                }
                 throw e;
             }
+            // Only a validated publication or a confirmed rollback may release this fence.
+            // An uncertain write or deletion leaves it for operator recovery, like a crashed
+            // writer.
+            fileIO.deleteQuietly(pendingMarker);
         }
 
         if (callbacks != null) {
@@ -434,6 +463,7 @@ public class TagManager {
                 }
             }
         }
+        return true;
     }
 
     public void renameTag(String tagName, String targetTagName) {

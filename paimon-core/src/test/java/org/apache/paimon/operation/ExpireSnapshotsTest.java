@@ -2071,22 +2071,140 @@ public class ExpireSnapshotsTest {
         assertThat(tags.tagExists("same")).isTrue();
     }
 
+    @Test
+    public void testOverlappingCreatorsCannotOverwriteProvisionalTag() throws Exception {
+        commit(4, new ArrayList<>(), new ArrayList<>());
+        newTagManager().createExpirationMarker(2, "expirer");
+        java.nio.file.Path signalsA = Files.createDirectory(tempDir.resolve("signals-a"));
+        java.nio.file.Path signalsB = Files.createDirectory(tempDir.resolve("signals-b"));
+        java.nio.file.Path logA = tempDir.resolve("a.log");
+        java.nio.file.Path logB = tempDir.resolve("b.log");
+        Process creatorB =
+                startTagProcess(
+                        logB, "same", "true", "pause-before-publish", signalsB.toString(), "4");
+        Process creatorA = null;
+        try {
+            // Both creators pass the absence check before either publishes.
+            awaitFile(signalsB.resolve("ready"), creatorB, logB);
+            creatorA =
+                    startTagProcess(
+                            logA, "same", "false", "pause-after-publish", signalsA.toString());
+            awaitFile(signalsA.resolve("published"), creatorA, logA);
+            Files.createFile(signalsB.resolve("release"));
+            assertThat(creatorB.waitFor(2, TimeUnit.SECONDS)).isFalse();
+            assertThat(newTagManager().getOrThrow("same").id()).isEqualTo(2);
+            Files.createFile(signalsA.resolve("release"));
+            assertThat(creatorA.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(creatorA.exitValue()).as(new String(Files.readAllBytes(logA))).isNotZero();
+            assertThat(creatorB.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(creatorB.exitValue()).as(new String(Files.readAllBytes(logB))).isZero();
+            assertThat(newTagManager().getOrThrow("same").id()).isEqualTo(4);
+            assertThat(fileIO.listStatus(new Path(store.options().path() + "/tag-pending/same")))
+                    .isEmpty();
+        } finally {
+            creatorB.destroyForcibly();
+            if (creatorA != null) {
+                creatorA.destroyForcibly();
+            }
+        }
+    }
+
+    @Test
+    public void testIgnoreIfExistsRejectsWriteFailureAfterPublication() throws Exception {
+        assertUnsettledPublication("fail-after-publish", "write failed after publication");
+    }
+
+    @Test
+    public void testIgnoreIfExistsRejectsFailedRollbackDeletion() throws Exception {
+        assertUnsettledPublication("fail-rollback", "snapshot #2");
+    }
+
+    private void assertUnsettledPublication(String mode, String error) throws Exception {
+        commit(4, new ArrayList<>(), new ArrayList<>());
+        newTagManager().createExpirationMarker(2, "expirer");
+        java.nio.file.Path log = tempDir.resolve("failed-creator.log");
+        Process creator = startTagProcess(log, "same", "false", mode);
+        try {
+            assertThat(creator.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(creator.exitValue()).isNotZero();
+            assertThat(new String(Files.readAllBytes(log))).contains(error);
+            TagManager tags = newTagManager();
+            assertThat(tags.tagExists("same")).isTrue();
+            tags.setPendingTagTimeout(Duration.ofMillis(200));
+            assertThatThrownBy(
+                            () ->
+                                    tags.createTag(
+                                            snapshotManager.snapshot(4),
+                                            "same",
+                                            null,
+                                            Collections.emptyList(),
+                                            true))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("tag-pending/same");
+            assertThat(tags.getOrThrow("same").id()).isEqualTo(2);
+            assertThat(fileIO.listStatus(new Path(store.options().path() + "/tag-pending/same")))
+                    .isNotEmpty();
+        } finally {
+            creator.destroyForcibly();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         Path tablePath = new Path(args[0]);
         String tagName = args.length > 1 ? args[1] : "kept";
         boolean ignoreIfExists = args.length > 2 && Boolean.parseBoolean(args[2]);
+        String mode = args.length > 3 ? args[3] : "";
         FileIO fileIO =
-                args.length > 4 && "pause-after-publish".equals(args[3])
+                "pause-after-publish".equals(mode)
                         ? new PauseAfterTagPublishFileIO(Paths.get(args[4]))
-                        : new LocalFileIO();
-        Snapshot snapshot = new SnapshotManager(fileIO, tablePath, null, null, null).snapshot(2);
-        new TagManager(fileIO, tablePath)
-                .createTag(
-                        snapshot,
-                        tagName,
-                        Duration.ofDays(1),
-                        Collections.emptyList(),
-                        ignoreIfExists);
+                        : new PublicationFailingFileIO(mode);
+        Snapshot snapshot =
+                new SnapshotManager(fileIO, tablePath, null, null, null)
+                        .snapshot(args.length > 5 ? Long.parseLong(args[5]) : 2);
+        TagManager tags = new TagManager(fileIO, tablePath);
+        if ("pause-before-publish".equals(mode)) {
+            tags.setBeforeTagCommit(
+                    () -> {
+                        try {
+                            java.nio.file.Path signals = Paths.get(args[4]);
+                            if (!Files.exists(signals.resolve("ready"))) {
+                                Files.createFile(signals.resolve("ready"));
+                            }
+                            awaitRelease(signals);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
+        }
+        tags.createTag(
+                snapshot, tagName, Duration.ofDays(1), Collections.emptyList(), ignoreIfExists);
+    }
+
+    private static final class PublicationFailingFileIO extends LocalFileIO {
+        private final String mode;
+
+        private PublicationFailingFileIO(String mode) {
+            this.mode = mode;
+        }
+
+        @Override
+        public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+            boolean written = super.tryToWriteAtomic(path, content);
+            if (written
+                    && path.getName().startsWith(TagManager.TAG_PREFIX)
+                    && "fail-after-publish".equals(mode)) {
+                throw new IOException("write failed after publication");
+            }
+            return written;
+        }
+
+        @Override
+        public void deleteQuietly(Path path) {
+            if (path.getName().startsWith(TagManager.TAG_PREFIX) && "fail-rollback".equals(mode)) {
+                return;
+            }
+            super.deleteQuietly(path);
+        }
     }
 
     private Process startTagProcess(java.nio.file.Path log, String... args) throws Exception {
@@ -2241,23 +2359,27 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        public void overwriteFileUtf8(Path path, String content) throws IOException {
-            super.overwriteFileUtf8(path, content);
-            if (!path.getName().startsWith(TagManager.TAG_PREFIX)) {
-                return;
+        public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+            boolean written = super.tryToWriteAtomic(path, content);
+            if (written && path.getName().startsWith(TagManager.TAG_PREFIX)) {
+                Files.createFile(signals.resolve("published"));
+                awaitRelease(signals);
             }
-            Files.createFile(signals.resolve("published"));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
-            while (!Files.exists(signals.resolve("release"))) {
-                if (System.nanoTime() > deadline) {
-                    throw new IOException("Timed out waiting for release.");
-                }
-                try {
-                    Thread.sleep(20);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException(e);
-                }
+            return written;
+        }
+    }
+
+    private static void awaitRelease(java.nio.file.Path signals) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+        while (!Files.exists(signals.resolve("release"))) {
+            if (System.nanoTime() > deadline) {
+                throw new IOException("Timed out waiting for release.");
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
             }
         }
     }
@@ -2265,11 +2387,11 @@ public class ExpireSnapshotsTest {
     private static final class TagWriteFailingFileIO extends LocalFileIO {
 
         @Override
-        public void overwriteFileUtf8(Path path, String content) throws IOException {
+        public boolean tryToWriteAtomic(Path path, String content) throws IOException {
             if (path.getName().startsWith(TagManager.TAG_PREFIX)) {
                 throw new IOException("tag write failed");
             }
-            super.overwriteFileUtf8(path, content);
+            return super.tryToWriteAtomic(path, content);
         }
     }
 
