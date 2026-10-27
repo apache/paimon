@@ -33,8 +33,10 @@ from pypaimon.catalog.catalog_exception import (
 )
 from pypaimon.catalog.jdbc_catalog import JdbcCatalog, _convert_qmark_placeholders
 from pypaimon.catalog.rest.property_change import PropertyChange
+from pypaimon.common.identifier import Identifier
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.system.options_table import OptionsTable
 
 
 class JdbcCatalogTest(unittest.TestCase):
@@ -170,6 +172,66 @@ class JdbcCatalogTest(unittest.TestCase):
         self.assertEqual(reloaded.list_tables("test_db"), [])
         with self.assertRaises(TableNotExistException):
             reloaded.get_table("test_db.renamed_table")
+
+    def test_get_system_table(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table(
+            "test_db.test_table", Schema(fields=fields, options={"bucket": "1"}), False
+        )
+
+        for suffix in ("$options", "$OPTIONS", "$branch_main$options"):
+            name = "test_db.test_table" + suffix
+            for identifier in (name, Identifier.from_string(name)):
+                with self.subTest(identifier=identifier):
+                    table = catalog.get_table(identifier)
+                    self.assertIsInstance(table, OptionsTable)
+                    self.assertEqual(table.base_table.identifier, Identifier("test_db", "test_table"))
+                    read_builder = table.new_read_builder()
+                    rows = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+                    self.assertIn({"key": "bucket", "value": "1"}, rows.to_pylist())
+
+    def test_get_system_table_not_exist(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+
+        for name in ("test_db.test_table$nosuch", "test_db.missing$options"):
+            with self.subTest(name=name):
+                with self.assertRaises(TableNotExistException) as context:
+                    catalog.get_table(name)
+                self.assertEqual(str(context.exception), "Table {} does not exist".format(name))
+
+    def test_get_table_branch(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+
+        for identifier in (
+            "test_db.test_table",
+            "test_db.test_table$branch_main",
+            Identifier("test_db", "test_table", branch="main"),
+            Identifier("test_db", "test_table", branch="MAIN"),
+        ):
+            with self.subTest(identifier=identifier):
+                self.assertEqual(catalog.get_table(identifier).fields, fields)
+
+        for identifier in (
+            "test_db.test_table$branch_dev",
+            "test_db.test_table$branch_dev$options",
+            "test_db.test_table$branch_dev$nosuch",
+            "test_db.missing$branch_dev",
+            "test_db.test_table$branch_MAIN",
+            "test_db.test_table$branch_",
+        ):
+            with self.subTest(identifier=identifier):
+                with self.assertRaisesRegex(
+                    NotImplementedError, "^JdbcCatalog currently does not support table branches$"
+                ):
+                    catalog.get_table(identifier)
 
     def test_create_table_rolls_back_metadata_on_failure(self):
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
