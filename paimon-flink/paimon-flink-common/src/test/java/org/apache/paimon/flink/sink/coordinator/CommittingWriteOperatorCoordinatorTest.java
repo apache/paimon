@@ -1259,7 +1259,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
                         new SavepointTagger(
                                 table.snapshotManager(),
                                 table.tagManager(),
-                                table.store().newTagDeletion(),
                                 table.store().createTagCallbacks(table),
                                 table.coreOptions().tagDefaultTimeRetained(),
                                 user));

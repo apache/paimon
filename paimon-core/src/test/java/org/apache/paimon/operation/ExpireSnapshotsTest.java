@@ -257,11 +257,7 @@ public class ExpireSnapshotsTest {
         // randomly delete tags
         for (int id = 1; id <= latestSnapshotId; id++) {
             if (random.nextBoolean()) {
-                tagManager.deleteTag(
-                        "tag" + id,
-                        store.newTagDeletion(),
-                        snapshotManager,
-                        Collections.emptyList());
+                tagManager.deleteTag("tag" + id, Collections.emptyList());
             }
         }
 
@@ -480,7 +476,7 @@ public class ExpireSnapshotsTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"snapshot", "tag", "changelog"})
+    @ValueSource(strings = {"snapshot", "changelog"})
     public void testCleanManifestExtraFilesFollowsManifestRetention(String cleaner)
             throws Exception {
         ManifestFileMeta expired =
@@ -501,10 +497,8 @@ public class ExpireSnapshotsTest {
                     expiredSnapshot.deltaManifestList(),
                     deletion.manifestSkippingSet(skippingSnapshots));
         } else {
-            FileDeletionBase<Snapshot> deletion =
-                    "tag".equals(cleaner) ? store.newTagDeletion() : snapshotDeletion;
-            deletion.cleanUnusedManifests(
-                    expiredSnapshot, deletion.manifestSkippingSet(skippingSnapshots));
+            snapshotDeletion.cleanUnusedManifests(
+                    expiredSnapshot, snapshotDeletion.manifestSkippingSet(skippingSnapshots));
         }
 
         assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("expired"))).isFalse();

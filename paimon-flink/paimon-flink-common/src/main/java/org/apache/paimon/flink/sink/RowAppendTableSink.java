@@ -23,7 +23,6 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
 import org.apache.paimon.flink.sink.coordinator.SavepointTagger;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TagCallback;
@@ -143,8 +142,6 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         private static SavepointTagger.Factory createSavepointTaggerFactory(FileStoreTable table) {
             SerializableSupplier<SnapshotManager> snapshotManagerFactory = table::snapshotManager;
             SerializableSupplier<TagManager> tagManagerFactory = table::tagManager;
-            SerializableSupplier<TagDeletion> tagDeletionFactory =
-                    () -> table.store().newTagDeletion();
             SerializableSupplier<List<TagCallback>> callbacksSupplier =
                     () -> table.store().createTagCallbacks(table);
             Duration tagTimeRetained = table.coreOptions().tagDefaultTimeRetained();
@@ -152,7 +149,6 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     new SavepointTagger(
                             snapshotManagerFactory.get(),
                             tagManagerFactory.get(),
-                            tagDeletionFactory.get(),
                             callbacksSupplier.get(),
                             tagTimeRetained,
                             commitUser);
