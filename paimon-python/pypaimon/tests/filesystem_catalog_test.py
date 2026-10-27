@@ -304,6 +304,18 @@ class FileSystemCatalogTest(unittest.TestCase):
         self.assertIn(
             "Change 'index-file-in-data-file-dir' is not supported yet.", str(ctx.exception))
 
+        for change, message in [
+            (SchemaChange.set_option("bucket", "4"), "Cannot change bucket when it is -1."),
+            (SchemaChange.remove_option("bucket"), "Cannot reset bucket."),
+            (SchemaChange.set_option("deletion-vectors.enabled", "true"), "Cannot change deletion vectors mode"),
+            (SchemaChange.set_option("bucket-function.provider", "custom"),
+             "Change 'bucket-function.provider' is not supported yet."),
+        ]:
+            with self.assertRaises(RuntimeError) as ctx:
+                catalog.alter_table(identifier, [change], False)
+            self.assertIn(message, str(ctx.exception))
+            self.assertEqual(catalog.get_table(identifier).table_schema.id, table.table_schema.id)
+
         # setting the default type explicitly is not a change
         catalog.alter_table(
             identifier, [SchemaChange.set_option("type", "table")], False)

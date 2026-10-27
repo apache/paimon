@@ -23,6 +23,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import CoreOptions, Options
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
@@ -305,16 +306,113 @@ def _is_unchanged_normalized_key(key, old_value, new_value, old_table_schema) ->
     """Values whose canonical home is outside the options map (or the implicit
     default) are not a change when replayed. Mirrors the Java SchemaManager's
     isUnchangedNormalizedKey."""
-    if old_value is not None or new_value is None:
+    if new_value is None:
+        return False
+    if key == "type":
+        effective_old = CoreOptions.TYPE.default_value() if old_value is None else old_value
+        return new_value.lower() == effective_old.lower()
+    if old_value is not None:
         return False
     if key == "primary-key":
         return _normalize_key_list(new_value) == old_table_schema.primary_keys
     if key == "partition":
         return _normalize_key_list(new_value) == old_table_schema.partition_keys
-    if key == "type":
-        # a table created without an explicit type is of the default type
-        return new_value == CoreOptions.TYPE.default_value()
     return False
+
+
+def _parse_bucket(value: str) -> int:
+    # Match Integer.parseInt's signed 32-bit decimal syntax.
+    if value is None:
+        raise ValueError("null")
+    negative = value.startswith("-")
+    digits = value[1:] if value.startswith(("+", "-")) else value
+    try:
+        if not digits:
+            raise ValueError
+        bucket = 0
+        limit = 2147483648 if negative else 2147483647
+        for c in digits:
+            if not c.isdecimal() or ord(c) > 0xffff:
+                raise ValueError
+            bucket = bucket * 10 + int(c)
+            if bucket > limit:
+                raise ValueError
+        return -bucket if negative else bucket
+    except ValueError:
+        raise ValueError(f'For input string: "{value}"') from None
+
+
+def _option_text(value) -> Optional[str]:
+    # Options may be persisted as native values such as 2, True or enums; compare them as Options reads them.
+    return None if value is None else OptionsUtils.convert_to_string(value)
+
+
+def _option_bool(value) -> bool:
+    # Same interpretation as the runtime; unparsable values are false, like Boolean.parseBoolean.
+    try:
+        return value is not None and OptionsUtils.convert_to_boolean(value)
+    except ValueError:
+        return False
+
+
+def _check_alter_table_option(options: dict, key: str, old_value: Optional[str], new_value: str):
+    # Booleans are read from the raw values, the way PyPaimon reads them.
+    raw_old, raw_new = old_value, new_value
+    old_value, new_value = _option_text(old_value), _option_text(new_value)
+    if key in CoreOptions.IMMUTABLE_OPTIONS:
+        raise NotImplementedError(f"Change '{key}' is not supported yet.")
+
+    if key == "data-evolution.nested-field.enabled":
+        old_enabled = _option_bool(raw_old)
+        new_enabled = _option_bool(raw_new)
+        if old_enabled and not new_enabled:
+            raise NotImplementedError(f"Cannot disable table option '{key}'.")
+
+    if key == "bucket":
+        old_bucket = CoreOptions.BUCKET.default_value() if old_value is None else _parse_bucket(old_value)
+        new_bucket = _parse_bucket(new_value)
+        if old_bucket == -1:
+            raise NotImplementedError("Cannot change bucket when it is -1.")
+        if new_bucket == -1:
+            raise NotImplementedError("Cannot change bucket to -1.")
+
+    if key == "deletion-vectors.enabled":
+        dv_modifiable = _option_bool(options.get("deletion-vectors.modifiable"))
+        if not dv_modifiable:
+            old_dv = _option_bool(raw_old)
+            new_dv = _option_bool(raw_new)
+            if old_dv != new_dv:
+                raise NotImplementedError(
+                    f"Cannot change deletion vectors mode from {str(old_dv).lower()} to {str(new_dv).lower()}. "
+                    "If modifying table deletion-vectors mode without full-compaction, "
+                    "this may result in data duplication. If you are confident, you can set table option "
+                    "'deletion-vectors.modifiable' = 'true' to allow deletion vectors modification.")
+
+    if key in ("ignore-delete", "ignore-update-before"):
+        # The writers read ignore-update-before as the literal "true" only.
+        parse = _option_bool if key == "ignore-delete" else (lambda v: str(v).lower() == "true")
+        old_ignore = parse(raw_old)
+        new_ignore = parse(raw_new)
+        if old_ignore and not new_ignore:
+            raise NotImplementedError(f"Cannot change {key} from true to false.")
+
+    if key == "clustering.columns" and "pk-clustering-override" in options:
+        raise NotImplementedError("Cannot change clustering.columns when pk-clustering-override enabled.")
+
+
+def _check_reset_table_option(options: dict, key: str):
+    if key in CoreOptions.IMMUTABLE_OPTIONS:
+        raise NotImplementedError(f"Change '{key}' is not supported yet.")
+
+    if key == "bucket":
+        raise NotImplementedError(f"Cannot reset {key}.")
+
+    if key in ("deletion-vectors.enabled", "data-evolution.nested-field.enabled",
+               "ignore-delete", "ignore-update-before"):
+        _check_alter_table_option(options, key, options.get(key), "false")
+
+    if key == "clustering.columns" and "pk-clustering-override" in options:
+        raise NotImplementedError(f"Cannot reset {key} when pk-clustering-override enabled.")
 
 
 def _assert_not_updating_partition_keys(
@@ -754,6 +852,7 @@ class SchemaManager:
     def _generate_table_schema(
         self, old_table_schema: TableSchema, changes: List[SchemaChange]
     ) -> TableSchema:
+        old_options = dict(old_table_schema.options)
         new_options = dict(old_table_schema.options)
         new_fields = []
         for field in old_table_schema.fields:
@@ -798,7 +897,7 @@ class SchemaManager:
                 # compare against the accumulated options so repeated changes to
                 # the same key in one batch apply in order
                 old_value = new_options.get(change.key)
-                unchanged = (old_value == change.value
+                unchanged = (_option_text(old_value) == _option_text(change.value)
                              or _is_unchanged_normalized_key(
                                  change.key, old_value, change.value, old_table_schema))
                 if unchanged:
@@ -807,15 +906,17 @@ class SchemaManager:
                 # format tables never create Paimon snapshots but can still hold
                 # data -- reject independently of the snapshot check
                 if change.key == "type":
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
-                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                    raise NotImplementedError(f"Change '{change.key}' is not supported yet.")
+                if _has_snapshots():
+                    # Like Java, checks compare with the table's options before the batch.
+                    _check_alter_table_option(
+                        old_options, change.key, old_options.get(change.key), change.value)
                 new_options[change.key] = change.value
             elif isinstance(change, RemoveOption):
                 if change.key == "type":
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
-                if change.key in CoreOptions.IMMUTABLE_OPTIONS and _has_snapshots():
-                    raise ValueError(f"Change '{change.key}' is not supported yet.")
+                    raise NotImplementedError(f"Change '{change.key}' is not supported yet.")
+                if _has_snapshots():
+                    _check_reset_table_option(old_options, change.key)
                 new_options.pop(change.key, None)
             elif isinstance(change, UpdateComment):
                 new_comment = change.comment

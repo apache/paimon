@@ -116,6 +116,7 @@ class CoreOptions:
         "type",
         "bucket-key",
         "bucket-function.type",
+        "bucket-function.provider",
         "data-file.path-directory",
         "merge-engine",
         "sequence.snapshot-ordering",
