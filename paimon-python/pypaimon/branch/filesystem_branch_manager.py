@@ -180,8 +180,10 @@ class FileSystemBranchManager(BranchManager):
             branch_name: Name of the branch to drop
 
         Raises:
-            ValueError: If branch doesn't exist
+            ValueError: If branch is main or doesn't exist
         """
+        if BranchManager.is_main_branch(branch_name):
+            raise ValueError("The main branch cannot be deleted.")
         if not self.branch_exists(branch_name):
             raise ValueError(f"Branch name '{branch_name}' doesn't exist.")
 
