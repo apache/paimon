@@ -72,11 +72,6 @@ public class FileSystemBranchManager implements BranchManager {
         this.mergeHandler = mergeHandler;
     }
 
-    /** Return the root Directory of branch. */
-    private Path branchDirectory() {
-        return new Path(tablePath + "/branch");
-    }
-
     /** Return the path of a branch. */
     public Path branchPath(String branchName) {
         return new Path(BranchManager.branchPath(tablePath, branchName));
@@ -458,8 +453,13 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public List<String> branches() {
+        return branches(fileIO, tablePath);
+    }
+
+    /** List branches without constructing the table's runtime managers. */
+    public static List<String> branches(FileIO fileIO, Path tablePath) {
         try {
-            return listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX)
+            return listVersionedDirectories(fileIO, new Path(tablePath, "branch"), BRANCH_PREFIX)
                     .map(status -> status.getPath().getName().substring(BRANCH_PREFIX.length()))
                     .collect(Collectors.toList());
         } catch (IOException e) {
