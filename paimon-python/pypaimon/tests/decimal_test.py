@@ -19,7 +19,11 @@ import struct
 import unittest
 from decimal import Decimal
 
+from parameterized import parameterized
+
+from pypaimon.execution.python.write.input_routing import FixedBucketInputRouter
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
                                             GenericRowSerializer,
                                             _decimal_to_unscaled_with_check)
@@ -157,6 +161,37 @@ class DecimalTest(unittest.TestCase):
         unscaled_value = int.from_bytes(unscaled_bytes, byteorder='big', signed=True)
         # Decimal("5.55000") with scale=5 => unscaled = 555000
         self.assertEqual(unscaled_value, 555000)
+
+    @parameterized.expand([
+        (0, '00'),
+        (-1, 'ff'),
+        (127, '7f'),
+        (128, '0080'),
+        (-128, '80'),
+        (-129, 'ff7f'),
+        (-32768, '8000'),
+        (-8388608, '800000'),
+    ])
+    def test_decimal_not_compact_java_bytes(self, unscaled, expected):
+        fields = [DataField(0, 'd', AtomicType('DECIMAL(20, 2)'))]
+        value = Decimal(unscaled).scaleb(-2)
+        raw = bytes.fromhex(expected)
+        prefix = struct.pack('>i', 1) + b'\x00' * 8
+        expected_row = prefix + struct.pack('<q', (16 << 32) | len(raw)) + raw.ljust(16, b'\x00')
+        self.assertEqual(GenericRowSerializer.to_bytes(GenericRow([value], fields)), expected_row)
+
+        for encoded in (raw, (b'\xff' if unscaled < 0 else b'\x00') + raw):
+            row = prefix + struct.pack('<q', (16 << 32) | len(encoded)) + encoded.ljust(16, b'\x00')
+            self.assertEqual(GenericRowDeserializer.from_bytes(row, fields).values, [value])
+
+    def test_decimal_fixed_bucket_matches_java(self):
+        fields = [DataField(0, 'd', AtomicType('DECIMAL(20, 2)'))]
+        schema = TableSchema(fields=fields, primary_keys=['d'], options={'bucket': '10'})
+        router = FixedBucketInputRouter(schema)
+        value = Decimal('-1.28')
+        # Same hash and bucket as Java.
+        self.assertEqual(router._binary_row_hash_code((value,), fields), 1196242097)
+        self.assertEqual(router.extract_partition_bucket_row({'d': value}), ((), 7))
 
     def test_decimal_boundary_precision(self):
         """Test boundary: DECIMAL(18, ...) is compact, DECIMAL(19, ...) is non-compact."""

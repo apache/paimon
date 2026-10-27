@@ -24,6 +24,7 @@ from typing import Any, List
 import pyarrow as pa
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
+from pypaimon.data.decimal import _signed_big_endian_bytes
 from pypaimon.schema.data_types import (
     ArrayType, AtomicType, DataField, MapType, MultisetType, RowType, VectorType
 )
@@ -278,8 +279,7 @@ def _write_field(buf: _BlockBuffer, value: Any, data_type) -> None:
             if precision <= 18:
                 buf.write_long_le(unscaled)
             else:
-                raw = unscaled.to_bytes(
-                    (unscaled.bit_length() + 8) // 8, byteorder='big', signed=True)
+                raw = _signed_big_endian_bytes(unscaled)
                 buf.write_bytes_with_length(raw)
         elif type_name.startswith('TIMESTAMP'):
             precision = _parse_timestamp_precision(type_name)

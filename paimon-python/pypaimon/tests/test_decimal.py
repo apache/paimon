@@ -163,6 +163,7 @@ class DecimalTest(unittest.TestCase):
 
     def test_to_unscaled_bytes_java_compatible(self):
         cases = [
+            (-8388608, "800000"),
             (-32769, "ff7fff"),
             (-32768, "8000"),
             (-129, "ff7f"),
@@ -195,7 +196,12 @@ class DecimalTest(unittest.TestCase):
 
     def test_from_unscaled_bytes_java_compatible(self):
         cases = [
+            ("800000", -8388608),
+            ("ff800000", -8388608),
+            ("8000", -32768),
+            ("ff8000", -32768),
             ("80", -128),
+            ("ff80", -128),
             ("ff7f", -129),
             ("ff", -1),
             ("00", 0),

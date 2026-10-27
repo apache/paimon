@@ -23,6 +23,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, List, Union
 
+from pypaimon.data.decimal import _signed_big_endian_bytes
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
 from pypaimon.table.row.binary_row import BinaryRow
@@ -528,12 +529,7 @@ class GenericRowSerializer:
                     (absolute_offset << 32) | length)
             elif is_var_len_type or is_high_precision_decimal:
                 if is_high_precision_decimal:
-                    # Big-endian signed bytes
-                    if unscaled_value == 0:
-                        value_bytes = b'\x00'
-                    else:
-                        byte_length = (unscaled_value.bit_length() + 8) // 8  # +8 for sign bit
-                        value_bytes = unscaled_value.to_bytes(byte_length, byteorder='big', signed=True)
+                    value_bytes = _signed_big_endian_bytes(unscaled_value)
                 elif any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
                     value_bytes = str(value).encode('utf-8')
                 elif type_name == 'BLOB':

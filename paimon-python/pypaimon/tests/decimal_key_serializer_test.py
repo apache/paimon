@@ -66,6 +66,27 @@ class DecimalKeySerializerTest(unittest.TestCase):
             self.assertEqual(3, context.prec)
             self.assertFalse(any(context.flags.values()))
 
+    @parameterized.expand([
+        (0, '00'),
+        (-1, 'ff'),
+        (127, '7f'),
+        (128, '0080'),
+        (-128, '80'),
+        (-129, 'ff7f'),
+        (-32768, '8000'),
+        (-8388608, '800000'),
+    ])
+    def test_java_decimal_bytes(self, unscaled, expected):
+        value = Decimal(unscaled).scaleb(-2)
+        raw = bytes.fromhex(expected)
+        for precision in (18, 20):
+            serializer = create_serializer(AtomicType('DECIMAL(%s,2)' % precision))
+            encoded = struct.pack('<q', unscaled) if precision <= 18 else raw
+            self.assertEqual(serializer.serialize(value), encoded)
+            self.assertEqual(serializer.deserialize(encoded), value)
+        padded = (b'\xff' if unscaled < 0 else b'\x00') + raw
+        self.assertEqual(serializer.deserialize(padded), value)
+
     def test_decode_does_not_round_at_default_precision(self):
         serializer = create_serializer(AtomicType('DECIMAL(38,2)'))
         unscaled = 12345678901234567890123456789012345678

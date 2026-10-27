@@ -25,6 +25,7 @@ import re
 from typing import Callable, Tuple
 import struct
 
+from pypaimon.data.decimal import _signed_big_endian_bytes
 from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.data_types import DataType
 
@@ -325,24 +326,6 @@ def _decimal_unscaled(value: object, scale: int) -> int:
     quant = Decimal((0, (1,), -scale))
     rounded = decimal_value.quantize(quant, rounding=ROUND_HALF_UP, context=context)
     return int(rounded.scaleb(scale, context=context))
-
-
-def _signed_big_endian_bytes(value: int) -> bytes:
-    length = max(1, (value.bit_length() + 8) // 8)
-    while True:
-        try:
-            encoded = value.to_bytes(length, byteorder='big', signed=True)
-            break
-        except OverflowError:
-            length += 1
-    while len(encoded) > 1:
-        if encoded[0] == 0x00 and encoded[1] < 0x80:
-            encoded = encoded[1:]
-        elif encoded[0] == 0xFF and encoded[1] >= 0x80:
-            encoded = encoded[1:]
-        else:
-            break
-    return encoded
 
 
 def _date_to_epoch_days(value: object) -> int:

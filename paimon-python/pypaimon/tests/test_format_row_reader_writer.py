@@ -296,6 +296,31 @@ class TestFormatRowReaderWriter:
         finally:
             os.unlink(path)
 
+    @pytest.mark.parametrize('unscaled,expected', [
+        (0, '00'),
+        (-1, 'ff'),
+        (127, '7f'),
+        (128, '0080'),
+        (-128, '80'),
+        (-129, 'ff7f'),
+        (-32768, '8000'),
+        (-8388608, '800000'),
+    ])
+    def test_decimal_minimal_bytes(self, unscaled, expected):
+        from pypaimon.execution.python.read.reader.format_row_reader import _read_field, _RowDecoder
+        from pypaimon.execution.python.write.writer.format_row_writer import _BlockBuffer, _write_field
+
+        data_type = AtomicType('DECIMAL(20, 2)')
+        value = Decimal(unscaled).scaleb(-2)
+        raw = bytes.fromhex(expected)
+        buf = _BlockBuffer()
+        _write_field(buf, value, data_type)
+        assert bytes(buf.buffer[:buf.position]) == bytes([len(raw)]) + raw
+
+        for encoded in (raw, (b'\xff' if unscaled < 0 else b'\x00') + raw):
+            decoder = _RowDecoder(bytes([len(encoded)]) + encoded, 0)
+            assert _read_field(decoder, data_type) == value
+
     def test_timestamp(self):
         fields = [
             DataField(0, "ts_millis", AtomicType("TIMESTAMP(3)")),

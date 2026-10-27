@@ -137,9 +137,7 @@ class Decimal:
             if value != value.to_integral_exact():
                 raise ArithmeticError("Decimal does not exactly fit in long.")
 
-        unscaled = int(value)
-        length = self._get_compact_byte_length(unscaled)
-        return unscaled.to_bytes(length, byteorder="big", signed=True)
+        return _signed_big_endian_bytes(int(value))
 
     def is_compact(self) -> bool:
         """
@@ -505,3 +503,8 @@ class Decimal:
             bits = (~val).bit_length()
 
         return bits // 8 + 1
+
+
+def _signed_big_endian_bytes(value: int) -> bytes:
+    length = Decimal._get_compact_byte_length(value)
+    return value.to_bytes(length, byteorder="big", signed=True)
