@@ -18,20 +18,36 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.Files;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.table.SimpleTableTestBase.getResult;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -71,6 +87,51 @@ class FileSystemBranchManagerTest {
         branchManager =
                 new FileSystemBranchManager(
                         fileIO, tablePath, snapshotManager, tagManager, schemaManager, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testDeleteMainBranchPreservesTable(boolean useTableApi) throws Exception {
+        schemaManager.commitChanges(SchemaChange.setOption(BUCKET.key(), "1"));
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10, 100));
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("tag1", 1);
+        table.createBranch("branch1", "tag1");
+        Set<java.nio.file.Path> retainedFiles;
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            retainedFiles = files.filter(Files::isRegularFile).collect(Collectors.toSet());
+        }
+
+        assertThatThrownBy(
+                        () -> {
+                            if (useTableApi) {
+                                table.deleteBranch(DEFAULT_MAIN_BRANCH);
+                            } else {
+                                branchManager.dropBranch(DEFAULT_MAIN_BRANCH);
+                            }
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("The main branch cannot be deleted.");
+
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(files.filter(Files::isRegularFile).collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrderElementsOf(retainedFiles);
+        }
+        FileStoreTable reloaded = FileStoreTableFactory.create(fileIO, tablePath);
+        assertThat(reloaded.snapshotManager().snapshotExists(1)).isTrue();
+        assertThat(reloaded.tagManager().tagExists("tag1")).isTrue();
+        assertThat(reloaded.branchManager().branchExists("branch1")).isTrue();
+        assertThat(
+                        getResult(
+                                reloaded.newRead(),
+                                reloaded.newReadBuilder().newScan().plan().splits(),
+                                row -> row.getInt(0) + "," + row.getInt(1) + "," + row.getInt(2)))
+                .containsExactly("1,10,100");
     }
 
     @Test
