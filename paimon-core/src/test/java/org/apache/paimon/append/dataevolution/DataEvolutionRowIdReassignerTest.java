@@ -334,6 +334,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(table.fileIO().exists(plan)).isTrue();
 
         table.deleteTag("reassign");
+        assertThat(table.tagManager().tagExists("reassign")).isFalse();
+        assertThat(table.fileIO().exists(plan)).isTrue();
+        new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
         assertThat(table.fileIO().exists(plan)).isFalse();
     }
 

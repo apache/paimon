@@ -2,6 +2,33 @@
 
 Guidelines for AI coding assistants working with the Apache Paimon codebase.
 
+## Architecture and Table Modes
+
+Identify the table mode before explaining storage, reads, updates, or compaction. Paimon shares
+schema, snapshot, and manifest metadata across different data layouts; it must not be described
+as universally LSM-based.
+
+| Mode | Data organization and read semantics |
+| --- | --- |
+| Ordinary append table | Stores inserted rows without primary-key merging. |
+| Primary-key table | Uses an LSM-based layout to reconcile record versions by key. |
+| Data Evolution append table | Aligns column files by row-ID range and selects current column values by file version, independently of primary-key LSM merging. |
+
+Data Evolution requires `data-evolution.enabled=true`, `row-tracking.enabled=true`, no primary
+key, and `bucket=-1`. It supports partial-column updates that retain files for untouched columns.
+Its column merging and compaction must not be explained as primary-key LSM merging. A
+`bucket-0` directory, sequence-number metadata, or compaction alone does not imply an LSM layout.
+
+For architecture and file-layout comparisons, cover Data Evolution explicitly rather than
+using the primary-key layout as the model for all Paimon tables.
+Distinguish table metadata and row reconstruction from the configurable physical file format.
+
+Start with [Basic Concepts](docs/docs/concepts/basic-concepts.md),
+[Data Evolution](docs/docs/multimodal-table/data-evolution.mdx), and
+[File Layout and Reads](docs/docs/multimodal-table/data-evolution-file-layout.mdx).
+Verify implementation details in `AppendOnlyFileStoreTable`, `DataEvolutionSplitRead`,
+`DataEvolutionReadPlanner`, and `SchemaValidation` under `paimon-core/src/main/java/org/apache/paimon/`.
+
 ## Syntax Requirements
 
 - Based on JDK 8 and Scala 2.12, higher version syntax features must not be used.

@@ -245,11 +245,14 @@ def test_named_iterator_keeps_map_key_authorization_boundary(projected_table):
         _rows(builder.new_read(), splits)
 
 
-def test_named_projection_keeps_torch_row_boundary(projected_table):
+@pytest.mark.parametrize('projection', [
+    {'user_id': 'id'}, {'city': 'profile.city'}, {'source': "attributes['source']"},
+])
+def test_named_projection_keeps_non_streaming_torch_row_boundary(projected_table, projection):
     table, _ = projected_table
-    read = table.new_read_builder().with_projection({'user_id': 'id'}).new_read()
+    read = table.new_read_builder().with_projection(projection).new_read()
     with pytest.raises(RuntimeError, match='not supported by Torch row format'):
-        read.to_torch([])
+        read.to_torch([], streaming=False, batch_format='row')
 
 
 @pytest.mark.parametrize('function', ['variant_get', 'try_variant_get'])
@@ -270,4 +273,7 @@ def test_named_iterator_rejects_variant_extractions(tmp_path, function, nested, 
     with patch('pypaimon.read.read_dispatch._native_read_execution') as native:
         with pytest.raises(RuntimeError, match='Variant extraction expressions are not supported by to_iterator'):
             read.to_iterator([])
+        for streaming in (False, True):
+            with pytest.raises(RuntimeError, match='not supported by Torch row format'):
+                read.to_torch([], streaming=streaming, batch_format='row')
         native.assert_not_called()

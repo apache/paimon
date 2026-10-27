@@ -29,14 +29,21 @@ snapshots. This page introduces the logical table first, then explains how it ma
 
 ## Table Types
 
-| Table type | Logical behavior | Typical use |
+| Table type or storage mode | Logical behavior | Typical use |
 | --- | --- | --- |
 | [Append table](../append-table/) | Stores incoming rows without merging them by primary key. | Event logs and batch datasets |
 | [Primary-key table](../primary-key-table/) | Merges records with the same key according to the configured merge engine. | CDC, upserts, and updates to an entity |
+| [Data Evolution append table](../multimodal-table/data-evolution) | Aligns column files by row ID and selects the current version of each column without primary-key LSM merging. | Column backfills, feature engineering, and multimodal enrichment |
 
 A primary-key table can keep multiple physical versions of a record. Reads and compaction
 reconcile those versions to produce the logical result. An append table does not merge incoming
 records by key; supported engines can still perform [batch row-level operations](../append-table/#row-level-operations).
+
+Data Evolution is an append-table storage mode, not a primary-key merge engine. It requires
+`data-evolution.enabled = true`, `row-tracking.enabled = true`, no primary key, and `bucket = -1`.
+It can update selected columns while retaining files for untouched columns. Readers reconstruct
+rows from row-ID-aligned column files; see [File Layout and Reads](../multimodal-table/data-evolution-file-layout).
+Paimon's shared snapshot and manifest structure does not imply that all tables use an LSM layout.
 
 [Multimodal tables](../multimodal-table/) add storage capabilities for data such as BLOBs and
 vectors. The [REST Catalog table guide](./rest/tables) also describes Format Tables and Object
@@ -65,6 +72,9 @@ A bucket groups files within a partition. Its role depends on the table's bucket
 - **Fixed buckets** distribute records by a hash of the bucket key.
 - **Dynamic buckets** assign keys to buckets and track the assignment in an index for primary-key tables.
 - **Bucket-unaware append tables** use a `bucket-0` directory without tying writer parallelism to a fixed bucket count.
+
+Data Evolution uses the bucket-unaware append mode. Its `bucket-0` directory does not contain
+a primary-key LSM tree; column files are associated through row-ID ranges and file versions.
 
 See [primary-key data distribution](../primary-key-table/data-distribution) for the complete
 set of modes and [bucketed append tables](../append-table/bucketed) for append-table choices.
@@ -116,8 +126,13 @@ Data files contain the records. Parquet is the default format; see [File Format]
 for the available formats and type mappings. Primary-key data files also carry information used
 to merge records, such as row kind and sequence number.
 
+Data Evolution files can supply different columns for the same row-ID range. A reader selects
+the current providers for the requested columns and combines their aligned row positions.
+File sequence numbers identify column versions here, not versions of a business primary key.
+
 Compaction replaces a set of data files with a new set. It can consolidate small files and,
-for primary-key tables, merge record versions. Changelog files serve incremental readers when
+for primary-key tables, merge record versions. Data Evolution compaction consolidates column
+files while preserving row reconstruction. Changelog files serve incremental readers when
 the configured [changelog producer](../primary-key-table/changelog-producer) generates them.
 
 ## Follow a Record Through Snapshots

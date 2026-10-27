@@ -62,6 +62,8 @@ from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
+                                                ColumnAlreadyExistException,
+                                                ColumnNotExistException,
                                                 DatabaseNoPermissionException,
                                                 DatabaseNotExistException,
                                                 TableNoPermissionException,
@@ -1231,6 +1233,16 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_DEFINITION, e.name, str(e), 404
             )
             return self._mock_response(response, 404)
+        except ColumnNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_COLUMN, e.column, str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except ColumnAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_COLUMN, e.column, str(e), 409
+            )
+            return self._mock_response(response, 409)
         except ValueError as e:
             response = ErrorResponse(None, None, str(e), 400)
             return self._mock_response(response, 400)

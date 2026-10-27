@@ -78,10 +78,8 @@ public class BatchReadTagCreator {
     public void deleteReadTag(String tagName) {
         try {
             if (tagManager.tagExists(tagName)) {
-                // Directly delete the tag metadata file instead of using TagManager.deleteTag(),
-                // which would also scan and delete unreferenced data files — too heavyweight for a
-                // read-path cleanup. Any orphan data files left behind will be reclaimed by
-                // OrphanFilesClean.
+                // Read protection tags do not need deletion callbacks. Any orphan files left
+                // behind will be reclaimed by OrphanFilesClean.
                 snapshotManager.fileIO().deleteQuietly(tagManager.tagPath(tagName));
                 LOG.info("Deleted batch read protection tag '{}'.", tagName);
             }

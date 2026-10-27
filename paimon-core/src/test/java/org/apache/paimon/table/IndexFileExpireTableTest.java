@@ -130,14 +130,19 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
 
         // test delete tag after expiring snapshots
         table.createTag("tag3", 3);
+        Snapshot taggedSnapshot = table.tagManager().getOrThrow("tag3");
         expire.expireUntil(1, 7);
+        indexFileSize = indexFileSize();
+        indexManifestSize = indexManifestSize();
         table.deleteTag("tag3");
+        assertThat(table.tagManager().tagExists("tag3")).isFalse();
 
         TagManager tagManager = new TagManager(LocalFileIO.create(), table.location());
+        checkIndexFiles(taggedSnapshot);
         checkIndexFiles(7);
         checkIndexFiles(tagManager.getOrThrow("tag5"));
-        assertThat(indexFileSize()).isEqualTo(4);
-        assertThat(indexManifestSize()).isEqualTo(2);
+        assertThat(indexFileSize()).isEqualTo(indexFileSize);
+        assertThat(indexManifestSize()).isEqualTo(indexManifestSize);
     }
 
     @Test

@@ -90,6 +90,19 @@ depends on the table mode and enabled features. The examples below use ordinary 
 [row tracking](../../append-table/row-tracking) and
 [data evolution](../../multimodal-table/data-evolution) can add metadata or split columns across files.
 
+### Data Evolution Append Table Files
+
+Data Evolution is an append-table storage mode, independent of primary-key LSM merging. It
+requires row tracking, no primary key, and `bucket = -1`. Its `bucket-0` directory can contain
+multiple files supplying different columns for the same logical rows.
+
+Normal files have equal or disjoint row-ID ranges. Readers select the newest normal file
+providing each requested column and combine columns at matching row positions. Dedicated
+BLOB and vector files must fit within one normal range. The metadata includes `firstRowId`,
+`rowCount`, `schemaId`, written columns, and file sequence numbers. See
+[File Layout and Reads](../../multimodal-table/data-evolution-file-layout) for the complete
+range and column-version contracts, including dedicated-file coverage and BLOB fallback rules.
+
 ### Table with Primary key Data File
 
 For the standard primary-key layout, fields appear in this order:
