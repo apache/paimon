@@ -78,14 +78,15 @@ public class CsvOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to skip empty lines when reading, the same way as Spark's CSV "
-                                    + "source. A line is empty if nothing is left after String#trim, "
-                                    + "which removes all characters up to U+0020, including spaces, "
-                                    + "tabs and other control characters. By default such a line is "
-                                    + "read as a row of NULLs. Note that Paimon itself writes a row "
-                                    + "whose values are all NULL as an empty line in a single-column "
-                                    + "table, or as a line of delimiters only, which can also be "
-                                    + "empty after trimming (e.g. a tab). Such rows are skipped when "
-                                    + "this option is enabled.");
+                                    + "source. Only supported for format tables. A line is empty if "
+                                    + "nothing is left after String#trim, which removes all "
+                                    + "characters up to U+0020, including spaces, tabs and other "
+                                    + "control characters. By default such a line is read as a row "
+                                    + "of NULLs. Note that Paimon itself writes a row whose values "
+                                    + "are all NULL as an empty line in a single-column table, or as "
+                                    + "a line of delimiters only, which can also be empty after "
+                                    + "trimming (e.g. a tab). Such rows are skipped when this option "
+                                    + "is enabled.");
 
     public static final ConfigOption<Mode> MODE =
             ConfigOptions.key("csv.mode")

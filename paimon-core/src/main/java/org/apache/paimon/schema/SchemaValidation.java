@@ -29,6 +29,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
 import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
@@ -176,6 +177,7 @@ public class SchemaValidation {
         // reject here rather than only at create time, so ALTER cannot turn the option on for a
         // table type that ignores it
         validateQueryAuthTableType(options.type(), options.queryAuthEnabled());
+        validateCsvSkipEmptyLines(options);
 
         if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
             throw new IllegalArgumentException(
@@ -443,6 +445,21 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+    }
+
+    /**
+     * Skipping empty lines drops rows at read time, while the data files of a table still record
+     * the number of rows that were written. Readers that answer COUNT(*) from that metadata would
+     * then disagree with a normal scan, so the option is only allowed for format tables, whose
+     * splits do not report row counts.
+     */
+    private static void validateCsvSkipEmptyLines(CoreOptions options) {
+        checkArgument(
+                options.type() == TableType.FORMAT_TABLE
+                        || !options.toConfiguration().get(CsvOptions.SKIP_EMPTY_LINES),
+                "%s is only supported for format tables, but the table type is %s.",
+                CsvOptions.SKIP_EMPTY_LINES.key(),
+                options.type());
     }
 
     /**
