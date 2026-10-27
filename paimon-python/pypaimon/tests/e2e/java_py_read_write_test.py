@@ -31,6 +31,7 @@ from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.execution.python.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.read.read_builder import ReadBuilder
 
 if sys.version_info[:2] == (3, 6):
@@ -186,6 +187,53 @@ class JavaPyReadWriteTest(unittest.TestCase):
             finally:
                 writer.close()
                 commit.close()
+
+    def test_py_write_column_default_values(self):
+        # Java testReadPythonColumnDefaultValues opens a writer on this schema,
+        # which casts every default, and checks the values it fills in.
+        table_name = 'default.column_defaults_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, Schema.from_pyarrow_schema(
+            pa.schema([
+                ('id', pa.int32()),
+                ('t', pa.time32('ms')),
+                ('ts', pa.timestamp('ms')),
+                ('ts_year', pa.timestamp('ms')),
+                ('ts_ltz', pa.timestamp('ms', tz='UTC')),
+                ('dec_zero', pa.decimal128(10, 2)),
+                ('dec_overflow', pa.decimal128(10, 2)),
+                ('ts_epoch', pa.timestamp('ms')),
+                ('s', pa.string()),
+            ]), options={'file.format': 'parquet'}), False)
+
+        # Each of these makes the Java writer fail to initialize.
+        rejected = [
+            ('t', '12:30+01:00'),
+            ('ts', '２０２４-０１-０１ ００:００:００'),
+            ('ts_ltz', '２０２４-０１-０１ ００:００:００'),
+            ('ts', '+999999999-12-31 24:00:00'),
+            ('dec_zero', '1e2147483648'),
+            ('dec_zero', '1e-2147483648'),
+            ('dec_zero', '1e-2147483646'),
+            ('s', "'"),
+        ]
+        for column, value in rejected:
+            with self.subTest(column=column, value=value):
+                with self.assertRaisesRegex(RuntimeError, 'Unsupported default value'):
+                    self.catalog.alter_table(table_name, [
+                        SchemaChange.update_column_default_value([column], value)])
+        self.assertEqual(0, self.catalog.get_table(table_name).table_schema.id)
+
+        self.catalog.alter_table(table_name, [
+            SchemaChange.update_column_default_value(['t'], '12:30+01'),
+            SchemaChange.update_column_default_value(['ts'], '2024-02-31 24:00:00'),
+            SchemaChange.update_column_default_value(['ts_year'], '+12345-01-01'),
+            SchemaChange.update_column_default_value(['ts_ltz'], '2024-01-01T24:00'),
+            SchemaChange.update_column_default_value(['dec_zero'], '0e-2147483645'),
+            SchemaChange.update_column_default_value(['dec_overflow'], '12345678901'),
+            SchemaChange.update_column_default_value(['ts_epoch'], '1700000000000'),
+            SchemaChange.update_column_default_value(['s'], "''"),
+        ])
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_append_table(self, file_format):
