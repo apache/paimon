@@ -227,7 +227,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         BucketSelectConverter bucketSelectConverter =
                 new BucketSelectConverter(
                         bucketMode(),
-                        options.bucketFunctionType(),
+                        options,
                         schema.logicalRowType(),
                         partitionType,
                         schema.logicalBucketKeyType());

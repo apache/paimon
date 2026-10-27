@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -1521,6 +1522,13 @@ public class SchemaValidation {
 
     private static void validateBucket(TableSchema schema, CoreOptions options) {
         int bucket = options.bucket();
+        if (options.bucketFunctionProvider().isPresent()) {
+            checkArgument(
+                    bucket > 0,
+                    "A custom bucket-function.provider requires a fixed positive bucket count.");
+            // Validate provider discovery and bucket-key compatibility before creating the table.
+            BucketFunction.create(options, schema.logicalBucketKeyType());
+        }
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
                 throw new IllegalArgumentException(
