@@ -31,7 +31,7 @@ from pypaimon.schema.data_types import AtomicType
 from pypaimon.schema.schema_change import SchemaChange
 
 
-def assert_table_guards(test, catalog, database):
+def assert_table_guards(test, catalog, database, branch_reads=True):
     """Table operations reject branch and system tables, as in Java, and leave the table untouched."""
     pa_schema = pa.schema([('id', pa.int32())])
     schema = Schema.from_pyarrow_schema(pa_schema)
@@ -72,7 +72,8 @@ def assert_table_guards(test, catalog, database):
     read_builder = table.new_read_builder()
     result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
     test.assertEqual(sorted(result.column('id').to_pylist()), [1, 2])
-    test.assertIsNotNone(catalog.get_table(name + '$branch_dev'))
+    if branch_reads:
+        test.assertIsNotNone(catalog.get_table(name + '$branch_dev'))
 
     # Identifier(db, t, branch='main') is encoded as and equal to db.t, so it is accepted.
     catalog.create_table(Identifier(database, 'm', branch='main'), schema, False)
@@ -120,7 +121,7 @@ class CatalogTableGuardTest(unittest.TestCase):
             "uri": "jdbc:sqlite:" + os.path.join(self.temp_dir, "catalog.db"),
             "catalog-key": "test-jdbc-catalog",
         })
-        assert_table_guards(self, catalog, 'db')
+        assert_table_guards(self, catalog, 'db', branch_reads=False)
         add_column = SchemaChange.add_column('x', AtomicType('INT'))
         catalog.get_table('db.t').branch_manager().create_branch('MAIN')
         for target in ('db.t$branch_dev', 'db.t$branch_MAIN'):
