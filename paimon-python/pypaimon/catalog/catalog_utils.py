@@ -21,7 +21,40 @@ import re
 from typing import Optional
 
 from pypaimon.api.api_response import PagedList, Partition
+from pypaimon.common.identifier import Identifier
 from pypaimon.table.table import Table
+
+
+def encoded_branch_name(identifier: Identifier) -> Optional[str]:
+    """The branch in the encoded name of ``identifier``, as in ``t$branch_dev``, or None.
+
+    ``Identifier(db, t, branch='main')``, in any case, is encoded as and equal to
+    ``db.t``, so it has none. ``t$branch_MAIN`` names a branch ``MAIN``.
+    """
+    without_branch = Identifier(
+        identifier.get_database_name(), identifier.get_table_name(),
+        system_table=identifier.get_system_table_name())
+    return None if identifier == without_branch else identifier.get_branch_name()
+
+
+def check_not_branch(identifier: Identifier, method: str) -> None:
+    """Mirrors Java ``CatalogUtils.checkNotBranch``.
+
+    Unlike Java, ``Identifier(db, t, branch='main')`` is accepted, see
+    ``encoded_branch_name``.
+    """
+    if encoded_branch_name(identifier) is not None:
+        raise ValueError(
+            "Cannot '{}' for branch table '{}', please modify the table with the default branch."
+            .format(method, identifier.get_full_name()))
+
+
+def check_not_system_table(identifier: Identifier, method: str) -> None:
+    """Mirrors Java ``CatalogUtils.checkNotSystemTable``."""
+    if identifier.is_system_table():
+        raise ValueError(
+            "Cannot '{}' for system table '{}', please use data table."
+            .format(method, identifier.get_full_name()))
 
 
 def list_partitions_from_file_system(

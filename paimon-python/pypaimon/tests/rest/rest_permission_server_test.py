@@ -303,8 +303,8 @@ def test_a_recreated_table_starts_from_its_own_schema(rest, drop_database):
 def test_a_branch_is_not_dropped_as_a_table(rest, branch):
     catalog, _ = rest
     catalog.create_branch(USERS, 'b1')
-    with pytest.raises(TableNotExistException):
-        catalog.drop_table(Identifier('default', 'users', branch=branch))
+    with pytest.raises(NoSuchResourceException):
+        catalog.rest_api.drop_table(Identifier('default', 'users', branch=branch))
     catalog.alter_table('default.users', [SchemaChange.set_option('a', 'b')])
     assert catalog.get_table('default.users').table_schema.options['a'] == 'b'
     assert catalog.list_branches(USERS) == ['b1']
