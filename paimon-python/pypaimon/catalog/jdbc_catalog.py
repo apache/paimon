@@ -404,20 +404,38 @@ class JdbcCatalog(Catalog):
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        branch = encoded_branch_name(identifier)
+        if branch is not None and branch != DEFAULT_MAIN_BRANCH:
+            raise NotImplementedError("JdbcCatalog currently does not support table branches")
         if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         if not self._table_exists(identifier):
             raise TableNotExistException(identifier)
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
+        table_identifier = identifier
+        if identifier.is_system_table():
+            table_identifier = Identifier.create(
+                identifier.get_database_name(),
+                identifier.get_table_name(),
+                branch=branch,
+            )
         from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         catalog_environment = CatalogEnvironment(
-            identifier=identifier,
+            identifier=table_identifier,
             uuid=None,
             catalog_loader=JdbcCatalogLoader(self.context),
             supports_version_management=False
         )
-        return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
+        table = FileStoreTable(self.file_io, table_identifier, table_path, table_schema, catalog_environment)
+        if identifier.is_system_table():
+            from pypaimon.table.system import system_table_loader
+
+            sys_table = system_table_loader.load(identifier.get_system_table_name().lower(), table)
+            if sys_table is None:
+                raise TableNotExistException(identifier)
+            return sys_table
+        return table
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool) -> None:
         from pypaimon.common.options.options_utils import OptionsUtils
