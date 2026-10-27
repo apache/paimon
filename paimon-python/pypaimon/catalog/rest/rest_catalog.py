@@ -28,7 +28,7 @@ from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsE
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_table
+from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_database, check_not_system_table
 from pypaimon.catalog.catalog_exception import (
     ColumnAlreadyExistException, ColumnNotExistException,
     TableNotExistException, DatabaseAlreadyExistException,
@@ -164,6 +164,7 @@ class RESTCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         try:
             self.rest_api.create_database(name, properties)
         except AlreadyExistsException as e:
@@ -187,6 +188,7 @@ class RESTCatalog(Catalog):
             raise DatabaseNoPermissionException(name) from e
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         if not cascade:
             try:
                 tables = self.list_tables(name)
@@ -209,6 +211,7 @@ class RESTCatalog(Catalog):
             raise DatabaseNoPermissionException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]) -> None:
+        check_not_system_database(name)
         try:
             set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
             self.rest_api.alter_database(name, list(remove_keys), set_properties)

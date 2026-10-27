@@ -21,7 +21,7 @@ from pypaimon.api.api_response import GetTagResponse, PagedList, Partition
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_table
+from pypaimon.catalog.catalog_utils import check_not_branch, check_not_system_database, check_not_system_table
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
                                                 DatabaseAlreadyExistException,
@@ -87,6 +87,7 @@ class FileSystemCatalog(Catalog):
 
     def create_database(self, name: str, ignore_if_exists: bool,
                         properties: Optional[Dict[str, str]] = None) -> None:
+        check_not_system_database(name)
         try:
             self.get_database(name)
             if not ignore_if_exists:
@@ -98,6 +99,7 @@ class FileSystemCatalog(Catalog):
             self.file_io.mkdirs(path)
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False) -> None:
+        check_not_system_database(name)
         try:
             self.get_database(name)
         except DatabaseNotExistException:
