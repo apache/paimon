@@ -194,7 +194,7 @@ public class TimeTravelSchemaEvolutionTest extends TableTestBase {
         Map<String, String> queryOptions = new HashMap<>();
         queryOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
         queryOptions.put(CoreOptions.VECTOR_FIELD.key(), "missing");
-        assertThatThrownBy(() -> table.copy(queryOptions))
+        assertThatThrownBy(() -> table.copy(queryOptions).newScan())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Some of the columns specified as vector-field are unknown.");
 

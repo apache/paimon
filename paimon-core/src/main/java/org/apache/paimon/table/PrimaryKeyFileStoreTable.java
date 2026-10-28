@@ -60,8 +60,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private transient KeyValueFileStore lazyStore;
-
     @VisibleForTesting
     PrimaryKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this(fileIO, path, tableSchema, CatalogEnvironment.empty());
@@ -77,49 +75,49 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public KeyValueFileStore store() {
-        if (lazyStore == null) {
-            RowType rowType = tableSchema.logicalRowType();
-            CoreOptions options = CoreOptions.fromMap(tableSchema.options());
-            KeyValueFieldsExtractor extractor =
-                    PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
+        return (KeyValueFileStore) runtimeStore();
+    }
 
-            RowType keyType = new RowType(extractor.keyFields(tableSchema));
-            List<String> deleteNotNullFields = deleteNotNullFields(options);
-            RowType valueType =
-                    deleteNotNullFields == null
-                            ? rowType
-                            : rowType.copy(
-                                    rowType.getFields().stream()
-                                            .map(
-                                                    field ->
-                                                            deleteNotNullFields.contains(
-                                                                            field.name())
-                                                                    ? field
-                                                                    : field.copy(true))
-                                            .collect(Collectors.toList()));
+    @Override
+    protected KeyValueFileStore createStore(TableSchema runtimeSchema) {
+        RowType rowType = runtimeSchema.logicalRowType();
+        CoreOptions options = coreOptions();
+        KeyValueFieldsExtractor extractor =
+                PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
-            MergeFunctionFactory<KeyValue> mfFactory =
-                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
-            if (options.needLookup()) {
-                mfFactory = LookupMergeFunction.wrap(mfFactory, options, keyType, valueType);
-            }
+        RowType keyType = new RowType(extractor.keyFields(runtimeSchema));
+        List<String> deleteNotNullFields = deleteNotNullFields(options);
+        RowType valueType =
+                deleteNotNullFields == null
+                        ? rowType
+                        : rowType.copy(
+                                rowType.getFields().stream()
+                                        .map(
+                                                field ->
+                                                        deleteNotNullFields.contains(field.name())
+                                                                ? field
+                                                                : field.copy(true))
+                                        .collect(Collectors.toList()));
 
-            lazyStore =
-                    new KeyValueFileStore(
-                            fileIO(),
-                            schemaManager(),
-                            tableSchema,
-                            tableSchema.crossPartitionUpdate(),
-                            options,
-                            tableSchema.logicalPartitionType(),
-                            keyType,
-                            valueType,
-                            extractor,
-                            mfFactory,
-                            name(),
-                            catalogEnvironment);
+        MergeFunctionFactory<KeyValue> mfFactory =
+                PrimaryKeyTableUtils.createMergeFunctionFactory(runtimeSchema);
+        if (options.needLookup()) {
+            mfFactory = LookupMergeFunction.wrap(mfFactory, options, keyType, valueType);
         }
-        return lazyStore;
+
+        return new KeyValueFileStore(
+                fileIO(),
+                schemaManager(),
+                runtimeSchema,
+                runtimeSchema.crossPartitionUpdate(),
+                options,
+                runtimeSchema.logicalPartitionType(),
+                keyType,
+                valueType,
+                extractor,
+                mfFactory,
+                name(),
+                catalogEnvironment);
     }
 
     @Override
@@ -164,7 +162,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead newRead() {
+    protected InnerTableRead createRead() {
         return new KeyValueTableRead(
                 () -> store().newRead(),
                 () -> store().newBatchRawFileRead(),
@@ -174,12 +172,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public DataTableScan newScan() {
-        return newScan(FileStoreTable::newSnapshotReader);
-    }
-
-    @Override
-    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+    protected DataTableScan createScan(SnapshotReaderFactory snapshotReaderFactory) {
         return new PrimaryKeyBatchScan(
                 this,
                 snapshotReaderFactory.create(this),

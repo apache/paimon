@@ -311,6 +311,13 @@ public class RESTCatalogServer {
         return server.url("").toString();
     }
 
+    public void setTableSchema(Identifier identifier, TableSchema schema) {
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        tableMetadataStore.put(
+                identifier.getFullName(),
+                new TableMetadata(schema, metadata.isExternal(), metadata.uuid()));
+    }
+
     public void shutdown() throws IOException {
         server.shutdown();
     }

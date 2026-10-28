@@ -64,7 +64,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public BucketMode bucketMode() {
-        return options.bucket() == -1 ? BucketMode.BUCKET_UNAWARE : BucketMode.HASH_FIXED;
+        return BucketMode.fromOptions(options.bucket(), false, false);
     }
 
     @Override

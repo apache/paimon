@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.Partition;
@@ -35,6 +36,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -63,6 +66,39 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ITCase for REST catalog. */
 class RESTCatalogITCase extends RESTCatalogITCaseBase {
+
+    @Test
+    void testMetadataOperationsWithInvalidOptions() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
+        org.apache.paimon.catalog.Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog("PAIMON").get()).catalog();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        TableSchema schema = table.schema();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing");
+        restCatalogServer.setTableSchema(identifier, schema.copy(options));
+        catalog.invalidateTable(identifier);
+
+        String name = DATABASE_NAME + "." + TABLE_NAME;
+        assertThat(sql("SHOW CREATE TABLE " + name).toString())
+                .contains("record-level.time-field", "missing");
+        assertThatThrownBy(() -> batchSql("SELECT * FROM " + name))
+                .hasStackTraceContaining("missing");
+        assertThatThrownBy(() -> batchSql("INSERT INTO " + name + " VALUES ('1', 11)"))
+                .hasStackTraceContaining("missing");
+
+        sql("ALTER TABLE " + name + " RESET ('record-level.time-field')");
+        batchSql("INSERT INTO " + name + " VALUES ('1', 11)");
+        assertThat(batchSql("SELECT * FROM " + name)).containsExactly(Row.of("1", 11.0D));
+
+        TableSchema repaired = ((FileStoreTable) catalog.getTable(identifier)).schema();
+        options = new HashMap<>(repaired.options());
+        options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing");
+        restCatalogServer.setTableSchema(identifier, repaired.copy(options));
+        catalog.invalidateTable(identifier);
+        sql("DROP TABLE " + name);
+        assertThat(catalog.listTables(DATABASE_NAME)).doesNotContain(TABLE_NAME);
+    }
 
     @Test
     void testCreateTable() {
