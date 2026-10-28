@@ -388,7 +388,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                appendChangesProvider(
+                                appendAndOverwriteChangesProvider(
                                         new CommitChanges(
                                                 changes.appendTableFiles,
                                                 changes.appendChangelog,
@@ -928,7 +928,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return result;
     }
 
-    private CommitChangesProvider appendChangesProvider(
+    private CommitChangesProvider appendAndOverwriteChangesProvider(
             CommitChanges changes, CommitKind commitKind) {
         if (options.dataEvolutionEnabled()
                 && commitKind == CommitKind.APPEND
