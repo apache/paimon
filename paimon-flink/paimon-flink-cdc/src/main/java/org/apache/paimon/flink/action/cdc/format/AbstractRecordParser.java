@@ -35,9 +35,12 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
@@ -116,9 +119,11 @@ public abstract class AbstractRecordParser
     /** generate values for computed columns. */
     protected void evalComputedColumns(
             Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
+        Set<String> base64EncodedFields =
+                computedColumns.isEmpty() ? Collections.emptySet() : extractBase64EncodedFields();
         computedColumns.forEach(
                 computedColumn -> {
-                    String result = computedColumn.evalFromRecord(rowData);
+                    String result = computedColumn.evalFromRecord(rowData, base64EncodedFields);
 
                     rowData.put(computedColumn.columnName(), result);
                     schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
@@ -148,11 +153,21 @@ public abstract class AbstractRecordParser
     protected RichCdcMultiplexRecord createRecord(
             RowKind rowKind, Map<String, String> data, CdcSchema.Builder schemaBuilder) {
         schemaBuilder.primaryKey(extractPrimaryKeys());
+        Set<String> base64EncodedFields = new HashSet<>(extractBase64EncodedFields());
+        computedColumns.forEach(column -> base64EncodedFields.remove(column.columnName()));
+        for (CdcMetadataConverter converter : metadataConverters) {
+            base64EncodedFields.remove(converter.columnName());
+        }
         return new RichCdcMultiplexRecord(
                 getDatabaseName(),
                 getTableName(),
                 schemaBuilder.build(),
-                new CdcRecord(rowKind, data));
+                CdcRecord.withBase64EncodedFields(rowKind, data, base64EncodedFields));
+    }
+
+    /** Names of source fields whose non-null values contain Base64-encoded binary data. */
+    protected Set<String> extractBase64EncodedFields() {
+        return Collections.emptySet();
     }
 
     @Nullable

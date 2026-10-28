@@ -42,6 +42,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_AFTER;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_BEFORE;
@@ -216,6 +218,20 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
         evalMetadataColumns(resultMap, schemaBuilder);
 
         return resultMap;
+    }
+
+    @Override
+    protected Set<String> extractBase64EncodedFields() {
+        if (!hasSchema) {
+            return Collections.emptySet();
+        }
+        return debeziumTypes.entrySet().stream()
+                .filter(
+                        entry ->
+                                DebeziumSchemaUtils.isPlainBinaryType(
+                                        entry.getValue(), classNames.get(entry.getKey())))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     @Override
