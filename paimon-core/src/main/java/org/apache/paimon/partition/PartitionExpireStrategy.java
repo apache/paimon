@@ -22,10 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
@@ -74,13 +77,43 @@ public abstract class PartitionExpireStrategy implements Serializable {
         return list;
     }
 
+    /**
+     * Whether {@link #convertPartition} renders the value at this index in a form meant for time
+     * extraction that can differ from the stored partition name.
+     */
+    public boolean isNormalizedForTimeExtraction(int index) {
+        switch (toObjectArrayConverter.rowType().getTypeAt(index).getTypeRoot()) {
+            case DATE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public Object[] convertPartition(BinaryRow partition) {
         Object[] values = toObjectArrayConverter.convert(partition);
         RowType partitionType = toObjectArrayConverter.rowType();
         for (int index = 0; index < values.length; index++) {
-            if (values[index] != null
-                    && partitionType.getTypeAt(index).getTypeRoot() == DataTypeRoot.DATE) {
-                values[index] = LocalDate.ofEpochDay((Integer) values[index]);
+            if (values[index] == null) {
+                continue;
+            }
+            DataType type = partitionType.getTypeAt(index);
+            switch (type.getTypeRoot()) {
+                case DATE:
+                    values[index] = LocalDate.ofEpochDay((Integer) values[index]);
+                    break;
+                case TIMESTAMP_WITHOUT_TIME_ZONE:
+                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                    // Timestamp#toString uses the ISO 'T' separator, which the default
+                    // partition time formatter cannot parse. Render it as the SQL string.
+                    values[index] =
+                            DateTimeUtils.formatTimestamp(
+                                    (Timestamp) values[index], DataTypeChecks.getPrecision(type));
+                    break;
+                default:
+                    break;
             }
         }
         return values;
