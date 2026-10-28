@@ -258,21 +258,23 @@ def test_named_projection_keeps_non_streaming_torch_row_boundary(projected_table
 @pytest.mark.parametrize('function', ['variant_get', 'try_variant_get'])
 @pytest.mark.parametrize('nested', [False, True])
 @pytest.mark.parametrize('mixed', [False, True])
-def test_named_iterator_rejects_variant_extractions(tmp_path, function, nested, mixed):
+def test_variant_iterator_requires_native_and_keeps_torch_restriction(tmp_path, function, nested, mixed):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('db', True)
     payload = DataField(2 if nested else 1, 'payload', AtomicType('VARIANT'))
     fields = [DataField(0, 'id', AtomicType('BIGINT')),
               DataField(1, 'profile', RowType(True, [payload])) if nested else payload]
-    catalog.create_table('db.t', Schema(fields, options={'bucket': '-1'}), False)
+    catalog.create_table('db.t', Schema(fields, options={
+        'bucket': '-1', 'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'}), False)
     source = 'profile.payload' if nested else 'payload'
     projection = {'x': "%s(%s, '$.x', 'float')" % (function, source)}
     if mixed:
         projection['user_id'] = 'id'
     read = catalog.get_table('db.t').new_read_builder().with_projection(projection).new_read()
-    with patch('pypaimon.read.read_dispatch._native_read_execution') as native:
-        with pytest.raises(RuntimeError, match='Variant extraction expressions are not supported by to_iterator'):
-            read.to_iterator([])
+    with patch.object(NativeTableRead, 'read_rows') as native, \
+            patch.object(PythonTableRead, 'read_rows', side_effect=AssertionError('Python Variant execution')):
+        with pytest.raises(RuntimeError, match='Variant extraction requires a compatible native reader'):
+            list(read.to_iterator([]))
         for streaming in (False, True):
             with pytest.raises(RuntimeError, match='not supported by Torch row format'):
                 read.to_torch([], streaming=streaming, batch_format='row')

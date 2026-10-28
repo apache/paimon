@@ -1262,7 +1262,7 @@ class TestVariantPaimonTable(unittest.TestCase):
             pa.field('payload', _variant_arrow_type()),
         ])
 
-    def test_native_variant_projection_rejects_row_readers(self):
+    def test_variant_projection_keeps_torch_row_restriction(self):
         for mode, options in (
             ('append', {}),
             ('lazy', {
@@ -1295,8 +1295,6 @@ class TestVariantPaimonTable(unittest.TestCase):
                 self.assertTrue(splits)
                 read = builder.new_read()
 
-                with self.assertRaisesRegex(RuntimeError, 'to_iterator'):
-                    read.to_iterator(splits)
                 with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
                     read.to_torch(splits, streaming=True)
                 with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
