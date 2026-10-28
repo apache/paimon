@@ -21,8 +21,10 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -30,17 +32,29 @@ import org.apache.paimon.io.ChainKeyValueFileReaderFactory;
 import org.apache.paimon.io.ChainReadContext;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
+import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.LookupStoreFactory;
+import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.DropDeleteReader;
+import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.mergetree.LookupFile;
+import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.mergetree.compact.ChangelogResult;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
+import org.apache.paimon.mergetree.compact.LookupChangelogMergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
+import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReadBatchSizer;
@@ -51,25 +65,39 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+import org.apache.paimon.utils.ValueEqualiserSupplier;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.lookup.LookupStoreFactory.bloomFilterBuilderFactory;
+import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * An implementation for {@link KeyValueFileStore}, this class handle LSM merging and changelog row
@@ -98,6 +126,13 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable private List<Predicate> filtersForAll;
 
     private boolean forceKeepDelete = false;
+
+    @Nullable private Cache<String, LookupFile> lookupFileCache;
+    @Nullable private LookupStoreFactory lookupStoreFactory;
+    // TODO Evict inactive partition-bucket states for partitioned tables. Each LookupLevels owns
+    //  1024 striped locks, so retaining every observed partition can consume unbounded heap.
+    private final Map<Pair<BinaryRow, Integer>, LookupLevels<KeyValue>> lookupLevels =
+            new HashMap<>();
 
     public MergeFileSplitRead(
             CoreOptions options,
@@ -235,6 +270,232 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         filtersForAll = allFilters;
         filtersForKeys = pkFilters;
         return this;
+    }
+
+    public RecordReader<KeyValue> createChangelogOnReadReader(IncrementalSplit split)
+            throws IOException {
+        checkArgument(
+                split.beforeDeletionFiles() == null && split.afterDeletionFiles() == null,
+                "Changelog-on-read does not support deletion vectors.");
+        checkArgument(
+                split.afterFiles().stream().allMatch(file -> file.level() == 0),
+                "Changelog-on-read expects only level-0 delta files.");
+
+        LookupLevels<KeyValue> history =
+                refreshLookupLevels(split.partition(), split.bucket(), split.beforeFiles());
+        history.prepareLookupFiles(lookupFilesToPrepare(split.beforeFiles(), split.afterFiles()));
+
+        RowType readType = actualReadType();
+        UserDefinedSeqComparator sequenceComparator = createUdsComparator();
+        Comparator<KeyValue> keyValueComparator = createSequenceComparator(sequenceComparator);
+        MergeFunction<KeyValue> historyMerge = mfFactory.create(readType);
+
+        MergeFunctionFactory<KeyValue> lookupFactory =
+                LookupMergeFunction.wrap(ignored -> mfFactory.create(readType), options, keyType, readType);
+        if (lookupFactory instanceof LookupMergeFunction.Factory) {
+            ((LookupMergeFunction.Factory) lookupFactory).withIOManager(ioManager);
+        }
+
+        RowType equalType = outerReadType == null ? readType : outerReadType;
+        RecordEqualiser equaliser =
+                options.changelogRowDeduplicate()
+                        ? ValueEqualiserSupplier.fromIgnoreFields(
+                                        equalType, options.changelogRowDeduplicateIgnoreFields())
+                                .get()
+                        : null;
+        MergeFunctionWrapper<ChangelogResult> mergeFunctionWrapper =
+                new LookupChangelogMergeFunctionWrapper<>(
+                        lookupFactory,
+                        key -> {
+                            try {
+                                List<KeyValue> values = history.lookupAll(key, 0);
+                                if (values.isEmpty()) {
+                                    return null;
+                                }
+                                values.sort(keyValueComparator);
+                                historyMerge.reset();
+                                values.forEach(historyMerge::add);
+                                return historyMerge.getResult().setLevel(1);
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        },
+                        equaliser,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        sequenceComparator);
+
+        KeyValueFileReaderFactory readerFactory =
+                readerFactoryBuilder.build(
+                        split.partition(),
+                        split.bucket(),
+                        DeletionVector.emptyFactory(),
+                        false,
+                        filtersForKeys);
+        RecordReader<ChangelogResult> reader =
+                MergeTreeReaders.readerForMergeTree(
+                        new IntervalPartition(split.afterFiles(), keyComparator).partition(),
+                        readerFactory,
+                        keyComparator,
+                        sequenceComparator,
+                        mergeFunctionWrapper,
+                        mergeSorter);
+        return finishMergeReader(changelogReader(reader), true);
+    }
+
+    private List<DataFileMeta> lookupFilesToPrepare(
+            List<DataFileMeta> beforeFiles, List<DataFileMeta> afterFiles) {
+        List<DataFileMeta> result = new ArrayList<>();
+        for (DataFileMeta before : beforeFiles) {
+            for (DataFileMeta after : afterFiles) {
+                if (keyComparator.compare(before.maxKey(), after.minKey()) >= 0
+                        && keyComparator.compare(before.minKey(), after.maxKey()) <= 0) {
+                    result.add(before);
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    private LookupLevels<KeyValue> refreshLookupLevels(
+            BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        Pair<BinaryRow, Integer> key = Pair.of(partition, bucket);
+        LookupLevels<KeyValue> lookup = lookupLevels.get(key);
+        if (lookup == null) {
+            lookup = createLookupLevels(partition, bucket, files);
+            lookupLevels.put(key, lookup);
+        } else {
+            lookup.getLevels().update(lookup.getLevels().allFiles(), files);
+        }
+        return lookup;
+    }
+
+    private LookupLevels<KeyValue> createLookupLevels(
+            BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        checkNotNull(ioManager, "IOManager is required for changelog-on-read.");
+        KeyValueFileReaderFactory readerFactory =
+                readerFactoryBuilder.build(
+                        partition, bucket, DeletionVector.emptyFactory(), false, filtersForKeys);
+        RowType readType = actualReadType();
+        Options configuration = options.toConfiguration();
+        return new LookupLevels<>(
+                ignored -> readType,
+                tableSchema.id(),
+                new Levels(keyComparator, files, options.numLevels()),
+                keyComparator,
+                keyType,
+                PersistValueProcessor.factory(readType),
+                LookupSerializerFactory.INSTANCE.get(),
+                readerFactory::createRecordReader,
+                file ->
+                        checkNotNull(ioManager)
+                                .createChannel(
+                                        localFilePrefix(
+                                                tableSchema.logicalPartitionType(),
+                                                partition,
+                                                bucket,
+                                                file))
+                                .getPathFile(),
+                lookupStoreFactory(),
+                bloomFilterBuilderFactory(configuration),
+                lookupFileCache());
+    }
+
+    private LookupStoreFactory lookupStoreFactory() {
+        if (lookupStoreFactory == null) {
+            lookupStoreFactory =
+                    LookupStoreFactory.create(
+                            options,
+                            new CacheManager(
+                                    options.lookupCacheMaxMemory(),
+                                    options.lookupCacheHighPrioPoolRatio()),
+                            new RowCompactedSerializer(keyType).createSliceComparator());
+        }
+        return lookupStoreFactory;
+    }
+
+    private Cache<String, LookupFile> lookupFileCache() {
+        if (lookupFileCache == null) {
+            lookupFileCache =
+                    LookupFile.createCache(
+                            options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                            options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        }
+        return lookupFileCache;
+    }
+
+    private Comparator<KeyValue> createSequenceComparator(
+            @Nullable UserDefinedSeqComparator comparator) {
+        if (comparator == null) {
+            return Comparator.comparingLong(KeyValue::sequenceNumber);
+        }
+        return (left, right) -> {
+            int result = comparator.compare(left.value(), right.value());
+            return result == 0
+                    ? Long.compare(left.sequenceNumber(), right.sequenceNumber())
+                    : result;
+        };
+    }
+
+    private RecordReader<KeyValue> changelogReader(RecordReader<ChangelogResult> reader) {
+        return new RecordReader<KeyValue>() {
+            @Nullable
+            @Override
+            public RecordIterator<KeyValue> readBatch() throws IOException {
+                RecordIterator<ChangelogResult> batch = reader.readBatch();
+                if (batch == null) {
+                    return null;
+                }
+                return new RecordIterator<KeyValue>() {
+                    private Iterator<KeyValue> current =
+                            Collections.<KeyValue>emptyList().iterator();
+
+                    @Nullable
+                    @Override
+                    public KeyValue next() throws IOException {
+                        while (true) {
+                            while (!current.hasNext()) {
+                                ChangelogResult result = batch.next();
+                                if (result == null) {
+                                    return null;
+                                }
+                                current = result.changelogs().iterator();
+                            }
+                            KeyValue next = current.next();
+                            if (options.changelogProducerIgnoreUpdateBefore()
+                                    && next.valueKind() == RowKind.UPDATE_BEFORE) {
+                                continue;
+                            }
+                            if (options.changelogProducerIgnoreDelete()
+                                    && next.valueKind() == RowKind.DELETE) {
+                                continue;
+                            }
+                            return next;
+                        }
+                    }
+
+                    @Override
+                    public void releaseBatch() {
+                        batch.releaseBatch();
+                    }
+                };
+            }
+
+            @Override
+            public void close() throws IOException {
+                reader.close();
+            }
+        };
+    }
+
+    public void close() {
+        lookupLevels.clear();
+        if (lookupFileCache != null) {
+            lookupFileCache.invalidateAll();
+            lookupFileCache.cleanUp();
+            lookupFileCache = null;
+        }
     }
 
     @Override

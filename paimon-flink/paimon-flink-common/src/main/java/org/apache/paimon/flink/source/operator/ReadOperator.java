@@ -26,6 +26,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.RecordLimiter;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableRead;
@@ -152,7 +153,11 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                         ? ((DataSplit) inner)
                                 .earliestFileCreationEpochMillis()
                                 .orElse(FileStoreSourceReaderMetrics.UNDEFINED)
-                        : FileStoreSourceReaderMetrics.UNDEFINED;
+                        : inner instanceof IncrementalSplit
+                                ? ((IncrementalSplit) inner)
+                                        .earliestFileCreationEpochMillis()
+                                        .orElse(FileStoreSourceReaderMetrics.UNDEFINED)
+                                : FileStoreSourceReaderMetrics.UNDEFINED;
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         // update idleStartTime when reading a new split
         idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
@@ -194,9 +199,18 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
     @Override
     public void close() throws Exception {
-        super.close();
-        if (ioManager != null) {
-            ioManager.close();
+        try {
+            super.close();
+        } finally {
+            try {
+                if (read != null) {
+                    read.close();
+                }
+            } finally {
+                if (ioManager != null) {
+                    ioManager.close();
+                }
+            }
         }
     }
 

@@ -431,6 +431,17 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     @Test
+    public void testCloseDoesNotCloseTableRead() throws Exception {
+        TestingTableRead tableRead =
+                new TestingTableRead(new SingleBatchRecordReader(new TrackingRecordIterator()));
+        FileStoreSourceSplitReader reader = createReader(tableRead, null);
+
+        reader.close();
+
+        assertThat(tableRead.closed()).isFalse();
+    }
+
+    @Test
     public void testLimit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), 2L);
@@ -603,6 +614,7 @@ public class FileStoreSourceSplitReaderTest {
     private static class TestingTableRead implements TableRead {
 
         private final RecordReader<InternalRow> recordReader;
+        private boolean closed;
 
         private TestingTableRead(RecordReader<InternalRow> recordReader) {
             this.recordReader = recordReader;
@@ -626,6 +638,15 @@ public class FileStoreSourceSplitReaderTest {
         @Override
         public RecordReader<InternalRow> createReader(Split split) {
             return recordReader;
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+
+        private boolean closed() {
+            return closed;
         }
     }
 

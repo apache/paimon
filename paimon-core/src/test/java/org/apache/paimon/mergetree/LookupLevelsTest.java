@@ -284,6 +284,36 @@ public class LookupLevelsTest {
     }
 
     @Test
+    public void testPrepareLookupFiles() throws Exception {
+        DataFileMeta first = newFile(1, kv(1, 11));
+        DataFileMeta second = newFile(1, kv(2, 22));
+        Levels levels = new Levels(comparator, Arrays.asList(first, second), 1);
+        AtomicInteger localFileRequests = new AtomicInteger();
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(
+                        levels,
+                        MemorySize.ofMebiBytes(10),
+                        fileName -> {
+                            localFileRequests.incrementAndGet();
+                            return new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + fileName);
+                        });
+
+        try {
+            lookupLevels.prepareLookupFiles(Arrays.asList(first, second));
+            assertThat(localFileRequests.get()).isEqualTo(2);
+            assertThat(lookupLevels.lookupFiles().asMap().keySet())
+                    .containsExactlyInAnyOrder(first.fileName(), second.fileName());
+
+            assertThat(lookupLevels.lookup(row(1), 1).value().getInt(1)).isEqualTo(11);
+            assertThat(lookupLevels.lookup(row(2), 1).value().getInt(1)).isEqualTo(22);
+            lookupLevels.prepareLookupFiles(Arrays.asList(first, second));
+            assertThat(localFileRequests.get()).isEqualTo(2);
+        } finally {
+            lookupLevels.close();
+        }
+    }
+
+    @Test
     public void testConcurrentLookupCreatesSingleLookupFile() throws Exception {
         DataFileMeta file = newFile(1, kv(1, 11), kv(2, 22));
         Levels levels = new Levels(comparator, Collections.singletonList(file), 1);

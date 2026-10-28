@@ -18,18 +18,24 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.connector.source.SourceEvent;
@@ -46,10 +52,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
@@ -152,6 +165,88 @@ public class FileStoreSourceReaderTest {
         assertThat(tableRead.ioManager()).isNotNull();
     }
 
+    @Test
+    public void testCloseClosesTableRead() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        CloseTrackingTableRead tableRead =
+                new CloseTrackingTableRead(
+                        new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey());
+        FileStoreSourceReader reader = createReader(context, tableRead);
+
+        reader.close();
+
+        assertThat(tableRead.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testCheckpointDuringFetchAndRestore() throws Exception {
+        List<List<InternalRow>> batches =
+                Arrays.asList(
+                        Arrays.asList(
+                                changelogRow(RowKind.UPDATE_BEFORE, 1L),
+                                changelogRow(RowKind.UPDATE_AFTER, 2L)),
+                        Collections.singletonList(changelogRow(RowKind.INSERT, 3L)));
+        CountDownLatch preparationStarted = new CountDownLatch(1);
+        CountDownLatch finishPreparation = new CountDownLatch(1);
+        ExecutorService checkpointExecutor = Executors.newSingleThreadExecutor();
+        FileStoreSourceReader reader =
+                createReader(
+                        new TestingReaderContext(),
+                        new BlockingTableRead(batches, preparationStarted, finishPreparation));
+        FileStoreSourceReader restoredReader = null;
+
+        try {
+            reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
+            reader.start();
+            assertThat(preparationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+
+            FileStoreSourceReader checkpointReader = reader;
+            Future<List<FileStoreSourceSplit>> checkpointDuringPreparation =
+                    checkpointExecutor.submit(() -> checkpointReader.snapshotState(1L));
+            List<FileStoreSourceSplit> unconsumedSplits =
+                    checkpointDuringPreparation.get(1, TimeUnit.SECONDS);
+            assertThat(unconsumedSplits)
+                    .singleElement()
+                    .extracting(FileStoreSourceSplit::recordsToSkip)
+                    .isEqualTo(0L);
+
+            finishPreparation.countDown();
+            TestingReaderOutput<RowData> outputBeforeCheckpoint = new TestingReaderOutput<>();
+            pollUntilRecords(reader, outputBeforeCheckpoint, 2);
+            assertThat(format(outputBeforeCheckpoint.getEmittedRecords()))
+                    .containsExactly("-U 1", "+U 2");
+
+            List<FileStoreSourceSplit> checkpoint = reader.snapshotState(2L);
+            assertThat(checkpoint)
+                    .singleElement()
+                    .extracting(FileStoreSourceSplit::recordsToSkip)
+                    .isEqualTo(2L);
+            reader.close();
+            reader = null;
+
+            restoredReader =
+                    createReader(new TestingReaderContext(), new BlockingTableRead(batches));
+            restoredReader.addSplits(checkpoint);
+            restoredReader.start();
+            TestingReaderOutput<RowData> outputAfterRestore = new TestingReaderOutput<>();
+            drain(restoredReader, outputAfterRestore);
+
+            List<String> allRecords = new ArrayList<>();
+            allRecords.addAll(format(outputBeforeCheckpoint.getEmittedRecords()));
+            allRecords.addAll(format(outputAfterRestore.getEmittedRecords()));
+            assertThat(allRecords).containsExactly("-U 1", "+U 2", "+I 3");
+        } finally {
+            finishPreparation.countDown();
+            if (reader != null) {
+                reader.close();
+            }
+            if (restoredReader != null) {
+                restoredReader.close();
+            }
+            checkpointExecutor.shutdownNow();
+        }
+    }
+
     protected FileStoreSourceReader createReader(TestingReaderContext context) {
         return createReader(
                 context, new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey());
@@ -172,6 +267,168 @@ public class FileStoreSourceReaderTest {
 
     protected static FileStoreSourceSplit createTestFileSplit(String id) {
         return newSourceSplit(id, row(1), 0, Collections.emptyList());
+    }
+
+    private static GenericRow changelogRow(RowKind kind, long value) {
+        GenericRow row = GenericRow.of(value);
+        row.setRowKind(kind);
+        return row;
+    }
+
+    private static void pollUntilRecords(
+            FileStoreSourceReader reader, TestingReaderOutput<RowData> output, int expected)
+            throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (output.getEmittedRecords().size() < expected && System.nanoTime() < deadline) {
+            reader.pollNext(output);
+            Thread.sleep(10);
+        }
+        assertThat(output.getEmittedRecords()).hasSize(expected);
+    }
+
+    private static void drain(FileStoreSourceReader reader, TestingReaderOutput<RowData> output)
+            throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (reader.getNumberOfCurrentlyAssignedSplits() > 0 && System.nanoTime() < deadline) {
+            reader.pollNext(output);
+            Thread.sleep(10);
+        }
+        assertThat(reader.getNumberOfCurrentlyAssignedSplits()).isZero();
+    }
+
+    private static List<String> format(List<RowData> records) {
+        List<String> result = new ArrayList<>();
+        for (RowData row : records) {
+            result.add(row.getRowKind().shortString() + " " + row.getLong(0));
+        }
+        return result;
+    }
+
+    private static class BlockingTableRead implements TableRead {
+
+        private final List<List<InternalRow>> batches;
+        private final CountDownLatch preparationStarted;
+        private final CountDownLatch finishPreparation;
+
+        private BlockingTableRead(List<List<InternalRow>> batches) {
+            this(batches, null, null);
+        }
+
+        private BlockingTableRead(
+                List<List<InternalRow>> batches,
+                CountDownLatch preparationStarted,
+                CountDownLatch finishPreparation) {
+            this.batches = batches;
+            this.preparationStarted = preparationStarted;
+            this.finishPreparation = finishPreparation;
+        }
+
+        @Override
+        public TableRead withMetricRegistry(MetricRegistry registry) {
+            return this;
+        }
+
+        @Override
+        public TableRead executeFilter() {
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
+            return this;
+        }
+
+        @Override
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+            if (preparationStarted != null) {
+                preparationStarted.countDown();
+                try {
+                    if (!finishPreparation.await(10, TimeUnit.SECONDS)) {
+                        throw new IOException("Timed out waiting for lookup preparation.");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(e);
+                }
+            }
+            return new BatchedRowsRecordReader(batches);
+        }
+    }
+
+    private static class BatchedRowsRecordReader implements RecordReader<InternalRow> {
+
+        private final List<List<InternalRow>> batches;
+        private int nextBatch;
+
+        private BatchedRowsRecordReader(List<List<InternalRow>> batches) {
+            this.batches = batches;
+        }
+
+        @Override
+        public RecordIterator<InternalRow> readBatch() {
+            if (nextBatch >= batches.size()) {
+                return null;
+            }
+
+            List<InternalRow> batch = batches.get(nextBatch++);
+            return new RecordIterator<InternalRow>() {
+                private int nextRow;
+
+                @Override
+                public InternalRow next() {
+                    return nextRow < batch.size() ? batch.get(nextRow++) : null;
+                }
+
+                @Override
+                public void releaseBatch() {}
+            };
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    private static class CloseTrackingTableRead implements TableRead {
+
+        private final TableRead delegate;
+        private int closeCount;
+
+        private CloseTrackingTableRead(TableRead delegate) {
+            this.delegate = delegate;
+        }
+
+        private int closeCount() {
+            return closeCount;
+        }
+
+        @Override
+        public TableRead withMetricRegistry(MetricRegistry registry) {
+            delegate.withMetricRegistry(registry);
+            return this;
+        }
+
+        @Override
+        public TableRead executeFilter() {
+            delegate.executeFilter();
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
+            delegate.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+            return delegate.createReader(split);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closeCount++;
+            delegate.close();
+        }
     }
 
     /** A {@link MetricGroup} for testing. */

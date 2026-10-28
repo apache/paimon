@@ -1161,9 +1161,9 @@ public class CoreOptions implements Serializable {
                     .enumType(ChangelogProducer.class)
                     .defaultValue(ChangelogProducer.NONE)
                     .withDescription(
-                            "Whether to double write to a changelog file. "
-                                    + "This changelog file keeps the details of data changes, "
-                                    + "it can be read directly during stream reads. This can be applied to tables with primary keys. ");
+                            "How to produce changelog for primary-key tables. "
+                                    + "Input, lookup and full-compaction produce changelog files; "
+                                    + "on-read reconstructs changes from data files during streaming reads.");
 
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_UPDATE_BEFORE =
             key("changelog-producer.ignore-update-before")
@@ -1171,8 +1171,8 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to ignore update-before records in the changelog. "
-                                    + "When set to true, UPDATE_BEFORE (-U) records will not be written to changelog files. "
-                                    + "This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+                                    + "When set to true, UPDATE_BEFORE (-U) records will not be emitted. "
+                                    + "Valid for lookup, full-compaction and on-read.");
 
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_DELETE =
             key("changelog-producer.ignore-delete")
@@ -1180,15 +1180,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to ignore delete records in the changelog. "
-                                    + "When set to true, DELETE (-D) records will not be written to changelog files. "
-                                    + "This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+                                    + "When set to true, DELETE (-D) records will not be emitted. "
+                                    + "Valid for lookup, full-compaction and on-read.");
 
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_ROW_DEDUPLICATE =
             key("changelog-producer.row-deduplicate")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+                            "Whether to suppress -U, +U changelog for equal records. "
+                                    + "Valid for lookup, full-compaction and on-read.");
 
     public static final ConfigOption<String> CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS =
             key("changelog-producer.row-deduplicate-ignore-fields")
@@ -4055,6 +4056,18 @@ public class CoreOptions implements Serializable {
         return options.get(CHANGELOG_PRODUCER);
     }
 
+    public boolean changelogOnRead() {
+        return changelogProducer() == ChangelogProducer.ON_READ;
+    }
+
+    /** Whether this mode materializes changelog files, rather than reconstructing changes. */
+    public boolean producesChangelogFiles() {
+        ChangelogProducer producer = changelogProducer();
+        return producer == ChangelogProducer.INPUT
+                || producer == ChangelogProducer.LOOKUP
+                || producer == ChangelogProducer.FULL_COMPACTION;
+    }
+
     public boolean needLookup() {
         return lookupStrategy().needLookup;
     }
@@ -5465,7 +5478,9 @@ public class CoreOptions implements Serializable {
 
         FULL_COMPACTION("full-compaction", "Generate changelog files with each full compaction."),
 
-        LOOKUP("lookup", "Generate changelog files through 'lookup' compaction.");
+        LOOKUP("lookup", "Generate changelog files through 'lookup' compaction."),
+
+        ON_READ("on-read", "Generate changelog during reads without writing changelog files.");
 
         private final String value;
         private final String description;
