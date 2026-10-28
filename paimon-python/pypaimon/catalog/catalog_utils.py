@@ -21,6 +21,7 @@ import re
 from typing import Optional
 
 from pypaimon.api.api_response import PagedList, Partition
+from pypaimon.catalog.catalog import Catalog
 from pypaimon.common.identifier import Identifier
 from pypaimon.table.table import Table
 
@@ -49,9 +50,15 @@ def check_not_branch(identifier: Identifier, method: str) -> None:
             .format(method, identifier.get_full_name()))
 
 
+def check_not_system_database(name: str) -> None:
+    """Mirrors Java ``CatalogUtils.checkNotSystemDatabase``."""
+    if name == Catalog.SYSTEM_DATABASE_NAME:
+        raise ValueError("Can't do operation on system database.")
+
+
 def check_not_system_table(identifier: Identifier, method: str) -> None:
     """Mirrors Java ``CatalogUtils.checkNotSystemTable``."""
-    if identifier.is_system_table():
+    if identifier.get_database_name() == Catalog.SYSTEM_DATABASE_NAME or identifier.is_system_table():
         raise ValueError(
             "Cannot '{}' for system table '{}', please use data table."
             .format(method, identifier.get_full_name()))
