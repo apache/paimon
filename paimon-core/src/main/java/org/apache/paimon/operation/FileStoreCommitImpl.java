@@ -386,27 +386,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                 }
 
-                CommitChangesProvider changesProvider =
-                        CommitChangesProvider.provider(
-                                changes.appendTableFiles,
-                                changes.appendChangelog,
-                                changes.appendIndexFiles);
-                if (options.dataEvolutionEnabled()
-                        && commitKind == CommitKind.APPEND
-                        && changes.appendTableFiles.isEmpty()
-                        && changes.appendChangelog.isEmpty()) {
-                    changesProvider =
-                            ReassignCompactChangesProvider.forIndexBuild(
-                                    fileIO,
-                                    pathFactory,
-                                    snapshotManager,
-                                    changes.appendIndexFiles,
-                                    options.commitLastSafeSnapshot().orElse(null),
-                                    this::checkIndexBuildChanges);
-                }
                 attempts +=
                         tryCommit(
-                                changesProvider,
+                                appendChangesProvider(
+                                        new CommitChanges(
+                                                changes.appendTableFiles,
+                                                changes.appendChangelog,
+                                                changes.appendIndexFiles),
+                                        commitKind),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -939,6 +926,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             result.add(Pair.of(commitMessage.partition(), commitMessage.bucket()));
         }
         return result;
+    }
+
+    private CommitChangesProvider appendChangesProvider(
+            CommitChanges changes, CommitKind commitKind) {
+        if (options.dataEvolutionEnabled()
+                && commitKind == CommitKind.APPEND
+                && changes.tableFiles.isEmpty()
+                && changes.changelogFiles.isEmpty()) {
+            return ReassignCompactChangesProvider.forIndexBuild(
+                    fileIO,
+                    pathFactory,
+                    snapshotManager,
+                    changes.indexFiles,
+                    options.commitLastSafeSnapshot().orElse(null),
+                    this::checkIndexBuildChanges);
+        }
+        return CommitChangesProvider.provider(
+                changes.tableFiles, changes.changelogFiles, changes.indexFiles);
     }
 
     @VisibleForTesting
