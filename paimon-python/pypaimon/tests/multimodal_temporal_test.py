@@ -45,6 +45,85 @@ class MultimodalTemporalTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def test_metadata_batches_coalesce_without_reading_ahead(self):
+        metadata = pa.table({"episode_id": [1] * 11,
+                             "event_time": list(range(11)),
+                             temporal._ROW_ID: list(range(11))})
+        consumed = []
+        closed = []
+
+        class Reader:
+            def __iter__(self):
+                for start, size in ((0, 2), (2, 0), (2, 3), (5, 6)):
+                    consumed.append(start)
+                    if size:
+                        yield metadata.slice(start, size).to_batches()[0]
+                    else:
+                        yield pa.RecordBatch.from_arrays(
+                            [pa.array([], type=field.type) for field in metadata.schema],
+                            schema=metadata.schema)
+
+            def close(self):
+                closed.append(True)
+
+        builder = mock.Mock()
+        builder.new_read.return_value._to_managed_arrow_batch_reader.return_value = Reader()
+        query = mock.Mock(_temporal_empty=False)
+        with mock.patch.object(temporal, "_metadata_builders", return_value=(
+                builder, [], ["episode_id", "event_time"], metadata.column_names)):
+            batches = temporal._metadata_batches(query, "event_time", ("episode_id",), 4)
+            first = next(batches)
+            self.assertEqual([0, 1, 2, 3], first["event_time"].to_pylist())
+            self.assertEqual([0, 2, 2], consumed)
+            remaining = list(batches)
+        self.assertEqual([4, 3], [len(batch) for batch in remaining])
+        self.assertEqual(metadata, pa.concat_tables([first] + remaining))
+        self.assertEqual([True], closed)
+
+    def test_columnar_metadata_keeps_timestamp_precision_and_slices(self):
+        times = pa.array([1, 2, 3], type=pa.timestamp("ns"))
+        metadata = pa.table({"episode_id": [1, 1, 2], "event_time": times,
+                             temporal._ROW_ID: [8, 9, 10]})
+        rows = temporal._ColumnarMetadata(metadata, "event_time", times.type)
+        self.assertEqual([1, 2, 3], rows.targets.tolist())
+        self.assertEqual(([(1,), (2,)], [0, 0, 1]),
+                         (rows.group_index(("episode_id",))[0],
+                          rows.group_index(("episode_id",))[1].tolist()))
+        self.assertIsNone(rows._rows)
+        self.assertEqual([2, 3], rows[1:].targets.tolist())
+        self.assertEqual(3, rows[-1][temporal._TIME_KEY])
+
+    def test_native_temporal_kernel_is_optional(self):
+        for module in (None, mock.Mock(spec=[])):
+            with self.subTest(module=module):
+                temporal._temporal_match_kernel.cache_clear()
+                with mock.patch.dict(sys.modules, {"pypaimon_rust": module}):
+                    self.assertIsNone(temporal._temporal_match_kernel())
+        temporal._temporal_match_kernel.cache_clear()
+
+    def test_native_temporal_matching_matches_reference(self):
+        kernel = temporal._temporal_match_kernel()
+        if kernel is None:
+            self.skipTest("Requires pypaimon_rust temporal_match")
+        rng = np.random.default_rng(123)
+        for direction in ("backward", "forward", "nearest"):
+            for exact in (False, True):
+                for tolerance in (None, 0, 3):
+                    source = object.__new__(temporal._AsOfJoinRight)
+                    source.by = ("episode_id",)
+                    source._time_keys = np.sort(rng.integers(-20, 20, size=40))
+                    source._row_ids = pa.array(range(40), type=pa.int64())
+                    source._index = {(1,): (0, 40)}
+                    source.direction = direction
+                    source.allow_exact_matches = exact
+                    source._tolerance_key = tolerance
+                    metadata = pa.table({"episode_id": [1] * 50 + [2],
+                                         "event_time": rng.integers(-30, 30, size=51)})
+                    rows = temporal._ColumnarMetadata(metadata, "event_time", pa.int64())
+                    first, _ = temporal._native_matches(source, rows, direction)
+                    expected = [source.match(row) for row in rows]
+                    self.assertEqual(expected, [None if value < 0 else int(value) for value in first])
+
     def test_alignment_requires_an_explicit_group_boundary(self):
         table = self._table("missing_group", {
             "event_time": pa.int64(),
