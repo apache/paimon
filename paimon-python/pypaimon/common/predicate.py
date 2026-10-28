@@ -601,7 +601,7 @@ class Like(Tester):
                     raise ValueError(
                         f"Invalid escape sequence '{pattern}' at position {index}")
             elif char == '_':
-                regex_parts.append('.')
+                regex_parts.append('(?s:.)')
             elif char == '%':
                 regex_parts.append('(?s:.*)')
             else:
