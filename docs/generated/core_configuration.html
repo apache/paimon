@@ -213,6 +213,12 @@ under the License.
             <td>Changelog file metadata stats collection. none, counts, truncate(16), full is available.</td>
         </tr>
         <tr>
+            <td><h5>changelog-on-read.lookup-state.max-size</h5></td>
+            <td style="word-wrap: break-word;">2048</td>
+            <td>Integer</td>
+            <td>Maximum number of partition-bucket lookup states cached by each reader with changelog-producer=on-read. Must be greater than 0. Least recently used states and their local lookup files are evicted when the limit is exceeded.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>

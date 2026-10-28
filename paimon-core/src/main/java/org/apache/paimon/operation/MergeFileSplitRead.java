@@ -85,8 +85,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -129,10 +129,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable private Cache<String, LookupFile> lookupFileCache;
     @Nullable private LookupStoreFactory lookupStoreFactory;
-    // TODO Evict inactive partition-bucket states for partitioned tables. Each LookupLevels owns
-    //  1024 striped locks, so retaining every observed partition can consume unbounded heap.
-    private final Map<Pair<BinaryRow, Integer>, LookupLevels<KeyValue>> lookupLevels =
-            new HashMap<>();
+    private final Map<Pair<BinaryRow, Integer>, LookupLevels<KeyValue>> lookupLevelsMap;
 
     public MergeFileSplitRead(
             CoreOptions options,
@@ -154,6 +151,24 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
         this.sequenceOrder = options.sequenceFieldSortOrderIsAscending();
+        int maxLookupStates = options.changelogOnReadLookupStateMaxSize();
+        this.lookupLevelsMap =
+                new LinkedHashMap<Pair<BinaryRow, Integer>, LookupLevels<KeyValue>>(
+                        16, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(
+                            Map.Entry<Pair<BinaryRow, Integer>, LookupLevels<KeyValue>> eldest) {
+                        if (size() <= maxLookupStates) {
+                            return false;
+                        }
+                        try {
+                            eldest.getValue().close();
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                        return true;
+                    }
+                };
     }
 
     public Comparator<InternalRow> keyComparator() {
@@ -272,6 +287,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return this;
     }
 
+    /**
+     * Creates a changelog reader. The previous on-read reader from this instance must be closed
+     * before calling this method again, because creating a reader may evict cached lookup states.
+     */
     public RecordReader<KeyValue> createChangelogOnReadReader(IncrementalSplit split)
             throws IOException {
         checkArgument(
@@ -316,10 +335,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         LookupMergeFunction.Factory lookupFactory =
                 (LookupMergeFunction.Factory)
                         LookupMergeFunction.wrap(
-                                ignored -> mfFactory.create(readType),
-                                options,
-                                keyType,
-                                readType);
+                                ignored -> mfFactory.create(readType), options, keyType, readType);
         lookupFactory.withIOManager(ioManager);
 
         RowType equalType = outerReadType == null ? readType : outerReadType;
@@ -369,10 +385,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     private LookupLevels<KeyValue> refreshLookupLevels(
             BinaryRow partition, int bucket, List<DataFileMeta> files) {
         Pair<BinaryRow, Integer> key = Pair.of(partition, bucket);
-        LookupLevels<KeyValue> lookup = lookupLevels.get(key);
+        LookupLevels<KeyValue> lookup = lookupLevelsMap.get(key);
         if (lookup == null) {
             lookup = createLookupLevels(partition, bucket, files);
-            lookupLevels.put(key, lookup);
+            lookupLevelsMap.put(key, lookup);
         } else {
             lookup.getLevels().update(lookup.getLevels().allFiles(), files);
         }
@@ -498,7 +514,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     public void close() {
-        lookupLevels.clear();
+        lookupLevelsMap.clear();
         if (lookupFileCache != null) {
             lookupFileCache.invalidateAll();
             lookupFileCache.cleanUp();
