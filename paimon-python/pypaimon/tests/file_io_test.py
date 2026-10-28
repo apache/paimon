@@ -25,12 +25,73 @@ from urllib.parse import urlparse
 
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import create_temp_path
+from pypaimon.common.file_io import FileIO, create_temp_path
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import OssOptions
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO, _file_uri_path
 from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
+
+
+class FileIOFactoryTest(unittest.TestCase):
+    def test_windows_drive_paths_use_local_file_io(self):
+        options = Options({})
+        paths = [r"C:\warehouse", "C:/warehouse", r"d:\warehouse", "D:/warehouse",
+                 "C:warehouse", "C:", r"C:\data set\episode%23#copy.txt"]
+        with patch.object(os, "name", "nt"), \
+                patch('pypaimon.filesystem.local_file_io.LocalFileIO') as local_io:
+            for location in paths:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), local_io.return_value)
+                    local_io.assert_called_with(location, options)
+
+    def test_local_paths_keep_their_original_spelling(self):
+        options = Options({})
+        paths = ["warehouse", "./warehouse", "/tmp/warehouse", "file:///tmp/warehouse",
+                 "file:///C:/warehouse", r"\\server\share\warehouse", "//server/share/warehouse"]
+        with patch('pypaimon.filesystem.local_file_io.LocalFileIO') as local_io:
+            for location in paths:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), local_io.return_value)
+                    local_io.assert_called_with(location, options)
+
+    def test_drive_letters_are_not_local_schemes_on_posix(self):
+        options = Options({})
+        with patch.object(os, "name", "posix"), \
+                patch('pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO') as remote_io:
+            for location in [r"C:\warehouse", "C:/warehouse", "x:relative"]:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), remote_io.return_value)
+                    remote_io.assert_called_with(location, options)
+
+    def test_remote_uris_are_not_windows_drive_paths(self):
+        options = Options({})
+        with patch.object(os, "name", "nt"), \
+                patch('pypaimon.filesystem.pyarrow_file_io.PyArrowFileIO') as remote_io:
+            for location in ["c://server/warehouse", "s3://bucket/warehouse",
+                             "gs://bucket/warehouse", "custom://server/warehouse"]:
+                with self.subTest(location=location):
+                    self.assertIs(FileIO.get(location, options), remote_io.return_value)
+                    remote_io.assert_called_with(location, options)
+
+    @unittest.skipUnless(os.name == "nt", "Requires native Windows paths")
+    def test_windows_native_paths_read_and_write(self):
+        with tempfile.TemporaryDirectory(prefix="file io # ") as directory:
+            for resolving in [False, True]:
+                with self.subTest(resolving=resolving):
+                    options = Options({CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(): resolving})
+                    file_io = FileIO.get(directory, options)
+                    location = os.path.join(directory, "episode%23-{}.txt".format(resolving))
+                    try:
+                        file_io.write_file(location, "native Windows path")
+                        self.assertEqual(file_io.read_file_utf8(location), "native Windows path")
+                        self.assertEqual(file_io.read_file_utf8(location.replace("\\", "/")),
+                                         "native Windows path")
+                        self.assertEqual(file_io.read_file_utf8(Path(location).as_uri()),
+                                         "native Windows path")
+                        self.assertTrue(Path(location).is_file())
+                    finally:
+                        file_io.close()
 
 
 class FileIOTest(unittest.TestCase):
@@ -244,6 +305,33 @@ class FileIOTest(unittest.TestCase):
             _file_uri_path(
                 urlparse("file://server/share/episode.h5"), windows=True),
         )
+
+    def test_local_file_status_uses_portable_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            location = Path(directory) / "schema-0"
+            location.write_text("{}", encoding="utf-8")
+            file_io = LocalFileIO(directory, Options({}))
+            expected = location.absolute().as_posix()
+            for path in [str(location), location.as_uri()]:
+                with self.subTest(path=path):
+                    status = file_io.get_file_status(path)
+                    self.assertEqual(status.path, expected)
+                    self.assertEqual(status.path.split('/')[-1], "schema-0")
+                    self.assertEqual(file_io.filesystem.get_file_info([expected])[0].path,
+                                     status.path)
+            self.assertEqual([entry.path for entry in file_io.list_status(directory)], [expected])
+            self.assertEqual(file_io.read_file_utf8(expected), "{}")
+
+    def test_copy_files_from_local_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            target = Path(directory) / "target"
+            source.mkdir()
+            (source / "data.txt").write_text("content", encoding="utf-8")
+            file_io = LocalFileIO(directory, Options({}))
+            file_io.copy_files(source.as_uri(), target.as_uri())
+            self.assertEqual((target / "data.txt").read_text(encoding="utf-8"), "content")
+            self.assertEqual([entry.name for entry in target.iterdir()], ["data.txt"])
 
     def test_local_directory_listing_propagates_permission_errors(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -129,7 +129,7 @@ class LocalFileIO(FileIO):
         class LocalFileStatus:
             def __init__(self, file_path: Path, original_path: str):
                 stat_info = file_path.stat()
-                self.path = str(file_path.absolute())
+                self.path = file_path.absolute().as_posix()
                 self.original_path = original_path
                 self.base_name = os.path.basename(original_path)
                 self.size = stat_info.st_size if file_path.is_file() else None

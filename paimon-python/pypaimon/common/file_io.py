@@ -651,7 +651,7 @@ class FileIO(ABC):
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
-        - LocalFileIO for local file system (file:// or no scheme)
+        - LocalFileIO for local file system (file://, no scheme, or Windows drive paths)
         - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
         - OssFileIO for OSS (oss://)
         - PyArrowFileIO for other remote file systems (s3://, gs://, ...),
@@ -670,7 +670,9 @@ class FileIO(ABC):
         uri = urlparse(path)
         scheme = uri.scheme
 
-        if not scheme or scheme == "file":
+        # urlparse treats a Windows drive letter as a URI scheme.
+        if not scheme or scheme == "file" or (
+                _os.name == "nt" and len(scheme) == 1 and not uri.netloc):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 
