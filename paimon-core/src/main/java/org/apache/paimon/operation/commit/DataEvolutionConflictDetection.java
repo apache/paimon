@@ -149,28 +149,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     @Override
-    public void checkRowIdReassignment(
-            SchemaManager schemaManager,
-            Snapshot snapshot,
-            CommitChanges changes,
-            CommitKind commitKind) {
-        if (!shouldCheckRowIdFromSnapshot(commitKind) || snapshot.id() <= rowIdCheckFromSnapshot) {
-            return;
-        }
-        // Check logical changes in the old coordinates before moving past this reassignment.
-        Optional<RuntimeException> exception =
-                checkForRowIdFromSnapshot(
-                        snapshotManager.snapshot(snapshot.id() - 1),
-                        SimpleFileEntry.from(changes.tableFiles),
-                        changes.indexFiles,
-                        createRowIdConflictChecker(schemaManager, changes.tableFiles, commitKind));
-        if (exception.isPresent()) {
-            throw exception.get();
-        }
-        rowIdCheckFromSnapshot = snapshot.id();
-    }
-
-    @Override
     public boolean canSkipDataFileConflictDetection(
             Snapshot latestSnapshot,
             List<ManifestEntry> deltaFiles,

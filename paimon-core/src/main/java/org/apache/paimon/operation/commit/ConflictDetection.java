@@ -173,15 +173,6 @@ public abstract class ConflictDetection {
         return false;
     }
 
-    /** Checks history in the old coordinates and advances the row-id check boundary. */
-    public void checkRowIdReassignment(
-            SchemaManager schemaManager,
-            Snapshot snapshot,
-            CommitChanges changes,
-            CommitKind commitKind) {
-        // Only Data Evolution tables rebase row-id-based commits.
-    }
-
     @Nullable
     public RowIdConflictChecker createRowIdConflictChecker(
             SchemaManager schemaManager, List<ManifestEntry> deltaFiles, CommitKind commitKind) {
