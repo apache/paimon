@@ -152,21 +152,18 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     }
 
     /** Lookup all records for a key instead of stopping at the first matching level. */
-    public List<T> lookupAll(InternalRow key, int startLevel) throws IOException {
+    public List<T> lookupAll(InternalRow key) throws IOException {
         List<T> result = new ArrayList<>();
-        if (startLevel == 0) {
-            for (DataFileMeta file : levels.level0()) {
-                if (keyComparator.compare(file.maxKey(), key) >= 0
-                        && keyComparator.compare(file.minKey(), key) <= 0) {
-                    T value = lookup(key, file, null);
-                    if (value != null) {
-                        result.add(value);
-                    }
+        for (DataFileMeta file : levels.level0()) {
+            if (keyComparator.compare(file.maxKey(), key) >= 0
+                    && keyComparator.compare(file.minKey(), key) <= 0) {
+                T value = lookup(key, file, null);
+                if (value != null) {
+                    result.add(value);
                 }
             }
-            startLevel++;
         }
-        for (int level = startLevel; level < levels.numberOfLevels(); level++) {
+        for (int level = 1; level < levels.numberOfLevels(); level++) {
             T value = lookup(key, levels.runOfLevel(level), null);
             if (value != null) {
                 result.add(value);
@@ -189,9 +186,6 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 lookupFile = lookupFileCache.getIfPresent(fileName);
                 if (lookupFile != null && !lookupFile.isClosed()) {
                     return;
-                }
-                if (lookupFile != null) {
-                    lookupFileCache.asMap().remove(fileName, lookupFile);
                 }
 
                 lookupFile = createLookupFile(file);

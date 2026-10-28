@@ -285,45 +285,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 refreshLookupLevels(split.partition(), split.bucket(), split.beforeFiles());
         history.prepareLookupFiles(lookupFilesToPrepare(split.beforeFiles(), split.afterFiles()));
 
-        RowType readType = actualReadType();
         UserDefinedSeqComparator sequenceComparator = createUdsComparator();
-        Comparator<KeyValue> keyValueComparator = createSequenceComparator(sequenceComparator);
-        MergeFunction<KeyValue> historyMerge = mfFactory.create(readType);
-
-        MergeFunctionFactory<KeyValue> lookupFactory =
-                LookupMergeFunction.wrap(ignored -> mfFactory.create(readType), options, keyType, readType);
-        if (lookupFactory instanceof LookupMergeFunction.Factory) {
-            ((LookupMergeFunction.Factory) lookupFactory).withIOManager(ioManager);
-        }
-
-        RowType equalType = outerReadType == null ? readType : outerReadType;
-        RecordEqualiser equaliser =
-                options.changelogRowDeduplicate()
-                        ? ValueEqualiserSupplier.fromIgnoreFields(
-                                        equalType, options.changelogRowDeduplicateIgnoreFields())
-                                .get()
-                        : null;
         MergeFunctionWrapper<ChangelogResult> mergeFunctionWrapper =
-                new LookupChangelogMergeFunctionWrapper<>(
-                        lookupFactory,
-                        key -> {
-                            try {
-                                List<KeyValue> values = history.lookupAll(key, 0);
-                                if (values.isEmpty()) {
-                                    return null;
-                                }
-                                values.sort(keyValueComparator);
-                                historyMerge.reset();
-                                values.forEach(historyMerge::add);
-                                return historyMerge.getResult().setLevel(1);
-                            } catch (IOException e) {
-                                throw new UncheckedIOException(e);
-                            }
-                        },
-                        equaliser,
-                        LookupStrategy.from(false, true, false, false),
-                        null,
-                        sequenceComparator);
+                createChangelogOnReadMergeWrapper(history, sequenceComparator);
 
         KeyValueFileReaderFactory readerFactory =
                 readerFactoryBuilder.build(
@@ -341,6 +305,50 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         mergeFunctionWrapper,
                         mergeSorter);
         return finishMergeReader(changelogReader(reader), true);
+    }
+
+    private MergeFunctionWrapper<ChangelogResult> createChangelogOnReadMergeWrapper(
+            LookupLevels<KeyValue> history, @Nullable UserDefinedSeqComparator sequenceComparator) {
+        RowType readType = actualReadType();
+        Comparator<KeyValue> keyValueComparator = createSequenceComparator(sequenceComparator);
+        MergeFunction<KeyValue> historyMerge = mfFactory.create(readType);
+
+        LookupMergeFunction.Factory lookupFactory =
+                (LookupMergeFunction.Factory)
+                        LookupMergeFunction.wrap(
+                                ignored -> mfFactory.create(readType),
+                                options,
+                                keyType,
+                                readType);
+        lookupFactory.withIOManager(ioManager);
+
+        RowType equalType = outerReadType == null ? readType : outerReadType;
+        RecordEqualiser equaliser =
+                options.changelogRowDeduplicate()
+                        ? ValueEqualiserSupplier.fromIgnoreFields(
+                                        equalType, options.changelogRowDeduplicateIgnoreFields())
+                                .get()
+                        : null;
+        return new LookupChangelogMergeFunctionWrapper<>(
+                lookupFactory,
+                key -> {
+                    try {
+                        List<KeyValue> values = history.lookupAll(key);
+                        if (values.isEmpty()) {
+                            return null;
+                        }
+                        values.sort(keyValueComparator);
+                        historyMerge.reset();
+                        values.forEach(historyMerge::add);
+                        return historyMerge.getResult().setLevel(1);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                },
+                equaliser,
+                LookupStrategy.from(false, true, false, false),
+                null,
+                sequenceComparator);
     }
 
     private List<DataFileMeta> lookupFilesToPrepare(

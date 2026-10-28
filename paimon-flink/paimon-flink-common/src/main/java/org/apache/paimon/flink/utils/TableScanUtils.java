@@ -32,7 +32,6 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.flink.FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION;
 
 /** Utility methods for {@link TableScan}, such as validating. */
@@ -40,11 +39,6 @@ public class TableScanUtils {
 
     public static void streamingReadingValidate(Table table) {
         CoreOptions coreOptions = CoreOptions.fromMap(table.options());
-        Options options = Options.fromMap(table.options());
-        if (coreOptions.changelogOnRead() && !options.get(READ_SHUFFLE_BUCKET_WITH_PARTITION)) {
-            throw new RuntimeException(
-                    "changelog-producer=on-read requires read.shuffle-bucket-with-partition to be true.");
-        }
         CoreOptions.MergeEngine mergeEngine = coreOptions.mergeEngine();
         HashMap<CoreOptions.MergeEngine, String> mergeEngineDesc =
                 new HashMap<CoreOptions.MergeEngine, String>() {
@@ -64,6 +58,7 @@ public class TableScanUtils {
             }
         }
 
+        Options options = Options.fromMap(table.options());
         if (options.get(SCAN_DEDICATED_SPLIT_GENERATION)) {
             throw new RuntimeException(
                     "The option "
