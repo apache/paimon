@@ -20,6 +20,7 @@ package org.apache.parquet.hadoop;
 
 import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
+import org.apache.paimon.format.parquet.metadata.SelectiveFooterParser;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.utils.Range;
@@ -229,6 +230,29 @@ public class ParquetFileReader implements Closeable {
 
             // Regular file, or encrypted file with plaintext footer
             if (!encryptedFooterMode) {
+                // Try selective footer parsing first for better performance
+                // This is enabled when requested columns are specified in options
+                String requestedColumns =
+                        options.getProperty(SelectiveFooterParser.REQUESTED_COLUMNS_KEY);
+                if (requestedColumns != null && fileDecryptor == null) {
+                    boolean includeStatistics =
+                            !"true"
+                                    .equals(
+                                            options.getProperty(
+                                                    SelectiveFooterParser.SKIP_STATISTICS_KEY));
+                    try {
+                        return SelectiveFooterParser.parse(
+                                footerBytesBuffer.duplicate(),
+                                SelectiveFooterParser.splitRequestedColumns(requestedColumns),
+                                includeStatistics,
+                                converter);
+                    } catch (SelectiveFooterParser.FallbackSignalException e) {
+                        LOG.debug("Selective footer parse fell back: {}", e.toString());
+                        // Reset the buffer for the official parser
+                        footerBytesBuffer.position(0);
+                        footerBytesStream = ByteBufferInputStream.wrap(footerBytesBuffer);
+                    }
+                }
                 return converter.readParquetMetadata(
                         footerBytesStream,
                         options.getMetadataFilter(),
