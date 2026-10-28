@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
@@ -28,6 +29,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.ExpireConfig;
@@ -529,6 +531,123 @@ class FileSystemBranchManagerTest {
         assertThat(reloaded.snapshotManager().snapshotExists(3)).isFalse();
     }
 
+    @Test
+    void testFastForwardRechecksLeaseAfterReadingSource() throws Exception {
+        schemaManager.commitChanges(SchemaChange.setOption(BUCKET.key(), "1"));
+        InterceptingFileIO io = new InterceptingFileIO();
+        HeldFlagLockFactory lockFactory = new HeldFlagLockFactory();
+        FileStoreTable table = createTableWithLock(io, lockFactory);
+        commitRow(table, 1);
+        table.createTag("tag1", 1);
+        table.createBranch("b1", "tag1");
+        FileStoreTable branch = table.switchToBranch("b1");
+        commitRow(branch, 2);
+
+        // The lease expires while the branch's snapshot 2 is read, before main gets a copy.
+        io.onOpen(branch.snapshotManager().snapshotPath(2), () -> lockFactory.expired.set(true));
+        assertThatThrownBy(() -> table.fastForward("b1")).hasStackTraceContaining("Lease expired");
+
+        assertThat(io.exists(table.snapshotManager().snapshotPath(2))).isFalse();
+    }
+
+    @Test
+    void testReplaceStopsDeletingWhenLeaseExpires() throws Exception {
+        schemaManager.commitChanges(SchemaChange.setOption(BUCKET.key(), "1"));
+        InterceptingFileIO io = new InterceptingFileIO();
+        HeldFlagLockFactory lockFactory = new HeldFlagLockFactory();
+        FileStoreTable table = createTableWithLock(io, lockFactory);
+        commitRow(table, 1);
+        table.createTag("tag1", 1);
+        table.createBranch("b1", "tag1");
+        commitRow(table.switchToBranch("b1"), 2);
+        commitRow(table, 2);
+        commitRow(table, 3);
+
+        // Replacing the diverged main deletes its snapshots 1 to 3; the lease expires after the
+        // first delete.
+        Path snapshotDirectory = table.snapshotManager().snapshotDirectory();
+        io.watch(snapshotDirectory, "snapshot-");
+        io.afterWatchedDelete = () -> lockFactory.expired.set(true);
+        assertThatThrownBy(() -> table.fastForward("b1")).hasStackTraceContaining("Lease expired");
+
+        assertThat(io.changes).containsExactly("delete snapshot-1");
+    }
+
+    @Test
+    void testReplaceDeletesTagsBeforeSnapshots() throws Exception {
+        schemaManager.commitChanges(
+                SchemaChange.setOption(BUCKET.key(), "1"),
+                SchemaChange.setOption(CoreOptions.WRITE_ONLY.key(), "true"));
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = FileStoreTableFactory.create(io, tablePath);
+        for (int i = 1; i <= 9; i++) {
+            commitRow(table, i);
+        }
+        table.createTag("tag9", 9);
+        table.createBranch("b1", "tag9");
+        commitRow(table.switchToBranch("b1"), 10);
+        // Main's own snapshots 10 and 11, with a tag on 11.
+        commitRow(table, 20);
+        commitRow(table, 21);
+        table.createTag("mtag", 11);
+
+        // Replacing main deletes snapshot-10 and snapshot-11 before snapshot-9 in name order, and
+        // fails on snapshot-9. Main is then a prefix of the branch, so the retry only appends.
+        io.failDeleteOf(table.snapshotManager().snapshotPath(9));
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Failed to delete");
+        assertThat(table.snapshotManager().snapshotExists(9)).isTrue();
+        assertThat(table.snapshotManager().snapshotExists(10)).isFalse();
+
+        table.fastForward("b1");
+        assertThat(table.tagManager().tagExists("mtag")).isFalse();
+        assertThat(table.tagManager().tagExists("tag9")).isTrue();
+    }
+
+    @Test
+    void testReplaceFailsWhenSnapshotCannotBeDeleted() throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        for (int i = 5; i <= 7; i++) {
+            commitRow(table, i);
+        }
+        SnapshotManager main = table.snapshotManager();
+        long mainLatest = main.latestSnapshotId();
+        assertThat(mainLatest).isGreaterThan(4L);
+
+        // Main's own latest snapshot is above all of the branch's. If it stayed, main would go back
+        // to it once commits fill the gap below it.
+        io.failDeleteOf(main.snapshotPath(mainLatest));
+        assertThatThrownBy(() -> table.fastForward("b1"))
+                .hasStackTraceContaining("Failed to delete");
+
+        table.fastForward("b1");
+        FileStoreTable reloaded = FileStoreTableFactory.create(io, tablePath);
+        assertThat(reloaded.snapshotManager().latestSnapshotId()).isEqualTo(4L);
+        assertThat(readRows(reloaded))
+                .containsExactlyInAnyOrder("1,10,100", "2,20,200", "3,30,300", "4,40,400");
+    }
+
+    @Test
+    void testFastForwardReplacesDivergentSnapshotOfSameLength() throws Exception {
+        InterceptingFileIO io = new InterceptingFileIO();
+        FileStoreTable table = createTableWithBranchAhead(io);
+        SnapshotManager main = table.snapshotManager();
+        SnapshotManager branch = table.switchToBranch("b1").snapshotManager();
+        // What an older version's replace leaves when it failed to delete main's own snapshot 3,
+        // copied the branch's snapshot 4 and then stopped before snapshot 3.
+        commitRow(table, 5);
+        io.copyFile(branch.snapshotPath(4), main.snapshotPath(4), false);
+        main.commitLatestHint(4);
+        assertThat(io.getFileSize(main.snapshotPath(3)))
+                .isEqualTo(io.getFileSize(branch.snapshotPath(3)));
+
+        table.fastForward("b1");
+
+        assertThat(readBytes(io, main.snapshotPath(3)))
+                .isEqualTo(readBytes(io, branch.snapshotPath(3)));
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void testFastForwardRunsUnderCommitLock(boolean mainDiverged) throws Exception {
@@ -696,8 +815,23 @@ class FileSystemBranchManagerTest {
         private volatile String watchedPrefix = "";
         private volatile BooleanSupplier lockHeld = () -> false;
         private volatile Runnable afterWatchedWrite = () -> {};
+        private volatile Runnable afterWatchedDelete = () -> {};
+        @Nullable private volatile Path openTrigger;
+        private volatile Runnable onOpenAction = () -> {};
+        @Nullable private volatile Path undeletable;
         private final List<String> changes = new CopyOnWriteArrayList<>();
         private final List<Boolean> lockHeldOnChanges = new CopyOnWriteArrayList<>();
+
+        /** Run the action once, when the file is next opened for reading. */
+        void onOpen(Path path, Runnable action) {
+            onOpenAction = action;
+            openTrigger = path;
+        }
+
+        /** Make the next delete of the file report failure and leave it in place. */
+        void failDeleteOf(Path path) {
+            undeletable = path;
+        }
 
         void failSnapshotWrite(Path directory, int successfulWritesFirst) {
             failWrite(directory, "snapshot-", successfulWritesFirst);
@@ -752,11 +886,34 @@ class FileSystemBranchManagerTest {
         }
 
         @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            if (sameFile(path, openTrigger)) {
+                openTrigger = null;
+                onOpenAction.run();
+            }
+            return super.newInputStream(path);
+        }
+
+        @Override
         public boolean delete(Path path, boolean recursive) throws IOException {
-            if (isIn(path, watchedDirectory, watchedPrefix)) {
+            if (sameFile(path, undeletable)) {
+                undeletable = null;
+                return false;
+            }
+            boolean watched = isIn(path, watchedDirectory, watchedPrefix);
+            if (watched) {
                 record("delete", path);
             }
-            return super.delete(path, recursive);
+            boolean deleted = super.delete(path, recursive);
+            if (watched) {
+                afterWatchedDelete.run();
+            }
+            return deleted;
+        }
+
+        private static boolean sameFile(Path path, @Nullable Path other) {
+            return other != null
+                    && new File(path.toUri().getPath()).equals(new File(other.toUri().getPath()));
         }
 
         private void beforeWrite(Path path) throws IOException {

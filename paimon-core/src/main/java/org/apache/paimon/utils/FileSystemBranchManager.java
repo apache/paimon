@@ -264,11 +264,8 @@ public class FileSystemBranchManager implements BranchManager {
         long branchLatestId = Collections.max(branchSizes.keySet());
         if (latestId < branchEarliestId
                 || latestId > branchLatestId
-                || !sameSizes(sizes, branchSizes, branchEarliestId, latestId)
-                || !sameContent(
-                        snapshotManager.snapshotPath(latestId),
-                        branchSnapshotManager.snapshotPath(latestId),
-                        Snapshot::fromJson)
+                || !samePrefix(
+                        sizes, branchSizes, branchSnapshotManager, branchEarliestId, latestId)
                 || !sameSchemas(branchSchemaManager)) {
             return false;
         }
@@ -284,6 +281,7 @@ public class FileSystemBranchManager implements BranchManager {
         }
         copySnapshots(branchSnapshotManager, latestId + 1, branchLatestId, lock);
         copyBranchTags(branchName, lock);
+        lock.ensureValid();
         snapshotManager.commitLatestHint(branchLatestId);
         return true;
     }
@@ -305,14 +303,28 @@ public class FileSystemBranchManager implements BranchManager {
 
     /**
      * Whether the current branch has every snapshot from {@code from} (or its earliest, if later)
-     * to {@code to}, each of the branch's size. A copy cut short by an older version's non-atomic
-     * replace has another size.
+     * to {@code to}, each with the branch's content. Sizes are compared first because they come
+     * with the listing; equal sizes do not mean equal snapshots.
      */
-    private static boolean sameSizes(
-            Map<Long, Long> sizes, Map<Long, Long> branchSizes, long from, long to) {
-        for (long id = Math.max(from, Collections.min(sizes.keySet())); id <= to; id++) {
+    private boolean samePrefix(
+            Map<Long, Long> sizes,
+            Map<Long, Long> branchSizes,
+            SnapshotManager branchSnapshotManager,
+            long from,
+            long to)
+            throws IOException {
+        long start = Math.max(from, Collections.min(sizes.keySet()));
+        for (long id = start; id <= to; id++) {
             Long size = sizes.get(id);
             if (size == null || !size.equals(branchSizes.get(id))) {
+                return false;
+            }
+        }
+        for (long id = start; id <= to; id++) {
+            if (!sameContent(
+                    snapshotManager.snapshotPath(id),
+                    branchSnapshotManager.snapshotPath(id),
+                    Snapshot::fromJson)) {
                 return false;
             }
         }
@@ -355,13 +367,18 @@ public class FileSystemBranchManager implements BranchManager {
         SchemaManager branchSchemaManager = schemaManager.copyWithBranch(branchName);
         long earliestSchemaId = branchSnapshotManager.snapshot(earliestSnapshotId).schemaId();
 
+        // Delete tags first: a retry decides from snapshots and schemas alone whether to append,
+        // which keeps main's tags, so the tags must be gone before either changes.
         List<Path> deletePaths =
-                new ArrayList<>(snapshotManager.snapshotPaths(id -> id >= earliestSnapshotId));
-        deletePaths.addAll(
-                tagManager.tagPaths(path -> Tag.fromPath(fileIO, path).id() >= earliestSnapshotId));
+                new ArrayList<>(
+                        tagManager.tagPaths(
+                                path -> Tag.fromPath(fileIO, path).id() >= earliestSnapshotId));
+        deletePaths.addAll(snapshotManager.snapshotPaths(id -> id >= earliestSnapshotId));
         lock.ensureValid();
         snapshotManager.deleteLatestHint();
-        fileIO.deleteFilesQuietly(deletePaths);
+        for (Path path : deletePaths) {
+            delete(lock, path);
+        }
         // Main expired its own snapshots up to its EARLIEST hint; the branch's snapshots below
         // that hint become main's. Move the hint before copying them, so that a retry after a
         // failed copy, which appends the rest, finds it already moved.
@@ -369,6 +386,7 @@ public class FileSystemBranchManager implements BranchManager {
                 HintFileUtils.readHint(
                         fileIO, HintFileUtils.EARLIEST, snapshotManager.snapshotDirectory());
         if (earliestHint != null && earliestHint > earliestSnapshotId) {
+            lock.ensureValid();
             snapshotManager.commitEarliestHint(earliestSnapshotId);
         }
 
@@ -379,8 +397,7 @@ public class FileSystemBranchManager implements BranchManager {
         }
         for (long id : schemaManager.listAllIds()) {
             if (id >= earliestSchemaId && !branchSchemaIds.contains(id)) {
-                lock.ensureValid();
-                fileIO.deleteQuietly(schemaManager.toSchemaPath(id));
+                delete(lock, schemaManager.toSchemaPath(id));
             }
         }
 
@@ -388,6 +405,7 @@ public class FileSystemBranchManager implements BranchManager {
         long branchLatestId = Collections.max(snapshotSizes(branchSnapshotManager).keySet());
         copySnapshots(branchSnapshotManager, earliestSnapshotId, branchLatestId, lock);
         copyBranchTags(branchName, lock);
+        lock.ensureValid();
         snapshotManager.commitLatestHint(branchLatestId);
     }
 
@@ -416,9 +434,9 @@ public class FileSystemBranchManager implements BranchManager {
 
     /** Copies a file without exposing partial content, accepting a target already copied. */
     private void copyAtomically(Lock lock, Path source, Path target) throws IOException {
-        // A lease may expire while many files are copied; stop before writing past it.
-        lock.ensureValid();
         String content = readExactly(source);
+        // Reading the source may outlast the lease, so check it right before writing.
+        lock.ensureValid();
         if ((fileIO.exists(target) || !fileIO.tryToWriteAtomic(target, content))
                 && !content.equals(readExactly(target))) {
             throw new IOException(
@@ -431,10 +449,17 @@ public class FileSystemBranchManager implements BranchManager {
     /** Like {@link #copyAtomically}, but first deletes a target that holds other content. */
     private void replaceAtomically(Lock lock, Path source, Path target) throws IOException {
         if (fileIO.exists(target) && !readExactly(source).equals(readExactly(target))) {
-            lock.ensureValid();
-            fileIO.delete(target, false);
+            delete(lock, target);
         }
         copyAtomically(lock, source, target);
+    }
+
+    /** Deletes a file while the lease is valid, failing if it remains. */
+    private void delete(Lock lock, Path path) throws IOException {
+        lock.ensureValid();
+        if (!fileIO.delete(path, false) && fileIO.exists(path)) {
+            throw new IOException("Failed to delete " + path);
+        }
     }
 
     /** Whether two files hold the same content, comparing parsed values when the bytes differ. */
