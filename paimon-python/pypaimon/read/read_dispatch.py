@@ -92,13 +92,6 @@ def to_iterator(self, splits: List[Split]) -> Iterator:
     Python split reader, the iterator reuses its row view and visits splits
     in order. Close the iterator when stopping before exhaustion.
     """
-    from pypaimon.read.variant_read_type import has_variant_extractions
-
-    if (self.output_projection is not None and self.output_projection.named
-            and has_variant_extractions(self.read_type)):
-        raise RuntimeError(
-            "Variant extraction expressions are not supported by to_iterator(); "
-            "use to_arrow() or to_arrow_batch_reader()")
     self._begin_auth_read(splits)
     limit = self.limit
 

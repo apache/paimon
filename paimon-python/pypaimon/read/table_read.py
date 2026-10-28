@@ -107,7 +107,7 @@ class TableRead:
         in order. Close the iterator when stopping before exhaustion.
 
         Named columns and nested paths retain their projection order. Named
-        VARIANT extraction expressions require the Arrow APIs.
+        VARIANT extraction expressions require native reading.
         """
         from pypaimon.read.read_dispatch import to_iterator
         return to_iterator(self, splits)
