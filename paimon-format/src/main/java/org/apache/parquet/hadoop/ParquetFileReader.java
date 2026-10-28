@@ -240,11 +240,17 @@ public class ParquetFileReader implements Closeable {
                                     .equals(
                                             options.getProperty(
                                                     SelectiveFooterParser.SKIP_STATISTICS_KEY));
+                    boolean caseSensitive =
+                            !"false"
+                                    .equals(
+                                            options.getProperty(
+                                                    SelectiveFooterParser.CASE_SENSITIVE_KEY));
                     try {
                         return SelectiveFooterParser.parse(
                                 footerBytesBuffer.duplicate(),
                                 SelectiveFooterParser.splitRequestedColumns(requestedColumns),
                                 includeStatistics,
+                                caseSensitive,
                                 converter);
                     } catch (SelectiveFooterParser.FallbackSignalException e) {
                         LOG.debug("Selective footer parse fell back: {}", e.toString());

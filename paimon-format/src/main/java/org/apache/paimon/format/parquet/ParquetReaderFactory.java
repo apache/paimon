@@ -251,6 +251,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         // Enable selective footer parsing when no predicates are present.
         // This improves performance by only parsing metadata for requested columns.
+        // NOTE: When predicates are present, statistics are needed for row-group filtering,
+        // so selective parser is currently disabled in that case. If selective parser is
+        // extended to support predicates in the future, set parseStatistics=true to preserve
+        // statistics metadata.
         if (predicates == null || predicates.isEmpty()) {
             StringBuilder requestedColumns = new StringBuilder();
             for (DataField field : readType.getFields()) {
@@ -262,9 +266,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             }
             readOptionsBuilder.set(
                     SelectiveFooterParser.REQUESTED_COLUMNS_KEY, requestedColumns.toString());
+            readOptionsBuilder.set(
+                    SelectiveFooterParser.CASE_SENSITIVE_KEY, String.valueOf(caseSensitive));
 
             // Skip statistics parsing by default for better performance.
             // Statistics are only needed for row-group filtering with predicates.
+            // Since selective parser is only enabled when predicates is empty (see line 254),
+            // statistics are not needed here. If selective parser is extended to support
+            // predicates in the future, this should be set to true.
             boolean parseStatistics = conf.getBoolean("parquet.footer.parse-statistics", false);
             if (!parseStatistics) {
                 readOptionsBuilder.set(SelectiveFooterParser.SKIP_STATISTICS_KEY, "true");

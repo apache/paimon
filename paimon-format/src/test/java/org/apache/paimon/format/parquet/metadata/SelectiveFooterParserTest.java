@@ -845,7 +845,7 @@ public class SelectiveFooterParserTest {
 
     /**
      * Split requested columns utility: verifies the splitRequestedColumns method handles various
-     * input formats correctly.
+     * input formats correctly. Whitespace is preserved as it may be part of valid column names.
      */
     @Test
     public void testSplitRequestedColumnsVariations() {
@@ -865,15 +865,15 @@ public class SelectiveFooterParserTest {
                         "a" + sep + sep + "b" + sep + "c" + sep);
         Assertions.assertEquals(new HashSet<>(Arrays.asList("a", "b", "c")), multiple);
 
-        // Test with whitespace (trimmed, not part of the column name)
+        // Test with whitespace (preserved, not trimmed - whitespace may be part of column names)
         Set<String> whitespace =
                 SelectiveFooterParser.splitRequestedColumns("a" + sep + " b " + sep + "c");
-        Assertions.assertEquals(new HashSet<>(Arrays.asList("a", "b", "c")), whitespace);
+        Assertions.assertEquals(new HashSet<>(Arrays.asList("a", " b ", "c")), whitespace);
 
-        // Test with whitespace-only entries (dropped)
+        // Test with whitespace-only entries (preserved as valid column names)
         Set<String> blankEntries =
                 SelectiveFooterParser.splitRequestedColumns("a" + sep + "  " + sep + sep + " b");
-        Assertions.assertEquals(new HashSet<>(Arrays.asList("a", "b")), blankEntries);
+        Assertions.assertEquals(new HashSet<>(Arrays.asList("a", "  ", " b")), blankEntries);
 
         // Test with column names containing commas (the key feature of null separator)
         Set<String> commasInNames =
@@ -881,6 +881,128 @@ public class SelectiveFooterParserTest {
                         "col1" + sep + "$% ^,& *(" + sep + "col3");
         Assertions.assertEquals(
                 new HashSet<>(Arrays.asList("col1", "$% ^,& *(", "col3")), commasInNames);
+    }
+
+    /**
+     * Case-insensitive column matching: verifies that the parser correctly handles case-insensitive
+     * column name resolution when caseSensitive=false.
+     */
+    @Test
+    public void testCaseInsensitiveColumnMatching() throws IOException {
+        // Create a file with mixed-case column names
+        MessageType schema =
+                new MessageType(
+                        "case_test",
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.INT64,
+                                        Type.Repetition.REQUIRED)
+                                .named("Event_Name"),
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.INT64,
+                                        Type.Repetition.REQUIRED)
+                                .named("Amount"));
+
+        java.io.File file = tempDir.resolve("case_test.parquet").toFile();
+        SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                org.apache.parquet.hadoop.util.HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(file.toURI().toString()),
+                                        new Configuration()))
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withRowGroupSize(1024)
+                        .build()) {
+            for (int i = 0; i < 10; i++) {
+                Group group = groupFactory.newGroup();
+                group.append("Event_Name", (long) i);
+                group.append("Amount", (long) (i * 100));
+                writer.write(group);
+            }
+        }
+
+        byte[] footer = readFooterBytes(file);
+        ParquetMetadataConverter converter = new ParquetMetadataConverter();
+
+        // Request columns with different case (lowercase)
+        Set<String> requested = new HashSet<>(Arrays.asList("event_name", "amount"));
+
+        // Test case-insensitive matching
+        ParquetMetadata selective =
+                SelectiveFooterParser.parse(
+                        ByteBuffer.wrap(footer), requested, true, false, converter);
+
+        // Verify both columns are present (case-insensitive match)
+        Assertions.assertEquals(1, selective.getBlocks().size());
+        Assertions.assertEquals(2, selective.getBlocks().get(0).getColumns().size());
+
+        Set<String> columnNames = new HashSet<>();
+        for (ColumnChunkMetaData chunk : selective.getBlocks().get(0).getColumns()) {
+            columnNames.add(chunk.getPath().toDotString());
+        }
+        Assertions.assertTrue(columnNames.contains("Event_Name"));
+        Assertions.assertTrue(columnNames.contains("Amount"));
+    }
+
+    /**
+     * Column names with whitespace: verifies that the parser preserves whitespace in column names
+     * and does not trim them.
+     */
+    @Test
+    public void testColumnNamesWithWhitespace() throws IOException {
+        // Create a file with column names containing whitespace
+        MessageType schema =
+                new MessageType(
+                        "whitespace_test",
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.INT64,
+                                        Type.Repetition.REQUIRED)
+                                .named("id"),
+                        Types.primitive(
+                                        PrimitiveType.PrimitiveTypeName.INT64,
+                                        Type.Repetition.REQUIRED)
+                                .named(" a"));
+
+        java.io.File file = tempDir.resolve("whitespace_test.parquet").toFile();
+        SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                org.apache.parquet.hadoop.util.HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(file.toURI().toString()),
+                                        new Configuration()))
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withRowGroupSize(1024)
+                        .build()) {
+            for (int i = 0; i < 10; i++) {
+                Group group = groupFactory.newGroup();
+                group.append("id", (long) i);
+                group.append(" a", (long) (i * 10));
+                writer.write(group);
+            }
+        }
+
+        byte[] footer = readFooterBytes(file);
+        ParquetMetadataConverter converter = new ParquetMetadataConverter();
+
+        // Request column with leading space (preserved, not trimmed)
+        Set<String> requested = new HashSet<>(Arrays.asList("id", " a"));
+
+        ParquetMetadata selective =
+                SelectiveFooterParser.parse(ByteBuffer.wrap(footer), requested, converter);
+
+        // Verify both columns are present (whitespace preserved)
+        Assertions.assertEquals(1, selective.getBlocks().size());
+        Assertions.assertEquals(2, selective.getBlocks().get(0).getColumns().size());
+
+        Set<String> columnNames = new HashSet<>();
+        for (ColumnChunkMetaData chunk : selective.getBlocks().get(0).getColumns()) {
+            columnNames.add(chunk.getPath().toDotString());
+        }
+        Assertions.assertTrue(columnNames.contains("id"));
+        Assertions.assertTrue(columnNames.contains(" a"));
     }
 
     /**

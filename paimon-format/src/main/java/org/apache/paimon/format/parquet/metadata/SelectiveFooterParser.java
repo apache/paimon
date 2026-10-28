@@ -104,6 +104,12 @@ public final class SelectiveFooterParser {
     public static final String SKIP_STATISTICS_KEY = "paimon.parquet.footer.skip.statistics";
 
     /**
+     * ParquetReadOptions property ("true"/"false") controlling whether column name matching is
+     * case-sensitive. Defaults to "true" for backward compatibility.
+     */
+    public static final String CASE_SENSITIVE_KEY = "paimon.parquet.footer.case-sensitive";
+
+    /**
      * Separator character used to join column names in {@link #REQUESTED_COLUMNS_KEY}. Uses null
      * character to support column names containing commas.
      */
@@ -119,6 +125,7 @@ public final class SelectiveFooterParser {
     private final ThriftCompactReader in;
     private final @Nullable Set<String> requestedColumns;
     private final boolean includeStatistics;
+    private final boolean caseSensitive;
     private final ParquetMetadataConverter converter;
 
     private SelectiveFooterParser(
@@ -127,10 +134,12 @@ public final class SelectiveFooterParser {
             int length,
             @Nullable Set<String> requestedColumns,
             boolean includeStatistics,
+            boolean caseSensitive,
             ParquetMetadataConverter converter) {
         this.in = new ThriftCompactReader(footer, offset, offset + length);
         this.requestedColumns = requestedColumns;
         this.includeStatistics = includeStatistics;
+        this.caseSensitive = caseSensitive;
         this.converter = converter;
     }
 
@@ -148,7 +157,26 @@ public final class SelectiveFooterParser {
             @Nullable Set<String> requestedColumns,
             ParquetMetadataConverter converter)
             throws IOException {
-        return parse(footerBytes, requestedColumns, true, converter);
+        return parse(footerBytes, requestedColumns, true, true, converter);
+    }
+
+    /**
+     * Parses the footer bytes with explicit statistics control.
+     *
+     * @param footerBytes raw footer bytes (thrift compact serialized FileMetaData); array-backed
+     *     buffers are read in place without copying
+     * @param requestedColumns top-level column names to keep; {@code null} parses everything
+     *     (equivalent to NO_FILTER, used to validate equivalence)
+     * @param includeStatistics whether to include statistics in the parsed metadata
+     * @param converter the caller's converter, reused for final object construction
+     */
+    public static ParquetMetadata parse(
+            ByteBuffer footerBytes,
+            @Nullable Set<String> requestedColumns,
+            boolean includeStatistics,
+            ParquetMetadataConverter converter)
+            throws IOException {
+        return parse(footerBytes, requestedColumns, includeStatistics, true, converter);
     }
 
     /**
@@ -158,11 +186,14 @@ public final class SelectiveFooterParser {
      *     false} skips them (AI training reads never consume footer statistics: the only consumer,
      *     row-group stats filtering, requires a pushdown filter, and selective parsing is enabled
      *     only when no filter is present)
+     * @param caseSensitive whether column name matching is case-sensitive; {@code false} uses
+     *     case-insensitive matching
      */
     public static ParquetMetadata parse(
             ByteBuffer footerBytes,
             @Nullable Set<String> requestedColumns,
             boolean includeStatistics,
+            boolean caseSensitive,
             ParquetMetadataConverter converter)
             throws IOException {
         if (requestedColumns != null && requestedColumns.isEmpty()) {
@@ -183,7 +214,13 @@ public final class SelectiveFooterParser {
         }
         SelectiveFooterParser parser =
                 new SelectiveFooterParser(
-                        bytes, offset, length, requestedColumns, includeStatistics, converter);
+                        bytes,
+                        offset,
+                        length,
+                        requestedColumns,
+                        includeStatistics,
+                        caseSensitive,
+                        converter);
         try {
             return parser.parseFileMetaData();
         } catch (FallbackSignalException e) {
@@ -742,7 +779,18 @@ public final class SelectiveFooterParser {
             // would.
             return true;
         }
-        return requestedColumns.contains(path.get(0));
+        String columnName = path.get(0);
+        if (caseSensitive) {
+            return requestedColumns.contains(columnName);
+        } else {
+            // Case-insensitive matching
+            for (String requested : requestedColumns) {
+                if (requested.equalsIgnoreCase(columnName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     // ------------------------------------------------------------------ small structs
@@ -946,10 +994,10 @@ public final class SelectiveFooterParser {
     public static Set<String> splitRequestedColumns(String propertyValue) {
         Set<String> result = new HashSet<>();
         // Use null character as separator to support column names containing commas
+        // Preserve each non-empty name exactly (including leading/trailing spaces)
         for (String name : propertyValue.split(COLUMN_NAME_SEPARATOR)) {
-            String trimmed = name.trim();
-            if (!trimmed.isEmpty()) {
-                result.add(trimmed);
+            if (!name.isEmpty()) {
+                result.add(name);
             }
         }
         return result;
