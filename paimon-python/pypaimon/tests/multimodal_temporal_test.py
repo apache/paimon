@@ -80,6 +80,49 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual(metadata, pa.concat_tables([first] + remaining))
         self.assertEqual([True], closed)
 
+    def test_native_interpolation_scans_right_time_bounds_only_during_plan(self):
+        reductions = []
+
+        class TrackedTimes(np.ndarray):
+            def min(self, *args, **kwargs):
+                reductions.append("min")
+                return super().min(*args, **kwargs)
+
+            def max(self, *args, **kwargs):
+                reductions.append("max")
+                return super().max(*args, **kwargs)
+
+        right = temporal._LinearInterpolationRight.__new__(
+            temporal._LinearInterpolationRight)
+        right.query = mock.Mock()
+        right.on = "event_time"
+        right.by = ("episode_id",)
+        right.time_type = pa.int64()
+        right.payload_schema = pa.schema([("value", pa.float64())])
+        row_ids = np.arange(1_000_000, dtype=np.int64)
+        times = (row_ids * 2).view(TrackedTimes)
+        metadata = pa.table({"episode_id": np.zeros(len(times), dtype=np.int32),
+                             "event_time": times, temporal._ROW_ID: row_ids})
+        fetcher = mock.Mock(schema=right.payload_schema)
+        fetcher.fetch.side_effect = lambda ids: pa.table({
+            "value": pa.array(ids, type=pa.float64())})
+        with mock.patch.object(temporal, "_metadata_table", return_value=metadata), \
+                mock.patch.object(temporal, "_time_search_keys", return_value=times):
+            right.plan()
+        self.assertEqual(["min", "max"], reductions)
+        for batch_size in (32, 1024):
+            for start in (0, 1024, 2048):
+                before = np.arange(start, start + batch_size, dtype=np.int64)
+                targets = before * 2 + 1
+                arrays = right._native_float_arrays(
+                    targets, fetcher, (before, before + 1))
+                self.assertEqual((before + 0.5).tolist(), arrays[0].to_pylist())
+            # Wide target spans still fall back without scanning the right side.
+            self.assertIsNone(right._native_float_arrays(
+                np.array([2 ** 54], dtype=np.int64), fetcher,
+                (np.array([0]), np.array([1]))))
+        self.assertEqual(["min", "max"], reductions)
+
     def test_native_anchor_keys_preserve_timestamp_precision(self):
         times = pa.array([1, 2, 3], type=pa.timestamp("ns"))
         metadata = pa.table({"episode_id": [1, 1, 2], "event_time": times,

@@ -495,6 +495,12 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             label, query, anchor_on, by, "nearest", tolerance,
             right_on, suffix)
 
+    def plan(self):
+        super().plan()
+        times = self._time_keys
+        self._time_min = times.min() if len(times) else None
+        self._time_max = times.max() if len(times) else None
+
     @staticmethod
     def output_field(field, effective=True):
         try:
@@ -604,8 +610,8 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             return None
         times = self._time_keys
         # Keep exact-ratio interpolation for wide spans and integer payloads.
-        if (max(int(times.max()), int(targets.max()))
-                - min(int(times.min()), int(targets.min())) > 2 ** 53):
+        if (max(int(self._time_max), int(targets.max()))
+                - min(int(self._time_min), int(targets.min())) > 2 ** 53):
             return None
         first, second = indices
         missing = first < 0
