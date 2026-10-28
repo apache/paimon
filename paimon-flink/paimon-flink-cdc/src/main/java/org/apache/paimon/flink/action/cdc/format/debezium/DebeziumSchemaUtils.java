@@ -38,10 +38,12 @@ import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
+import org.apache.avro.Conversions;
 import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.util.Utf8;
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -116,14 +118,29 @@ public class DebeziumSchemaUtils {
 
     public static String transformAvroRawValue(
             @Nullable String rawValue,
-            String debeziumType,
-            @Nullable String className,
+            Schema schema,
             TypeMapping typeMapping,
             Object origin,
             ZoneId serverTimeZone) {
 
-        if (rawValue != null && "bytes".equals(debeziumType) && className == null) {
-            return new String(((ByteBuffer) origin).array());
+        String debeziumType = schema.getFullName();
+        String className = schema.getProp(CONNECT_NAME_PROP);
+        LogicalType logicalType = schema.getLogicalType();
+        if (rawValue != null && logicalType instanceof LogicalTypes.Decimal) {
+            Conversions.DecimalConversion conversion = new Conversions.DecimalConversion();
+            BigDecimal decimal =
+                    schema.getType() == Schema.Type.BYTES
+                            ? conversion.fromBytes(
+                                    ((ByteBuffer) origin).duplicate(), schema, logicalType)
+                            : conversion.fromFixed((GenericFixed) origin, schema, logicalType);
+            return decimal.toPlainString();
+        }
+
+        if (rawValue != null && isPlainBinaryType(debeziumType, className) && logicalType == null) {
+            ByteBuffer buffer = ((ByteBuffer) origin).duplicate();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            return Base64.getEncoder().encodeToString(bytes);
         }
 
         return transformRawValue(
