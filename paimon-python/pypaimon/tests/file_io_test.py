@@ -182,29 +182,29 @@ class FileIOTest(unittest.TestCase):
 
         # Test file:// scheme
         self.assertEqual(file_io.to_filesystem_path("file:///tmp/path/to/file.txt"),
-                         "/tmp/path/to/file.txt")
+                         os.path.normpath("/tmp/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("file:///path/to/file.txt"),
-                         "/path/to/file.txt")
+                         os.path.normpath("/path/to/file.txt"))
         self.assertEqual(
             file_io.to_filesystem_path(
                 "file:///tmp/episode%20%E4%B8%AD%E6%96%87.h5"),
-            "/tmp/episode 中文.h5",
+            os.path.normpath("/tmp/episode 中文.h5"),
         )
 
         # Test empty paths
         self.assertEqual(file_io.to_filesystem_path("file://"), ".")
-        self.assertEqual(file_io.to_filesystem_path("file:///"), "/")
+        self.assertEqual(file_io.to_filesystem_path("file:///"), os.path.normpath("/"))
 
         # Test paths without scheme
         self.assertEqual(file_io.to_filesystem_path("/tmp/path/to/file.txt"),
-                         "/tmp/path/to/file.txt")
+                         os.path.normpath("/tmp/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("relative/path/to/file.txt"),
-                         "relative/path/to/file.txt")
+                         os.path.normpath("relative/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("./relative/path/to/file.txt"),
-                         "./relative/path/to/file.txt")
+                         "./" + os.path.normpath("relative/path/to/file.txt"))
 
         # Test idempotency
-        converted_path = "/tmp/path/to/file.txt"
+        converted_path = os.path.normpath("/tmp/path/to/file.txt")
         self.assertEqual(file_io.to_filesystem_path(converted_path), converted_path)
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
@@ -216,16 +216,17 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
         self.assertEqual(file_io.to_filesystem_path("C:/path/to/file.txt"),
-                         "C:/path/to/file.txt")
+                         os.path.normpath("C:/path/to/file.txt"))
         self.assertEqual(file_io.to_filesystem_path("C:"), "C:")
 
         # file:// scheme with Windows drive
         self.assertEqual(file_io.to_filesystem_path("file://C:/path/to/file.txt"),
-                         "C:/path/to/file.txt")
-        self.assertEqual(file_io.to_filesystem_path("file://C:/path"), "C:/path")
+                         os.path.normpath("C:/path/to/file.txt"))
+        self.assertEqual(file_io.to_filesystem_path("file://C:/path"), os.path.normpath("C:/path"))
         self.assertEqual(file_io.to_filesystem_path("file://C:"), "C:")
         self.assertEqual(file_io.to_filesystem_path("file:///C:/path/to/file.txt"),
-                         "/C:/path/to/file.txt")
+                         os.path.normpath("C:/path/to/file.txt") if os.name == "nt"
+                         else "/C:/path/to/file.txt")
 
         # Windows path with S3FileSystem (should preserve)
         s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
@@ -255,7 +256,7 @@ class FileIOTest(unittest.TestCase):
         """Test path normalization (multiple slashes)."""
         file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
         self.assertEqual(file_io.to_filesystem_path("file://///tmp///path///file.txt"),
-                         "/tmp/path/file.txt")
+                         os.path.normpath("/tmp/path/file.txt"))
 
         s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("s3://my-bucket///path///to///file.txt"),
