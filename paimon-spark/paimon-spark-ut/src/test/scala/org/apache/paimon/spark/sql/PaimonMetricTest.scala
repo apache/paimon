@@ -18,12 +18,17 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.data.{InternalRow => PaimonRow}
+import org.apache.paimon.disk.IOManager
+import org.apache.paimon.reader.RecordReader
+import org.apache.paimon.reader.RecordReader.RecordIterator
+import org.apache.paimon.spark.{PaimonInputPartition, PaimonPartitionReader, PaimonRecordReaderIterator, PaimonSparkTestBase}
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
-import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.spark.util.ScanPlanHelper
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split, TableRead}
+import org.apache.paimon.types.{DataTypes, RowType}
 
 import org.apache.spark.metrics.source.PaimonMetricsSource
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
@@ -35,12 +40,96 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
+import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.{doThrow, mock, times, verify, when}
 
 import javax.management.ObjectName
 
+import java.io.IOException
 import java.lang.management.ManagementFactory
 
 class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
+
+  test("read batch time includes the first batch") {
+    val reader = timedReader()
+    val iterator = PaimonRecordReaderIterator(reader, Seq.empty, mock(classOf[Split]))
+    try {
+      assert(iterator.readBatchTimeMs >= 20L)
+    } finally {
+      iterator.close()
+    }
+  }
+
+  test("read batch time includes active splits without counting them again on close") {
+    for (earlyClose <- Seq(true, false); failClose <- Seq(false, true)) {
+      val inputs = Seq(timedReader(), timedReader())
+      if (failClose) {
+        doThrow(new IOException("close failed"))
+          .doNothing()
+          .when(inputs.last)
+          .close()
+      }
+      val splits = inputs.map(_ => mock(classOf[Split]))
+      val read = mock(classOf[TableRead])
+      when(read.withIOManager(any(classOf[IOManager]))).thenReturn(read)
+      splits.zip(inputs).foreach {
+        case (split, input) => when(read.createReader(split)).thenReturn(input)
+      }
+      val builder = mock(classOf[ReadBuilder])
+      when(builder.readType()).thenReturn(RowType.of(DataTypes.INT()))
+      when(builder.newRead()).thenReturn(read)
+      val reader = PaimonPartitionReader(
+        builder,
+        PaimonInputPartition(splits),
+        Seq.empty,
+        true,
+        null,
+        Array.empty)
+      def readTime: Long = metric(reader.currentMetricsValues(), "readBatchTime")
+      try {
+        assert(reader.next() && reader.get().getInt(0) == 1)
+        val first = readTime
+        assert(first >= 20L)
+        assert(readTime == first)
+        assert(reader.next() && reader.get().getInt(0) == 2)
+        assert(reader.next() && reader.get().getInt(0) == 1)
+        assert(readTime >= first + 20L)
+        if (!earlyClose) {
+          assert(reader.next() && reader.get().getInt(0) == 2)
+          if (failClose) intercept[IOException](reader.next())
+          else assert(!reader.next())
+        }
+        val beforeClose = readTime
+        assert(beforeClose >= first + 20L)
+        if (earlyClose && failClose) {
+          intercept[IOException](reader.close())
+          assert(readTime == beforeClose)
+        }
+        reader.close()
+        assert(readTime == beforeClose)
+        reader.close()
+        assert(readTime == beforeClose)
+        verify(inputs.head).close()
+        verify(inputs.last, times(if (failClose) 2 else 1)).close()
+      } finally {
+        reader.close()
+      }
+    }
+  }
+
+  private def timedReader(): RecordReader[PaimonRow] = {
+    val batch = mock(classOf[RecordIterator[PaimonRow]])
+    when(batch.next()).thenReturn(GenericRow.of(1), GenericRow.of(2), null)
+    val reader = mock(classOf[RecordReader[PaimonRow]])
+    when(reader.readBatch())
+      .thenAnswer {
+        _ =>
+          Thread.sleep(25)
+          batch
+      }
+      .thenReturn(null)
+    reader
+  }
 
   test("Paimon Metric: registered metrics are exposed through JMX") {
     val tableName = "jmx-metric-test-" + System.nanoTime()
