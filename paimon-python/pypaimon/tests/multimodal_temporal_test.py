@@ -80,18 +80,16 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual(metadata, pa.concat_tables([first] + remaining))
         self.assertEqual([True], closed)
 
-    def test_columnar_metadata_keeps_timestamp_precision_and_slices(self):
+    def test_native_anchor_keys_preserve_timestamp_precision(self):
         times = pa.array([1, 2, 3], type=pa.timestamp("ns"))
         metadata = pa.table({"episode_id": [1, 1, 2], "event_time": times,
                              temporal._ROW_ID: [8, 9, 10]})
-        rows = temporal._ColumnarMetadata(metadata, "event_time", times.type)
-        self.assertEqual([1, 2, 3], rows.targets.tolist())
-        self.assertEqual(([(1,), (2,)], [0, 0, 1]),
-                         (rows.group_index(("episode_id",))[0],
-                          rows.group_index(("episode_id",))[1].tolist()))
-        self.assertIsNone(rows._rows)
-        self.assertEqual([2, 3], rows[1:].targets.tolist())
-        self.assertEqual(3, rows[-1][temporal._TIME_KEY])
+        with mock.patch.object(temporal, "_temporal_match_kernel", return_value=object()):
+            targets, keys, codes = temporal._native_anchor_keys(
+                metadata, "event_time", ("episode_id",), times.type)
+        self.assertEqual([1, 2, 3], targets.tolist())
+        self.assertEqual([(1,), (2,)], keys)
+        self.assertEqual([0, 0, 1], codes.tolist())
 
     def test_native_temporal_kernel_is_optional(self):
         for module in (None, mock.Mock(spec=[])):
@@ -119,9 +117,11 @@ class MultimodalTemporalTest(unittest.TestCase):
                     source._tolerance_key = tolerance
                     metadata = pa.table({"episode_id": [1] * 50 + [2],
                                          "event_time": rng.integers(-30, 30, size=51)})
-                    rows = temporal._ColumnarMetadata(metadata, "event_time", pa.int64())
-                    first, _ = temporal._native_matches(source, rows, direction)
-                    expected = [source.match(row) for row in rows]
+                    native_keys = temporal._native_anchor_keys(
+                        metadata, "event_time", ("episode_id",), pa.int64())
+                    first, _ = temporal._native_matches(source, native_keys, direction)
+                    expected = [source.match(row) for row in
+                                temporal._metadata_rows(metadata, "event_time", pa.int64())]
                     self.assertEqual(expected, [None if value < 0 else int(value) for value in first])
 
     def test_alignment_requires_an_explicit_group_boundary(self):
