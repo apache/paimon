@@ -99,8 +99,16 @@ class MultimodalTemporalTest(unittest.TestCase):
                     self.assertIsNone(temporal._temporal_match_kernel())
         temporal._temporal_match_kernel.cache_clear()
 
+    def test_native_ci_rejects_missing_temporal_kernel(self):
+        with mock.patch.dict(os.environ, {"PYPAIMON_TEST_NATIVE_READ": "1"}), \
+                mock.patch.object(temporal, "_temporal_match_kernel", return_value=None):
+            with self.assertRaisesRegex(AssertionError, "Native CI requires temporal_match"):
+                self.test_native_temporal_matching_matches_reference()
+
     def test_native_temporal_matching_matches_reference(self):
         kernel = temporal._temporal_match_kernel()
+        if os.environ.get("PYPAIMON_TEST_NATIVE_READ") == "1":
+            self.assertIsNotNone(kernel, "Native CI requires temporal_match")
         if kernel is None:
             self.skipTest("Requires pypaimon_rust temporal_match")
         rng = np.random.default_rng(123)
