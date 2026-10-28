@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -75,6 +76,8 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
+import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -83,6 +86,7 @@ import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -120,6 +124,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -159,6 +164,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final IndexManifestFile indexManifestFile;
     @Nullable private final CommitRollback rollback;
     private final CommitScanner scanner;
+    private final Supplier<FileStoreScan> scanSupplier;
     private final List<CommitPreCallback> commitPreCallbacks;
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
@@ -211,6 +217,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.indexManifestFile = indexManifestFileFactory.create();
         this.rollback = rollback;
         this.scanner = new CommitScanner(scanSupplier, snapshotManager, indexManifestFile, options);
+        this.scanSupplier = scanSupplier;
         this.commitPreCallbacks = commitPreCallbacks;
         this.commitCallbacks = commitCallbacks;
         this.retryWaiter =
@@ -379,12 +386,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                 }
 
+                CommitChangesProvider changesProvider =
+                        CommitChangesProvider.provider(
+                                changes.appendTableFiles,
+                                changes.appendChangelog,
+                                changes.appendIndexFiles);
+                if (options.dataEvolutionEnabled()
+                        && commitKind == CommitKind.APPEND
+                        && changes.appendTableFiles.isEmpty()
+                        && changes.appendChangelog.isEmpty()) {
+                    changesProvider =
+                            ReassignCompactChangesProvider.forIndexBuild(
+                                    fileIO,
+                                    pathFactory,
+                                    snapshotManager,
+                                    changes.appendIndexFiles,
+                                    options.commitLastSafeSnapshot().orElse(null),
+                                    this::checkIndexBuildChanges);
+                }
                 attempts +=
                         tryCommit(
-                                CommitChangesProvider.provider(
-                                        changes.appendTableFiles,
-                                        changes.appendChangelog,
-                                        changes.appendIndexFiles),
+                                changesProvider,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -832,6 +854,68 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } else {
             // A committer can be reused; an untagged commit must not inherit a previous baseline.
             conflictDetection.setRowIdCheckFromSnapshot(checkFromSnapshot);
+        }
+    }
+
+    private void checkIndexBuildChanges(Snapshot snapshot, List<IndexManifestEntry> indexes) {
+        if (indexes.isEmpty()) {
+            return;
+        }
+        List<BinaryRow> partitions =
+                indexes.stream()
+                        .map(IndexManifestEntry::partition)
+                        .distinct()
+                        .collect(Collectors.toList());
+        if (snapshot.commitKind() == CommitKind.OVERWRITE) {
+            new StrictModeChecker(
+                            snapshotManager, commitUser, scanSupplier, indexManifestFile, true, 0)
+                    .checkIndexBuildOverwrite(snapshot, partitions);
+            return;
+        }
+        Map<Integer, DataField> schemaFields =
+                schemaManager.schema(snapshot.schemaId()).idToFieldMap();
+        Map<List<Integer>, List<IndexManifestEntry>> definitions =
+                indexes.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        entry ->
+                                                entry.indexFile()
+                                                        .globalIndexMeta()
+                                                        .getIndexedFieldIds()));
+        for (Map.Entry<List<Integer>, List<IndexManifestEntry>> definition :
+                definitions.entrySet()) {
+            List<DataField> fields =
+                    definition.getKey().stream()
+                            .map(
+                                    id -> {
+                                        DataField field = schemaFields.get(id);
+                                        checkState(
+                                                field != null,
+                                                "Indexed field %s no longer exists.",
+                                                id);
+                                        return field;
+                                    })
+                            .collect(Collectors.toList());
+            List<Range> ranges =
+                    definition.getValue().stream()
+                            .map(entry -> entry.indexFile().globalIndexMeta().rowRange())
+                            .collect(Collectors.toList());
+            Iterable<ManifestEntry> entries =
+                    () ->
+                            scanSupplier
+                                    .get()
+                                    .withSnapshot(snapshot)
+                                    .withKind(ScanMode.DELTA)
+                                    .withPartitionFilter(partitions)
+                                    .withRowRanges(ranges)
+                                    .dropStats()
+                                    .readFileIterator();
+            checkState(
+                    DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
+                                    schemaManager, entries, definition.getValue(), fields)
+                            .isEmpty(),
+                    "Cannot reuse index build because snapshot %s modified indexed columns.",
+                    snapshot.id());
         }
     }
 

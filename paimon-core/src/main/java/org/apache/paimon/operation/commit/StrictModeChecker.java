@@ -71,7 +71,8 @@ public class StrictModeChecker {
             Set<Long> rebasedReassignments) {
         Set<BinaryRow> newPartitions = new HashSet<>(newChangedPartitions);
         for (long id = lastSafeSnapshot + 1; id < newSnapshotId; id++) {
-            if (newCommitKind == CommitKind.COMPACT && rebasedReassignments.contains(id)) {
+            if ((newCommitKind == CommitKind.COMPACT || newCommitKind == CommitKind.APPEND)
+                    && rebasedReassignments.contains(id)) {
                 continue;
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
@@ -126,6 +127,18 @@ public class StrictModeChecker {
                                     CoreOptions.COMMIT_STRICT_MODE_ENABLED.key()));
                 }
             }
+        }
+    }
+
+    /** Index builds must reject data changes even when optional strict mode is disabled. */
+    public void checkIndexBuildOverwrite(Snapshot snapshot, List<BinaryRow> indexedPartitions) {
+        Set<BinaryRow> partitions = new HashSet<>(indexedPartitions);
+        if (hasOverlappedDataPartition(snapshot, partitions)
+                || hasOverlappedIndexPartition(snapshot, partitions)) {
+            throw new RuntimeException(
+                    String.format(
+                            "Cannot reuse index build because OVERWRITE snapshot %s modified indexed partitions.",
+                            snapshot.id()));
         }
     }
 
