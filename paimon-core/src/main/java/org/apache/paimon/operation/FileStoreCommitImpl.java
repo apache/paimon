@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.append.dataevolution.SerializationAssignment;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -29,6 +30,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -352,8 +354,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
-        configureRowIdCheckFromMessages(commitMessages);
+        Long dataScanSnapshot = configureRowIdCheckFromMessages(commitMessages);
         ManifestEntryChanges changes = collectChanges(commitMessages);
+        if (options.dataEvolutionEnabled()
+                && dataScanSnapshot == null
+                && changes.appendTableFiles.stream()
+                        .anyMatch(entry -> entry.file().firstRowId() != null)) {
+            dataScanSnapshot = options.commitLastSafeSnapshot().filter(id -> id >= 0).orElse(null);
+            conflictDetection.setRowIdCheckFromSnapshot(dataScanSnapshot);
+        }
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
             List<SimpleFileEntry> appendSimpleEntries =
@@ -393,7 +402,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 changes.appendTableFiles,
                                                 changes.appendChangelog,
                                                 changes.appendIndexFiles),
-                                        commitKind),
+                                        commitKind,
+                                        dataScanSnapshot),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -800,7 +810,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private void configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
+    @Nullable
+    private Long configureRowIdCheckFromMessages(List<CommitMessage> commitMessages) {
         Long checkFromSnapshot = null;
         for (CommitMessage message : commitMessages) {
             Long snapshotId = message.checkFromSnapshot();
@@ -841,6 +852,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } else {
             // A committer can be reused; an untagged commit must not inherit a previous baseline.
             conflictDetection.setRowIdCheckFromSnapshot(checkFromSnapshot);
+        }
+        return checkFromSnapshot;
+    }
+
+    private void checkReassignChanges(
+            Snapshot snapshot, CommitChanges changes, CommitKind commitKind) {
+        if (snapshot.commitKind() == CommitKind.OVERWRITE
+                && SerializationAssignment.planFile(snapshot) != null) {
+            conflictDetection.checkRowIdReassignment(schemaManager, snapshot, changes, commitKind);
+        } else if (snapshot.commitKind() == CommitKind.APPEND
+                || snapshot.commitKind() == CommitKind.OVERWRITE) {
+            checkIndexBuildChanges(
+                    snapshot,
+                    changes.indexFiles.stream()
+                            .filter(
+                                    entry ->
+                                            entry.kind() == FileKind.ADD
+                                                    && entry.indexFile().globalIndexMeta() != null
+                                                    && DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                            entry.indexFile())
+                                                                    .scanSnapshotId()
+                                                            < snapshot.id())
+                            .collect(Collectors.toList()));
         }
     }
 
@@ -929,18 +963,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private CommitChangesProvider appendAndOverwriteChangesProvider(
-            CommitChanges changes, CommitKind commitKind) {
-        if (options.dataEvolutionEnabled()
-                && commitKind == CommitKind.APPEND
-                && changes.tableFiles.isEmpty()
-                && changes.changelogFiles.isEmpty()) {
-            return ReassignCompactChangesProvider.indexOnlyCommitChangesProvider(
+            CommitChanges changes, CommitKind commitKind, @Nullable Long dataScanSnapshot) {
+        if (options.dataEvolutionEnabled()) {
+            return ReassignCompactChangesProvider.commitChangesProvider(
                     fileIO,
                     pathFactory,
                     snapshotManager,
-                    changes.indexFiles,
+                    changes,
+                    dataScanSnapshot,
                     options.commitLastSafeSnapshot().orElse(null),
-                    this::checkIndexBuildChanges);
+                    (snapshot, currentChanges) ->
+                            checkReassignChanges(snapshot, currentChanges, commitKind));
         }
         return CommitChangesProvider.provider(
                 changes.tableFiles, changes.changelogFiles, changes.indexFiles);

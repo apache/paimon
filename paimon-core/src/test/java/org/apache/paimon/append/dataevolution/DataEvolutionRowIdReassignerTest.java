@@ -921,9 +921,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"a", "b"})
-    void testReassignBeforeVideoBackfillCommit(String reassignedPartition) throws Exception {
+    void testVideoBackfillAdvancesAcrossReassignment(String reassignedPartition) throws Exception {
         FileStoreTable table = createTableAndAddVideo();
-        String originalFile = currentEntriesAtRange(table, "pt=a/", 0, 0).get(0).file().fileName();
         List<CommitMessage> pending = prepareVideo(table, 0);
         DataEvolutionRowIdReassigner.Result result =
                 new DataEvolutionRowIdReassigner(
@@ -931,23 +930,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         .reassign();
         assertThat(result.newSnapshotId).isGreaterThan(result.previousSnapshotId);
         long afterReassign = table.latestSnapshot().get().id();
-        if (reassignedPartition.equals("a")) {
-            assertThatThrownBy(() -> commitDefault(pending))
-                    .hasMessageContaining("Row ID existence conflict");
-            assertThat(table.latestSnapshot().get().id()).isEqualTo(afterReassign);
-            assertVideoBackfillRows(table, false);
-            long newRowId =
-                    currentEntries(table).stream()
-                            .map(ManifestEntry::file)
-                            .filter(file -> file.fileName().equals(originalFile))
-                            .findFirst()
-                            .get()
-                            .nonNullFirstRowId();
-            assertThat(newRowId).isGreaterThanOrEqualTo(5);
-            commitDefault(prepareVideo(table, newRowId));
-        } else {
-            commitDefault(pending);
-        }
+        commitDefault(pending);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(afterReassign + 1);
         assertVideoBackfillRows(table, true);
     }
 

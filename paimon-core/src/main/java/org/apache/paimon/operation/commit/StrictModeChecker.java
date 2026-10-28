@@ -71,7 +71,9 @@ public class StrictModeChecker {
             Set<Long> rebasedReassignments) {
         Set<BinaryRow> newPartitions = new HashSet<>(newChangedPartitions);
         for (long id = lastSafeSnapshot + 1; id < newSnapshotId; id++) {
-            if ((newCommitKind == CommitKind.COMPACT || newCommitKind == CommitKind.APPEND)
+            if ((newCommitKind == CommitKind.COMPACT
+                            || newCommitKind == CommitKind.APPEND
+                            || newCommitKind == CommitKind.OVERWRITE)
                     && rebasedReassignments.contains(id)) {
                 continue;
             }

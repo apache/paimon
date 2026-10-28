@@ -44,17 +44,18 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Reuses immutable compact or index-build outputs after metadata-only row-id reassignments. */
+/** Reuses immutable outputs after verified, metadata-only row-id reassignments. */
 public final class ReassignCompactChangesProvider implements CommitChangesProvider {
 
     private final FileIO fileIO;
     private final FileStorePathFactory paths;
     private final SnapshotManager snapshots;
-    @Nullable private final BiConsumer<Snapshot, List<IndexManifestEntry>> indexBuildCheck;
+    @Nullable private final BiConsumer<Snapshot, CommitChanges> changesCheck;
+    private final long dataScanSnapshot;
+    private final long initialScanSnapshot;
     private final Set<Long> reassignments = new HashSet<>();
     private long checkedSnapshot;
     private CommitChanges changes;
@@ -65,7 +66,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             SnapshotManager snapshots,
             long scanSnapshotId,
             CommitChanges changes) {
-        this(fileIO, paths, snapshots, scanSnapshotId, changes, null);
+        this(fileIO, paths, snapshots, scanSnapshotId, changes, scanSnapshotId, null);
     }
 
     private ReassignCompactChangesProvider(
@@ -74,33 +75,46 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             SnapshotManager snapshots,
             long scanSnapshotId,
             CommitChanges changes,
-            @Nullable BiConsumer<Snapshot, List<IndexManifestEntry>> indexBuildCheck) {
+            long dataScanSnapshot,
+            @Nullable BiConsumer<Snapshot, CommitChanges> changesCheck) {
         this.fileIO = fileIO;
         this.paths = paths;
         this.snapshots = snapshots;
-        this.indexBuildCheck = indexBuildCheck;
+        this.changesCheck = changesCheck;
+        this.dataScanSnapshot = dataScanSnapshot;
+        this.initialScanSnapshot = scanSnapshotId;
         this.checkedSnapshot = scanSnapshotId;
         this.changes = changes;
     }
 
-    /** Uses index scan baselines without changing the original source metadata. */
-    public static CommitChangesProvider indexOnlyCommitChangesProvider(
+    /** Uses data and index scan baselines without changing the original source metadata. */
+    public static CommitChangesProvider commitChangesProvider(
             FileIO fileIO,
             FileStorePathFactory paths,
             SnapshotManager snapshots,
-            List<IndexManifestEntry> indexFiles,
+            CommitChanges changes,
+            @Nullable Long dataScanSnapshot,
             @Nullable Long lastSafeSnapshot,
-            BiConsumer<Snapshot, List<IndexManifestEntry>> buildCheck) {
-        CommitChanges changes =
-                new CommitChanges(Collections.emptyList(), Collections.emptyList(), indexFiles);
+            BiConsumer<Snapshot, CommitChanges> changesCheck) {
+        boolean hasRowIdFiles =
+                changes.tableFiles.stream().anyMatch(entry -> entry.file().firstRowId() != null);
+        if (!changes.changelogFiles.isEmpty() || (hasRowIdFiles && dataScanSnapshot == null)) {
+            return latest -> changes;
+        }
         long scanSnapshotId =
                 lastSafeSnapshot == null || lastSafeSnapshot < 0
                         ? Long.MAX_VALUE
                         : lastSafeSnapshot;
+        if (hasRowIdFiles) {
+            scanSnapshotId = Math.min(scanSnapshotId, dataScanSnapshot);
+        }
         boolean hasBuildOutputs = false;
-        for (IndexManifestEntry entry : indexFiles) {
+        for (IndexManifestEntry entry : changes.indexFiles) {
             GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
             if (meta == null) {
+                if (entry.indexFile().dvRanges() != null) {
+                    continue;
+                }
                 return latest -> changes;
             }
             if (entry.kind() == FileKind.ADD) {
@@ -116,14 +130,27 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
                                         .scanSnapshotId());
             }
         }
-        return !hasBuildOutputs
+        return !hasBuildOutputs && !hasRowIdFiles
                 ? latest -> changes
                 : new ReassignCompactChangesProvider(
-                        fileIO, paths, snapshots, scanSnapshotId, changes, buildCheck);
+                        fileIO,
+                        paths,
+                        snapshots,
+                        scanSnapshotId,
+                        changes,
+                        dataScanSnapshot == null ? Long.MAX_VALUE : dataScanSnapshot,
+                        changesCheck);
     }
 
     @Override
     public CommitChanges provide(@Nullable Snapshot latest) {
+        // An automatic rollback can retry older history while outputs are still unmapped.
+        if (changesCheck != null
+                && reassignments.isEmpty()
+                && latest != null
+                && latest.id() < checkedSnapshot) {
+            checkedSnapshot = initialScanSnapshot;
+        }
         checkState(
                 latest != null && latest.id() >= checkedSnapshot,
                 "Compaction planning snapshot %s is ahead of the current table.",
@@ -140,23 +167,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
                     snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
                             ? SerializationAssignment.planFile(snapshot)
                             : null;
-            if (indexBuildCheck != null
-                    && (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
-                            || snapshot.commitKind() == Snapshot.CommitKind.APPEND)
-                    && plan == null) {
-                List<IndexManifestEntry> indexes =
-                        changes.indexFiles.stream()
-                                .filter(
-                                        entry ->
-                                                entry.kind() == FileKind.ADD
-                                                        && DataEvolutionIndexSourceMeta
-                                                                        .fromIndexFile(
-                                                                                entry.indexFile())
-                                                                        .scanSnapshotId()
-                                                                < snapshot.id())
-                                .collect(Collectors.toList());
-                indexBuildCheck.accept(snapshot, indexes);
-            }
             if (plan != null) {
                 SerializationAssignment assignment;
                 try {
@@ -170,8 +180,13 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
                                 && Objects.equals(snapshot.nextRowId(), assignment.nextRowId()),
                         "Reassignment plan does not match snapshot %s.",
                         id);
+                if (changesCheck != null) {
+                    changesCheck.accept(snapshot, changes);
+                }
                 changes = mapChanges(assignment);
                 reassignments.add(id);
+            } else if (changesCheck != null) {
+                changesCheck.accept(snapshot, changes);
             }
             checkedSnapshot = id;
         }
@@ -190,6 +205,11 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         List<ManifestEntry> files = new ArrayList<>(changes.tableFiles.size());
         for (ManifestEntry entry : changes.tableFiles) {
             DataFileMeta file = entry.file();
+            if (changesCheck != null
+                    && (file.firstRowId() == null || dataScanSnapshot >= assignment.snapshotId())) {
+                files.add(entry);
+                continue;
+            }
             checkState(
                     file.firstRowId() != null,
                     "Cannot reuse compaction across reassignment: file %s has no first row ID.",
@@ -206,8 +226,9 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         List<IndexManifestEntry> indexes = new ArrayList<>(changes.indexFiles.size());
         for (IndexManifestEntry entry : changes.indexFiles) {
             IndexFileMeta file = entry.indexFile();
-            if (indexBuildCheck != null
+            if (changesCheck != null
                     && entry.kind() == FileKind.ADD
+                    && file.globalIndexMeta() != null
                     && DataEvolutionIndexSourceMeta.fromIndexFile(file).scanSnapshotId()
                             >= assignment.snapshotId()) {
                 indexes.add(entry);
