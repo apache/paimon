@@ -71,6 +71,8 @@ private[spark] class SparkPostponeStagedCommitter(
   private val rescaleWriteBuilder = {
     val options = new java.util.HashMap[String, String]()
     options.put(CoreOptions.CHANGELOG_PRODUCER.key(), CoreOptions.ChangelogProducer.NONE.toString)
+    // Rescale rewrites produce no changelog, so retract field preservation does not apply.
+    options.put(CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(), null)
     fixedWriteTable.copy(options).newPostponeFixedBucketWriteBuilder()
   }
   private val ignoreEmptyCommit = new Options(table.options())

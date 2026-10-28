@@ -360,6 +360,49 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Postpone bucket table: load-factor rescale with preserve-field-on-retract") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  event_ts BIGINT
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'changelog-producer' = 'lookup',
+            |  'changelog-producer.preserve-field-on-retract' = 'event_ts',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '1',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '16',
+            |  'postpone.batch-write-fixed-bucket.rescale-load-factor' = '32'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (0, 'initial', 0)")
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CAST(id AS STRING), id FROM range(1, 33)
+            |""".stripMargin)
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CAST(id AS STRING), id FROM range(33, 66)
+            |""".stripMargin)
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 16)
+
+      sql("INSERT INTO t VALUES (0, 'updated', 100)")
+
+      checkAnswer(sql("SELECT count(*), sum(k) FROM t"), Seq(Row(66L, 2145L)))
+      checkAnswer(sql("SELECT v, event_ts FROM t WHERE k = 0"), Seq(Row("updated", 100L)))
+      assert(
+        loadTable("t").options().get("changelog-producer.preserve-field-on-retract") == "event_ts")
+    }
+  }
+
   test("Postpone bucket table: staged fixed write does not compact") {
     withTable("t") {
       sql("""
