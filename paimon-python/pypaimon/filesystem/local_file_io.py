@@ -33,6 +33,62 @@ from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import PyarrowFieldParser
 
 
+def _fsync_file_obj(file_obj) -> None:
+    """Flush and fsync an open file object so its data reaches durable storage."""
+    file_obj.flush()
+    os.fsync(file_obj.fileno())
+
+
+def _fsync_directory(dir_path: Path) -> None:
+    """Fsync a directory so renames and new entries are durable on crash.
+
+    Some platforms reject directory fsync; durability of the rename is best-effort
+    there, but file data is still synced separately.
+    """
+    try:
+        fd = os.open(str(dir_path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+class _FsyncOnCloseFile:
+    """Wrap a binary file so close() flushes and fsyncs before releasing the fd."""
+
+    def __init__(self, file_obj, parent_dir: Optional[Path] = None):
+        self._file = file_obj
+        self._parent_dir = parent_dir
+        self._closed = False
+
+    def __getattr__(self, name):
+        return getattr(self._file, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            if not self._file.closed:
+                _fsync_file_obj(self._file)
+        finally:
+            if not self._file.closed:
+                self._file.close()
+            self._closed = True
+            if self._parent_dir is not None:
+                _fsync_directory(self._parent_dir)
+
+
 def _file_uri_path(parsed, windows=None) -> str:
     """Decode a file URI path, preserving Windows drives and UNC hosts."""
     if windows is None:
@@ -110,8 +166,10 @@ class LocalFileIO(FileIO):
         parent = file_path.parent
         if parent and not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
+            _fsync_directory(parent)
         
-        return open(file_path, 'wb')
+        stream = open(file_path, 'wb')
+        return _FsyncOnCloseFile(stream, parent if parent else None)
     
     def get_file_status(self, path: str):
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -262,7 +320,10 @@ class LocalFileIO(FileIO):
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+                _fsync_file_obj(f)
             success = self.rename(str(temp_path), path)
+            if success and parent:
+                _fsync_directory(parent)
         finally:
             if not success and temp_path.exists():
                 self.delete_quietly(str(temp_path))
@@ -314,6 +375,9 @@ class LocalFileIO(FileIO):
                 if compression.lower() == 'zstd':
                     kwargs['compression_level'] = zstd_level
                 pq.write_table(data, f, compression=compression, **kwargs)
+                _fsync_file_obj(f)
+            if parent:
+                _fsync_directory(parent)
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
@@ -337,6 +401,9 @@ class LocalFileIO(FileIO):
                     orc.write_table(data, f, **kwargs)
                 else:
                     orc.write_table(data, f, compression=compression, **kwargs)
+                _fsync_file_obj(f)
+            if parent:
+                _fsync_directory(parent)
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
@@ -388,6 +455,9 @@ class LocalFileIO(FileIO):
             if codec == 'zstandard':
                 kwargs['codec_compression_level'] = zstd_level
             fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
+            _fsync_file_obj(output_stream)
+        if parent:
+            _fsync_directory(parent)
     
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
@@ -395,6 +465,10 @@ class LocalFileIO(FileIO):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'wb') as f:
                 mosaic.write_table(data, f, options=kwargs.get("options"))
+                _fsync_file_obj(f)
+            parent = Path(path).parent
+            if parent:
+                _fsync_directory(parent)
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
