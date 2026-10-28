@@ -343,7 +343,8 @@ public class RangeShuffle {
      * This two-input-operator require an input with RangeBoundaries as broadcast input, and
      * generate Tuple2 which includes range index and record from the other input itself as output.
      */
-    private static class AssignRangeIndexOperator<T>
+    @VisibleForTesting
+    static class AssignRangeIndexOperator<T>
             extends TableStreamOperator<Tuple2<Integer, Tuple2<T, RowData>>>
             implements TwoInputStreamOperator<
                             List<T>, Tuple2<T, RowData>, Tuple2<Integer, Tuple2<T, RowData>>>,
@@ -425,11 +426,12 @@ public class RangeShuffle {
                 }
             }
 
-            // key not found, but the low index is the target
-            // bucket, since the boundaries are the upper bound
+            // Only keys equal to a boundary may be spread across its repeated ranges. A key
+            // below a boundary belongs to its first range; a key above all boundaries belongs
+            // to the range after the last boundary.
             return low > lastIndex
-                    ? (keyIndex.get(lastIndex).getRight().get() + 1)
-                    : keyIndex.get(low).getRight().get();
+                    ? (keyIndex.get(lastIndex).getRight().getLast() + 1)
+                    : keyIndex.get(low).getRight().getFirst();
         }
 
         /** A {@link KeySelector} to select by f0 of tuple2. */
@@ -564,6 +566,14 @@ public class RangeShuffle {
 
         public int get() {
             return list.get(RANDOM.nextInt(list.size()));
+        }
+
+        public int getFirst() {
+            return list.get(0);
+        }
+
+        public int getLast() {
+            return list.get(list.size() - 1);
         }
     }
 
