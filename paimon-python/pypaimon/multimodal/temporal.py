@@ -23,6 +23,7 @@ import json
 import math
 from numbers import Integral, Real
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -1238,14 +1239,21 @@ class _RowIdFetcher:
         return Range.sort_and_merge_overlap(ranges, True)
 
     def fetch(self, row_ids):
-        if not row_ids:
+        if len(row_ids) == 0:
             return pa.Table.from_arrays(
                 [pa.array([], type=field.type) for field in self._schema],
                 schema=self._schema,
             )
 
-        wanted = Range.sort_and_merge_overlap(
-            [Range(row_id, row_id) for row_id in set(row_ids)], True)
+        requested = np.asarray(row_ids, dtype=np.int64)
+        unique = np.unique(requested)
+        boundaries = np.flatnonzero(unique[1:] - unique[:-1] != 1) + 1
+        starts = np.concatenate(([0], boundaries))
+        ends = np.concatenate((boundaries - 1, [len(unique) - 1]))
+        wanted = [
+            Range(int(unique[start]), int(unique[end]))
+            for start, end in zip(starts, ends)
+        ]
         selected_splits = []
         for split_index in self._find_splits(wanted):
             original = self._splits[split_index]
@@ -1265,21 +1273,27 @@ class _RowIdFetcher:
             selected_splits.append(indexed)
 
         arrow = self._project_fetch(self._read.to_arrow(selected_splits))
-        found = arrow[self._row_id_name].to_pylist()
-        positions = {}
-        for index, row_id in enumerate(found):
-            if row_id in positions:
-                raise RuntimeError(
-                    "Duplicate row id %r in aligned scan." % row_id)
-            positions[row_id] = index
-        missing = [row_id for row_id in row_ids if row_id not in positions]
-        if missing:
+        found = arrow[self._row_id_name]
+        if found.null_count:
+            raise RuntimeError("Null row id in aligned scan.")
+        found = found.to_numpy()
+        order = None
+        if len(found) > 1 and not np.all(found[1:] > found[:-1]):
+            order = np.argsort(found)
+            found = found[order]
+            if np.any(found[1:] == found[:-1]):
+                raise RuntimeError("Duplicate row id in aligned scan.")
+        positions = np.searchsorted(found, requested)
+        present = positions < len(found)
+        if len(found):
+            present &= found[np.minimum(positions, len(found) - 1)] == requested
+        if not np.all(present):
             raise RuntimeError(
                 "Aligned row ids disappeared from pinned snapshot: %r."
-                % missing
+                % requested[~present].tolist()
             )
         take = pa.array(
-            [positions[row_id] for row_id in row_ids], type=pa.int64())
+            positions if order is None else order[positions], type=pa.int64())
         visible = pa.Table.from_arrays(
             [arrow.column(index) for index in range(len(self._schema))],
             schema=self._schema,

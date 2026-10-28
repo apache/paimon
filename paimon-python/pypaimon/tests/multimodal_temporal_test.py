@@ -36,6 +36,46 @@ from pypaimon.read.table_scan import TableScan
 
 class MultimodalTemporalTest(unittest.TestCase):
 
+    def test_row_id_fetch_preserves_request_order(self):
+        for found in ([1, 2, 3, 9], [9, 2, 1, 3], [2**63 - 1, 0]):
+            for requested in (list(reversed(found)), [found[0]] * 3):
+                with self.subTest(found=found, requested=requested):
+                    fetcher = self._row_id_fetcher(found)
+                    result = fetcher.fetch(np.asarray(requested, dtype=np.int64))
+                    self.assertEqual(result["value"].to_pylist(), requested)
+
+    def test_row_id_fetch_keeps_exact_ranges(self):
+        fetcher = self._row_id_fetcher([1, 2, 4, 5, 9])
+        fetcher.fetch([9, 1, 2, 4, 5, 1])
+        fetcher._find_splits.assert_called_once_with([
+            temporal.Range(1, 2), temporal.Range(4, 5), temporal.Range(9, 9)])
+
+    def test_row_id_fetch_rejects_missing_and_duplicate_ids(self):
+        for found, requested, error in (
+                ([1, 1], [1], "Duplicate row id"),
+                ([1, 2], [3], "disappeared"),
+                ([], [1], "disappeared"),
+                ([None], [1], "Null row id")):
+            with self.subTest(found=found, requested=requested):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    self._row_id_fetcher(found).fetch(requested)
+        self.assertEqual(
+            self._row_id_fetcher([]).fetch(np.array([], dtype=np.int64)).num_rows, 0)
+
+    @staticmethod
+    def _row_id_fetcher(ids):
+        fetcher = temporal._RowIdFetcher.__new__(temporal._RowIdFetcher)
+        fetcher._schema = pa.schema([("value", pa.int64())])
+        fetcher._row_id_name = temporal._ROW_ID
+        fetcher._name_paths = None
+        fetcher._find_splits = mock.Mock(return_value=[])
+        fetcher._read = mock.Mock()
+        fetcher._read.to_arrow.return_value = pa.table({
+            "value": pa.array(ids, type=pa.int64()),
+            temporal._ROW_ID: pa.array(ids, type=pa.int64()),
+        })
+        return fetcher
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="pypaimon_temporal_")
         self.conn = pmm.connect(options={
