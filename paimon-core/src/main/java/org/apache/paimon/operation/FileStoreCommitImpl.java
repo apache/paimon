@@ -934,7 +934,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 && commitKind == CommitKind.APPEND
                 && changes.tableFiles.isEmpty()
                 && changes.changelogFiles.isEmpty()) {
-            return ReassignCompactChangesProvider.forIndexBuild(
+            return ReassignCompactChangesProvider.indexOnlyCommitChangesProvider(
                     fileIO,
                     pathFactory,
                     snapshotManager,

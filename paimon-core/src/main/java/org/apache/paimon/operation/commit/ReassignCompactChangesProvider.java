@@ -84,7 +84,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
     }
 
     /** Uses index scan baselines without changing the original source metadata. */
-    public static CommitChangesProvider forIndexBuild(
+    public static CommitChangesProvider indexOnlyCommitChangesProvider(
             FileIO fileIO,
             FileStorePathFactory paths,
             SnapshotManager snapshots,
