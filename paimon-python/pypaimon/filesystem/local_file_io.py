@@ -34,16 +34,20 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 def _fsync_file_obj(file_obj) -> None:
-    """Flush and fsync an open file object so its data reaches durable storage."""
+    """Flush and fsync an open file object so its data reaches durable storage.
+
+    Raises OSError if the data cannot be synced; callers must not publish the
+    path as durable when this fails.
+    """
     file_obj.flush()
     os.fsync(file_obj.fileno())
 
 
 def _fsync_directory(dir_path: Path) -> None:
-    """Fsync a directory so renames and new entries are durable on crash.
+    """Best-effort fsync of a directory so renames are ordered on disk.
 
-    Some platforms reject directory fsync; durability of the rename is best-effort
-    there, but file data is still synced separately.
+    Some platforms reject directory fsync; failures are ignored there. File data
+    durability still depends on a successful prior file fsync.
     """
     try:
         fd = os.open(str(dir_path), os.O_RDONLY)
@@ -58,7 +62,12 @@ def _fsync_directory(dir_path: Path) -> None:
 
 
 class _FsyncOnCloseFile:
-    """Wrap a binary file so close() flushes and fsyncs before releasing the fd."""
+    """Binary file wrapper: close() fsyncs file data before releasing the fd.
+
+    If file fsync fails, the underlying file is still closed and the error is
+    re-raised so callers do not treat the write as durable. Parent-directory
+    fsync runs only after a successful file fsync.
+    """
 
     def __init__(self, file_obj, parent_dir: Optional[Path] = None):
         self._file = file_obj
@@ -78,15 +87,21 @@ class _FsyncOnCloseFile:
     def close(self):
         if self._closed:
             return
+        sync_error = None
         try:
             if not self._file.closed:
-                _fsync_file_obj(self._file)
+                try:
+                    _fsync_file_obj(self._file)
+                except OSError as err:
+                    sync_error = err
         finally:
             if not self._file.closed:
                 self._file.close()
             self._closed = True
-            if self._parent_dir is not None:
-                _fsync_directory(self._parent_dir)
+        if sync_error is not None:
+            raise sync_error
+        if self._parent_dir is not None:
+            _fsync_directory(self._parent_dir)
 
 
 def _file_uri_path(parsed, windows=None) -> str:
@@ -320,7 +335,11 @@ class LocalFileIO(FileIO):
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-                _fsync_file_obj(f)
+                try:
+                    _fsync_file_obj(f)
+                except OSError:
+                    # Do not rename: publishing would claim a durable snapshot/schema.
+                    return False
             success = self.rename(str(temp_path), path)
             if success and parent:
                 _fsync_directory(parent)
@@ -371,13 +390,10 @@ class LocalFileIO(FileIO):
             if parent and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
             
-            with open(file_path, 'wb') as f:
+            with self.new_output_stream(path) as f:
                 if compression.lower() == 'zstd':
                     kwargs['compression_level'] = zstd_level
                 pq.write_table(data, f, compression=compression, **kwargs)
-                _fsync_file_obj(f)
-            if parent:
-                _fsync_directory(parent)
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
@@ -394,16 +410,13 @@ class LocalFileIO(FileIO):
             
             data = self._cast_time_columns_for_orc(data)
             
-            with open(file_path, 'wb') as f:
+            with self.new_output_stream(path) as f:
                 # ORC compression= was added in PyArrow 7.0; PyArrow 6 lacks it.
                 from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
                 if _pyarrow_lt_7():
                     orc.write_table(data, f, **kwargs)
                 else:
                     orc.write_table(data, f, compression=compression, **kwargs)
-                _fsync_file_obj(f)
-            if parent:
-                _fsync_directory(parent)
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
@@ -451,24 +464,17 @@ class LocalFileIO(FileIO):
         if parent and not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
         
-        with open(file_path, 'wb') as output_stream:
+        with self.new_output_stream(path) as output_stream:
             if codec == 'zstandard':
                 kwargs['codec_compression_level'] = zstd_level
             fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
-            _fsync_file_obj(output_stream)
-        if parent:
-            _fsync_directory(parent)
     
     def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import mosaic
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'wb') as f:
+            with self.new_output_stream(path) as f:
                 mosaic.write_table(data, f, options=kwargs.get("options"))
-                _fsync_file_obj(f)
-            parent = Path(path).parent
-            if parent:
-                _fsync_directory(parent)
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
