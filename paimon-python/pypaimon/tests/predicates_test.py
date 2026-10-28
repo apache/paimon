@@ -442,6 +442,33 @@ class PredicateTest(unittest.TestCase):
         predicate = predicate_builder.like('f1', '%bc')
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
 
+    @pytest.mark.python_plan
+    def test_like_newline_pk_merge(self):
+        pa_schema = pa.schema([('f0', pa.int64()), ('f1', pa.string())])
+        self.catalog.create_table('default.test_like_newline', Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['f0'], options={
+                'bucket': '1', 'file.format': 'parquet',
+                'scan.native-plan.enabled': 'false', 'read.native.enabled': 'false',
+            }), False)
+        table = self.catalog.get_table('default.test_like_newline')
+        df = pd.DataFrame({
+            'f0': [1, 2, 3, 4, 5],
+            'f1': ['a\nc', 'abc', 'a\r\nc', 'ac', None],
+        })
+        # A second commit overlaps the first file and requires row-by-row filtering.
+        for data in (df, df.loc[[0]]):
+            builder = table.new_batch_write_builder()
+            write, commit = builder.new_write(), builder.new_commit()
+            try:
+                write.write_pandas(data)
+                commit.commit(write.prepare_commit())
+            finally:
+                write.close()
+                commit.close()
+            read_builder = table.new_read_builder()
+            predicate = read_builder.new_predicate_builder().like('f1', 'a_c')
+            _check_filtered_result(read_builder.with_filter(predicate), df.loc[[0, 1]])
+
     def test_null_literal_matches_nothing(self):
         pa_schema = pa.schema([('f0', pa.int64()), ('f1', pa.string())])
         # without stats no file is pruned, so the Arrow filter decides
@@ -646,6 +673,19 @@ class PredicateTest(unittest.TestCase):
         underscore_pred = Predicate(method='like', index=0, field='name', literals=['a_c'])
         self.assertTrue(underscore_pred.test(OffsetRow(['abc'], 0, 1)))
         self.assertFalse(underscore_pred.test(OffsetRow(['aXYc'], 0, 1)))
+
+    def test_like_single_character_wildcard_matches_line_terminators(self):
+        predicate = Predicate(method='like', index=0, field='name', literals=['a_c'])
+        for terminator in ('\n', '\r', '\u0085', '\u2028', '\u2029'):
+            with self.subTest(terminator=terminator):
+                self.assertTrue(predicate.test(OffsetRow(['a' + terminator + 'c'], 0, 1)))
+
+        self.assertFalse(predicate.test(OffsetRow(['a\r\nc'], 0, 1)))
+        two_characters = predicate.new_literals(['a__c'])
+        self.assertTrue(two_characters.test(OffsetRow(['a\r\nc'], 0, 1)))
+        escaped = predicate.new_literals([r'a\_c'])
+        self.assertTrue(escaped.test(OffsetRow(['a_c'], 0, 1)))
+        self.assertFalse(escaped.test(OffsetRow(['a\nc'], 0, 1)))
 
     def test_not_between_value(self):
         predicate = Predicate(method='notBetween', index=0, field='val', literals=[3, 7])
