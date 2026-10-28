@@ -18,9 +18,12 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -121,6 +124,31 @@ class LeafPredicateTest {
                                 }));
         assertThat(InstantiationUtil.clone(overlap).test(row)).isTrue();
         assertThat(InstantiationUtil.clone(containsAll).test(row)).isTrue();
+    }
+
+    @Test
+    public void testEmptyNullCountsWithCompleteBounds() {
+        RowType type = RowType.of(DataTypes.STRING(), DataTypes.STRING());
+        PredicateBuilder builder = new PredicateBuilder(type);
+        InternalRowSerializer serializer = new InternalRowSerializer(type);
+        BinaryRow bounds =
+                serializer
+                        .toBinaryRow(
+                                GenericRow.of(
+                                        BinaryString.fromString("sample"),
+                                        BinaryString.fromString("1")))
+                        .copy();
+        BinaryArray nullCounts = BinaryArray.fromLongArray(new Long[0]);
+        Predicate first = builder.equal(0, BinaryString.fromString("other"));
+        Predicate second = builder.equal(1, BinaryString.fromString("1"));
+
+        assertThat(first.test(1, bounds, bounds, nullCounts)).isFalse();
+        assertThat(second.test(1, bounds, bounds, nullCounts)).isTrue();
+        assertThat(builder.isNull(0).test(1, bounds, bounds, nullCounts)).isTrue();
+        assertThat(builder.isNotNull(1).test(1, bounds, bounds, nullCounts)).isTrue();
+        assertThat(PredicateBuilder.and(first, second).test(1, bounds, bounds, nullCounts))
+                .isFalse();
+        assertThat(PredicateBuilder.or(first, second).test(1, bounds, bounds, nullCounts)).isTrue();
     }
 
     private LeafPredicate create() {
