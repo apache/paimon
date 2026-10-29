@@ -158,10 +158,8 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                 ((KeyValueFileStoreScan) scan).withKeyFilter(and(keyFilters));
             }
 
-            // Changelog-on-read must reconstruct the complete value before applying value filters.
-            if (!coreOptions().changelogOnRead()) {
-                ((KeyValueFileStoreScan) scan).withValueFilter(predicate);
-            }
+            // support value filter in bucket level
+            ((KeyValueFileStoreScan) scan).withValueFilter(predicate);
         };
     }
 

@@ -517,7 +517,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         lookupLevelsMap.clear();
         if (lookupFileCache != null) {
             lookupFileCache.invalidateAll();
-            lookupFileCache.cleanUp();
             lookupFileCache = null;
         }
     }
