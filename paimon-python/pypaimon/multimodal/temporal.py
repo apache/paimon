@@ -942,8 +942,7 @@ def _pin_scan_to_snapshot(query):
         raise ValueError(
             "Temporal alignment requires 'row-tracking.enabled' = 'true'.")
     if (options.scan_mode() == StartupMode.INCREMENTAL
-            or options.options.contains(
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)):
+            or any(options.options.contains_key(key) for key in CoreOptions.INCREMENTAL_SCAN_KEYS)):
         raise ValueError(
             "Temporal alignment does not support incremental scans; "
             "inputs must "

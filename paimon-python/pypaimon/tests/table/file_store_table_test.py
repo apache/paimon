@@ -104,6 +104,25 @@ class FileStoreTableTest(unittest.TestCase):
                 CoreOptions.SCAN_SNAPSHOT_ID.key()],
         )
 
+    def test_snapshot_pin_clears_incremental_selectors(self):
+        for selector in ('incremental-between', 'incremental-between-timestamp', 'incremental-to-auto-tag'):
+            with self.subTest(selector=selector):
+                selected = self.table.copy({selector: '1,2'})
+                pinned = selected._copy_with_snapshot(None)
+                self.assertNotIn(selector, pinned.table_schema.options)
+                self.assertIsNone(pinned._read_snapshot)
+                self.assertEqual([], pinned.new_read_builder().new_scan().plan().splits())
+                self.assertIn(selector, selected.table_schema.options)
+
+    def test_incremental_selector_copy_invalidates_pinned_snapshot(self):
+        pinned = self.table._copy_with_snapshot(None)
+        for selector in ('incremental-between', 'incremental-between-timestamp', 'incremental-to-auto-tag'):
+            for copy in (pinned.copy, pinned.copy_without_time_travel):
+                with self.subTest(selector=selector, copy=copy.__name__):
+                    selected = copy({selector: '1,2'})
+                    self.assertFalse(hasattr(selected, '_read_snapshot'))
+        self.assertIsNone(pinned.copy({'read.batch-size': '1'})._read_snapshot)
+
     def test_consumer_manager(self):
         """Test that FileStoreTable has consumer_manager method."""
         # Get consumer_manager

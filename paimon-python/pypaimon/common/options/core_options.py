@@ -87,6 +87,13 @@ class StartupMode(str, Enum):
     INCREMENTAL = "incremental"
 
 
+class IncrementalBetweenScanMode(str, Enum):
+    AUTO = "auto"
+    DELTA = "delta"
+    CHANGELOG = "changelog"
+    DIFF = "diff"
+
+
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
@@ -559,11 +566,45 @@ class CoreOptions:
         .with_description("The fallback branch for scanning.")
     )
 
+    INCREMENTAL_BETWEEN: ConfigOption[str] = (
+        ConfigOptions.key("incremental-between")
+        .string_type()
+        .no_default_value()
+        .with_description("Read changes between start snapshot (exclusive) and end snapshot (inclusive).")
+    )
+
+    INCREMENTAL_BETWEEN_SCAN_MODE: ConfigOption[IncrementalBetweenScanMode] = (
+        ConfigOptions.key("incremental-between-scan-mode")
+        .enum_type(IncrementalBetweenScanMode)
+        .default_value(IncrementalBetweenScanMode.AUTO)
+        .with_description("Scan mode for incremental changes between snapshots.")
+    )
+
     INCREMENTAL_BETWEEN_TIMESTAMP: ConfigOption[str] = (
         ConfigOptions.key("incremental-between-timestamp")
         .string_type()
         .no_default_value()
         .with_description("The timestamp range for incremental reading.")
+    )
+
+    INCREMENTAL_TO_AUTO_TAG: ConfigOption[str] = (
+        ConfigOptions.key("incremental-to-auto-tag")
+        .string_type()
+        .no_default_value()
+        .with_description("Read changes between an earlier auto-created tag and the specified end tag (inclusive).")
+    )
+
+    INCREMENTAL_SCAN_KEYS = [
+        INCREMENTAL_BETWEEN.key(),
+        INCREMENTAL_BETWEEN_TIMESTAMP.key(),
+        INCREMENTAL_TO_AUTO_TAG.key(),
+    ]
+
+    INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT: ConfigOption[bool] = (
+        ConfigOptions.key("incremental-between-tag-to-snapshot")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Read incremental changes between the snapshots corresponding to the tags.")
     )
 
     SCAN_TAG_NAME: ConfigOption[str] = (
@@ -1541,12 +1582,12 @@ class CoreOptions:
                   or self.options.contains(CoreOptions.SCAN_WATERMARK)
                   or self.options.contains(CoreOptions.SCAN_VERSION)):
                 return StartupMode.FROM_SNAPSHOT
-            elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
-                return StartupMode.INCREMENTAL
             elif self.options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS):
                 return StartupMode.FROM_FILE_CREATION_TIME
             elif self.options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS):
                 return StartupMode.FROM_CREATION_TIMESTAMP
+            elif any(self.options.contains_key(key) for key in CoreOptions.INCREMENTAL_SCAN_KEYS):
+                return StartupMode.INCREMENTAL
             else:
                 return StartupMode.LATEST_FULL
         elif mode == StartupMode.FULL:
@@ -1564,6 +1605,23 @@ class CoreOptions:
 
     def incremental_between_timestamp(self, default=None):
         return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP, default)
+
+    def incremental_between(self):
+        value = self.options.get(CoreOptions.INCREMENTAL_BETWEEN)
+        # Java String.split discards trailing empty strings.
+        parts = value.rstrip(',').split(',')
+        if len(parts) != 2:
+            raise ValueError(
+                "The incremental-between must specific start(exclusive) and end snapshot,"
+                " for example, 'incremental-between'='5,10' means changes between snapshot 5 and snapshot 10. But is: "
+                + value)
+        return parts[0], parts[1]
+
+    def incremental_between_scan_mode(self):
+        return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE)
+
+    def incremental_between_tag_to_snapshot(self):
+        return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT)
 
     def scan_tag_name(self, default=None):
         return self.options.get(CoreOptions.SCAN_TAG_NAME, default)

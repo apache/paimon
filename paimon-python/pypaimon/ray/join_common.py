@@ -84,9 +84,10 @@ def pin_latest_snapshot(table) -> Optional[int]:
     for key in (CoreOptions.SCAN_MODE, CoreOptions.SCAN_SNAPSHOT_ID,
                 CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_WATERMARK,
                 CoreOptions.SCAN_TIMESTAMP, CoreOptions.SCAN_TIMESTAMP_MILLIS,
-                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP,
                 CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
                 CoreOptions.SCAN_CREATION_TIME_MILLIS):
         opts.data.pop(key.key(), None)
+    for key in CoreOptions.INCREMENTAL_SCAN_KEYS:
+        opts.data.pop(key, None)
     opts.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
     return snapshot.id

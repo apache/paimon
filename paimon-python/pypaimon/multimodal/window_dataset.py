@@ -818,10 +818,9 @@ def _pin_table(table, snapshot_id):
     tag_name = table.options.scan_tag_name()
     if tag_name is not None:
         _require_tag_snapshot(table, tag_name, snapshot_id)
-    scan_keys = set(SCAN_KEYS)
+    scan_keys = set(SCAN_KEYS + CoreOptions.INCREMENTAL_SCAN_KEYS)
     scan_keys.update(option.key() for option in (
         CoreOptions.SCAN_MODE,
-        CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP,
         CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
         CoreOptions.SCAN_CREATION_TIME_MILLIS,
     ))
