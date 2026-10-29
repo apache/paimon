@@ -178,14 +178,14 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             String fileName = file.fileName();
             LookupFile lookupFile = lookupFileCache.getIfPresent(fileName);
             if (lookupFile != null && !lookupFile.isClosed()) {
-                return;
+                continue;
             }
 
             Object lock = lookupFileLock(fileName);
             synchronized (lock) {
                 lookupFile = lookupFileCache.getIfPresent(fileName);
                 if (lookupFile != null && !lookupFile.isClosed()) {
-                    return;
+                    continue;
                 }
 
                 lookupFile = createLookupFile(file);
