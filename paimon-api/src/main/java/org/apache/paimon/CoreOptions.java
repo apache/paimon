@@ -2396,6 +2396,17 @@ public class CoreOptions implements Serializable {
                                     + "falls through to the current branch, which can mask data issues. "
                                     + "Set this to true to surface fallback branch errors to the caller instead.");
 
+    public static final ConfigOption<Boolean> SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT =
+            key("scan.fallback-branch.allow-earliest-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to allow reading the earliest available snapshot of a fallback or primary branch "
+                                    + "when no snapshot exists at or before the current branch's requested snapshot time. "
+                                    + "This applies to snapshot-ID time travel, including numeric scan.version. "
+                                    + "By default, such reads fail unless the other branch has no snapshots. "
+                                    + "Enabling this option may read data committed after the requested time.");
+
     public static final ConfigOption<String> SCAN_PRIMARY_BRANCH =
             key("scan.primary-branch")
                     .stringType()

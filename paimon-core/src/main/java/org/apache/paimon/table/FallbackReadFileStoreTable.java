@@ -246,7 +246,108 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         validateSchema();
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
-        return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
+        FileStoreTable otherToScan = resolveOtherBranchForScan();
+        return new FallbackReadScan(
+                first,
+                second,
+                wrapped.schema(),
+                table -> {
+                    if (table == other) {
+                        return otherToScan == null
+                                ? new EmptyBranchScan()
+                                : scanCreator.apply(otherToScan);
+                    }
+                    return scanCreator.apply(table);
+                });
+    }
+
+    @Nullable
+    private FileStoreTable resolveOtherBranchForScan() {
+        Long snapshotId = wrapped.coreOptions().scanSnapshotId();
+        if (snapshotId == null) {
+            String version = wrapped.coreOptions().scanVersion();
+            if (version != null
+                    && version.chars().allMatch(Character::isDigit)
+                    && !wrapped.tagManager().tagExists(version)) {
+                snapshotId = Long.parseLong(version);
+            }
+        }
+        if (snapshotId == null
+                || !Objects.equals(
+                        other.coreOptions().scanSnapshotId(), Snapshot.FIRST_SNAPSHOT_ID)) {
+            return other;
+        }
+
+        Snapshot earliest = other.snapshotManager().earliestSnapshot();
+        if (earliest == null) {
+            LOG.warn(
+                    "Branch '{}' has no snapshots; skipping it when reading branch '{}' at snapshot {}.",
+                    other.coreOptions().branch(),
+                    wrapped.coreOptions().branch(),
+                    snapshotId);
+            return null;
+        }
+
+        long timestamp = wrapped.snapshotManager().snapshot(snapshotId).timeMillis();
+        if (earliest.timeMillis() <= timestamp) {
+            return other;
+        }
+
+        // Snapshot 1 is the placeholder used by rewriteOtherOptions when no time match exists.
+        // Do not read future data implicitly, regardless of whether snapshot 1 still exists.
+        Preconditions.checkArgument(
+                wrapped.coreOptions()
+                        .toConfiguration()
+                        .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
+                "No snapshot at or before %s is available in branch '%s'. "
+                        + "The earliest available snapshot is %s (time %s). "
+                        + "Set '%s' to true to allow reading it.",
+                timestamp,
+                other.coreOptions().branch(),
+                earliest.id(),
+                earliest.timeMillis(),
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+        LOG.warn(
+                "No snapshot at or before {} is available in branch '{}'; reading earliest snapshot {} "
+                        + "(time {}) because '{}' is enabled.",
+                timestamp,
+                other.coreOptions().branch(),
+                earliest.id(),
+                earliest.timeMillis(),
+                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+        // Pin the same snapshot for both partition listing and data planning, without changing
+        // the branch's read schema.
+        return other.copyWithoutTimeTravel(
+                Collections.singletonMap(
+                        CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(earliest.id())));
+    }
+
+    private static class EmptyBranchScan implements DataTableScan {
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withInternalPartitionFilter(PartitionPredicate partitionPredicate) {
+            return this;
+        }
+
+        @Override
+        public Plan plan() {
+            return new DataFilePlan<>(Collections.emptyList());
+        }
+
+        @Override
+        public List<PartitionEntry> listPartitionEntries() {
+            return Collections.emptyList();
+        }
     }
 
     protected void validateSchema() {
