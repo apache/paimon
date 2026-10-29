@@ -39,6 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * {@link StoreMultiCommitter} for multiple dynamic store. During the commit process, it will group
  * the WrappedManifestCommittables by their table identifier and use different committers to commit
@@ -46,6 +48,37 @@ import java.util.stream.Collectors;
  */
 public class StoreMultiCommitter
         implements Committer<MultiTableCommittable, WrappedManifestCommittable> {
+
+    public static final EndInputCommittableHandler<WrappedManifestCommittable> END_INPUT_HANDLER =
+            new EndInputCommittableHandler<WrappedManifestCommittable>() {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                public boolean isEndInput(WrappedManifestCommittable committable) {
+                    return committable.checkpointId() == CommitterOperator.END_INPUT_CHECKPOINT_ID;
+                }
+
+                @Override
+                public WrappedManifestCommittable merge(
+                        WrappedManifestCommittable target, WrappedManifestCommittable source) {
+                    checkArgument(
+                            target.checkpointId() == source.checkpointId(),
+                            "Cannot merge committables from different checkpoints %s and %s.",
+                            target.checkpointId(),
+                            source.checkpointId());
+                    for (Map.Entry<Identifier, ManifestCommittable> entry :
+                            source.manifestCommittables().entrySet()) {
+                        ManifestCommittable previous =
+                                target.manifestCommittables().get(entry.getKey());
+                        if (previous == null) {
+                            target.putManifestCommittable(entry.getKey(), entry.getValue());
+                        } else {
+                            StoreCommitter.mergeManifestCommittables(previous, entry.getValue());
+                        }
+                    }
+                    return target;
+                }
+            };
 
     private final Catalog catalog;
     private final Context context;

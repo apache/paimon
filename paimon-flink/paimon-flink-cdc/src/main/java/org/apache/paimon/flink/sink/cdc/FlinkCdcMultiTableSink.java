@@ -283,6 +283,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager<>(
-                WrappedManifestCommittableSerializer::new, true);
+                WrappedManifestCommittableSerializer::new,
+                true,
+                StoreMultiCommitter.END_INPUT_HANDLER);
     }
 }
