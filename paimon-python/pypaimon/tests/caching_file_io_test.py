@@ -137,6 +137,20 @@ class LocalDiskCacheManagerTest(unittest.TestCase):
         self.assertEqual(b"x" * 100, cache2.get_block("f", 0))
         self.assertEqual(b"y" * 200, cache2.get_block("f", 1))
 
+    def test_restart_with_changed_block_size_does_not_reuse_blocks(self):
+        # Blocks are sized by block_size, so a directory written with one size
+        # must never satisfy reads made with another.
+        cache1 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        cache1.put_block("f", 0, b"x" * 64)
+
+        for block_size in (32, 128, 256):
+            cache2 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=block_size)
+            self.assertIsNone(cache2.get_block("f", 0))
+
+        # The original block stays readable for a manager using its own size.
+        cache3 = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        self.assertEqual(b"x" * 64, cache3.get_block("f", 0))
+
     def test_cache_dir_created(self):
         new_dir = os.path.join(self.cache_dir, "sub", "deep")
         LocalDiskCacheManager(new_dir, 2 ** 63 - 1, block_size=64)
@@ -306,6 +320,24 @@ class CachingInputStreamTest(unittest.TestCase):
         self.assertEqual(data, result)
         # Verify block 1 is only 2 bytes
         self.assertEqual(b"ij", cache.get_block("test", 1))
+
+    def test_reads_stay_correct_after_block_size_change(self):
+        # A disk cache directory outlives the process, so reopening it with a
+        # different block-size must re-fetch rather than reuse stale blocks.
+        data = bytes(i % 251 for i in range(4096))
+        for first, second in [(64, 256), (256, 64), (128, 512)]:
+            with self.subTest(first=first, second=second):
+                cache_dir = tempfile.mkdtemp()
+                try:
+                    warm = LocalDiskCacheManager(cache_dir, 2 ** 63 - 1, block_size=first)
+                    CachingInputStream(self._make_file_io(data), "test", warm).read()
+
+                    cache = LocalDiskCacheManager(cache_dir, 2 ** 63 - 1, block_size=second)
+                    stream = CachingInputStream(self._make_file_io(data), "test", cache)
+                    self.assertEqual(data, stream.read())
+                    self.assertEqual(data[512:1024], stream.read_at(512, 512))
+                finally:
+                    shutil.rmtree(cache_dir, ignore_errors=True)
 
     def test_coalesce_cold_blocks_and_preserve_cursor(self):
         data = b"abcdefghijklmn"
