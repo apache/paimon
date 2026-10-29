@@ -361,7 +361,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         values.sort(keyValueComparator);
                         historyMerge.reset();
                         values.forEach(historyMerge::add);
-                        return historyMerge.getResult().setLevel(1);
+                        KeyValue result = historyMerge.getResult();
+                        return result == null ? null : result.setLevel(1);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
