@@ -146,7 +146,14 @@ public class ChangelogModeTest {
         Options options = new Options();
         options.set(BUCKET, 1);
         options.set(CHANGELOG_PRODUCER, ON_READ);
-        test(options, ChangelogMode.all(), ChangelogMode.upsert());
+        test(
+                options,
+                ChangelogMode.all(),
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.INSERT)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.DELETE)
+                        .build());
     }
 
     @Test
