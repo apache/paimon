@@ -28,6 +28,71 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /v1/{prefix}/databases/{database}/tables/{table}/predict:
+    post:
+      tags: [table]
+      summary: Submit an asynchronous prediction (experimental extension)
+      operationId: predictTable
+      description: >-
+        A supporting service authorizes all referenced columns and the model,
+        retains the selected snapshot, freezes the model version, and durably
+        accepts the job before returning 202. This operation is not idempotent;
+        clients must not automatically retry an ambiguous submission failure.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: database, in: path, required: true, schema: {type: string}}
+        - {name: table, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [model, inputs, result_columns, prompt, response_format]
+              properties:
+                model: {type: string, minLength: 1}
+                prompt: {type: string, minLength: 1}
+                response_format: {type: string, minLength: 1}
+                where: {type: string, minLength: 1}
+                snapshot_id: {type: integer, format: int64, minimum: 1}
+                tag_name: {type: string, minLength: 1}
+                inputs:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [column, modality]
+                    properties:
+                      column: {type: string, minLength: 1}
+                      modality: {type: string, enum: [text, image, audio, video]}
+                result_columns:
+                  type: array
+                  uniqueItems: true
+                  items: {type: string, minLength: 1}
+              description: >-
+                snapshot_id and tag_name are mutually exclusive. When neither
+                is provided, the service fixes the latest snapshot at acceptance.
+                Model identifiers and field names are resolved by the service;
+                endpoint, credentials and execution options are not accepted.
+      responses:
+        "202":
+          description: Durably accepted; the result table is readable by the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, result_table, snapshot_id, model_version]
+                properties:
+                  job_id: {type: string, minLength: 1}
+                  result_table: {type: string, minLength: 1}
+                  snapshot_id: {type: integer, format: int64, minimum: 1}
+                  model_version: {type: string, minLength: 1}
+        "400": {description: Invalid request}
+        "403": {description: Not authorized}
+        "404": {description: Table or model not found, or unsupported endpoint}
+        "501": {description: Prediction is not supported}
   /v1/config:
     get:
       tags:

@@ -76,6 +76,9 @@ class ResourcePaths:
         table_id = urllib.parse.quote_plus(table_id, safe="*~", errors="replace")
         return "{}/{}/{}/{}".format(self.base_path, self.TABLES, self.ID, table_id)
 
+    def predict(self, database_name: str, table_name: str) -> str:
+        return self.table(database_name, table_name) + "/predict"
+
     def table_details(self, database_name: str) -> str:
         database_name = urllib.parse.quote_plus(database_name, safe="*~", errors="replace")
         return "{}/{}/{}/{}".format(
