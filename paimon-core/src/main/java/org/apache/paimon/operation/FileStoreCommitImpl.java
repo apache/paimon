@@ -50,8 +50,8 @@ import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.DataEvolutionReassignChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
-import org.apache.paimon.operation.commit.ReassignCompactChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
@@ -878,7 +878,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
                     && lastSafeSnapshot != null
                     && lastSafeSnapshot >= 0) {
-                return new ReassignCompactChangesProvider(
+                return new DataEvolutionReassignChangesProvider(
                         fileIO, pathFactory, snapshotManager, lastSafeSnapshot, changes);
             }
             return CommitChangesProvider.provider(
