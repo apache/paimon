@@ -238,6 +238,16 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
             self.catalog.drop_branch(self.identifier, "absent")
         self.assertEqual(cm.exception.branch, "absent")
 
+    def test_drop_main_branch_preserves_table(self):
+        table = self.catalog.get_table(self.identifier)
+        with self.assertRaisesRegex(ValueError, r"^The main branch cannot be deleted\.$"):
+            self.catalog.drop_branch(self.identifier, "main")
+        self.assertTrue(os.path.isdir(table.table_path))
+        self.assertEqual(
+            self._read(self.catalog.get_table(self.identifier)).to_pydict(),
+            {"id": [1, 2, 3], "value": ["a", "b", "c"]},
+        )
+
     # -- fast_forward ---------------------------------------------------------
 
     def test_fast_forward_missing_raises(self):
