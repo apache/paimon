@@ -517,13 +517,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
         FileStoreScan.Plan deltaPlan = scan.plan();
         Snapshot snapshot = deltaPlan.snapshot();
         if (snapshot == null) {
-            return new PlanImpl(deltaPlan.watermark(), null, Collections.emptyList());
+            return new PlanImpl(deltaPlan.watermark(), null, null, Collections.emptyList());
         }
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> deltaFiles =
                 groupByPartFiles(deltaPlan.files(FileKind.ADD));
         if (deltaFiles.isEmpty()) {
-            return new PlanImpl(deltaPlan.watermark(), snapshot.id(), Collections.emptyList());
+            return new PlanImpl(
+                    deltaPlan.watermark(), snapshot.id(), snapshot, Collections.emptyList());
         }
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> historyFiles;
