@@ -41,6 +41,7 @@ Sections
 """
 
 import asyncio
+import importlib.util
 import io
 import json
 import os
@@ -1262,7 +1263,8 @@ class TestVariantPaimonTable(unittest.TestCase):
             pa.field('payload', _variant_arrow_type()),
         ])
 
-    def test_variant_projection_keeps_torch_row_restriction(self):
+    @unittest.skipUnless(importlib.util.find_spec('torch') is not None, 'torch is not installed')
+    def test_variant_projection_torch_row_backend_boundary(self):
         for mode, options in (
             ('append', {}),
             ('lazy', {
@@ -1289,16 +1291,28 @@ class TestVariantPaimonTable(unittest.TestCase):
                 writer.close()
                 commit.close()
 
-                builder = table.new_read_builder().with_projection(
-                    {'ratio': "try_variant_get(payload, '$.ratio', 'float')"})
+                projection = {'ratio': "try_variant_get(payload, '$.ratio', 'float')"}
+                builder = table.copy({'read.native.enabled': 'false'}).new_read_builder().with_projection(projection)
                 splits = builder.new_scan().plan().splits()
                 self.assertTrue(splits)
                 read = builder.new_read()
 
                 with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
-                    read.to_torch(splits, streaming=True)
-                with self.assertRaisesRegex(RuntimeError, 'Torch row format'):
                     read.to_torch(splits, streaming=False)
+
+                dataset = read.to_torch(splits, streaming=True)
+                with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
+                    list(dataset)
+
+                builder = table.copy({'read.native.enabled': 'true'}).new_read_builder().with_projection(projection)
+                read = builder.new_read()
+                with patch('pypaimon.execution.native.runtime.native_runtime_available', return_value=False):
+                    dataset = read.to_torch(splits, streaming=True)
+                    with self.assertRaisesRegex(RuntimeError, 'Variant extraction requires a compatible native reader'):
+                        list(dataset)
+
+                if _native_variant_projection_available():
+                    self.assertEqual(list(read.to_torch(splits, streaming=True)), [{'ratio': 1.25}])
 
     def _check_variant_projection_literal_top_level_names(
             self, suffix, native_read):

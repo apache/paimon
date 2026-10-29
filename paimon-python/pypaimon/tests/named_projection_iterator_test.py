@@ -258,7 +258,7 @@ def test_named_projection_keeps_non_streaming_torch_row_boundary(projected_table
 @pytest.mark.parametrize('function', ['variant_get', 'try_variant_get'])
 @pytest.mark.parametrize('nested', [False, True])
 @pytest.mark.parametrize('mixed', [False, True])
-def test_variant_iterator_requires_native_and_keeps_torch_restriction(tmp_path, function, nested, mixed):
+def test_variant_iterator_and_torch_rows_require_native(tmp_path, function, nested, mixed):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
     catalog.create_database('db', True)
     payload = DataField(2 if nested else 1, 'payload', AtomicType('VARIANT'))
@@ -275,7 +275,12 @@ def test_variant_iterator_requires_native_and_keeps_torch_restriction(tmp_path, 
             patch.object(PythonTableRead, 'read_rows', side_effect=AssertionError('Python Variant execution')):
         with pytest.raises(RuntimeError, match='Variant extraction requires a compatible native reader'):
             list(read.to_iterator([]))
-        for streaming in (False, True):
-            with pytest.raises(RuntimeError, match='not supported by Torch row format'):
-                read.to_torch([], streaming=streaming, batch_format='row')
+        with pytest.raises(RuntimeError, match='not supported by Torch row format'):
+            read.to_torch([], streaming=False, batch_format='row')
+        native.assert_not_called()
+
+        pytest.importorskip('torch')
+        dataset = read.to_torch([], streaming=True, batch_format='row')
+        with pytest.raises(RuntimeError, match='Variant extraction requires a compatible native reader'):
+            list(dataset)
         native.assert_not_called()

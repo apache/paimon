@@ -651,6 +651,22 @@ class TorchReadTest(unittest.TestCase):
             with self.assertRaisesRegex(NotImplementedError, 'with query authorization'):
                 list(dataset)
 
+    def test_torch_streaming_row_limit_with_prefetch_and_shuffle(self):
+        table, _ = self._create_named_projection_table('default.row_limit', 'append')
+        builder = table.new_read_builder().with_projection({'identifier': 'id'})
+        splits = builder.new_scan().plan().splits()
+        self.assertGreater(len(splits), 1)
+        for limit in [0, 1, 3, 5]:
+            builder.with_limit(limit)
+            read = builder.new_read()
+            expected = read.to_arrow(splits, parallelism=1).to_pylist()
+            for options in [{'prefetch_concurrency': 2},
+                            {'shuffle': True, 'buffer_size': 1, 'max_buffer_input_splits': 1},
+                            {'shuffle': True, 'buffer_size': 1, 'max_buffer_input_splits': 3}]:
+                with self.subTest(limit=limit, options=options):
+                    dataset = read.to_torch(splits, streaming=True, **options)
+                    self.assertCountEqual(list(dataset), expected)
+
     @parameterized.expand([True, False])
     def test_torch_read(self, is_streaming: bool = False):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
