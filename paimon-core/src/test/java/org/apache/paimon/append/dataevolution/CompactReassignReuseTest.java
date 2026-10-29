@@ -297,9 +297,7 @@ public class CompactReassignReuseTest extends TableTestBase {
                         .collect(Collectors.toList());
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.COMMIT_STRICT_MODE_ENABLED.key(), Boolean.toString(strict));
-        if (strict) {
-            options.put(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(), Long.toString(scanSnapshot));
-        }
+        options.put(CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(), Long.toString(scanSnapshot));
         try (BatchTableCommit commit = table.copy(options).newBatchWriteBuilder().newCommit()) {
             commit.commit(messages);
         }
@@ -334,6 +332,7 @@ public class CompactReassignReuseTest extends TableTestBase {
     @ValueSource(booleans = {false, true})
     void testIndexBuildKeepsExistingColumnUpdateBehavior(boolean reassign) throws Exception {
         FileStoreTable table = prepare();
+        long scanSnapshot = table.snapshotManager().latestSnapshotId();
         List<CommitMessage> messages = buildIndex(table, "id", null);
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write =
@@ -354,7 +353,13 @@ public class CompactReassignReuseTest extends TableTestBase {
             new DataEvolutionRowIdReassigner(table).reassign();
         }
         long snapshot = table.snapshotManager().latestSnapshotId();
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+        try (BatchTableCommit commit =
+                table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.COMMIT_LAST_SAFE_SNAPSHOT.key(),
+                                        Long.toString(scanSnapshot)))
+                        .newBatchWriteBuilder()
+                        .newCommit()) {
             commit.commit(messages);
         }
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot + 1);
@@ -714,10 +719,14 @@ public class CompactReassignReuseTest extends TableTestBase {
         checkRows(table, 0, 1, 2, 3);
     }
 
-    @Test
-    void testNoBoundaryKeepsExistingConflictCheck() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testNoBoundaryKeepsExistingConflictCheck(boolean indexBuild) throws Exception {
         FileStoreTable table = prepare();
-        CommitMessageImpl message = compact(table, false);
+        CommitMessageImpl message =
+                indexBuild
+                        ? (CommitMessageImpl) buildIndex(table, "id", "a").get(0)
+                        : compact(table, false);
         new DataEvolutionRowIdReassigner(table).reassign();
         long snapshot = table.snapshotManager().latestSnapshotId();
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

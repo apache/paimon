@@ -21,11 +21,9 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.SerializationAssignment;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
@@ -46,7 +44,7 @@ import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Reuses immutable compact or index-build outputs after metadata-only row-id reassignments. */
+/** Reuses immutable compact outputs after verified, metadata-only row-id reassignments. */
 public final class ReassignCompactChangesProvider implements CommitChangesProvider {
 
     private final FileIO fileIO;
@@ -67,44 +65,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         this.snapshots = snapshots;
         this.checkedSnapshot = scanSnapshotId;
         this.changes = changes;
-    }
-
-    /** Uses index scan baselines without changing the original source metadata. */
-    public static CommitChangesProvider indexOnlyCommitChangesProvider(
-            FileIO fileIO,
-            FileStorePathFactory paths,
-            SnapshotManager snapshots,
-            List<IndexManifestEntry> indexFiles,
-            @Nullable Long lastSafeSnapshot) {
-        CommitChanges changes =
-                new CommitChanges(Collections.emptyList(), Collections.emptyList(), indexFiles);
-        long scanSnapshotId =
-                lastSafeSnapshot == null || lastSafeSnapshot < 0
-                        ? Long.MAX_VALUE
-                        : lastSafeSnapshot;
-        boolean hasBuildOutputs = false;
-        for (IndexManifestEntry entry : indexFiles) {
-            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
-            if (meta == null) {
-                return latest -> changes;
-            }
-            if (entry.kind() == FileKind.ADD) {
-                if (!DataEvolutionIndexSourceMeta.isDataEvolutionMeta(meta.sourceMeta())) {
-                    return latest -> changes;
-                }
-                // DELETE source metadata belongs to the old index, not this build's scan.
-                hasBuildOutputs = true;
-                scanSnapshotId =
-                        Math.min(
-                                scanSnapshotId,
-                                DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile())
-                                        .scanSnapshotId());
-            }
-        }
-        return !hasBuildOutputs
-                ? latest -> changes
-                : new ReassignCompactChangesProvider(
-                        fileIO, paths, snapshots, scanSnapshotId, changes);
     }
 
     @Override

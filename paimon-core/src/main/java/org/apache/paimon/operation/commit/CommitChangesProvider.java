@@ -34,7 +34,7 @@ public interface CommitChangesProvider {
 
     CommitChanges provide(@Nullable Snapshot latestSnapshot);
 
-    /** Reassignments already validated and applied to this provider's results. */
+    /** Reassignments already validated and applied to this provider's compact results. */
     default Set<Long> rebasedReassignments() {
         return Collections.emptySet();
     }

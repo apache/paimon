@@ -861,16 +861,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private CommitChangesProvider appendAndOverwriteChangesProvider(
             CommitChanges changes, CommitKind commitKind) {
-        if (options.dataEvolutionEnabled()
-                && commitKind == CommitKind.APPEND
+        if (commitKind == CommitKind.APPEND
                 && changes.tableFiles.isEmpty()
-                && changes.changelogFiles.isEmpty()) {
-            return ReassignCompactChangesProvider.indexOnlyCommitChangesProvider(
-                    fileIO,
-                    pathFactory,
-                    snapshotManager,
-                    changes.indexFiles,
-                    options.commitLastSafeSnapshot().orElse(null));
+                && changes.changelogFiles.isEmpty()
+                && !changes.indexFiles.isEmpty()) {
+            return compactChangesProvider(changes, Collections.emptySet());
         }
         return CommitChangesProvider.provider(
                 changes.tableFiles, changes.changelogFiles, changes.indexFiles);
