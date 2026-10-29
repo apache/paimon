@@ -136,6 +136,11 @@ public class DebeziumSchemaUtils {
                 serverTimeZone);
     }
 
+    /** Plain binary values, excluding logical types such as BIT, DECIMAL and geometry. */
+    public static boolean isPlainBinaryType(String debeziumType, @Nullable String schemaName) {
+        return "bytes".equals(debeziumType) && schemaName == null;
+    }
+
     /** Transform raw string value according to schema. */
     public static String transformRawValue(
             @Nullable String rawValue,
@@ -164,9 +169,10 @@ public class DebeziumSchemaUtils {
             } else {
                 transformed = Base64.getEncoder().encodeToString(bigEndian);
             }
-        } else if (("bytes".equals(debeziumType) && className == null)) {
-            // MySQL binary, varbinary, blob
-            transformed = new String(Base64.getDecoder().decode(rawValue));
+        } else if (isPlainBinaryType(debeziumType, className)) {
+            // Keep binary values in Base64 until the sink converts them to bytes. The parser
+            // marks these fields in CdcRecord, without changing other CDC string conversions.
+            transformed = rawValue;
         } else if ("bytes".equals(debeziumType) && className.endsWith(decimalLogicalName())) {
             // MySQL numeric, fixed, decimal
             try {

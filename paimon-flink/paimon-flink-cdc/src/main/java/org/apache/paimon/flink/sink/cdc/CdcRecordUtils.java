@@ -21,12 +21,16 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.Charset;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,7 +61,7 @@ public class CdcRecordUtils {
             String fieldValue = record.data().get(dataField.name());
             if (fieldValue != null) {
                 genericRow.setField(
-                        i, TypeUtils.castFromCdcValueString(fieldValue, dataField.type()));
+                        i, castFieldValue(record, dataField.name(), fieldValue, dataField.type()));
             }
         }
         return genericRow;
@@ -101,7 +105,7 @@ public class CdcRecordUtils {
 
             DataType type = dataFields.get(idx).type();
             try {
-                genericRow.setField(idx, TypeUtils.castFromCdcValueString(value, type));
+                genericRow.setField(idx, castFieldValue(record, key, value, type));
             } catch (Exception e) {
                 LOG.info(
                         "Failed to convert field '{}' value {} to type {}. Waiting for schema update.",
@@ -113,6 +117,27 @@ public class CdcRecordUtils {
             }
         }
         return Optional.of(genericRow);
+    }
+
+    private static Object castFieldValue(
+            CdcRecord record, String fieldName, String value, DataType type) {
+        if (record.base64EncodedFields().contains(fieldName)) {
+            byte[] bytes = Base64.getDecoder().decode(value);
+            if (type.getTypeRoot() == DataTypeRoot.BINARY
+                    || type.getTypeRoot() == DataTypeRoot.VARBINARY) {
+                int length = DataTypeChecks.getLength(type);
+                if (bytes.length > length) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Length of type %s is %d, but casting result has a length of %d",
+                                    type, length, bytes.length));
+                }
+                return bytes;
+            }
+            // Preserve the previous text conversion when an existing target column is not binary.
+            value = new String(bytes, Charset.defaultCharset());
+        }
+        return TypeUtils.castFromCdcValueString(value, type);
     }
 
     public static CdcRecord fromGenericRow(GenericRow row, List<String> fieldNames) {
