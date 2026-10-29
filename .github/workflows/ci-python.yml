@@ -196,9 +196,6 @@ jobs:
     timeout-minutes: 90
     runs-on: ubuntu-latest
     container: "python:3.11-slim"
-    env:
-      # Restore main after paimon-rust#1238 merges and rerun Native CI.
-      PAIMON_RUST_REV: '927a0248163d4d230ceed8f33c281a3c538781e3'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -214,10 +211,10 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-rust at the pinned revision
+      - name: Build paimon-rust from main
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@${PAIMON_RUST_REV}#subdirectory=bindings/python"
+          python -m pip install --upgrade "git+https://github.com/apache/paimon-rust.git@main#subdirectory=bindings/python"
 
       - name: Install Python test dependencies
         run: |
@@ -230,7 +227,6 @@ jobs:
           python - <<'PY'
           import importlib.metadata as metadata
           import json
-          import os
 
           import pypaimon_rust
           import pypaimon_rust.datafusion
@@ -239,7 +235,7 @@ jobs:
           source = json.loads(distribution.read_text('direct_url.json'))
           print('pypaimon-rust', distribution.version,
                 'commit', source['vcs_info']['commit_id'])
-          assert source['vcs_info']['commit_id'] == os.environ['PAIMON_RUST_REV']
+          assert source['vcs_info']['requested_revision'] == 'main'
           assert callable(getattr(pypaimon_rust, 'temporal_match', None)), (
               'Native CI requires the real temporal_match kernel')
           PY
