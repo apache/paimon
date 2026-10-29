@@ -895,6 +895,10 @@ public class SchemaValidation {
         }
 
         checkArgument(
+                !options.queryAuthEnabled(),
+                "changelog-producer=on-read does not support query authorization.");
+
+        checkArgument(
                 !schema.primaryKeys().isEmpty(),
                 "%s requires a table with primary keys.",
                 CHANGELOG_PRODUCER.key());
