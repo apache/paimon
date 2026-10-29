@@ -43,7 +43,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.commit.CommitChanges;
-import org.apache.paimon.operation.commit.DataEvolutionReassignChangesProvider;
+import org.apache.paimon.operation.commit.DataEvolutionChangesProvider;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -954,8 +954,8 @@ public class CompactReassignReuseTest extends TableTestBase {
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.singletonList(unsupported));
-        DataEvolutionReassignChangesProvider provider =
-                new DataEvolutionReassignChangesProvider(
+        DataEvolutionChangesProvider provider =
+                new DataEvolutionChangesProvider(
                         table.fileIO(),
                         table.store().pathFactory(),
                         table.snapshotManager(),

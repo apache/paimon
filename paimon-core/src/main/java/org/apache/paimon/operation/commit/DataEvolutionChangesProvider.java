@@ -45,7 +45,7 @@ import java.util.Set;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Reuses immutable outputs after verified, metadata-only row-id reassignments. */
-public final class DataEvolutionReassignChangesProvider implements CommitChangesProvider {
+public final class DataEvolutionChangesProvider implements CommitChangesProvider {
 
     private final FileIO fileIO;
     private final FileStorePathFactory paths;
@@ -54,7 +54,7 @@ public final class DataEvolutionReassignChangesProvider implements CommitChanges
     private long checkedSnapshot;
     private CommitChanges changes;
 
-    public DataEvolutionReassignChangesProvider(
+    public DataEvolutionChangesProvider(
             FileIO fileIO,
             FileStorePathFactory paths,
             SnapshotManager snapshots,
