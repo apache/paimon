@@ -214,5 +214,5 @@ def test_streaming_variant_closes_native_streams(variant_builder, row_options, s
 def test_non_streaming_variant_rows_remain_unsupported(variant_builder):
     builder, _ = variant_builder
     splits = builder.new_scan().plan().splits()
-    with pytest.raises(RuntimeError, match='Projection expressions are not supported by Torch row format'):
+    with pytest.raises(RuntimeError, match='VARIANT expressions are not supported by Torch row format'):
         builder.new_read().to_torch(splits)
