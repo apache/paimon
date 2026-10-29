@@ -32,7 +32,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -74,19 +73,20 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             return GlobalIndexResult.createEmpty();
         }
 
-        List<GlobalIndexer> globalIndexers =
-                indexSplits.isEmpty() ? Collections.emptyList() : createGlobalIndexers(indexSplits);
+        GlobalIndexer globalIndexer =
+                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
         ScoredGlobalIndexResult result =
                 indexSplits.isEmpty()
                         ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexed(indexSplits, globalIndexers);
-        GlobalIndexer globalIndexer =
-                globalIndexers.isEmpty() ? null : metricIndexer(globalIndexers);
+                        : readIndexed(indexSplits, globalIndexer);
         return withRawSearch(result, rawSplits, globalIndexer, rawPreFilter(rawSplits), vector);
     }
 
     protected ScoredGlobalIndexResult readIndexed(
-            List<IndexVectorSearchSplit> splits, List<GlobalIndexer> globalIndexers) {
+            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+        // Keep the caller's indexer for the first definition so its persisted metric is also
+        // available to Flink/Spark callers when they subsequently search raw splits.
+        List<GlobalIndexer> globalIndexers = createGlobalIndexers(splits, globalIndexer);
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
         String indexType = vectorIndexType(splits);
         int searchLimit = indexedSearchLimit(indexType);

@@ -36,6 +36,8 @@ import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -56,6 +58,8 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.BatchVectorSearchBuilder;
+import org.apache.paimon.table.source.DataEvolutionVectorRead;
+import org.apache.paimon.table.source.IndexVectorSearchSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.VectorSearchBuilder;
@@ -305,6 +309,44 @@ class ESIndexScalarTableTest {
         // while row 2 wins in L2; row 8 is outside the index ranges when rawTail is true.
         assertDefinitionVectorQuery(table, 5, filter, batch, false, 8);
         assertDefinitionVectorQuery(table, 5, filter, batch, true, 8);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testSubclassIndexedReadPreservesDefinitionsAndMetric(boolean sameDefinition)
+            throws Exception {
+        FileStoreTable table = createTable();
+        FileStoreTable cosine =
+                table.copy(
+                        Collections.singletonMap(
+                                "global-index.es-index.fields.embedding.metric", "cosine"));
+        build(cosine, 0, 6, "embedding", "category", "price");
+        if (sameDefinition) {
+            build(cosine, 6, 8, "embedding", "category", "price");
+        } else {
+            build(cosine, 6, 8, "embedding", "category");
+        }
+        table =
+                configured(table, "full", false)
+                        .copy(Collections.singletonMap("vector-index.search-mode", "full"));
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(2, BinaryString.fromString("c2"));
+        SubclassVectorRead read = new SubclassVectorRead(table, filter);
+        fileIO.indexOpens.set(0);
+        assertThat(
+                        read.read(
+                                        table.newVectorSearchBuilder()
+                                                .withVectorColumn("embedding")
+                                                .withVector(vector(5))
+                                                .withFilter(filter)
+                                                .withLimit(1)
+                                                .newVectorScan()
+                                                .scan())
+                                .results()
+                                .toRangeList())
+                .containsExactly(new Range(8, 8));
+        assertThat(fileIO.indexOpens.get()).isPositive();
+        assertThat(((VectorGlobalIndexer) read.suppliedIndexer).metric()).isEqualTo("cosine");
     }
 
     @ParameterizedTest
@@ -961,6 +1003,23 @@ class ESIndexScalarTableTest {
 
     private static Double price(int id) {
         return id % 4 == 0 ? null : (double) id;
+    }
+
+    /** Uses the protected entry point also called by the Flink and Spark local search paths. */
+    private static class SubclassVectorRead extends DataEvolutionVectorRead {
+
+        private GlobalIndexer suppliedIndexer;
+
+        private SubclassVectorRead(FileStoreTable table, Predicate filter) {
+            super(table, null, filter, 1, table.rowType().getField("embedding"), vector(5), null);
+        }
+
+        @Override
+        protected ScoredGlobalIndexResult readIndexed(
+                List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+            suppliedIndexer = globalIndexer;
+            return super.readIndexed(splits, globalIndexer);
+        }
     }
 
     private static class AuditedFileIO extends LocalFileIO {

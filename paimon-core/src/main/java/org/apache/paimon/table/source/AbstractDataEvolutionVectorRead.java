@@ -136,8 +136,12 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
     /** One indexer per definition, aligned with the splits and shared across matching shards. */
     protected List<GlobalIndexer> createGlobalIndexers(List<IndexVectorSearchSplit> splits) {
+        return createGlobalIndexers(splits, createGlobalIndexer(splits));
+    }
+
+    protected List<GlobalIndexer> createGlobalIndexers(
+            List<IndexVectorSearchSplit> splits, GlobalIndexer first) {
         Map<String, Map<List<Integer>, GlobalIndexer>> definitions = new HashMap<>();
-        GlobalIndexer first = createGlobalIndexer(splits);
         IndexFileMeta firstFile = firstVectorIndexFile(splits);
         definitions
                 .computeIfAbsent(firstFile.indexType(), k -> new HashMap<>())
