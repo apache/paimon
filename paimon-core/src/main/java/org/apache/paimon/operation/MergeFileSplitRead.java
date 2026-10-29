@@ -331,11 +331,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         RowType readType = actualReadType();
         Comparator<KeyValue> keyValueComparator = createSequenceComparator(sequenceComparator);
         MergeFunction<KeyValue> historyMerge = mfFactory.create(readType);
+        MergeFunctionFactory<KeyValue> mergeFactory = unwrapLookup(mfFactory);
 
+        // Keep one lookup layer and size its spill serializer for the projected values.
         LookupMergeFunction.Factory lookupFactory =
                 (LookupMergeFunction.Factory)
                         LookupMergeFunction.wrap(
-                                ignored -> mfFactory.create(readType), options, keyType, readType);
+                                ignored -> mergeFactory.create(readType),
+                                options,
+                                keyType,
+                                readType);
         lookupFactory.withIOManager(ioManager);
 
         RowType equalType = outerReadType == null ? readType : outerReadType;
@@ -345,7 +350,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                                         equalType, options.changelogRowDeduplicateIgnoreFields())
                                 .get()
                         : null;
-        return new LookupChangelogMergeFunctionWrapper<>(
+        return new LookupChangelogMergeFunctionWrapper<KeyValue>(
                 lookupFactory,
                 key -> {
                     try {
@@ -364,7 +369,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 equaliser,
                 LookupStrategy.from(false, true, false, false),
                 null,
-                sequenceComparator);
+                sequenceComparator) {
+            @Override
+            public void reset() {
+                try {
+                    super.reset();
+                } finally {
+                    historyMerge.reset();
+                }
+            }
+        };
     }
 
     private List<DataFileMeta> lookupFilesToPrepare(

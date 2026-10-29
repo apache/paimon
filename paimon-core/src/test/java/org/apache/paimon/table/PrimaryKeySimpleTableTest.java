@@ -2863,6 +2863,43 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @ParameterizedTest
+    @EnumSource(CoreOptions.SortEngine.class)
+    public void testForceLookupWithProjectedBatchRead(CoreOptions.SortEngine sortEngine)
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.FORCE_LOOKUP, true);
+                            options.set(CoreOptions.WRITE_ONLY, true);
+                            options.set(CoreOptions.LOOKUP_MERGE_RECORDS_THRESHOLD, 0);
+                            options.set(CoreOptions.SORT_ENGINE, sortEngine);
+                        });
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 0));
+            write.write(rowData(1, 10, 200L));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+        ReadBuilder builder = table.newReadBuilder().withProjection(new int[] {2, 1});
+        List<Split> splits = builder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles()).hasSize(2);
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("lookup").toString());
+                TableRead read = builder.newRead().withIOManager(ioManager)) {
+            assertThat(
+                            getResult(
+                                    read,
+                                    splits,
+                                    row -> {
+                                        assertThat(row.getFieldCount()).isEqualTo(2);
+                                        return row.getLong(0) + "|" + row.getInt(1);
+                                    }))
+                    .containsExactly("200|10");
+        }
+    }
+
+    @ParameterizedTest
     @EnumSource(CoreOptions.MergeEngine.class)
     public void testForceLookupCompaction(CoreOptions.MergeEngine mergeEngine) throws Exception {
         Map<MergeEngine, Pair<Long, Long>> testData = new HashMap<>();

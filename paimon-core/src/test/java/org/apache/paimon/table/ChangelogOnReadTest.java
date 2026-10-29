@@ -21,12 +21,18 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -38,6 +44,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -45,10 +52,12 @@ import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,9 +66,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for generating changelog during reads. */
 public class ChangelogOnReadTest extends TableTestBase {
 
-    @Test
-    public void testAggregationProjectionMultipleLevel0AndCacheLifecycle() throws Exception {
-        FileStoreTable table = createTable(CoreOptions.MergeEngine.AGGREGATE);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAggregationProjectionMultipleLevel0AndCacheLifecycle(boolean forceLookup)
+            throws Exception {
+        FileStoreTable table =
+                createTable(
+                        CoreOptions.MergeEngine.AGGREGATE,
+                        CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue(),
+                        forceLookup);
         write(table, GenericRow.of(1, 1, 1, 1));
 
         StreamTableScan scan = table.newStreamScan();
@@ -94,6 +109,54 @@ public class ChangelogOnReadTest extends TableTestBase {
                 assertThat(firstLookupFile).doesNotExist();
             }
             lookupIO.close();
+        }
+    }
+
+    @Test
+    public void testForceLookupPreservesCompactedHistoryWithProjection() throws Exception {
+        FileStoreTable table =
+                createTable(
+                                CoreOptions.MergeEngine.AGGREGATE,
+                                CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue(),
+                                true)
+                        .copy(Collections.singletonMap("lookup.merge-records-threshold", "0"));
+        write(table, ioManager, GenericRow.of(1, 1, 1, 10));
+        DataSplit first = (DataSplit) table.newReadBuilder().newScan().plan().splits().get(0);
+        String olderFile = first.dataFiles().get(0).fileName();
+        write(table, ioManager, GenericRow.of(1, 1, 2, 13));
+        StreamTableScan scan = table.newStreamScan();
+        scan.plan();
+        write(table, ioManager, GenericRow.of(1, 1, 3, 4));
+        IncrementalSplit delta = (IncrementalSplit) scan.plan().splits().get(0);
+        assertThat(delta.beforeFiles()).hasSize(2);
+        // Model lookup-compacted history: L2 has 10, and the newer L1 value 13 includes it.
+        List<DataFileMeta> history =
+                delta.beforeFiles().stream()
+                        .map(file -> file.upgrade(file.fileName().equals(olderFile) ? 2 : 1))
+                        .collect(Collectors.toList());
+        IncrementalSplit split =
+                new IncrementalSplit(
+                        delta.snapshotId(),
+                        delta.partition(),
+                        delta.bucket(),
+                        delta.totalBuckets(),
+                        history,
+                        null,
+                        delta.afterFiles(),
+                        null,
+                        true);
+        try (IOManager lookupIO = IOManager.create(tempPath.resolve("lookup").toString());
+                TableRead read =
+                        table.newReadBuilder()
+                                .withProjection(new int[] {3})
+                                .newRead()
+                                .withIOManager(lookupIO);
+                RecordReader<InternalRow> reader = read.createReader(split)) {
+            List<String> result = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> result.add(row.getRowKind().shortString() + " " + row.getInt(0)));
+            // History is 13, not 10 + 13; then apply the new delta 4.
+            assertThat(result).containsExactly("-U 13", "+U 17");
         }
     }
 
@@ -238,12 +301,170 @@ public class ChangelogOnReadTest extends TableTestBase {
                 .hasMessageContaining(CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.key());
     }
 
+    @ParameterizedTest
+    @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
+    public void testCloseReleasesMergeSpills(String sortEngine, boolean forceLookup)
+            throws Exception {
+        testMergeSpillCleanup(sortEngine, forceLookup, false, false);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
+    public void testEarlyCloseReleasesMergeSpills(String sortEngine, boolean forceLookup)
+            throws Exception {
+        testMergeSpillCleanup(sortEngine, forceLookup, true, false);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"min-heap,false", "min-heap,true", "loser-tree,false", "loser-tree,true"})
+    public void testProjectedReaderReleasesMergeSpills(String sortEngine, boolean forceLookup)
+            throws Exception {
+        testMergeSpillCleanup(sortEngine, forceLookup, false, true);
+    }
+
+    private void testMergeSpillCleanup(
+            String sortEngine, boolean forceLookup, boolean earlyClose, boolean projected)
+            throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("seq", DataTypes.INT())
+                        .column("v", DataTypes.STRING())
+                        .primaryKey("k")
+                        .option("bucket", "1")
+                        .option("write-only", "true")
+                        .option("file.format", "avro")
+                        .option("changelog-producer", "on-read")
+                        .option("force-lookup", String.valueOf(forceLookup))
+                        .option("sequence.field", "seq")
+                        .option("sort-engine", sortEngine)
+                        .option("sort-spill-threshold", "1000")
+                        .option("lookup.merge-records-threshold", "0")
+                        .option("lookup.merge-buffer-size", "4 kb")
+                        .option("page-size", "4 kb")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = getTableDefault();
+        char[] chars = new char[1000];
+        Arrays.fill(chars, 'x');
+        BinaryString value = BinaryString.fromString(new String(chars));
+        // Keep enough historical versions to spill historyMerge when force-lookup is enabled.
+        for (int i = 0; i < 12; i++) {
+            write(table, ioManager, GenericRow.of(1, i, value));
+        }
+        ReadBuilder builder = table.newReadBuilder();
+        if (projected) {
+            // Drop the primary key and reorder values so spill serialization must use readType.
+            builder.withProjection(new int[] {2, 1});
+        }
+        StreamTableScan scan = builder.newStreamScan();
+        DataSplit initial = (DataSplit) scan.plan().splits().get(0);
+        String firstDataFile = initial.dataFiles().get(0).fileName();
+        Path lookupDir = tempPath.resolve("lookup");
+        try (IOManager lookupIO = IOManager.create(lookupDir.toString())) {
+            TableRead read = builder.newRead().withIOManager(lookupIO);
+            Path firstLookupFile = null;
+            try {
+                for (int round = 1; round <= 2; round++) {
+                    // Multiple writers contribute overlapping files to one APPEND snapshot.
+                    List<CommitMessage> messages = new ArrayList<>();
+                    BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+                    for (int i = 0; i < 12; i++) {
+                        try (BatchTableWrite write = writeBuilder.newWrite()) {
+                            write.withIOManager(ioManager);
+                            write.write(GenericRow.of(1, round * 100 + i, value));
+                            messages.addAll(write.prepareCommit());
+                        }
+                    }
+                    try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                        commit.commit(messages);
+                    }
+                    // The table's merge-function factory is shared by writes and reads.
+                    read.withIOManager(lookupIO);
+                    TableScan.Plan plan = scan.plan();
+                    assertThat(plan.splits()).hasSize(1);
+                    List<String> result = new ArrayList<>();
+                    try (RecordReader<InternalRow> reader = read.createReader(plan)) {
+                        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+                        assertThat(batch).isNotNull();
+                        try {
+                            InternalRow before = batch.next();
+                            assertThat(before).isNotNull();
+                            assertThat(before.getFieldCount()).isEqualTo(projected ? 2 : 3);
+                            assertThat(before.getString(projected ? 0 : 2)).isEqualTo(value);
+                            result.add(before.getRowKind().shortString() + " " + before.getInt(1));
+                            assertThat(mergeSpillFiles(lookupDir)).isNotEmpty();
+                            if (!earlyClose) {
+                                InternalRow row;
+                                while ((row = batch.next()) != null) {
+                                    result.add(
+                                            row.getRowKind().shortString() + " " + row.getInt(1));
+                                }
+                            }
+                        } finally {
+                            batch.releaseBatch();
+                        }
+                        if (!earlyClose) {
+                            while ((batch = reader.readBatch()) != null) {
+                                try {
+                                    InternalRow row;
+                                    while ((row = batch.next()) != null) {
+                                        result.add(
+                                                row.getRowKind().shortString()
+                                                        + " "
+                                                        + row.getInt(1));
+                                    }
+                                } finally {
+                                    batch.releaseBatch();
+                                }
+                            }
+                        }
+                    }
+                    int beforeSeq = (round - 1) * 100 + 11;
+                    if (earlyClose) {
+                        assertThat(result).containsExactly("-U " + beforeSeq);
+                    } else {
+                        assertThat(result)
+                                .containsExactly("-U " + beforeSeq, "+U " + (round * 100 + 11));
+                    }
+                    assertThat(mergeSpillFiles(lookupDir)).isEmpty();
+                    Path cachedFile = findLookupFile(lookupDir, firstDataFile);
+                    if (firstLookupFile == null) {
+                        firstLookupFile = cachedFile;
+                    } else {
+                        assertThat(cachedFile).isEqualTo(firstLookupFile);
+                    }
+                    assertThat(firstLookupFile).exists();
+                }
+            } finally {
+                read.close();
+            }
+            assertThat(firstLookupFile).doesNotExist();
+            assertThat(mergeSpillFiles(lookupDir)).isEmpty();
+        }
+    }
+
+    private List<Path> mergeSpillFiles(Path lookupDir) throws IOException {
+        try (Stream<Path> paths = Files.walk(lookupDir)) {
+            // Lookup files have a data-file prefix; only merge buffers use unnamed channels.
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().matches("[0-9a-f]{32}[.]channel"))
+                    .collect(Collectors.toList());
+        }
+    }
+
     private FileStoreTable createTable(CoreOptions.MergeEngine mergeEngine) throws Exception {
         return createTable(
                 mergeEngine, CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue());
     }
 
     private FileStoreTable createTable(CoreOptions.MergeEngine mergeEngine, int maxStates)
+            throws Exception {
+        return createTable(mergeEngine, maxStates, false);
+    }
+
+    private FileStoreTable createTable(
+            CoreOptions.MergeEngine mergeEngine, int maxStates, boolean forceLookup)
             throws Exception {
         Schema.Builder builder =
                 Schema.newBuilder()
@@ -257,6 +478,7 @@ public class ChangelogOnReadTest extends TableTestBase {
                         .option(CoreOptions.WRITE_ONLY.key(), "true")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "on-read")
                         .option(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString())
+                        .option(CoreOptions.FORCE_LOOKUP.key(), String.valueOf(forceLookup))
                         .option(CoreOptions.SEQUENCE_FIELD.key(), "seq")
                         .option(
                                 CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.key(),
