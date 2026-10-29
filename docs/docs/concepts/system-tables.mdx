@@ -74,9 +74,18 @@ ORDER BY snapshot_id DESC;
 ```
 
 Additional columns include manifest-list names, `changelog_record_count`, `watermark`,
-`next_row_id`, `operation`, and `writer_version`. Optional metadata can be `NULL`, depending on
-the writer and enabled features. See the [Snapshot specification](./spec/snapshot) for the meaning
-of these fields.
+`next_row_id`, `operation`, `writer_version`, and `properties`. Optional metadata can be `NULL`,
+depending on the writer and enabled features. See the [Snapshot specification](./spec/snapshot)
+for the meaning of these fields.
+
+The `properties` column is a `MAP<STRING, STRING>` containing additional metadata recorded in each
+snapshot. It is `NULL` when the snapshot has no properties. For example, if a writer records a
+`source.batch-id` property, you can query it with:
+
+```sql
+SELECT snapshot_id, properties['source.batch-id'] AS batch_id
+FROM my_table$snapshots;
+```
 
 `total_record_count` and `delta_record_count` are unmerged counts calculated from data files, not
 logical row counts. All dedicated data files contribute to these values. For example, appending `N`
