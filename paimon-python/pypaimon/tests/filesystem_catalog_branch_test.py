@@ -185,6 +185,34 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(branch_root))
         self.assertTrue(os.path.isfile("{}/tag/tag-t1".format(branch_root)))
 
+    def test_create_branch_from_tag_after_snapshot_expired(self):
+        table = self.catalog.get_table(self.identifier)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        table.create_tag("t1", time_retained="1d")
+        tag = table.tag_manager().get_or_throw("t1")
+        self._write(table, pa.table({"id": [4], "value": ["d"]}))
+
+        # Simulate snapshot expiration while the tag retains its metadata and data.
+        snapshot_path = table.snapshot_manager().get_snapshot_path(snapshot.id)
+        table.file_io.delete(snapshot_path)
+        expected = {"id": [1, 2, 3], "value": ["a", "b", "c"]}
+        self.assertEqual(
+            self._read(table.copy({"scan.tag-name": "t1"})).to_pydict(), expected)
+
+        self.catalog.create_branch(self.identifier, "b1", tag_name="t1")
+
+        branch_identifier = Identifier(
+            self.identifier.get_database_name(), self.identifier.get_table_name(), branch="b1")
+        branch = self.catalog.get_table(branch_identifier)
+        self.assertEqual(branch.snapshot_manager().get_latest_snapshot(), snapshot)
+        self.assertEqual(branch.tag_manager().get_or_throw("t1"), tag)
+        self.assertEqual(self._read(branch).to_pydict(), expected)
+        self.assertFalse(table.file_io.exists(snapshot_path))
+        self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, snapshot.id + 1)
+        self.assertEqual(
+            self._read(table).sort_by("id").to_pydict(),
+            {"id": [1, 2, 3, 4], "value": ["a", "b", "c", "d"]})
+
     # -- list -----------------------------------------------------------------
 
     def test_list_branches_returns_created(self):
