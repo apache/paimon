@@ -17,6 +17,7 @@
 
 from concurrent.futures import wait
 from heapq import nsmallest
+from itertools import islice
 
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
@@ -35,6 +36,16 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 class PrimaryKeyVectorRead(DataEvolutionVectorRead):
     """Search PK vector payloads and localize payload row ids to data files."""
 
+    def _new_distributed_reader(self, executor):
+        if type(self) is not PrimaryKeyVectorRead:
+            raise ValueError("Custom vector readers must define their own distributed execution.")
+        from pypaimon.execution.python.read.search.distributed_search import validate_query_vectors
+        from pypaimon.execution.python.read.search.distributed_primary_key_vector_search import (
+            DistributedPrimaryKeyVectorRead,
+        )
+        validate_query_vectors([self._query_vector])
+        return DistributedPrimaryKeyVectorRead(self, executor)
+
     def read_plan(self, plan, executor=None):
         if executor is not None:
             return self._with_executor(executor).read_plan(plan)
@@ -48,6 +59,27 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
             raise ValueError(
                 "Vector search limit overflow: limit=%d, refine factor=%d"
                 % (self._limit, indexed_limit // self._limit))
+        # Match Java's separately bounded indexed and exact queues.  The ANN
+        # queue must retain indexed_limit until exact reranking is complete.
+        indexed_candidates = self._search_indexed_candidates(plan, indexed_limit)
+        if self._configured_refine_factor(index_type) > 0 and indexed_candidates:
+            indexed_candidates = self._rerank_indexed(
+                plan, indexed_candidates, index_type)
+        else:
+            indexed_candidates = _top_k(indexed_candidates, self._limit)
+        exact_candidates = []
+        if (self._table.options.vector_index_search_mode()
+                != GlobalIndexSearchMode.FAST):
+            exact_candidates = self._search_exact_candidates(plan)
+        candidates = _top_k(
+            (candidate
+             for group in (indexed_candidates, exact_candidates)
+             for candidate in group),
+            self._limit)
+        source_splits = [split.data_split for split in plan.splits()]
+        return PrimaryKeyScoredResult(plan.snapshot_id, source_splits, candidates)
+
+    def _search_indexed_candidates(self, plan, indexed_limit):
         futures = []
         contexts = []
         deleted_positions = _deleted_positions(self._table, plan)
@@ -66,42 +98,13 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
 
         def indexed_candidate_iter():
             for future, context in zip(futures, contexts):
-                result = future.result()
-                if result is None:
-                    continue
-                score_getter = result.score_getter()
-                for local_row_id in result.results():
-                    source, row_position = _localize(
-                        context[1].source_files, local_row_id)
-                    if row_position in deleted_positions.get(
-                            (id(context[0]), source.file_name), set()):
-                        continue
-                    if not _allowed(context[0], source.file_name, row_position):
-                        continue
-                    yield PrimaryKeySearchPosition(
-                        _partition_bytes(context[0].data_split.partition),
-                        context[0].data_split.bucket, source.file_name,
-                        row_position, score_getter(local_row_id))
+                yield from _localized_candidates(
+                    future.result(), context[0], context[1], deleted_positions)
 
-        # Match Java's separately bounded indexed and exact queues.  The ANN
-        # queue must retain indexed_limit until exact reranking is complete.
-        indexed_candidates = _top_k(indexed_candidate_iter(), indexed_limit)
-        if self._configured_refine_factor(index_type) > 0 and indexed_candidates:
-            indexed_candidates = self._rerank_indexed(
-                plan, indexed_candidates, index_type)
-        else:
-            indexed_candidates = _top_k(indexed_candidates, self._limit)
-        exact_candidates = []
-        if (self._table.options.vector_index_search_mode()
-                != GlobalIndexSearchMode.FAST):
-            exact_candidates = _top_k(self._raw_candidates(plan), self._limit)
-        candidates = _top_k(
-            (candidate
-             for group in (indexed_candidates, exact_candidates)
-             for candidate in group),
-            self._limit)
-        source_splits = [split.data_split for split in plan.splits()]
-        return PrimaryKeyScoredResult(plan.snapshot_id, source_splits, candidates)
+        return _top_k(indexed_candidate_iter(), indexed_limit)
+
+    def _search_exact_candidates(self, plan):
+        return _top_k(self._raw_candidates(plan), self._limit)
 
     def _rerank_indexed(self, plan, candidates, index_type):
         source_splits = [split.data_split for split in plan.splits()]
@@ -172,6 +175,15 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         metric = self._search_metric(
             self._table.options.primary_key_vector_index_type(
                 self._vector_column.name))
+        for split, data_file, positions, vectors in self._raw_batches(plan):
+            for position, score in zip(positions, _iter_arrow_scores(vectors, self._query_vector, metric)):
+                if score is not None:
+                    yield PrimaryKeySearchPosition(
+                        _partition_bytes(split.data_split.partition), split.data_split.bucket,
+                        data_file.file_name, position, score)
+
+    def _raw_batches(self, plan):
+        """Read each selected file once, retaining its live physical row positions."""
         read_table = self._table.copy_without_time_travel({
             'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         read_builder = read_table.new_read_builder().with_projection(
@@ -199,24 +211,30 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
                     if _allowed(split, data_file.file_name, position))
                 position_iter = iter(positions)
                 for batch in reader.to_arrow([read_split]).to_batches():
-                    for score in _iter_arrow_scores(batch.column(0), self._query_vector, metric):
-                        try:
-                            row_position = next(position_iter)
-                        except StopIteration:
-                            raise ValueError(
-                                "Raw vector read returned an unexpected row.")
-                        if score is None:
-                            continue
-                        yield PrimaryKeySearchPosition(
-                            _partition_bytes(split.data_split.partition),
-                            split.data_split.bucket, data_file.file_name,
-                            row_position, score)
+                    batch_positions = list(islice(position_iter, batch.num_rows))
+                    if len(batch_positions) != batch.num_rows:
+                        raise ValueError("Raw vector read returned an unexpected row.")
+                    yield split, data_file, batch_positions, batch.column(0)
                 try:
                     next(position_iter)
                     raise ValueError(
                         "Raw vector row count does not match physical positions.")
                 except StopIteration:
                     pass
+
+
+def _localized_candidates(result, split, source_meta, deleted_positions):
+    if result is None:
+        return
+    score_getter = result.score_getter()
+    for local_row_id in result.results():
+        source, position = _localize(source_meta.source_files, local_row_id)
+        if position in deleted_positions.get((id(split), source.file_name), set()):
+            continue
+        if _allowed(split, source.file_name, position):
+            yield PrimaryKeySearchPosition(
+                _partition_bytes(split.data_split.partition), split.data_split.bucket,
+                source.file_name, position, score_getter(local_row_id))
 
 
 def _rank_key(position):

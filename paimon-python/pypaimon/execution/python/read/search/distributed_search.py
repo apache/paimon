@@ -38,9 +38,6 @@ def closing_task_results(results):
 
 def create_distributed_reader(reader, executor):
     executor = executor.with_concurrency(executor.concurrency)
-    from pypaimon.execution.python.read.search.vector_search_read import (
-        DataEvolutionVectorRead, BatchVectorSearchReadImpl,
-    )
     from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead
 
     if isinstance(reader, DataEvolutionFullTextRead):
@@ -49,15 +46,11 @@ def create_distributed_reader(reader, executor):
             raise ValueError("Ray full-text search supports only data-evolution tables.")
         from pypaimon.execution.python.read.search.distributed_full_text_search import DistributedFullTextRead
         return DistributedFullTextRead(reader, executor)
-    if type(reader) not in (DataEvolutionVectorRead, BatchVectorSearchReadImpl):
-        raise ValueError("Ray vector search supports only data-evolution tables.")
-    if not reader._table.options.data_evolution_enabled():
-        raise ValueError("Ray vector search supports only data-evolution tables.")
-    from pypaimon.execution.python.read.search.distributed_vector_search import (
-        DistributedVectorSearchRead, DistributedBatchVectorSearchRead,
-    )
-    if type(reader) is DataEvolutionVectorRead:
-        if not all(math.isfinite(float(value)) for value in reader._query_vector):
-            raise ValueError("Ray vector search requires a finite query vector.")
-        return DistributedVectorSearchRead(reader, executor)
-    return DistributedBatchVectorSearchRead(reader, executor)
+    if getattr(reader, '_new_distributed_reader', None) is None:
+        raise ValueError("This reader does not support distributed search.")
+    return reader._new_distributed_reader(executor)
+
+
+def validate_query_vectors(queries):
+    if not all(math.isfinite(float(value)) for query in queries for value in query):
+        raise ValueError("Ray vector search requires a finite query vector.")

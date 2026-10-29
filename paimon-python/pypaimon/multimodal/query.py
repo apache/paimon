@@ -675,7 +675,8 @@ class VectorQuery(_PreFilterQuery):
     def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
         """Execute a vector query locally or on Ray workers, returning an Arrow table.
 
-        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        Ray execution supports data-evolution tables and vector search on
+        primary-key tables using the Python read backend. ``concurrency`` bounds
         in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
         resources and retries. Result lookup runs on the driver.
         """
@@ -856,9 +857,10 @@ class BatchVectorQuery(_PreFilterQuery):
     def to_arrow(self, *, execution="local", concurrency=None, ray_remote_args=None):
         """Return one Arrow table per query, optionally searching splits on Ray.
 
-        Ray execution supports data-evolution tables. ``concurrency`` bounds
+        Ray execution supports data-evolution tables and vector search on
+        primary-key tables using the Python read backend. ``concurrency`` bounds
         in-flight tasks (defaults to 4); ``ray_remote_args`` configures their
-        resources and retries. Shared result lookup runs on the driver,
+        resources and retries. Result lookup runs on the driver,
         using the same snapshot as all workers, including refinement tasks.
         """
         if execution == "local":
@@ -899,10 +901,12 @@ class BatchVectorQuery(_PreFilterQuery):
 
     def _read_batch_results(self, results):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.table.source.global_index_split_result import GlobalIndexSplitResult
         from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
         projection = self._effective_projection()
-        if (len(results) <= 1 or self._metadata_only_result()
+        if (len(results) <= 1 or any(isinstance(result, GlobalIndexSplitResult) for result in results)
+                or self._metadata_only_result()
                 or (projection and not self._configured_read_builder()._output_fields())):
             return [self._read_global_index_result(result) for result in results]
 
