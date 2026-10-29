@@ -24,6 +24,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.analysis.ReplacePaimonFunctions
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.write.PaimonWriteOptions
 import org.apache.paimon.table.FileStoreTable
 
@@ -47,10 +48,14 @@ case class WriteIntoPaimonTable(
   with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val replacedData =
+    val replacedDataWithMetadata =
       PaimonUtils.createDataset(
         sparkSession,
         ReplacePaimonFunctions(sparkSession)(_data.queryExecution.analyzed))
+    val replacedData =
+      SparkSystemColumns
+        .changelogMetadataFieldNames(table)
+        .foldLeft(replacedDataWithMetadata)((data, fieldName) => data.drop(fieldName))
     mergeSchema(sparkSession, replacedData, options)
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()

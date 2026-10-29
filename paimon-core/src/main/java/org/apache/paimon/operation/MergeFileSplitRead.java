@@ -52,8 +52,10 @@ import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.system.ChangelogEventMetadata;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -119,6 +121,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
         this.sequenceOrder = options.sequenceFieldSortOrderIsAscending();
+        ChangelogEventMetadata.validate(tableSchema.logicalRowType(), options);
     }
 
     public Comparator<InternalRow> keyComparator() {
@@ -172,6 +175,15 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 adjustedReadType = new RowType(allFields);
             }
         }
+
+        // Metadata columns are backed by values from the incoming event. Ordinary data files do
+        // not physically contain the synthetic metadata fields, so retain the corresponding
+        // physical fields while reading whenever a metadata field was requested. The outer read
+        // projection removes these internal dependencies after the reader has populated the
+        // metadata columns.
+        adjustedReadType =
+                ChangelogEventMetadata.withMetadataDependencies(
+                        adjustedReadType, tableSchema.logicalRowType(), options);
         adjustedReadType = mfFactory.adjustReadType(adjustedReadType);
         return adjustedReadType;
     }
@@ -533,8 +545,14 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private RecordReader<KeyValue> projectOuter(RecordReader<KeyValue> reader) {
         if (outerReadType != null) {
-            ProjectedRow projectedRow = ProjectedRow.from(outerReadType, actualReadType());
-            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+            // Metadata dependencies may widen nested children, so project them back as well.
+            NestedProjectedRow projectedRow =
+                    NestedProjectedRow.create(actualReadType(), outerReadType);
+            if (projectedRow != null) {
+                reader =
+                        reader.transform(
+                                kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+            }
         }
         return reader;
     }
