@@ -381,12 +381,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                appendAndOverwriteChangesProvider(
+                                dataEvolutionChangesProvider(
                                         new CommitChanges(
                                                 changes.appendTableFiles,
                                                 changes.appendChangelog,
                                                 changes.appendIndexFiles),
-                                        commitKind),
+                                        commitKind,
+                                        Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -402,11 +403,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(
+                                dataEvolutionChangesProvider(
                                         new CommitChanges(
                                                 changes.compactTableFiles,
                                                 changes.compactChangelog,
                                                 changes.compactIndexFiles),
+                                        CommitKind.COMPACT,
                                         materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
@@ -591,11 +593,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (withCompact) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(
+                                dataEvolutionChangesProvider(
                                         new CommitChanges(
                                                 changes.compactTableFiles,
                                                 emptyList(),
                                                 changes.compactIndexFiles),
+                                        CommitKind.COMPACT,
                                         Collections.emptySet()),
                                 committable.identifier(),
                                 committable.watermark(),
@@ -859,24 +862,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return result;
     }
 
-    private CommitChangesProvider appendAndOverwriteChangesProvider(
-            CommitChanges changes, CommitKind commitKind) {
-        if (commitKind == CommitKind.APPEND
-                && changes.tableFiles.isEmpty()
-                && changes.changelogFiles.isEmpty()
-                && !changes.indexFiles.isEmpty()) {
-            return compactChangesProvider(changes, Collections.emptySet());
-        }
-        return CommitChangesProvider.provider(
-                changes.tableFiles, changes.changelogFiles, changes.indexFiles);
-    }
-
     @VisibleForTesting
-    CommitChangesProvider compactChangesProvider(
-            CommitChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+    CommitChangesProvider dataEvolutionChangesProvider(
+            CommitChanges changes,
+            CommitKind commitKind,
+            Set<Pair<BinaryRow, Integer>> materializedBuckets) {
         if (materializedBuckets.isEmpty()) {
             Long lastSafeSnapshot = options.commitLastSafeSnapshot().orElse(null);
             if (options.dataEvolutionEnabled()
+                    && (commitKind == CommitKind.COMPACT
+                            || (commitKind == CommitKind.APPEND
+                                    && changes.tableFiles.isEmpty()
+                                    && changes.changelogFiles.isEmpty()
+                                    && !changes.indexFiles.isEmpty()))
                     && !conflictDetection.shouldCheckRowIdFromSnapshot(CommitKind.COMPACT)
                     && lastSafeSnapshot != null
                     && lastSafeSnapshot >= 0) {

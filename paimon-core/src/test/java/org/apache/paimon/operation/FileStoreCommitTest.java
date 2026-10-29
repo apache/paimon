@@ -1010,8 +1010,10 @@ public class FileStoreCommitTest {
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             CommitChanges refreshed =
-                    commit.compactChangesProvider(
-                                    changes, Collections.singleton(Pair.of(partition, 0)))
+                    commit.dataEvolutionChangesProvider(
+                                    changes,
+                                    Snapshot.CommitKind.COMPACT,
+                                    Collections.singleton(Pair.of(partition, 0)))
                             .provide(null);
 
             assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
