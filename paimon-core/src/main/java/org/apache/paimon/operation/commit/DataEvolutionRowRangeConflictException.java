@@ -18,10 +18,30 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.manifest.FileEntry;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /** Conflict caused by incompatible row-range boundaries in a data-evolution table. */
 public final class DataEvolutionRowRangeConflictException extends RuntimeException {
 
+    private static final long serialVersionUID = 1L;
+
+    private final List<FileEntry.Identifier> conflictingFiles;
+
     public DataEvolutionRowRangeConflictException(String message) {
+        this(message, Collections.emptyList());
+    }
+
+    public DataEvolutionRowRangeConflictException(
+            String message, List<FileEntry.Identifier> conflictingFiles) {
         super(message);
+        this.conflictingFiles = Collections.unmodifiableList(new ArrayList<>(conflictingFiles));
+    }
+
+    public List<FileEntry.Identifier> conflictingFiles() {
+        return conflictingFiles;
     }
 }
