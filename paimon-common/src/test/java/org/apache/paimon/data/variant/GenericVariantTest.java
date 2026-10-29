@@ -21,11 +21,13 @@ package org.apache.paimon.data.variant;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 
@@ -280,6 +282,37 @@ public class GenericVariantTest {
         assertThat(variant.variantGet("$.boolean2", DataTypes.BOOLEAN(), castArgs))
                 .isEqualTo(false);
         assertThat(variant.variantGet("$.nullField", DataTypes.BOOLEAN(), castArgs)).isNull();
+    }
+
+    @Test
+    public void testVariantGetMapWithNotNullStringKey() {
+        // Spark hands over map key types as NOT NULL, so a STRING key must match whatever its
+        // nullability is.
+        Variant variant =
+                GenericVariant.fromJson("{\"m\": {\"a\": 1, \"b\": 2}, \"arr\": [{\"a\": 1}]}");
+        VariantCastArgs tryCast = new VariantCastArgs(false, ZoneOffset.UTC);
+        VariantCastArgs strict = new VariantCastArgs(true, ZoneOffset.UTC);
+        MapType notNullKey = new MapType(DataTypes.STRING().notNull(), DataTypes.INT());
+
+        Map<BinaryString, Integer> expected = new HashMap<>();
+        expected.put(BinaryString.fromString("a"), 1);
+        expected.put(BinaryString.fromString("b"), 2);
+        assertThat(variant.variantGet("$.m", notNullKey, tryCast))
+                .isEqualTo(new GenericMap(expected));
+        assertThat(variant.variantGet("$.m", notNullKey, strict))
+                .isEqualTo(new GenericMap(expected));
+
+        Map<BinaryString, Integer> element = new HashMap<>();
+        element.put(BinaryString.fromString("a"), 1);
+        GenericArray expectedArray = new GenericArray(new Object[] {new GenericMap(element)});
+        assertThat(variant.variantGet("$.arr", DataTypes.ARRAY(notNullKey), tryCast))
+                .isEqualTo(expectedArray);
+        assertThat(variant.variantGet("$.arr", DataTypes.ARRAY(notNullKey), strict))
+                .isEqualTo(expectedArray);
+
+        // a non string key is still an invalid cast
+        MapType intKey = new MapType(DataTypes.INT().notNull(), DataTypes.INT());
+        assertThat(variant.variantGet("$.m", intKey, tryCast)).isNull();
     }
 
     @Test
