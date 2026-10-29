@@ -53,6 +53,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
+from pypaimon.api.predict import PredictRequest, PredictResponse
 from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
@@ -84,6 +85,12 @@ class RESTApi:
     PARTITION_NAME_PATTERN = "partitionNamePattern"
     TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
+
+    def predict(self, identifier: Identifier, request: PredictRequest) -> PredictResponse:
+        database, table = self._validate_resource_path(identifier)
+        return self.client.post_with_response_type(
+            self.resource_paths.predict(database, table), request,
+            PredictResponse, self.rest_auth_function)
 
     # Function name validation pattern
     _FUNCTION_NAME_PATTERN = re.compile(r'^(?=.*[A-Za-z])[A-Za-z0-9._-]+$')

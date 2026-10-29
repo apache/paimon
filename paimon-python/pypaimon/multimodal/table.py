@@ -108,6 +108,37 @@ class MultimodalTable:
         return MultimodalTable(
             self.catalog, raw_table.identifier.get_full_name(), raw_table)
 
+    def predict(self, *, model, inputs, result_columns, prompt,
+                where=None, response_format="json_object"):
+        """Submit an asynchronous prediction to a supporting REST Catalog.
+
+        No rows or BLOBs are read locally. The service must retain the selected
+        snapshot and freeze the model version before accepting the job. A
+        transport failure does not prove rejection; do not blindly resubmit.
+        """
+        from dataclasses import asdict
+        from pypaimon.api.predict import PredictRequest
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        provider = getattr(self.catalog, "predict", None)
+        if provider is None:
+            raise NotImplementedError("Catalog does not support prediction")
+        if not isinstance(self.raw_table, FileStoreTable):
+            raise NotImplementedError("Prediction requires a Paimon file store table")
+        options = self.raw_table.options.options.to_map()
+        allowed = {"scan.snapshot-id", "scan.tag-name"}
+        unsupported = [key for key in options
+                       if (key.startswith("scan.") or key.startswith("incremental-"))
+                       and key not in allowed]
+        if unsupported:
+            raise ValueError("Prediction does not support scan options: %s" % unsupported)
+        request = PredictRequest(
+            model=model, inputs=inputs, result_columns=result_columns,
+            prompt=prompt, where=where, response_format=response_format,
+            snapshot_id=self.raw_table.options.scan_snapshot_id(),
+            tag_name=self.raw_table.options.scan_tag_name())
+        return asdict(provider(self.raw_table.identifier, request))
+
     def add(self, data):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         write_builder = self.raw_table.new_batch_write_builder()

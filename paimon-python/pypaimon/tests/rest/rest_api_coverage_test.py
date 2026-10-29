@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.predict import PredictRequest
 from pypaimon.common.identifier import Identifier
 from pypaimon.function.function import FunctionImpl
 from pypaimon.function.function_change import FunctionChange
@@ -53,6 +54,8 @@ _TABLE = PermissionResource(ResourceType.TABLE, "db", "t", None, None)
 
 # A value per parameter annotation, else per name; "SELECT" is valid both as a name and as an access.
 _ARGUMENTS = {
+    PredictRequest: PredictRequest("quality", [{"column": "content", "modality": "image"}],
+                                   ["id"], "Classify"),
     str: "SELECT",
     bool: False,
     Identifier: Identifier.create("db", "t"),

@@ -75,6 +75,18 @@ OBJECT_TABLE_TYPE = "object-table"
 
 
 class RESTCatalog(Catalog):
+    def predict(self, identifier, request):
+        """Submit a prediction to a supporting REST service; never execute locally."""
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        check_not_branch(identifier, "predict")
+        check_not_system_table(identifier, "predict")
+        try:
+            return self.rest_api.predict(identifier, request)
+        except NotImplementedException as e:
+            raise NotImplementedError("REST Catalog does not support prediction") from e
+        # Preserve 404: it can also mean that the table or model does not exist.
+
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
         self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
         self.rest_api = RESTApi(context.options, config_required)

@@ -38,6 +38,7 @@ OPERATIONS: Tuple[Tuple[str, str, str], ...] = (
     ("GET", "/v1/{prefix}/tables/id/{tableId}", "GetTableById"),
     ("POST", "/v1/{prefix}/tables/rename", "RenameTable"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/auth", "AuthTableQuery"),
+    ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/predict", "PredictTable"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit", "CommitTable"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock", "AcquireCommitLock"),
     ("POST", "/v1/{prefix}/databases/{database}/tables/{table}/commit-lock/renew",
