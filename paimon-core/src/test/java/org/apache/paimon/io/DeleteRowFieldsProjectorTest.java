@@ -102,7 +102,7 @@ class DeleteRowFieldsProjectorTest {
                         null,
                         null,
                         null,
-                        "payload");
+                        "payloads");
         KeyValue input = new KeyValue().replace(GenericRow.of(1), 2L, RowKind.DELETE, value);
 
         Options options = new Options();
