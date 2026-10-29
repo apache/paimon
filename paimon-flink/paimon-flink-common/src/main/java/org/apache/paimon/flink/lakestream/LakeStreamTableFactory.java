@@ -20,12 +20,15 @@ package org.apache.paimon.flink.lakestream;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.AbstractFlinkTableFactory;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.FlinkFileIOLoader;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 
@@ -53,8 +56,8 @@ import java.util.Set;
 
 /**
  * Builds the source and the sink of a lake-stream table by delegating to the Lakestream Store's own
- * table factory. Not registered with Flink's factory SPI: {@link #factoryIdentifier} exists because
- * the interface asks for it, and nothing discovers this object by it.
+ * table factory. Not an SPI-registered factory: {@link #factoryIdentifier} is implemented only
+ * because the interface requires it.
  */
 public class LakeStreamTableFactory implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
@@ -79,18 +82,31 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         return Collections.emptySet();
     }
 
-    /** Whether the read is a {@code $rt} read of a lake-stream table. */
+    /** Whether the read asks for the Lakestream Store's view of a table. */
     public static boolean isLakeStreamRead(
-            Catalog paimonCatalog, DynamicTableFactory.Context context) {
-        return realTimeReadBaseTable(paimonCatalog, context) != null;
+            @Nullable FlinkCatalog catalog, DynamicTableFactory.Context context) {
+        if (catalog == null) {
+            // with no catalog there is no lake-stream table to confirm the name against, so the
+            // name alone counts; the read is then refused for lack of a store rather than served
+            // from Paimon
+            return LakeStreamUtils.isRealTimeTable(context.getObjectIdentifier().toObjectPath());
+        }
+        return realTimeReadBaseTable(catalog.catalog(), context) != null;
     }
 
-    /** Whether the write is to a lake-stream table, or through the read-only {@code $rt} name. */
+    /**
+     * Whether the write is to a lake-stream table, or through the read-only {@code $rt} name.
+     * Connector options and query hints do not change the answer.
+     */
     public static boolean isLakeStreamWrite(
-            Catalog paimonCatalog, DynamicTableFactory.Context context) {
+            @Nullable FlinkCatalog catalog, DynamicTableFactory.Context context) {
         Identifier identifier = identifierOf(context);
-        return LakeStreamUtils.isRealTimeTable(identifier)
-                || persistedLakeStreamTable(paimonCatalog, identifier) != null;
+        if (LakeStreamUtils.isRealTimeTable(identifier)) {
+            return true;
+        }
+        return catalog != null
+                ? persistedLakeStreamTable(catalog.catalog(), identifier) != null
+                : lakeStreamEnabledAtPath(context);
     }
 
     @Override
@@ -128,8 +144,10 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         DynamicTableSinkFactory sinkFactory =
                 storeFactory(
                         storeCatalog, DynamicTableSinkFactory.class, "create a sink for writes");
-        return sinkFactory.createDynamicTableSink(
-                delegatedContext(context, identifier, storeTable));
+        return new LakeStreamDynamicTableSink(
+                sinkFactory.createDynamicTableSink(
+                        delegatedContext(context, identifier, storeTable)),
+                identifier);
     }
 
     /** A format table has no Paimon history for the store to tier into, so it cannot be one. */
@@ -156,11 +174,7 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
                 Identifier.create(identifier.getDatabaseName(), identifier.getTableName()));
     }
 
-    /**
-     * The persisted Paimon table when lake-stream mode is enabled on it, otherwise {@code null}.
-     * Read from the catalog because Flink merges query hints into the planner-resolved table, and a
-     * hint must not move a table's writes off the store that holds its recent data.
-     */
+    /** The Paimon table when lake-stream mode is enabled on it, otherwise {@code null}. */
     @Nullable
     private static Table persistedLakeStreamTable(Catalog paimonCatalog, Identifier identifier) {
         try {
@@ -171,6 +185,24 @@ public class LakeStreamTableFactory implements DynamicTableSourceFactory, Dynami
         } catch (Catalog.TableNotExistException e) {
             return null;
         }
+    }
+
+    /** Whether the schema persisted at the connector's {@code path} has lake-stream mode on. */
+    private static boolean lakeStreamEnabledAtPath(DynamicTableFactory.Context context) {
+        Options options = Options.fromMap(context.getCatalogTable().getOptions());
+        String path = options.get(CoreOptions.PATH);
+        if (path == null) {
+            return options.get(CoreOptions.LAKE_STREAM_ENABLED);
+        }
+        // only the location goes in: the factory merges whatever it is given over the persisted
+        // schema, so passing the connector options would restate the very flag being read
+        Options location = new Options();
+        location.set(CoreOptions.PATH, path);
+        location.set(CoreOptions.BRANCH, options.get(CoreOptions.BRANCH));
+        Table table =
+                FileStoreTableFactory.create(
+                        CatalogContext.create(location, new FlinkFileIOLoader()));
+        return Options.fromMap(table.options()).get(CoreOptions.LAKE_STREAM_ENABLED);
     }
 
     private static Identifier identifierOf(DynamicTableFactory.Context context) {

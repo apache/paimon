@@ -18,13 +18,17 @@
 
 package org.apache.paimon.flink.lakestream;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.factories.DynamicTableFactory;
@@ -101,7 +105,12 @@ public class LakeStreamRoutingITCase {
     private StreamTableEnvironment newTableEnv(RuntimeExecutionMode mode) {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(1);
         env.setRuntimeMode(mode);
-        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
+        // UPDATE and DELETE are gated on the environment settings, not on the runtime mode alone
+        EnvironmentSettings settings =
+                mode == RuntimeExecutionMode.BATCH
+                        ? EnvironmentSettings.inBatchMode()
+                        : EnvironmentSettings.inStreamingMode();
+        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env, settings);
         tEnv.registerCatalog("paimon", catalog);
         tEnv.useCatalog("paimon");
         return tEnv;
@@ -116,6 +125,15 @@ public class LakeStreamRoutingITCase {
                                 + "'bucket' = '-1', 'lakestream.enabled' = 'true')",
                         name));
         return tEnv;
+    }
+
+    private String tablePath(String name) throws Exception {
+        return ((FileStoreTable)
+                        ((FlinkCatalog) catalog)
+                                .catalog()
+                                .getTable(Identifier.create("default", name)))
+                .location()
+                .toString();
     }
 
     private static List<Integer> queryIds(StreamTableEnvironment tEnv, String sql)
@@ -181,6 +199,79 @@ public class LakeStreamRoutingITCase {
                                         "INSERT OVERWRITE t1 SELECT * FROM (VALUES (5)) AS t(id)"))
                 .hasStackTraceContaining("INSERT OVERWRITE");
         assertThat(FakeStoreData.rows("default.t1")).isEmpty();
+    }
+
+    @Test
+    public void testRowLevelModificationIsRejectedWhileARowIsUntiered() throws Exception {
+        StreamTableEnvironment batch = newBatchEnvWithLakeStreamTable("t1");
+        StreamTableEnvironment streaming = newTableEnv(RuntimeExecutionMode.STREAMING);
+
+        streaming.executeSql("INSERT INTO t1 SELECT * FROM (VALUES (1)) AS t(id)").await();
+
+        // the row lives only in the store: the original name cannot see it, the '$rt' name can
+        assertThat(queryIds(batch, "SELECT id FROM t1")).isEmpty();
+        assertThat(queryIds(batch, "SELECT id FROM t1$rt")).containsExactly(1);
+
+        // a modification would scan Paimon, find nothing, and write to the store anyway
+        assertThatThrownBy(() -> batch.executeSql("UPDATE t1 SET id = 9 WHERE id = 1"))
+                .hasStackTraceContaining("UPDATE")
+                .hasStackTraceContaining("paimon.default.t1")
+                .hasStackTraceContaining("not supported yet");
+        assertThatThrownBy(() -> batch.executeSql("DELETE FROM t1 WHERE id = 1"))
+                .hasStackTraceContaining("DELETE")
+                .hasStackTraceContaining("paimon.default.t1")
+                .hasStackTraceContaining("not supported yet");
+
+        // refused, not half executed: the store still holds exactly what was written to it
+        assertThat(FakeStoreData.rows("default.t1")).hasSize(1);
+    }
+
+    @Test
+    public void testConnectorMappingToALakeStreamTableIsRejected() throws Exception {
+        StreamTableEnvironment batch = newBatchEnvWithLakeStreamTable("t1");
+        String path = tablePath("t1");
+
+        // a temporary table reaches the same directory without going through the catalog, so it
+        // has no store; writing to Paimon here would diverge from what the store holds
+        batch.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE t1_path (id INT) WITH ("
+                                + "'connector' = 'paimon', 'path' = '%s')",
+                        path));
+
+        assertThatThrownBy(
+                        () ->
+                                batch.executeSql(
+                                        "INSERT INTO t1_path SELECT * FROM (VALUES (9)) AS t(id)"))
+                .hasStackTraceContaining(CatalogOptions.LAKE_STREAM_STORE.key());
+        assertThat(FakeStoreData.rows("default.t1")).isEmpty();
+        assertThat(queryIds(batch, "SELECT id FROM t1")).isEmpty();
+    }
+
+    @Test
+    public void testNonTemporaryConnectorTableIsAlsoRejected() throws Exception {
+        StreamTableEnvironment batch = newBatchEnvWithLakeStreamTable("t1");
+        String path = tablePath("t1");
+
+        // a permanent table in the default catalog also reaches Paimon through the connector: the
+        // catalog hands out no factory, so Flink discovers one by the 'connector' option. The guard
+        // therefore keys on where the factory came from, not on whether the table is temporary.
+        batch.useCatalog("default_catalog");
+        batch.executeSql(
+                String.format(
+                        "CREATE TABLE t1_perm (id INT) WITH ("
+                                + "'connector' = 'paimon', 'path' = '%s')",
+                        path));
+
+        assertThatThrownBy(
+                        () ->
+                                batch.executeSql(
+                                        "INSERT INTO t1_perm SELECT * FROM (VALUES (9)) AS t(id)"))
+                .hasStackTraceContaining(CatalogOptions.LAKE_STREAM_STORE.key());
+        assertThat(FakeStoreData.rows("default.t1")).isEmpty();
+
+        batch.useCatalog("paimon");
+        assertThat(queryIds(batch, "SELECT id FROM t1")).isEmpty();
     }
 
     @Test

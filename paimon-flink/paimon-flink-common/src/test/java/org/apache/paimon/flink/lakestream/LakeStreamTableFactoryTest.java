@@ -21,6 +21,7 @@ package org.apache.paimon.flink.lakestream;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.DataCatalogTable;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkCatalogOptions;
@@ -29,6 +30,7 @@ import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -50,11 +52,11 @@ import org.apache.flink.table.catalog.WatermarkSpec;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.SinkV2Provider;
 import org.apache.flink.table.connector.sink.abilities.SupportsDeletePushDown;
+import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelDelete;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
 import org.apache.flink.table.connector.source.DynamicTableSource;
-import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.DataType;
@@ -169,6 +171,30 @@ public class LakeStreamTableFactoryTest {
                                 .build(),
                         resolvedSchema);
         catalog.createTable(path, table, false);
+    }
+
+    private String tableLocation(FlinkCatalog catalog, ObjectPath path) throws Exception {
+        return ((FileStoreTable) ((DataCatalogTable) catalog.getTable(path)).table())
+                .location()
+                .toString();
+    }
+
+    /**
+     * A connector mapping that names only the path, as {@code WITH ('connector'='paimon')} does.
+     */
+    private ResolvedCatalogTable pathOnlyMapping(
+            String location, Map<String, String> extraOptions) {
+        Map<String, String> options = new HashMap<>();
+        options.put("connector", "paimon");
+        options.put(CoreOptions.PATH.key(), location);
+        options.putAll(extraOptions);
+        return new ResolvedCatalogTable(
+                CatalogTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(idSchema()).build())
+                        .partitionKeys(Collections.<String>emptyList())
+                        .options(options)
+                        .build(),
+                idSchema());
     }
 
     private static ResolvedCatalogTable resolved(CatalogBaseTable table, ResolvedSchema schema) {
@@ -349,18 +375,36 @@ public class LakeStreamTableFactoryTest {
     }
 
     @Test
-    public void testRealTimeReadInConnectorModeIsNotRouted() throws Exception {
+    public void testRealTimeReadInConnectorModeIsRejected() throws Exception {
         FlinkCatalog catalog = newCatalog(null);
         createTable(catalog, T1, true);
         ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), idSchema());
         // connector mode: the factory is discovered by identifier and gets no catalog at all
         FlinkTableFactory factory = new FlinkTableFactory();
 
-        DynamicTableSource source =
-                factory.createDynamicTableSource(context(id("t1$rt"), paimonTable));
-
-        assertThat(source).isNotInstanceOf(FakeStoreSource.class);
+        // answering a '$rt' read from Paimon would serve snapshot data for a freshness request
+        // and say nothing about it
+        assertThatThrownBy(
+                        () -> factory.createDynamicTableSource(context(id("t1$rt"), paimonTable)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(CatalogOptions.LAKE_STREAM_STORE.key())
+                .hasMessageContaining("t1$rt");
         assertThat(FakeStoreTableFactory.sourceContexts()).isEmpty();
+        catalog.close();
+    }
+
+    @Test
+    public void testRealTimeWriteInConnectorModeIsRejected() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        // a plain table, so the name alone has to be enough to refuse the read-only view
+        createTable(catalog, T2, false);
+        ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T2), idSchema());
+        FlinkTableFactory factory = new FlinkTableFactory();
+
+        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t2$rt"), paimonTable)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(CatalogOptions.LAKE_STREAM_STORE.key());
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
         catalog.close();
     }
 
@@ -390,9 +434,9 @@ public class LakeStreamTableFactoryTest {
 
         DynamicTableSink sink = factory.createDynamicTableSink(context(id("t1"), paimonTable));
 
-        // a regular write is executed by the store, so the planner is handed the store's own sink
-        // and discovers its abilities on it directly
-        assertThat(sink).isInstanceOf(FakeStoreSink.class);
+        // a regular write is executed by the store, so the runtime provider and the summary come
+        // from the store's own sink
+        assertThat(sink).isInstanceOf(LakeStreamDynamicTableSink.class);
         assertThat(sink).isNotInstanceOf(FlinkTableSink.class);
 
         // the store sink is built through the delegated context
@@ -412,7 +456,7 @@ public class LakeStreamTableFactoryTest {
     }
 
     @Test
-    public void testRowLevelOperationsAreForwardedToTheStore() throws Exception {
+    public void testRowLevelModificationIsRejected() throws Exception {
         FlinkCatalog catalog = newCatalog(null);
         createTable(catalog, T1, true);
         ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), idSchema());
@@ -421,22 +465,59 @@ public class LakeStreamTableFactoryTest {
 
         DynamicTableSink sink = factory.createDynamicTableSink(context(id("t1"), paimonTable));
 
-        // a DELETE/UPDATE is a regular write, so the store executes it
-        ((SupportsRowLevelDelete) sink).applyRowLevelDelete(null);
-        ((SupportsRowLevelUpdate) sink)
-                .applyRowLevelUpdate(
-                        Collections.singletonList(Column.physical("id", DataTypes.INT())), null);
-        ((SupportsDeletePushDown) sink)
-                .applyDeleteFilters(Collections.<ResolvedExpression>emptyList());
-        ((SupportsDeletePushDown) sink).executeDeletion();
+        // the scan half reads Paimon snapshots while the modification is written to the store, so
+        // it could miss rows that have not been tiered or compute from stale values
+        assertThatThrownBy(
+                        () ->
+                                ((SupportsRowLevelUpdate) sink)
+                                        .applyRowLevelUpdate(
+                                                Collections.singletonList(
+                                                        Column.physical("id", DataTypes.INT())),
+                                                null))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("test-catalog.db1.t1")
+                .hasMessageContaining("UPDATE");
+        assertThatThrownBy(() -> ((SupportsRowLevelDelete) sink).applyRowLevelDelete(null))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("test-catalog.db1.t1")
+                .hasMessageContaining("DELETE");
 
-        assertThat(FakeStoreSink.abilityCalls())
-                .contains(
-                        "applyRowLevelDelete",
-                        "applyRowLevelUpdate(1)",
-                        "applyDeleteFilters(0)",
-                        "executeDeletion");
+        // nothing reached the store: the statement is refused, not half executed
+        assertThat(FakeStoreSink.abilityCalls()).isEmpty();
         catalog.close();
+    }
+
+    @Test
+    public void testOnlyModificationAbilitiesAreWithheldFromTheStoreSink() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        createTable(catalog, T1, true);
+        ResolvedCatalogTable paimonTable = resolved(catalog.getTable(T1), idSchema());
+        FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
+
+        DynamicTableSink sink = factory.createDynamicTableSink(context(id("t1"), paimonTable));
+
+        assertThat(sink).isInstanceOf(SupportsPartitioning.class);
+        assertThat(sink).isInstanceOf(SupportsRowLevelUpdate.class);
+        assertThat(sink).isInstanceOf(SupportsRowLevelDelete.class);
+        // overwrite selection arrives with INSERT OVERWRITE support; until then the store must not
+        // serve it either. A DELETE that cannot be pushed down falls back to the row-level path,
+        // which is rejected above, so push-down is withheld rather than forwarded.
+        assertThat(sink).isNotInstanceOf(SupportsOverwrite.class);
+        assertThat(sink).isNotInstanceOf(SupportsDeletePushDown.class);
+        catalog.close();
+    }
+
+    @Test
+    public void testStaticPartitionIsReportedWhenTheStoreSinkCannotTakeIt() {
+        // the wrapper advertises partitioning for the store, so a store that cannot take it has to
+        // be reported rather than reached through a blind cast
+        DynamicTableSink storeSink = mock(DynamicTableSink.class);
+        LakeStreamDynamicTableSink sink = new LakeStreamDynamicTableSink(storeSink, id("t1"));
+
+        assertThatThrownBy(() -> sink.applyStaticPartition(Collections.emptyMap()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("test-catalog.db1.t1")
+                .hasMessageContaining("static partitions");
     }
 
     @Test
@@ -535,6 +616,60 @@ public class LakeStreamTableFactoryTest {
                 .hasMessageContaining(CoreOptions.LAKE_STREAM_ENABLED.key());
         assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
         catalog.close();
+    }
+
+    @Test
+    public void testPathOnlyConnectorMappingCannotBypassTheStore() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        createTable(catalog, T1, true);
+        String location = tableLocation(catalog, T1);
+        catalog.close();
+
+        // the mapping says nothing about lake-stream, but the schema persisted at that path does
+        ResolvedCatalogTable pathOnly = pathOnlyMapping(location, Collections.emptyMap());
+        FlinkTableFactory factory = new FlinkTableFactory();
+
+        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t1"), pathOnly)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(CatalogOptions.LAKE_STREAM_STORE.key())
+                .hasMessageContaining(CoreOptions.LAKE_STREAM_ENABLED.key());
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
+    }
+
+    @Test
+    public void testConnectorModeOptionCannotRestateThePersistedFlagAsFalse() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        createTable(catalog, T1, true);
+        String location = tableLocation(catalog, T1);
+        catalog.close();
+
+        // whether the DDL restates the flag or a query hint overrides it, the merged options carry
+        // 'false'; the persisted schema is what decides
+        Map<String, String> overrides = new HashMap<>();
+        overrides.put(CoreOptions.LAKE_STREAM_ENABLED.key(), "false");
+        ResolvedCatalogTable pathOnly = pathOnlyMapping(location, overrides);
+        FlinkTableFactory factory = new FlinkTableFactory();
+
+        assertThatThrownBy(() -> factory.createDynamicTableSink(context(id("t1"), pathOnly)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(CatalogOptions.LAKE_STREAM_STORE.key());
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
+    }
+
+    @Test
+    public void testPathOnlyConnectorMappingToAPlainTableStillWritesToPaimon() throws Exception {
+        FlinkCatalog catalog = newCatalog(null);
+        createTable(catalog, T2, false);
+        String location = tableLocation(catalog, T2);
+        catalog.close();
+
+        ResolvedCatalogTable pathOnly = pathOnlyMapping(location, Collections.emptyMap());
+        FlinkTableFactory factory = new FlinkTableFactory();
+
+        DynamicTableSink sink = factory.createDynamicTableSink(context(id("t2"), pathOnly));
+
+        assertThat(sink).isInstanceOf(FlinkTableSink.class);
+        assertThat(FakeStoreTableFactory.sinkContexts()).isEmpty();
     }
 
     @Test

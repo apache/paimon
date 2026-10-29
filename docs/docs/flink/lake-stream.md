@@ -63,6 +63,11 @@ would leave the store and Paimon holding different data for the same keys. Table
 lake-stream tables are unaffected. Add `lakestream.store` and the store's connection options to the
 catalog, or [disable the mode](../concepts/lake-stream#disable-lake-stream-mode) on the table first.
 
+Lake-stream mode needs a Paimon catalog. A temporary table declared with `'connector' = 'paimon'`
+and a `path` reaches the data without a catalog, so it has no store: a `$rt` read through it, and a
+write to a lake-stream table through it, are both rejected rather than served from Paimon. Read and
+write a lake-stream table through the catalog.
+
 ## Write to a Lake-Stream Table
 
 Your write statements do not change. Flink reads `lakestream.enabled` from the table when it plans

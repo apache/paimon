@@ -52,6 +52,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -94,7 +96,8 @@ public class LakeStreamCatalogTest {
                 "test-catalog",
                 context.options().get(FlinkCatalogOptions.DEFAULT_DATABASE),
                 context.options(),
-                new Configuration());
+                new Configuration(),
+                getClass().getClassLoader());
     }
 
     private FlinkCatalog catalogWithStore() {
@@ -205,6 +208,34 @@ public class LakeStreamCatalogTest {
             assertThat(FakeStoreCatalogFactory.createdCatalogConfigurations().get(0).get(tokenPath))
                     .isEqualTo("/var/run/secrets/token");
         } finally {
+            catalog.close();
+        }
+    }
+
+    @Test
+    public void testStoreDiscoveryUsesTheClassLoaderSuppliedToTheCatalogFactory() throws Exception {
+        Options conf = conf(FakeStoreCatalogFactory.IDENTIFIER);
+        conf.setString("fakestore.bootstrap.servers", "localhost:9123");
+        FlinkCatalog catalog =
+                new FlinkCatalogFactory()
+                        .createCatalog(
+                                new FactoryUtil.DefaultCatalogContext(
+                                        "test-catalog",
+                                        conf.toMap(),
+                                        new Configuration(),
+                                        getClass().getClassLoader()));
+
+        // a store connector can be visible to the loader Flink handed to the catalog factory while
+        // the thread that first touches the store knows nothing about it
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(new URLClassLoader(new URL[0], null));
+        try {
+            assertThat(catalog.getOrCreateLakeStreamStoreCatalog())
+                    .isInstanceOf(FakeStoreCatalog.class);
+            assertThat(FakeStoreCatalogFactory.createdCatalogClassLoaders())
+                    .containsExactly(getClass().getClassLoader());
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
             catalog.close();
         }
     }

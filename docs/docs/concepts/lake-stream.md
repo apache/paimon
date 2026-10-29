@@ -58,7 +58,12 @@ does not apply to it. Read a historical snapshot through `my_table` instead.
 ## Write to a Lake-Stream Table
 
 Regular writes go to the store, and the store's tiering service moves them into Paimon afterwards.
-This covers streaming and batch inserts, and `DELETE` and `UPDATE` where the store supports them.
+This covers streaming and batch inserts.
+
+`UPDATE` and `DELETE` are not supported yet. Both read the table to find the rows they apply to,
+and on a lake-stream table that read resolves to Paimon snapshots while the modification is written
+to the store. The statement could then miss rows the store has not tiered yet, or compute an update
+from a stale value, so Paimon rejects it rather than run it against two different views.
 
 `INSERT OVERWRITE` is not supported on a lake-stream table: every write to such a table is served by
 the store, so an overwrite never reaches Paimon.

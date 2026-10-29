@@ -47,6 +47,7 @@ public class FakeStoreCatalogFactory implements CatalogFactory {
 
     private static final List<Map<String, String>> CREATED_CATALOG_OPTIONS = new ArrayList<>();
     private static final List<ReadableConfig> CREATED_CATALOG_CONFIGURATIONS = new ArrayList<>();
+    private static final List<ClassLoader> CREATED_CATALOG_CLASS_LOADERS = new ArrayList<>();
     private static final List<FakeStoreCatalog> CREATED_CATALOGS = new ArrayList<>();
 
     public static List<Map<String, String>> createdCatalogOptions() {
@@ -58,6 +59,11 @@ public class FakeStoreCatalogFactory implements CatalogFactory {
         return CREATED_CATALOG_CONFIGURATIONS;
     }
 
+    /** The class loaders the created store catalogs were handed, in creation order. */
+    public static List<ClassLoader> createdCatalogClassLoaders() {
+        return CREATED_CATALOG_CLASS_LOADERS;
+    }
+
     public static List<FakeStoreCatalog> createdCatalogs() {
         return CREATED_CATALOGS;
     }
@@ -65,6 +71,7 @@ public class FakeStoreCatalogFactory implements CatalogFactory {
     public static void reset() {
         CREATED_CATALOG_OPTIONS.clear();
         CREATED_CATALOG_CONFIGURATIONS.clear();
+        CREATED_CATALOG_CLASS_LOADERS.clear();
         CREATED_CATALOGS.clear();
         FakeStoreCatalog.resetGetTableCalls();
         FakeStoreTableFactory.reset();
@@ -90,6 +97,7 @@ public class FakeStoreCatalogFactory implements CatalogFactory {
         Map<String, String> options = new HashMap<>(context.getOptions());
         CREATED_CATALOG_OPTIONS.add(options);
         CREATED_CATALOG_CONFIGURATIONS.add(context.getConfiguration());
+        CREATED_CATALOG_CLASS_LOADERS.add(context.getClassLoader());
         if (!options.containsKey(BOOTSTRAP_SERVERS.key())) {
             throw new ValidationException(
                     String.format(

@@ -204,11 +204,20 @@ public class FlinkCatalog extends AbstractCatalog {
     /** The Flink configuration of the {@code CREATE CATALOG} statement. */
     private final ReadableConfig flinkConfiguration;
 
+    /** The class loader Flink supplied for this catalog. */
+    private final ClassLoader userClassLoader;
+
     /** The cached Lakestream Store catalog, {@code null} until first use. */
     @Nullable private volatile org.apache.flink.table.catalog.Catalog lakeStreamStoreCatalog;
 
     public FlinkCatalog(Catalog catalog, String name, String defaultDatabase, Options options) {
-        this(catalog, name, defaultDatabase, options, new Configuration());
+        this(
+                catalog,
+                name,
+                defaultDatabase,
+                options,
+                new Configuration(),
+                Thread.currentThread().getContextClassLoader());
     }
 
     public FlinkCatalog(
@@ -216,7 +225,8 @@ public class FlinkCatalog extends AbstractCatalog {
             String name,
             String defaultDatabase,
             Options options,
-            ReadableConfig flinkConfiguration) {
+            ReadableConfig flinkConfiguration,
+            ClassLoader userClassLoader) {
         super(name, defaultDatabase);
         LOG.info("Creating Flink catalog: metastore={}", options.get(CatalogOptions.METASTORE));
         this.catalog = catalog;
@@ -224,6 +234,7 @@ public class FlinkCatalog extends AbstractCatalog {
         this.options = new Options(options.toMap());
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         this.flinkConfiguration = flinkConfiguration;
+        this.userClassLoader = userClassLoader;
         if (!disableCreateTableInDefaultDatabase) {
             try {
                 getDatabase(defaultDatabase);
@@ -1065,10 +1076,7 @@ public class FlinkCatalog extends AbstractCatalog {
         CatalogFactory catalogFactory;
         try {
             catalogFactory =
-                    FactoryUtil.discoverFactory(
-                            Thread.currentThread().getContextClassLoader(),
-                            CatalogFactory.class,
-                            identifier);
+                    FactoryUtil.discoverFactory(userClassLoader, CatalogFactory.class, identifier);
         } catch (ValidationException e) {
             throw new CatalogException(
                     String.format(
@@ -1084,10 +1092,7 @@ public class FlinkCatalog extends AbstractCatalog {
                 LakeStreamUtils.extractPrefixedOptions(options.toMap(), identifier + ".");
         CatalogFactory.Context storeContext =
                 new FactoryUtil.DefaultCatalogContext(
-                        name,
-                        storeOptions,
-                        flinkConfiguration,
-                        Thread.currentThread().getContextClassLoader());
+                        name, storeOptions, flinkConfiguration, userClassLoader);
 
         org.apache.flink.table.catalog.Catalog created = catalogFactory.createCatalog(storeContext);
         try {

@@ -98,7 +98,7 @@ public abstract class AbstractFlinkTableFactory
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
-        if (isLakeStreamRead(context)) {
+        if (LakeStreamTableFactory.isLakeStreamRead(flinkCatalog, context)) {
             return createLakeStreamSource(context);
         }
         return createPaimonTableSource(context);
@@ -106,32 +106,13 @@ public abstract class AbstractFlinkTableFactory
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        if (isLakeStreamWrite(context)) {
+        if (LakeStreamTableFactory.isLakeStreamWrite(flinkCatalog, context)) {
             return createLakeStreamSink(context);
         }
         return createPaimonTableSink(context, buildPaimonTable(context));
     }
 
-    /** Whether the read is a {@code $rt} read of a lake-stream table. */
-    protected boolean isLakeStreamRead(Context context) {
-        return flinkCatalog != null
-                && LakeStreamTableFactory.isLakeStreamRead(flinkCatalog.catalog(), context);
-    }
-
-    /**
-     * Whether the write is to a lake-stream table, or through the read-only {@code $rt} name. The
-     * flag comes from the catalog, not from the table in the context, because Flink merges query
-     * hints into the latter. With no catalog there is no persisted flag, only the DDL options.
-     */
-    protected boolean isLakeStreamWrite(Context context) {
-        if (flinkCatalog == null) {
-            return Options.fromMap(context.getCatalogTable().getOptions())
-                    .get(CoreOptions.LAKE_STREAM_ENABLED);
-        }
-        return LakeStreamTableFactory.isLakeStreamWrite(flinkCatalog.catalog(), context);
-    }
-
-    /** The source that serves a lake-stream read. */
+    /** The source that serves a lake-stream read, refused when no store is configured. */
     protected DynamicTableSource createLakeStreamSource(Context context) {
         if (lakeStreamTableFactory == null) {
             throw LakeStreamTableFactory.missingStoreError(context.getObjectIdentifier(), "read");
@@ -139,7 +120,7 @@ public abstract class AbstractFlinkTableFactory
         return lakeStreamTableFactory.createDynamicTableSource(context);
     }
 
-    /** The sink that serves a lake-stream write. */
+    /** The sink that serves a lake-stream write, refused when no store is configured. */
     protected DynamicTableSink createLakeStreamSink(Context context) {
         if (lakeStreamTableFactory == null) {
             throw LakeStreamTableFactory.missingStoreError(
