@@ -52,7 +52,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
     private final FileIO fileIO;
     private final FileStorePathFactory paths;
     private final SnapshotManager snapshots;
-    private final boolean indexOnly;
     private final Set<Long> reassignments = new HashSet<>();
     private long checkedSnapshot;
     private CommitChanges changes;
@@ -63,20 +62,9 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             SnapshotManager snapshots,
             long scanSnapshotId,
             CommitChanges changes) {
-        this(fileIO, paths, snapshots, scanSnapshotId, changes, false);
-    }
-
-    private ReassignCompactChangesProvider(
-            FileIO fileIO,
-            FileStorePathFactory paths,
-            SnapshotManager snapshots,
-            long scanSnapshotId,
-            CommitChanges changes,
-            boolean indexOnly) {
         this.fileIO = fileIO;
         this.paths = paths;
         this.snapshots = snapshots;
-        this.indexOnly = indexOnly;
         this.checkedSnapshot = scanSnapshotId;
         this.changes = changes;
     }
@@ -116,7 +104,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         return !hasBuildOutputs
                 ? latest -> changes
                 : new ReassignCompactChangesProvider(
-                        fileIO, paths, snapshots, scanSnapshotId, changes, true);
+                        fileIO, paths, snapshots, scanSnapshotId, changes);
     }
 
     @Override
@@ -186,13 +174,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         List<IndexManifestEntry> indexes = new ArrayList<>(changes.indexFiles.size());
         for (IndexManifestEntry entry : changes.indexFiles) {
             IndexFileMeta file = entry.indexFile();
-            if (indexOnly
-                    && entry.kind() == FileKind.ADD
-                    && DataEvolutionIndexSourceMeta.fromIndexFile(file).scanSnapshotId()
-                            >= assignment.snapshotId()) {
-                indexes.add(entry);
-                continue;
-            }
             GlobalIndexMeta meta = file.globalIndexMeta();
             if (meta == null) {
                 checkState(

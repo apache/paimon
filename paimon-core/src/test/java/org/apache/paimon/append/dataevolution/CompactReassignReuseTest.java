@@ -285,9 +285,8 @@ public class CompactReassignReuseTest extends TableTestBase {
             commit.commit(buildIndex(table, "pt", null));
         }
         long scanSnapshot = table.snapshotManager().latestSnapshotId();
-        List<CommitMessage> messages = buildIndex(table, indexType, "id", "a");
+        List<CommitMessage> messages = buildIndex(table, indexType, "id", null);
         assertThat(new DataEvolutionRowIdReassigner(table).reassign().reassigned).isTrue();
-        messages.addAll(buildIndex(table, indexType, "id", "b"));
         List<String> files =
                 messages.stream()
                         .flatMap(
@@ -317,10 +316,7 @@ public class CompactReassignReuseTest extends TableTestBase {
             assertThat(
                             DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile())
                                     .scanSnapshotId())
-                    .isEqualTo(
-                            entry.partition().getString(0).toString().equals("a")
-                                    ? scanSnapshot
-                                    : scanSnapshot + 1);
+                    .isEqualTo(scanSnapshot);
         }
         long[] rowIds = {4, 5, 2, 6};
         for (int id = 0; id < rowIds.length; id++) {
