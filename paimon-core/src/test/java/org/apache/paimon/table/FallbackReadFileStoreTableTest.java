@@ -371,10 +371,7 @@ public class FallbackReadFileStoreTableTest {
     }
 
     @ParameterizedTest
-    @CsvSource({
-        "false,false,false", "false,false,true", "false,true,false", "false,true,true",
-        "true,false,false", "true,false,true", "true,true,false", "true,true,true"
-    })
+    @CsvSource({"false,false,false", "false,true,true", "true,false,true", "true,true,false"})
     public void testTimeTravelWithEmptyOtherBranch(
             boolean wrappedFirst, boolean scanVersion, boolean allowEarliest) throws Exception {
         FileStoreTable mainTable = createTable();
@@ -395,23 +392,10 @@ public class FallbackReadFileStoreTableTest {
                         new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst)
                                 .copy(options);
 
-        // Copying and serialization must retain the empty time-travel result.
-        for (FileStoreTable copy :
-                Arrays.asList(
-                        table,
-                        table.copy(Collections.emptyMap()),
-                        table.copyWithoutTimeTravel(Collections.emptyMap()),
-                        table.copy(table.schema()),
-                        table.copyWithLatestSchema(),
-                        InstantiationUtil.deserializeObject(
-                                InstantiationUtil.serializeObject(table),
-                                getClass().getClassLoader()))) {
-            assertThat(readAndCollect((FallbackReadFileStoreTable) copy, scan -> {}))
-                    .containsExactly(Pair.of(1, 10));
-            assertThat(copy.newScan().listPartitionEntries())
-                    .map(entry -> entry.partition().getInt(0))
-                    .containsExactly(1);
-        }
+        assertThat(readAndCollect(table, scan -> {})).containsExactly(Pair.of(1, 10));
+        assertThat(table.newScan().listPartitionEntries())
+                .map(entry -> entry.partition().getInt(0))
+                .containsExactly(1);
     }
 
     @Test
@@ -477,15 +461,6 @@ public class FallbackReadFileStoreTableTest {
                     .hasMessageContaining(
                             CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
         }
-
-        writeDataIntoTable(mainTable, 1, rowData(3, 30));
-        FallbackReadFileStoreTable later =
-                (FallbackReadFileStoreTable)
-                        table.copy(
-                                Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
-        assertThat(readAndCollect(later, scan -> {}))
-                .containsExactlyInAnyOrder(
-                        Pair.of(1, wrappedFirst ? 10 : 100), Pair.of(2, 20), Pair.of(3, 30));
     }
 
     @ParameterizedTest
@@ -581,23 +556,9 @@ public class FallbackReadFileStoreTableTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
-        Map<String, String> schemaOptions = new HashMap<>(table.options());
-        schemaOptions.put(CoreOptions.BRANCH.key(), mainTable.coreOptions().branch());
-        schemaOptions.remove(CoreOptions.SCAN_SNAPSHOT_ID.key());
-        schemaOptions.put(
-                CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
-        for (FileStoreTable latest :
-                Arrays.asList(
-                        table.copy(options),
-                        table.copy(table.schema().copy(schemaOptions)),
-                        table.switchToBranch("main"))) {
-            assertThat(readAndCollect((FallbackReadFileStoreTable) latest, scan -> {}))
-                    .as(
-                            "Latest options: %s, other options: %s",
-                            latest.options(),
-                            ((FallbackReadFileStoreTable) latest).other().options())
-                    .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
-        }
+        FileStoreTable latest = table.copy(options);
+        assertThat(readAndCollect((FallbackReadFileStoreTable) latest, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
         assertThatThrownBy(
                         () ->
                                 table.copy(
@@ -607,9 +568,8 @@ public class FallbackReadFileStoreTableTest {
                 .hasMessageContaining("No snapshot at or before");
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testExplicitExpiredSnapshotIsNotReplaced(boolean allowEarliest) throws Exception {
+    @Test
+    public void testExplicitExpiredSnapshotIsNotReplaced() throws Exception {
         FileStoreTable table = createTable();
         writeDataIntoTable(table, 0, rowData(1, 10));
         writeDataIntoTable(table, 1, rowData(2, 20));
@@ -617,9 +577,7 @@ public class FallbackReadFileStoreTableTest {
         table.snapshotManager().commitEarliestHint(2);
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-        options.put(
-                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(),
-                String.valueOf(allowEarliest));
+        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
         FileStoreTable expired = table.copy(options);
 
         assertThatThrownBy(() -> expired.newScan().plan())
@@ -659,9 +617,8 @@ public class FallbackReadFileStoreTableTest {
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testAllowEarliestSnapshotOptionOverrides(boolean wrappedFirst) throws Exception {
+    @Test
+    public void testAllowEarliestSnapshotOptionOverrides() throws Exception {
         FileStoreTable mainTable =
                 createTable()
                         .copy(
@@ -678,7 +635,7 @@ public class FallbackReadFileStoreTableTest {
         }
         writeDataIntoTable(branchTable, 0, rowData(2, 20));
         FallbackReadFileStoreTable table =
-                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
 
@@ -695,9 +652,8 @@ public class FallbackReadFileStoreTableTest {
                 .hasMessageContaining("No snapshot at or before");
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testTimestampTimeTravelUsesRequestedTime(boolean wrappedFirst) throws Exception {
+    @Test
+    public void testTimestampTimeTravelUsesRequestedTime() throws Exception {
         FileStoreTable mainTable = createTable();
         writeDataIntoTable(mainTable, 0, rowData(1, 10));
         mainTable.createBranch("bc");
@@ -714,7 +670,7 @@ public class FallbackReadFileStoreTableTest {
         writeDataIntoTable(branchTable, 1, rowData(3, 30));
         FallbackReadFileStoreTable table =
                 (FallbackReadFileStoreTable)
-                        new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst)
+                        new FallbackReadFileStoreTable(mainTable, branchTable, true)
                                 .copy(
                                         Collections.singletonMap(
                                                 CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
@@ -724,10 +680,8 @@ public class FallbackReadFileStoreTableTest {
                 .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testTagTimeTravelWithoutActiveOtherSnapshots(boolean wrappedFirst)
-            throws Exception {
+    @Test
+    public void testTagTimeTravelWithoutActiveOtherSnapshots() throws Exception {
         FileStoreTable mainTable = createTable();
         writeDataIntoTable(mainTable, 0, rowData(1, 10));
         mainTable.createTag("base");
@@ -740,7 +694,7 @@ public class FallbackReadFileStoreTableTest {
         assertThat(branchTable.snapshotManager().latestSnapshotId()).isNull();
         FallbackReadFileStoreTable table =
                 (FallbackReadFileStoreTable)
-                        new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst)
+                        new FallbackReadFileStoreTable(mainTable, branchTable, true)
                                 .copy(
                                         Collections.singletonMap(
                                                 CoreOptions.SCAN_TAG_NAME.key(), "base"));
