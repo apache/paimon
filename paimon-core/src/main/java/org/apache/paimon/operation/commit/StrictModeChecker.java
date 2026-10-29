@@ -130,18 +130,6 @@ public class StrictModeChecker {
         }
     }
 
-    /** Index builds must reject data changes even when optional strict mode is disabled. */
-    public void checkIndexBuildOverwrite(Snapshot snapshot, List<BinaryRow> indexedPartitions) {
-        Set<BinaryRow> partitions = new HashSet<>(indexedPartitions);
-        if (hasOverlappedDataPartition(snapshot, partitions)
-                || hasOverlappedIndexPartition(snapshot, partitions)) {
-            throw new RuntimeException(
-                    String.format(
-                            "Cannot reuse index build because OVERWRITE snapshot %s modified indexed partitions.",
-                            snapshot.id()));
-        }
-    }
-
     private boolean hasOverlappedDataPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
         if (newPartitions.isEmpty()) {
             return false;

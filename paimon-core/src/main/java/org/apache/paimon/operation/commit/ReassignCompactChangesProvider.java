@@ -43,8 +43,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -54,7 +52,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
     private final FileIO fileIO;
     private final FileStorePathFactory paths;
     private final SnapshotManager snapshots;
-    @Nullable private final BiConsumer<Snapshot, List<IndexManifestEntry>> indexBuildCheck;
+    private final boolean indexOnly;
     private final Set<Long> reassignments = new HashSet<>();
     private long checkedSnapshot;
     private CommitChanges changes;
@@ -65,7 +63,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             SnapshotManager snapshots,
             long scanSnapshotId,
             CommitChanges changes) {
-        this(fileIO, paths, snapshots, scanSnapshotId, changes, null);
+        this(fileIO, paths, snapshots, scanSnapshotId, changes, false);
     }
 
     private ReassignCompactChangesProvider(
@@ -74,11 +72,11 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             SnapshotManager snapshots,
             long scanSnapshotId,
             CommitChanges changes,
-            @Nullable BiConsumer<Snapshot, List<IndexManifestEntry>> indexBuildCheck) {
+            boolean indexOnly) {
         this.fileIO = fileIO;
         this.paths = paths;
         this.snapshots = snapshots;
-        this.indexBuildCheck = indexBuildCheck;
+        this.indexOnly = indexOnly;
         this.checkedSnapshot = scanSnapshotId;
         this.changes = changes;
     }
@@ -89,8 +87,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
             FileStorePathFactory paths,
             SnapshotManager snapshots,
             List<IndexManifestEntry> indexFiles,
-            @Nullable Long lastSafeSnapshot,
-            BiConsumer<Snapshot, List<IndexManifestEntry>> buildCheck) {
+            @Nullable Long lastSafeSnapshot) {
         CommitChanges changes =
                 new CommitChanges(Collections.emptyList(), Collections.emptyList(), indexFiles);
         long scanSnapshotId =
@@ -119,7 +116,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         return !hasBuildOutputs
                 ? latest -> changes
                 : new ReassignCompactChangesProvider(
-                        fileIO, paths, snapshots, scanSnapshotId, changes, buildCheck);
+                        fileIO, paths, snapshots, scanSnapshotId, changes, true);
     }
 
     @Override
@@ -140,23 +137,6 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
                     snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
                             ? SerializationAssignment.planFile(snapshot)
                             : null;
-            if (indexBuildCheck != null
-                    && (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
-                            || snapshot.commitKind() == Snapshot.CommitKind.APPEND)
-                    && plan == null) {
-                List<IndexManifestEntry> indexes =
-                        changes.indexFiles.stream()
-                                .filter(
-                                        entry ->
-                                                entry.kind() == FileKind.ADD
-                                                        && DataEvolutionIndexSourceMeta
-                                                                        .fromIndexFile(
-                                                                                entry.indexFile())
-                                                                        .scanSnapshotId()
-                                                                < snapshot.id())
-                                .collect(Collectors.toList());
-                indexBuildCheck.accept(snapshot, indexes);
-            }
             if (plan != null) {
                 SerializationAssignment assignment;
                 try {
@@ -206,7 +186,7 @@ public final class ReassignCompactChangesProvider implements CommitChangesProvid
         List<IndexManifestEntry> indexes = new ArrayList<>(changes.indexFiles.size());
         for (IndexManifestEntry entry : changes.indexFiles) {
             IndexFileMeta file = entry.indexFile();
-            if (indexBuildCheck != null
+            if (indexOnly
                     && entry.kind() == FileKind.ADD
                     && DataEvolutionIndexSourceMeta.fromIndexFile(file).scanSnapshotId()
                             >= assignment.snapshotId()) {

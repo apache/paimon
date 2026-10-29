@@ -334,8 +334,9 @@ public class CompactReassignReuseTest extends TableTestBase {
         }
     }
 
-    @Test
-    void testIndexBuildRejectsConcurrentColumnUpdate() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testIndexBuildKeepsExistingColumnUpdateBehavior(boolean reassign) throws Exception {
         FileStoreTable table = prepare();
         List<CommitMessage> messages = buildIndex(table, "id", null);
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
@@ -353,17 +354,17 @@ public class CompactReassignReuseTest extends TableTestBase {
             }
             commit.commit(updates);
         }
-        new DataEvolutionRowIdReassigner(table).reassign();
+        if (reassign) {
+            new DataEvolutionRowIdReassigner(table).reassign();
+        }
         long snapshot = table.snapshotManager().latestSnapshotId();
-        assertThatThrownBy(
-                        () -> {
-                            try (BatchTableCommit commit =
-                                    table.newBatchWriteBuilder().newCommit()) {
-                                commit.commit(messages);
-                            }
-                        })
-                .hasMessageContaining("modified indexed columns");
-        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(snapshot + 1);
+        assertThat(read(table))
+                .extracting(row -> row.getInt(1))
+                .containsExactlyInAnyOrder(100, 1, 2, 3);
     }
 
     @ParameterizedTest
