@@ -970,6 +970,43 @@ class SchemaValidationTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"aggregation, k1", "aggregation, k2", "partial-update, k1", "partial-update, k2"})
+    void testPrimaryKeyIgnoreRetract(String mergeEngine, String primaryKey) {
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", mergeEngine);
+        options.put("fields.v.aggregate-function", "last_non_null_value");
+        options.put("fields.v.ignore-retract", "true");
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "k1", DataTypes.INT()),
+                                new DataField(1, "k2", DataTypes.INT()),
+                                new DataField(2, "v", DataTypes.INT())),
+                        2,
+                        singletonList("k1"),
+                        Arrays.asList("k1", "k2"),
+                        options,
+                        "");
+
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        String option = "fields." + primaryKey + ".ignore-retract";
+        options.put(option, "true");
+        assertThatThrownBy(() -> validateTableSchema(schema.copy(options)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Primary key field '"
+                                + primaryKey
+                                + "' cannot be configured with '"
+                                + option
+                                + "=true'.");
+
+        options.put(option, "false");
+        assertThatCode(() -> validateTableSchema(schema.copy(options))).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
     @CsvSource({
         "aggregation, fields.data.num.aggregate-function, sum",
         "partial-update, fields.data.num.sequence-group.sort-order, descending"
