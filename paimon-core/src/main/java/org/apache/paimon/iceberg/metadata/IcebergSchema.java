@@ -19,6 +19,12 @@
 package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -52,12 +58,61 @@ public class IcebergSchema {
     @JsonProperty(FIELD_FIELDS)
     private final List<IcebergDataField> fields;
 
+    /** Paimon column IDs are 0-based; Iceberg IDs must be >= 1, so every ID is shifted by one. */
+    private static final int ID_OFFSET = 1;
+
+    /**
+     * Builds the Iceberg schema for a Paimon table schema.
+     *
+     * <p>Iceberg field IDs must be positive, but Paimon assigns a single 0-based counter to both
+     * top-level and nested fields (see {@code Schema.Builder#column}). Every Paimon ID - top-level
+     * and nested ROW/ARRAY/MAP/MULTISET alike - is shifted by {@link #ID_OFFSET} so the whole
+     * emitted Iceberg schema uses one consistent, positive ID space. The same mapping therefore
+     * applies to the manifest header, the table metadata schemas, the partition source IDs and the
+     * manifest metrics maps, which are all derived from this schema.
+     */
     public static IcebergSchema create(TableSchema tableSchema) {
         return new IcebergSchema(
                 (int) tableSchema.id(),
                 tableSchema.fields().stream()
-                        .map(IcebergDataField::new)
+                        .map(IcebergSchema::positiveField)
                         .collect(Collectors.toList()));
+    }
+
+    private static IcebergDataField positiveField(DataField field) {
+        return new IcebergDataField(shiftIds(field));
+    }
+
+    private static DataField shiftIds(DataField field) {
+        return new DataField(
+                field.id() + ID_OFFSET, field.name(), shiftIds(field.type()), field.description());
+    }
+
+    private static DataType shiftIds(DataType type) {
+        switch (type.getTypeRoot()) {
+            case ROW:
+                RowType rowType = (RowType) type;
+                return new RowType(
+                        rowType.isNullable(),
+                        rowType.getFields().stream()
+                                .map(IcebergSchema::shiftIds)
+                                .collect(Collectors.toList()));
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) type;
+                return new ArrayType(arrayType.isNullable(), shiftIds(arrayType.getElementType()));
+            case MAP:
+                MapType mapType = (MapType) type;
+                return new MapType(
+                        mapType.isNullable(),
+                        shiftIds(mapType.getKeyType()),
+                        shiftIds(mapType.getValueType()));
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) type;
+                return new MultisetType(
+                        multisetType.isNullable(), shiftIds(multisetType.getElementType()));
+            default:
+                return type;
+        }
     }
 
     public IcebergSchema(int schemaId, List<IcebergDataField> fields) {
