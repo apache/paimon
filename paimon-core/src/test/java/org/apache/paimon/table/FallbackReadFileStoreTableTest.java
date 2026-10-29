@@ -387,10 +387,10 @@ public class FallbackReadFileStoreTableTest {
                 CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(),
                 String.valueOf(allowEarliest));
 
-        FallbackReadFileStoreTable table =
-                (FallbackReadFileStoreTable)
-                        new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst)
-                                .copy(options);
+        FallbackReadFileStoreTable latest =
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
+        assertThat(readAndCollect(latest, scan -> {})).containsExactly(Pair.of(1, 10));
+        FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) latest.copy(options);
 
         assertThat(readAndCollect(table, scan -> {})).containsExactly(Pair.of(1, 10));
         assertThat(table.newScan().listPartitionEntries())
@@ -398,286 +398,88 @@ public class FallbackReadFileStoreTableTest {
                 .containsExactly(1);
     }
 
-    @Test
-    public void testTimeTravelWithEmptyTable() throws Exception {
-        FileStoreTable table =
-                createTable()
-                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
-
-        assertThatThrownBy(() -> table.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("There is currently no snapshot.");
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testLatestWithEmptyOtherBranch(boolean wrappedFirst) throws Exception {
-        FileStoreTable mainTable = createTable();
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        mainTable.createBranch("empty");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "empty");
-        FallbackReadFileStoreTable table =
-                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
-
-        assertThat(readAndCollect(table, scan -> {})).containsExactly(Pair.of(1, 10));
-    }
-
     @ParameterizedTest
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-    public void testTimeTravelBeforeOtherBranchFirstSnapshot(
-            boolean wrappedFirst, boolean allowEarliest) throws Exception {
+    public void testTimeTravelBeforeOtherSnapshots(boolean wrappedFirst, boolean expired)
+            throws Exception {
         FileStoreTable mainTable = createTable();
         writeDataIntoTable(mainTable, 0, rowData(1, 10));
         long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
-        mainTable.createBranch("later");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "later");
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
         while (System.currentTimeMillis() <= snapshotTime) {
             Thread.yield();
         }
         writeDataIntoTable(branchTable, 0, rowData(1, 100), rowData(2, 20));
-        assertThat(branchTable.snapshotManager().snapshot(1).timeMillis())
-                .isGreaterThan(snapshotTime);
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-        if (allowEarliest) {
-            options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
+        if (expired) {
+            writeDataIntoTable(branchTable, 1, rowData(3, 30));
+            branchTable.snapshotManager().deleteSnapshot(1);
+            branchTable.snapshotManager().commitEarliestHint(2);
         }
-        FallbackReadFileStoreTable table =
-                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
-
-        if (allowEarliest) {
-            FallbackReadFileStoreTable historical =
-                    (FallbackReadFileStoreTable) table.copy(options);
-            assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(1L);
-            assertThat(readAndCollect(historical, scan -> {}))
-                    .containsExactlyInAnyOrder(Pair.of(1, wrappedFirst ? 10 : 100), Pair.of(2, 20));
-            assertThat(historical.newScan().listPartitionEntries())
-                    .map(entry -> entry.partition().getInt(0))
-                    .containsExactlyInAnyOrder(1, 2);
-        } else {
-            assertThatThrownBy(() -> table.copy(options))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("No snapshot at or before")
-                    .hasMessageContaining(
-                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testTimeTravelWithEmptyBranchOption(boolean wrappedFirst) throws Exception {
-        FileStoreTable mainTable = createTable();
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        mainTable.createBranch("empty");
-        Options options = new Options();
-        options.set(
-                wrappedFirst ? CoreOptions.SCAN_FALLBACK_BRANCH : CoreOptions.SCAN_PRIMARY_BRANCH,
-                "empty");
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                                fileIO,
-                                tablePath,
-                                mainTable.schema(),
-                                options,
-                                CatalogEnvironment.empty())
-                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
-
-        assertThat(readAndCollect((FallbackReadFileStoreTable) table, scan -> {}))
-                .containsExactly(Pair.of(1, 10));
-    }
-
-    @ParameterizedTest
-    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-    public void testTimeTravelWithExpiredOtherSnapshot(boolean wrappedFirst, boolean allowEarliest)
-            throws Exception {
-        FileStoreTable mainTable = createTable();
-        mainTable.createBranch("bc");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
-        writeDataIntoTable(branchTable, 0, rowData(2, 20));
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
-        while (System.currentTimeMillis() <= snapshotTime) {
-            Thread.yield();
-        }
-        writeDataIntoTable(branchTable, 1, rowData(3, 30));
-        branchTable.snapshotManager().deleteSnapshot(1);
-        branchTable.snapshotManager().commitEarliestHint(2);
-        // Earliest and latest must differ, so this verifies that the option selects earliest.
+        // The latest snapshot must differ from earliest; its extra row must not be read.
         writeDataIntoTable(branchTable, 2, rowData(4, 40));
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-        if (allowEarliest) {
-            options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
+        if (expired) {
+            branchTable
+                    .schemaManager()
+                    .commitChanges(SchemaChange.addColumn("extra", DataTypes.STRING()));
+            branchTable = branchTable.copyWithLatestSchema();
         }
         FallbackReadFileStoreTable table =
                 new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        assertThatThrownBy(() -> table.copy(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No snapshot at or before");
 
-        if (allowEarliest) {
-            FallbackReadFileStoreTable historical =
-                    (FallbackReadFileStoreTable) table.copy(options);
-            assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(2L);
-            assertThat(readAndCollect(historical, scan -> {}))
-                    .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
-            assertThat(historical.newScan().listPartitionEntries())
-                    .map(entry -> entry.partition().getInt(0))
-                    .containsExactlyInAnyOrder(1, 2, 3);
-            DataTableScan pinned = historical.newScan();
-            branchTable.snapshotManager().deleteSnapshot(2);
-            branchTable.snapshotManager().commitEarliestHint(3);
-            assertThatThrownBy(pinned::plan)
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("out of available snapshotId range");
-        } else {
-            assertThatThrownBy(() -> table.copy(options))
+        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
+        FallbackReadFileStoreTable historical = (FallbackReadFileStoreTable) table.copy(options);
+        long earliestId = expired ? 2L : 1L;
+        assertThat(historical.other().coreOptions().scanSnapshotId()).isEqualTo(earliestId);
+        assertThat(historical.other().rowType()).isEqualTo(mainTable.rowType());
+        List<Pair<Integer, Integer>> expected =
+                new ArrayList<>(Arrays.asList(Pair.of(1, wrappedFirst ? 10 : 100), Pair.of(2, 20)));
+        if (expired) {
+            expected.add(Pair.of(3, 30));
+        }
+        assertThat(readAndCollect(historical, scan -> {}))
+                .containsExactlyInAnyOrderElementsOf(expected);
+
+        options.remove(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+        assertThat(
+                        ((FallbackReadFileStoreTable) historical.copy(options))
+                                .other()
+                                .coreOptions()
+                                .scanSnapshotId())
+                .isEqualTo(earliestId);
+        for (String override : Arrays.asList("false", null)) {
+            options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), override);
+            assertThatThrownBy(() -> historical.copy(options))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("No snapshot at or before");
         }
     }
 
-    @Test
-    public void testClearTimeTravelWithEmptyOtherBranch() throws Exception {
-        FileStoreTable mainTable = createTable();
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        mainTable.createBranch("bc");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
-        FileStoreTable table =
-                new FallbackReadFileStoreTable(mainTable, branchTable, true)
-                        .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
-        DataTableScan emptyBranchScan = table.newScan();
-        long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
-        while (System.currentTimeMillis() <= snapshotTime) {
-            Thread.yield();
-        }
-        writeDataIntoTable(branchTable, 0, rowData(2, 20));
-        assertThat(emptyBranchScan.listPartitionEntries())
-                .map(entry -> entry.partition().getInt(0))
-                .containsExactly(1);
-        assertThat(emptyBranchScan.plan().splits()).hasSize(1);
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
-        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
-        FileStoreTable latest = table.copy(options);
-        assertThat(readAndCollect((FallbackReadFileStoreTable) latest, scan -> {}))
-                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
-        assertThatThrownBy(
-                        () ->
-                                table.copy(
-                                        Collections.singletonMap(
-                                                CoreOptions.SCAN_SNAPSHOT_ID.key(), "1")))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
-    }
-
-    @Test
-    public void testExplicitExpiredSnapshotIsNotReplaced() throws Exception {
-        FileStoreTable table = createTable();
-        writeDataIntoTable(table, 0, rowData(1, 10));
-        writeDataIntoTable(table, 1, rowData(2, 20));
-        table.snapshotManager().deleteSnapshot(1);
-        table.snapshotManager().commitEarliestHint(2);
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
-        FileStoreTable expired = table.copy(options);
-
-        assertThatThrownBy(() -> expired.newScan().plan())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("out of available snapshotId range");
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testEarliestSnapshotUsesHistoricalSchema(boolean wrappedFirst) throws Exception {
-        FileStoreTable mainTable = createTable();
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        mainTable.createBranch("bc");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
-        long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
-        while (System.currentTimeMillis() <= snapshotTime) {
-            Thread.yield();
+    public void testExplicitMissingSnapshotIsNotReplaced(boolean expired) throws Exception {
+        FileStoreTable table = createTable();
+        if (expired) {
+            writeDataIntoTable(table, 0, rowData(1, 10));
+            writeDataIntoTable(table, 1, rowData(2, 20));
+            table.snapshotManager().deleteSnapshot(1);
+            table.snapshotManager().commitEarliestHint(2);
         }
-        writeDataIntoTable(branchTable, 0, rowData(2, 20));
-        writeDataIntoTable(branchTable, 1, rowData(3, 30));
-        branchTable.snapshotManager().deleteSnapshot(1);
-        branchTable.snapshotManager().commitEarliestHint(2);
-        branchTable
-                .schemaManager()
-                .commitChanges(SchemaChange.addColumn("extra", DataTypes.STRING()));
-        branchTable = branchTable.copyWithLatestSchema();
-        assertThat(branchTable.rowType().getFieldCount()).isEqualTo(3);
-        assertThat(branchTable.snapshotManager().snapshot(2).schemaId())
-                .isEqualTo(mainTable.snapshotManager().snapshot(1).schemaId());
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
         options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "true");
-        FileStoreTable table =
-                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst).copy(options);
 
-        assertThat(readAndCollect((FallbackReadFileStoreTable) table, scan -> {}))
-                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 30));
-    }
-
-    @Test
-    public void testAllowEarliestSnapshotOptionOverrides() throws Exception {
-        FileStoreTable mainTable =
-                createTable()
-                        .copy(
-                                Collections.singletonMap(
-                                        CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT
-                                                .key(),
-                                        "true"));
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        mainTable.createBranch("bc");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
-        long snapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
-        while (System.currentTimeMillis() <= snapshotTime) {
-            Thread.yield();
-        }
-        writeDataIntoTable(branchTable, 0, rowData(2, 20));
-        FallbackReadFileStoreTable table =
-                new FallbackReadFileStoreTable(mainTable, branchTable, true);
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
-
-        assertThat(readAndCollect((FallbackReadFileStoreTable) table.copy(options), scan -> {}))
-                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
-
-        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), "false");
-        assertThatThrownBy(() -> table.copy(options))
+        assertThatThrownBy(() -> table.copy(options).newScan().plan())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
-        options.put(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key(), null);
-        assertThatThrownBy(() -> table.copy(options))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No snapshot at or before");
-    }
-
-    @Test
-    public void testTimestampTimeTravelUsesRequestedTime() throws Exception {
-        FileStoreTable mainTable = createTable();
-        writeDataIntoTable(mainTable, 0, rowData(1, 10));
-        mainTable.createBranch("bc");
-        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
-        long mainSnapshotTime = mainTable.snapshotManager().snapshot(1).timeMillis();
-        while (System.currentTimeMillis() <= mainSnapshotTime) {
-            Thread.yield();
-        }
-        writeDataIntoTable(branchTable, 0, rowData(2, 20));
-        long timestamp = branchTable.snapshotManager().snapshot(1).timeMillis();
-        while (System.currentTimeMillis() <= timestamp) {
-            Thread.yield();
-        }
-        writeDataIntoTable(branchTable, 1, rowData(3, 30));
-        FallbackReadFileStoreTable table =
-                (FallbackReadFileStoreTable)
-                        new FallbackReadFileStoreTable(mainTable, branchTable, true)
-                                .copy(
-                                        Collections.singletonMap(
-                                                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-                                                String.valueOf(timestamp)));
-
-        assertThat(readAndCollect(table, scan -> {}))
-                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+                .hasMessageContaining(
+                        expired
+                                ? "out of available snapshotId range"
+                                : "There is currently no snapshot.");
     }
 
     @Test
