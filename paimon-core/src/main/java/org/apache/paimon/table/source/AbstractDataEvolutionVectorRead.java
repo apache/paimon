@@ -65,6 +65,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -131,6 +132,58 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         IndexFileMeta firstFile = firstVectorIndexFile(splits);
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         return createGlobalIndexer(firstFile.indexType(), firstMeta);
+    }
+
+    /** One indexer per definition, aligned with the splits and shared across matching shards. */
+    protected List<GlobalIndexer> createGlobalIndexers(List<IndexVectorSearchSplit> splits) {
+        Map<String, Map<List<Integer>, GlobalIndexer>> definitions = new HashMap<>();
+        GlobalIndexer first = createGlobalIndexer(splits);
+        IndexFileMeta firstFile = firstVectorIndexFile(splits);
+        definitions
+                .computeIfAbsent(firstFile.indexType(), k -> new HashMap<>())
+                .put(checkNotNull(firstFile.globalIndexMeta()).getIndexedFieldIds(), first);
+        List<GlobalIndexer> indexers = new ArrayList<>(splits.size());
+        for (IndexVectorSearchSplit split : splits) {
+            indexers.add(
+                    split.vectorIndexFiles().isEmpty()
+                            ? first
+                            : indexerForDefinition(split, definitions));
+        }
+        return indexers;
+    }
+
+    private GlobalIndexer indexerForDefinition(
+            IndexVectorSearchSplit split,
+            Map<String, Map<List<Integer>, GlobalIndexer>> definitions) {
+        IndexFileMeta file = split.vectorIndexFiles().get(0);
+        return definitions
+                .computeIfAbsent(file.indexType(), k -> new HashMap<>())
+                .computeIfAbsent(
+                        checkNotNull(file.globalIndexMeta()).getIndexedFieldIds(),
+                        k -> createGlobalIndexer(Collections.singletonList(split)));
+    }
+
+    /** Resolve metrics after every shard has registered its metadata with its own indexer. */
+    protected GlobalIndexer metricIndexer(List<GlobalIndexer> indexers) {
+        GlobalIndexer first = indexers.get(0);
+        String metric = null;
+        for (GlobalIndexer indexer : indexers) {
+            if (indexer == first) {
+                continue;
+            }
+            if (metric == null) {
+                metric = rawSearchMetric(first);
+            }
+            String current = rawSearchMetric(indexer);
+            if (!metric.equals(current)) {
+                throw new IllegalArgumentException(
+                        "Cannot combine vector indexes with different metrics: "
+                                + metric
+                                + " and "
+                                + current);
+            }
+        }
+        return first;
     }
 
     protected GlobalIndexer createGlobalIndexer(String indexType) {
@@ -200,12 +253,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             }
             // Share an indexer within each definition so the backend retains its own policy for
             // conflicting shard metrics. Different definitions must use their own field lists.
-            IndexFileMeta firstFile = split.vectorIndexFiles().get(0);
-            GlobalIndexer indexer =
-                    indexers.computeIfAbsent(firstFile.indexType(), k -> new HashMap<>())
-                            .computeIfAbsent(
-                                    checkNotNull(firstFile.globalIndexMeta()).getIndexedFieldIds(),
-                                    k -> createGlobalIndexer(Collections.singletonList(split)));
+            GlobalIndexer indexer = indexerForDefinition(split, indexers);
             try (GlobalIndexReader ignored =
                     indexer.createReader(
                             meta -> table.fileIO().newInputStream(meta.filePath()),
@@ -772,9 +820,38 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<RawVectorSearchSplit> rawSplits) {
         for (VectorSearchSplit split : splits) {
             if (split instanceof IndexVectorSearchSplit) {
-                indexSplits.add((IndexVectorSearchSplit) split);
+                addIndexDefinitionSplits((IndexVectorSearchSplit) split, indexSplits);
             } else if (split instanceof RawVectorSearchSplit) {
                 rawSplits.add((RawVectorSearchSplit) split);
+            }
+        }
+    }
+
+    private static void addIndexDefinitionSplits(
+            IndexVectorSearchSplit split, List<IndexVectorSearchSplit> indexSplits) {
+        Map<String, Map<List<Integer>, List<IndexFileMeta>>> definitions = new LinkedHashMap<>();
+        for (IndexFileMeta file : split.vectorIndexFiles()) {
+            definitions
+                    .computeIfAbsent(file.indexType(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(
+                            checkNotNull(file.globalIndexMeta()).getIndexedFieldIds(),
+                            k -> new ArrayList<>())
+                    .add(file);
+        }
+        if (definitions.values().stream().mapToInt(Map::size).sum() <= 1) {
+            indexSplits.add(split);
+            return;
+        }
+        // A range can contain several definitions. Keep each reader's field list homogeneous
+        // without changing the serialized scan plan or the row-id offset of any shard.
+        for (Map<List<Integer>, List<IndexFileMeta>> byFields : definitions.values()) {
+            for (List<IndexFileMeta> files : byFields.values()) {
+                indexSplits.add(
+                        new IndexVectorSearchSplit(
+                                split.rowRangeStart(),
+                                split.rowRangeEnd(),
+                                files,
+                                split.scalarIndexFiles()));
             }
         }
     }

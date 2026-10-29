@@ -32,6 +32,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,17 +74,19 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             return GlobalIndexResult.createEmpty();
         }
 
-        GlobalIndexer globalIndexer =
-                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
+        List<GlobalIndexer> globalIndexers =
+                indexSplits.isEmpty() ? Collections.emptyList() : createGlobalIndexers(indexSplits);
         ScoredGlobalIndexResult result =
                 indexSplits.isEmpty()
                         ? ScoredGlobalIndexResult.createEmpty()
-                        : readIndexed(indexSplits, globalIndexer);
+                        : readIndexed(indexSplits, globalIndexers);
+        GlobalIndexer globalIndexer =
+                globalIndexers.isEmpty() ? null : metricIndexer(globalIndexers);
         return withRawSearch(result, rawSplits, globalIndexer, rawPreFilter(rawSplits), vector);
     }
 
     protected ScoredGlobalIndexResult readIndexed(
-            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+            List<IndexVectorSearchSplit> splits, List<GlobalIndexer> globalIndexers) {
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
         String indexType = vectorIndexType(splits);
         int searchLimit = indexedSearchLimit(indexType);
@@ -99,7 +102,7 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             IndexVectorSearchSplit split = splits.get(i);
             futures.add(
                     eval(
-                            globalIndexer,
+                            globalIndexers.get(i),
                             indexPathFactory,
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
@@ -120,6 +123,9 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
             }
         }
         return maybeRerankIndexedResult(
-                ScoredGlobalIndexResult.merge(results), indexType, globalIndexer, vector);
+                ScoredGlobalIndexResult.merge(results),
+                indexType,
+                metricIndexer(globalIndexers),
+                vector);
     }
 }

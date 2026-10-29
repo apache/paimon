@@ -55,8 +55,10 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.BatchVectorSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
@@ -238,6 +240,140 @@ class ESIndexScalarTableTest {
                                 .results()
                                 .toRangeList())
                 .containsExactly(new Range(4, 4));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "disjoint,false",
+        "disjoint,true",
+        "same-range,false",
+        "same-range,true",
+        "reordered,false",
+        "reordered,true",
+        "same-definition,false",
+        "same-definition,true",
+        "overlap,false",
+        "overlap,true",
+        "raw-tail,false",
+        "raw-tail,true"
+    })
+    void testVectorQueriesUseMatchingDefinitions(String layout, boolean batch) throws Exception {
+        FileStoreTable table = createTable();
+        if ("same-range".equals(layout)) {
+            build(table, 0, 12, "embedding", "category", "price");
+            build(table, 0, 12, "embedding", "category");
+        } else {
+            int firstEnd = "overlap".equals(layout) ? 8 : 6;
+            int secondStart = "overlap".equals(layout) ? 4 : 6;
+            int secondEnd = "raw-tail".equals(layout) ? 8 : 12;
+            build(table, 0, firstEnd, "embedding", "category", "price");
+            if ("same-definition".equals(layout)) {
+                build(table, secondStart, secondEnd, "embedding", "category", "price");
+            } else if ("reordered".equals(layout)) {
+                build(table, secondStart, secondEnd, "embedding", "price", "category");
+            } else {
+                build(table, secondStart, secondEnd, "embedding", "category");
+            }
+        }
+        table = configured(table, "full", false);
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(2, BinaryString.fromString("c1"));
+        assertThat(read(withoutIndex(table), filter)).containsExactly(1, 4, 7);
+        fileIO.indexOpens.set(0);
+        assertDefinitionVectorQuery(table, 5, null, batch, false, 5);
+        assertThat(fileIO.indexOpens.get()).isPositive();
+        assertDefinitionVectorQuery(table, 5, filter, batch, false, 4);
+        Predicate unsupported =
+                new PredicateBuilder(table.rowType()).greaterThan(2, BinaryString.fromString("c1"));
+        assertDefinitionVectorQuery(table, 5, unsupported, batch, false, 2);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testVectorDefinitionsPreserveMetricForRawAndRefine(boolean rawTail, boolean batch)
+            throws Exception {
+        FileStoreTable table = createTable();
+        FileStoreTable cosine =
+                table.copy(
+                        Collections.singletonMap(
+                                "global-index.es-index.fields.embedding.metric", "cosine"));
+        build(cosine, 0, 6, "embedding", "category", "price");
+        build(cosine, 6, rawTail ? 8 : 12, "embedding", "category");
+        Predicate filter =
+                new PredicateBuilder(table.rowType()).equal(2, BinaryString.fromString("c2"));
+        // The table still says L2, but all index archives persist cosine. Row 8 wins in cosine,
+        // while row 2 wins in L2; row 8 is outside the index ranges when rawTail is true.
+        assertDefinitionVectorQuery(table, 5, filter, batch, false, 8);
+        assertDefinitionVectorQuery(table, 5, filter, batch, true, 8);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void testVectorDefinitionsRejectIncompatibleMetrics(boolean sameDefinition, boolean batch)
+            throws Exception {
+        FileStoreTable table = createTable();
+        build(
+                table.copy(
+                        Collections.singletonMap(
+                                "global-index.es-index.fields.embedding.metric", "cosine")),
+                0,
+                6,
+                "embedding",
+                "category",
+                "price");
+        if (sameDefinition) {
+            build(table, 6, 12, "embedding", "category", "price");
+        } else {
+            build(table, 6, 12, "embedding", "category");
+        }
+        assertThatThrownBy(() -> assertDefinitionVectorQuery(table, 5, null, batch, false, 5))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("different");
+    }
+
+    private void assertDefinitionVectorQuery(
+            FileStoreTable table,
+            int query,
+            Predicate filter,
+            boolean batch,
+            boolean refine,
+            int expected) {
+        table =
+                configured(table, "full", false)
+                        .copy(Collections.singletonMap("vector-index.search-mode", "full"));
+        Map<String, String> queryOptions =
+                refine
+                        ? Collections.singletonMap("es-index.refine-factor", "2")
+                        : Collections.emptyMap();
+        if (batch) {
+            BatchVectorSearchBuilder builder =
+                    table.newBatchVectorSearchBuilder()
+                            .withVectorColumn("embedding")
+                            .withVectors(new float[][] {vector(query), vector(query)})
+                            .withLimit(1)
+                            .withOptions(queryOptions);
+            if (filter != null) {
+                builder.withFilter(filter);
+            }
+            assertThat(builder.executeBatchLocal())
+                    .hasSize(2)
+                    .allSatisfy(
+                            result ->
+                                    assertThat(result.results().toRangeList())
+                                            .containsExactly(new Range(expected, expected)));
+        } else {
+            VectorSearchBuilder builder =
+                    table.newVectorSearchBuilder()
+                            .withVectorColumn("embedding")
+                            .withVector(vector(query))
+                            .withLimit(1)
+                            .withOptions(queryOptions);
+            if (filter != null) {
+                builder.withFilter(filter);
+            }
+            assertThat(builder.executeLocal().results().toRangeList())
+                    .containsExactly(new Range(expected, expected));
+        }
     }
 
     @Test
