@@ -18,18 +18,20 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.options.options import Options
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, RowType)
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import SetOption
+from pypaimon.schema.schema_change import RemoveOption, SetOption
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class TestSchemaManagerBranch(unittest.TestCase):
@@ -293,6 +295,198 @@ class TestOptionValidation(unittest.TestCase):
 
         self.assertEqual(manager.latest().id, 0)
         self.assertNotIn(key, manager.latest().options)
+
+
+class TestAlterTableOptions(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.file_io = FileIO.get(self.temp_dir.name, Options({}))
+        self.manager = SchemaManager(self.file_io, self.temp_dir.name)
+
+    def _alter(self, options, changes, has_snapshots=True):
+        schema = TableSchema.from_schema(0, Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))], options=options))
+        with patch.object(SnapshotManager, "get_latest_snapshot",
+                          return_value=object() if has_snapshots else None):
+            return self.manager._generate_table_schema(schema, changes).options
+
+    def _assert_rejected(self, options, changes, message):
+        with self.assertRaises(NotImplementedError) as ctx:
+            self._alter(options, changes)
+        self.assertEqual(str(ctx.exception), message)
+
+    def test_immutable_options(self):
+        for key in CoreOptions.IMMUTABLE_OPTIONS | {"bucket-function.provider"}:
+            with self.subTest(key=key):
+                old_value = "false" if key == "primary-key.nullable" else "old"
+                for options, change in [
+                    ({}, SetOption(key, "new")),
+                    ({key: old_value}, SetOption(key, "new")),
+                    ({}, RemoveOption(key)),
+                    ({key: old_value}, RemoveOption(key)),
+                ]:
+                    self._assert_rejected(options, [change], f"Change '{key}' is not supported yet.")
+                self.assertEqual(self._alter({key: old_value}, [SetOption(key, old_value)]), {key: old_value})
+
+    def test_bucket_changes(self):
+        for old_value, new_value, message in [
+            (None, "4", "Cannot change bucket when it is -1."),
+            (None, "-1", "Cannot change bucket when it is -1."),
+            ("-1", "4", "Cannot change bucket when it is -1."),
+            ("-1", "-01", "Cannot change bucket when it is -1."),
+            ("4", "-1", "Cannot change bucket to -1."),
+        ]:
+            with self.subTest(old=old_value, new=new_value):
+                options = {} if old_value is None else {"bucket": old_value}
+                self._assert_rejected(options, [SetOption("bucket", new_value)], message)
+        for options in [{}, {"bucket": "-1"}, {"bucket": "4"}]:
+            self._assert_rejected(options, [RemoveOption("bucket")], "Cannot reset bucket.")
+        for old_value, new_value in [
+            ("-1", "-1"), ("4", "8"), ("4", "+4"), ("-2", "4"),
+            ("4", "2147483647"), ("4", "-2147483648"), ("4", "\uff14"), ("4", "0" * 5000 + "4"),
+        ]:
+            self.assertEqual(
+                self._alter({"bucket": old_value}, [SetOption("bucket", new_value)]),
+                {"bucket": new_value})
+
+    def test_bucket_requires_java_integer(self):
+        for value in ["", "+", "invalid", " 4", "4 ", "4_0", "1.0", "2147483648", "-2147483649", "\U0001d7dc"]:
+            for old_value, new_value in [("4", value), (value, "4")]:
+                with self.subTest(old=old_value, new=new_value):
+                    with self.assertRaises(ValueError) as ctx:
+                        self._alter({"bucket": old_value}, [SetOption("bucket", new_value)])
+                    self.assertEqual(str(ctx.exception), f'For input string: "{value}"')
+
+    def test_deletion_vectors_changes(self):
+        key = "deletion-vectors.enabled"
+        for old_value, new_value in [(None, "true"), ("false", "true"), ("true", "false"), ("true", None)]:
+            for modifiable in [None, "false", "no"]:
+                options = {} if old_value is None else {key: old_value}
+                if modifiable is not None:
+                    options["deletion-vectors.modifiable"] = modifiable
+                message = (
+                    f"Cannot change deletion vectors mode from {old_value or 'false'} to {new_value or 'false'}. "
+                    "If modifying table deletion-vectors mode without full-compaction, "
+                    "this may result in data duplication. If you are confident, you can set table option "
+                    "'deletion-vectors.modifiable' = 'true' to allow deletion vectors modification.")
+                changes = [SetOption(key, new_value)]
+                if new_value == "false":
+                    changes.append(RemoveOption(key))
+                for change in changes:
+                    with self.subTest(old=old_value, new=new_value, modifiable=modifiable, change=change):
+                        self._assert_rejected(options, [change], message)
+        for old_value, new_value in [(None, "false"), ("false", "FALSE"), ("true", "TRUE")]:
+            options = {} if old_value is None else {key: old_value}
+            self.assertEqual(self._alter(options, [SetOption(key, new_value)])[key], new_value)
+        for options in [{}, {key: "false"}]:
+            self.assertEqual(self._alter(options, [RemoveOption(key)]), {})
+        for change in [SetOption(key, "true"), SetOption(key, "false"), RemoveOption(key)]:
+            for old_value in ["false", "true"]:
+                options = {key: old_value, "deletion-vectors.modifiable": "TRUE"}
+                result = self._alter(options, [change])
+                self.assertEqual(result.get(key), getattr(change, "value", None))
+
+    def test_options_cannot_be_disabled(self):
+        for key, message in [
+            ("ignore-delete", "Cannot change ignore-delete from true to false."),
+            ("ignore-update-before", "Cannot change ignore-update-before from true to false."),
+            ("data-evolution.nested-field.enabled",
+             "Cannot disable table option 'data-evolution.nested-field.enabled'."),
+        ]:
+            with self.subTest(key=key):
+                for change in [SetOption(key, "false"), SetOption(key, None), SetOption(key, "no"),
+                               RemoveOption(key)]:
+                    self._assert_rejected({key: "TRUE"}, [change], message)
+                for old_value in [None, "false", "true"]:
+                    options = {} if old_value is None else {key: old_value}
+                    self.assertEqual(self._alter(options, [SetOption(key, "true")]), {key: "true"})
+                for options in [{}, {key: "false"}]:
+                    self.assertEqual(self._alter(options, [RemoveOption(key)]), {})
+
+    def test_clustering_columns(self):
+        key = "clustering.columns"
+        for override in ["true", "false"]:
+            for old_value in [None, "id"]:
+                options = {"pk-clustering-override": override}
+                if old_value is not None:
+                    options[key] = old_value
+                self._assert_rejected(options, [SetOption(key, "name")],
+                                      "Cannot change clustering.columns when pk-clustering-override enabled.")
+                self._assert_rejected(options, [RemoveOption(key)],
+                                      "Cannot reset clustering.columns when pk-clustering-override enabled.")
+            self.assertEqual(self._alter(options, [SetOption(key, "id")]), options)
+        self.assertEqual(self._alter({}, [SetOption(key, "id")]), {key: "id"})
+        self.assertEqual(self._alter({key: "id"}, [RemoveOption(key)]), {})
+
+    def test_guards_require_snapshots(self):
+        for options, key, value in [
+            ({"bucket": "-1"}, "bucket", "4"),
+            ({"bucket": "4"}, "bucket", "-1"),
+            ({"deletion-vectors.enabled": "true"}, "deletion-vectors.enabled", "false"),
+            ({"ignore-delete": "true"}, "ignore-delete", "false"),
+            ({"ignore-update-before": "true"}, "ignore-update-before", "false"),
+            ({"data-evolution.nested-field.enabled": "true"}, "data-evolution.nested-field.enabled", "false"),
+            ({"pk-clustering-override": "true", "clustering.columns": "id"}, "clustering.columns", "name"),
+            ({"bucket-function.provider": "old"}, "bucket-function.provider", "new"),
+        ]:
+            with self.subTest(key=key):
+                self.assertEqual(self._alter(options, [SetOption(key, value)], False)[key], value)
+                self.assertNotIn(key, self._alter(options, [RemoveOption(key)], False))
+        for change in [SetOption("type", "format-table"), RemoveOption("type")]:
+            with self.assertRaisesRegex(NotImplementedError, "Change 'type' is not supported yet."):
+                self._alter({}, [change], False)
+
+    def test_checks_accept_native_option_values(self):
+        self.assertEqual(self._alter({"bucket": 2}, [SetOption("bucket", "4")]), {"bucket": "4"})
+        self.assertEqual(self._alter({"bucket": -1}, [SetOption("bucket", "-1")]), {"bucket": -1})
+        self.assertEqual(self._alter({"ignore-delete": True}, [SetOption("ignore-delete", "true")]),
+                         {"ignore-delete": "true"})
+        self.assertEqual(self._alter({"partition.default-name": True}, [SetOption("partition.default-name", "true")]),
+                         {"partition.default-name": "true"})
+        self.assertEqual(self._alter({"deletion-vectors.enabled": "yes"}, [SetOption("deletion-vectors.enabled", "1")]),
+                         {"deletion-vectors.enabled": "1"})
+        with self.assertRaisesRegex(NotImplementedError, "Cannot change deletion vectors mode"):
+            self._alter({"deletion-vectors.enabled": "false"}, [SetOption("deletion-vectors.enabled", "yes")])
+        dv = "deletion-vectors.enabled"
+        self.assertEqual(self._alter({dv: 1.0}, [SetOption(dv, "true")]), {dv: "true"})
+        self.assertEqual(self._alter({"ignore-update-before": "yes"}, [SetOption("ignore-update-before", "false")]),
+                         {"ignore-update-before": "false"})
+        self.assertEqual(self._alter({"merge-engine": "first-row"}, [SetOption("merge-engine", MergeEngine.FIRST_ROW)]),
+                         {"merge-engine": "first-row"})
+        with self.assertRaisesRegex(NotImplementedError, "Cannot change ignore-delete from true to false"):
+            self._alter({"ignore-delete": True}, [SetOption("ignore-delete", "false")])
+        options = {"deletion-vectors.modifiable": True}
+        self.assertEqual(self._alter(options, [SetOption("deletion-vectors.enabled", "true")]),
+                         {"deletion-vectors.modifiable": True, "deletion-vectors.enabled": "true"})
+
+    def test_checks_use_original_options(self):
+        key = "deletion-vectors.enabled"
+        modifiable = "deletion-vectors.modifiable"
+        for changes in [
+            [SetOption(modifiable, "true"), SetOption(key, "true")],
+            [SetOption(modifiable, "true"), RemoveOption(key)],
+        ]:
+            options = {key: "true"} if isinstance(changes[1], RemoveOption) else {}
+            with self.assertRaisesRegex(NotImplementedError, "Cannot change deletion vectors mode"):
+                self._alter(options, changes)
+        self.assertEqual(self._alter({modifiable: "true"}, [RemoveOption(modifiable), SetOption(key, "true")]),
+                         {key: "true"})
+        self.assertEqual(self._alter({}, [SetOption("ignore-delete", "true"), SetOption("ignore-delete", "false")]),
+                         {"ignore-delete": "false"})
+        self.assertEqual(self._alter({"bucket": "4"}, [SetOption("bucket", "8"), SetOption("bucket", "4")]),
+                         {"bucket": "4"})
+
+    def test_normalized_unchanged_options(self):
+        for options in [{}, {"type": "table"}, {"type": "TABLE"}]:
+            self.assertEqual(self._alter(options, [SetOption("type", "TaBlE")]), options)
+        schema = TableSchema.from_schema(0, Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))], primary_keys=["id"], partition_keys=["id"]))
+        with patch.object(SnapshotManager, "get_latest_snapshot", return_value=object()):
+            result = self.manager._generate_table_schema(schema, [
+                SetOption("primary-key", " id, "), SetOption("partition", " id, ")])
+        self.assertEqual(result.options, schema.options)
 
 
 class TestRowTrackingValidation(unittest.TestCase):
