@@ -216,13 +216,34 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
             Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
-            long otherId;
             if (otherSnapshot == null) {
-                otherId = Snapshot.FIRST_SNAPSHOT_ID;
-            } else {
-                otherId = otherSnapshot.id();
+                otherSnapshot = other.snapshotManager().earliestSnapshot();
+                if (otherSnapshot != null) {
+                    Preconditions.checkArgument(
+                            new Options(wrapped.options(), options)
+                                    .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
+                            "No snapshot at or before %s is available in branch '%s'. "
+                                    + "The earliest available snapshot is %s (time %s). "
+                                    + "Set '%s' to true to allow reading it.",
+                            millis,
+                            other.coreOptions().branch(),
+                            otherSnapshot.id(),
+                            otherSnapshot.timeMillis(),
+                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+                    LOG.warn(
+                            "No snapshot at or before {} is available in branch '{}'; reading earliest "
+                                    + "snapshot {} (time {}) because '{}' is enabled.",
+                            millis,
+                            other.coreOptions().branch(),
+                            otherSnapshot.id(),
+                            otherSnapshot.timeMillis(),
+                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+                }
             }
-            result.put(scanSnapshotIdOptionKey, String.valueOf(otherId));
+            // An empty branch is skipped by newFallbackScan instead of loading this ID.
+            result.put(
+                    scanSnapshotIdOptionKey,
+                    otherSnapshot == null ? scanSnapshotId : String.valueOf(otherSnapshot.id()));
         }
 
         // bucket number of main branch and other branch are very likely different,
@@ -246,80 +267,25 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         validateSchema();
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
-        FileStoreTable otherToScan = resolveOtherBranchForScan();
+        boolean otherIsEmpty =
+                other.coreOptions().scanSnapshotId() != null
+                        && other.snapshotManager().latestSnapshotId() == null;
+        if (otherIsEmpty) {
+            LOG.warn(
+                    "Branch '{}' has no snapshots; skipping it when reading branch '{}'.",
+                    other.coreOptions().branch(),
+                    wrapped.coreOptions().branch());
+        }
         return new FallbackReadScan(
                 first,
                 second,
                 wrapped.schema(),
                 table -> {
-                    if (table == other) {
-                        return otherToScan == null
-                                ? new EmptyBranchScan()
-                                : scanCreator.apply(otherToScan);
+                    if (table == other && otherIsEmpty) {
+                        return new EmptyBranchScan();
                     }
                     return scanCreator.apply(table);
                 });
-    }
-
-    @Nullable
-    private FileStoreTable resolveOtherBranchForScan() {
-        Long snapshotId = wrapped.coreOptions().scanSnapshotId();
-        if (snapshotId == null) {
-            String version = wrapped.coreOptions().scanVersion();
-            if (version != null
-                    && version.chars().allMatch(Character::isDigit)
-                    && !wrapped.tagManager().tagExists(version)) {
-                snapshotId = Long.parseLong(version);
-            }
-        }
-        if (snapshotId == null
-                || !Objects.equals(
-                        other.coreOptions().scanSnapshotId(), Snapshot.FIRST_SNAPSHOT_ID)) {
-            return other;
-        }
-
-        Snapshot earliest = other.snapshotManager().earliestSnapshot();
-        if (earliest == null) {
-            LOG.warn(
-                    "Branch '{}' has no snapshots; skipping it when reading branch '{}' at snapshot {}.",
-                    other.coreOptions().branch(),
-                    wrapped.coreOptions().branch(),
-                    snapshotId);
-            return null;
-        }
-
-        long timestamp = wrapped.snapshotManager().snapshot(snapshotId).timeMillis();
-        if (earliest.timeMillis() <= timestamp) {
-            return other;
-        }
-
-        // Snapshot 1 is the placeholder used by rewriteOtherOptions when no time match exists.
-        // Do not read future data implicitly, regardless of whether snapshot 1 still exists.
-        Preconditions.checkArgument(
-                wrapped.coreOptions()
-                        .toConfiguration()
-                        .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
-                "No snapshot at or before %s is available in branch '%s'. "
-                        + "The earliest available snapshot is %s (time %s). "
-                        + "Set '%s' to true to allow reading it.",
-                timestamp,
-                other.coreOptions().branch(),
-                earliest.id(),
-                earliest.timeMillis(),
-                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
-        LOG.warn(
-                "No snapshot at or before {} is available in branch '{}'; reading earliest snapshot {} "
-                        + "(time {}) because '{}' is enabled.",
-                timestamp,
-                other.coreOptions().branch(),
-                earliest.id(),
-                earliest.timeMillis(),
-                CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
-        // Pin the same snapshot for both partition listing and data planning, without changing
-        // the branch's read schema.
-        return other.copyWithoutTimeTravel(
-                Collections.singletonMap(
-                        CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(earliest.id())));
     }
 
     private static class EmptyBranchScan implements DataTableScan {
