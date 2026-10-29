@@ -192,6 +192,43 @@ public class SparkPartitionMetadataAuthTest {
         }
     }
 
+    @ParameterizedTest(name = "policy={0}")
+    @ValueSource(strings = {"constant", "field", "null"})
+    public void testJoinOnMaskedPartitionKey(String mode, @TempDir Path warehouse)
+            throws IOException {
+        try (SparkSession spark = createSession(warehouse)) {
+            // Isolate the static IS NOT NULL predicates inferred from the equality join.
+            spark.conf().set("spark.sql.optimizer.dynamicPartitionPruning.enabled", "false");
+            spark.conf().set("spark.sql.adaptive.enabled", "false");
+            createTable(spark, false);
+            setPolicy(spark, false, mode, "id,dt,region");
+            assertRows(spark, "SELECT id, dt FROM spark_test.default.T", expectedRows(false, mode));
+
+            List<Row> joined = new ArrayList<>();
+            if (!"null".equals(mode)) {
+                joined.add(RowFactory.create(1, 1));
+                joined.add(RowFactory.create(2, 2));
+                if ("constant".equals(mode)) {
+                    joined.add(RowFactory.create(1, 2));
+                    joined.add(RowFactory.create(2, 1));
+                }
+            }
+            assertRows(
+                    spark,
+                    "SELECT l.id, r.id FROM spark_test.default.T l "
+                            + "JOIN spark_test.default.T r ON l.dt = r.dt",
+                    joined);
+
+            // The residual must evaluate masked values, even without a join to reject NULLs.
+            assertRows(
+                    spark,
+                    "SELECT id FROM spark_test.default.T WHERE dt IS NOT NULL",
+                    "null".equals(mode)
+                            ? Collections.emptyList()
+                            : Arrays.asList(RowFactory.create(1), RowFactory.create(2)));
+        }
+    }
+
     @ParameterizedTest(name = "chain={0}, nestedPruning={1}")
     @CsvSource({"true,true", "true,false", "false,true", "false,false"})
     public void testPartitionMetadataAuthorizationWithNestedSchemaPruning(
