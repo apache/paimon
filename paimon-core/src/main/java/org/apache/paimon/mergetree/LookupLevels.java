@@ -219,10 +219,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return null;
         }
 
+        // A cached SST can outlive a file upgrade; use the level from the current read view.
         return readFromDisk(
                 getOrCreateProcessor(lookupResult.schemaId, lookupResult.serVersion),
                 key,
-                lookupResult.level,
+                file.level(),
                 valueBytes,
                 file.fileName());
     }
@@ -293,21 +294,18 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     private static class LookupResult {
 
-        private final int level;
         private final long schemaId;
         private final String serVersion;
         private final byte[] valueBytes;
 
-        private LookupResult(int level, long schemaId, String serVersion, byte[] valueBytes) {
-            this.level = level;
+        private LookupResult(long schemaId, String serVersion, byte[] valueBytes) {
             this.schemaId = schemaId;
             this.serVersion = serVersion;
             this.valueBytes = valueBytes;
         }
 
         private static LookupResult of(LookupFile lookupFile, byte[] valueBytes) {
-            return new LookupResult(
-                    lookupFile.level(), lookupFile.schemaId(), lookupFile.serVersion(), valueBytes);
+            return new LookupResult(lookupFile.schemaId(), lookupFile.serVersion(), valueBytes);
         }
     }
 

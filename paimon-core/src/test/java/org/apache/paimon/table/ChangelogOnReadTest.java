@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -161,6 +162,64 @@ public class ChangelogOnReadTest extends TableTestBase {
     }
 
     @Test
+    public void testForceLookupCachedHistoryAfterFileUpgrade() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        options.put(CoreOptions.NUM_LEVELS.key(), "3");
+        options.put(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(), "10");
+        options.put(CoreOptions.LOOKUP_COMPACT.key(), "radical");
+        FileStoreTable table =
+                createTable(
+                                CoreOptions.MergeEngine.AGGREGATE,
+                                CoreOptions.CHANGELOG_ON_READ_LOOKUP_STATE_MAX_SIZE.defaultValue(),
+                                true)
+                        .copy(options);
+        // Keep the history file large enough that the next small delta compacts only to L1.
+        List<InternalRow> rows = new ArrayList<>();
+        for (int key = 1; key <= 2000; key++) {
+            rows.add(GenericRow.of(1, key, 1, 10));
+        }
+        write(table, ioManager, rows.toArray(new InternalRow[0]));
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {3});
+        StreamTableScan scan = readBuilder.newStreamScan();
+        DataSplit initial = (DataSplit) scan.plan().splits().get(0);
+        assertThat(initial.dataFiles()).hasSize(1);
+        String historyFile = initial.dataFiles().get(0).fileName();
+        FileStoreTable compactionTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        BatchWriteBuilder compactBuilder = compactionTable.newBatchWriteBuilder();
+        try (TableRead read = readBuilder.newRead().withIOManager(ioManager);
+                BatchTableWrite compactWrite = compactBuilder.newWrite();
+                BatchTableCommit compactCommit = compactBuilder.newCommit()) {
+            compactWrite.withIOManager(ioManager);
+            compactWrite.compact(initial.partition(), initial.bucket(), true);
+            List<CommitMessage> upgrade = compactWrite.prepareCommit();
+
+            // Cache the original file at L0 before publishing its same-name upgrade to L2.
+            write(table, ioManager, GenericRow.of(1, 1, 2, 3));
+            assertThat(read(read, scan.plan())).containsExactly("-U 10", "+U 13");
+            compactCommit.commit(upgrade);
+            compact(compactionTable, initial.partition(), initial.bucket(), ioManager, false);
+
+            write(table, ioManager, GenericRow.of(1, 1, 3, 4));
+            TableScan.Plan delta = scan.plan();
+            IncrementalSplit split = (IncrementalSplit) delta.splits().get(0);
+            assertThat(split.beforeFiles())
+                    .extracting(DataFileMeta::level)
+                    .containsExactlyInAnyOrder(1, 2);
+            assertThat(split.beforeFiles())
+                    .filteredOn(file -> file.fileName().equals(historyFile))
+                    .hasSize(1)
+                    .allSatisfy(file -> assertThat(file.level()).isEqualTo(2));
+            // L1 contains 13, including the older L2 value 10; count that history only once.
+            assertThat(read(read, delta)).containsExactly("-U 13", "+U 17");
+            try (TableRead coldRead = readBuilder.newRead().withIOManager(ioManager)) {
+                assertThat(read(coldRead, delta)).containsExactly("-U 13", "+U 17");
+            }
+        }
+    }
+
+    @Test
     public void testDeduplicateMultipleLevel0() throws Exception {
         FileStoreTable table = createTable(CoreOptions.MergeEngine.DEDUPLICATE);
         write(table, GenericRow.of(1, 1, 1, 10));
@@ -176,6 +235,67 @@ public class ChangelogOnReadTest extends TableTestBase {
 
             write(table, GenericRow.of(1, 1, 4, 40));
             assertThat(read(read, scan.plan())).containsExactly("-U 30", "+U 40");
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false,INSERT,DELETE",
+        "true,INSERT,DELETE",
+        "false,UPDATE_AFTER,UPDATE_BEFORE",
+        "true,UPDATE_AFTER,UPDATE_BEFORE"
+    })
+    public void testHistoryWithSameSequenceAndDifferentRowKinds(
+            boolean withSequenceField, RowKind addKind, RowKind retractKind) throws Exception {
+        Schema.Builder schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("seq", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("k")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.WRITE_ONLY.key(), "true")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "on-read");
+        if (withSequenceField) {
+            schema.option(CoreOptions.SEQUENCE_FIELD.key(), "seq");
+        }
+        catalog.createTable(identifier(), schema.build(), false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder first = table.newBatchWriteBuilder();
+        BatchWriteBuilder second = table.newBatchWriteBuilder();
+        try (BatchTableWrite firstWrite = first.newWrite();
+                BatchTableWrite secondWrite = second.newWrite();
+                BatchTableCommit firstCommit = first.newCommit();
+                BatchTableCommit secondCommit = second.newCommit()) {
+            // Both writers start before either commit, so each key has equal internal sequences.
+            // Reverse the row kinds for key 2 to cover either history file iteration order.
+            firstWrite.write(GenericRow.ofKind(addKind, 1, 1, 10));
+            firstWrite.write(GenericRow.ofKind(retractKind, 2, 1, 20));
+            secondWrite.write(GenericRow.ofKind(retractKind, 1, 1, 10));
+            secondWrite.write(GenericRow.ofKind(addKind, 2, 1, 20));
+            List<CommitMessage> firstMessages = firstWrite.prepareCommit();
+            List<CommitMessage> secondMessages = secondWrite.prepareCommit();
+            firstCommit.commit(firstMessages);
+            secondCommit.commit(secondMessages);
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
+        StreamTableScan scan = readBuilder.newStreamScan();
+        try (TableRead read = readBuilder.newRead().withIOManager(ioManager)) {
+            assertThat(read(read, scan.plan()))
+                    .containsExactlyInAnyOrder(
+                            addKind.shortString() + " 10", addKind.shortString() + " 20");
+            write(table, GenericRow.of(1, 2, 11), GenericRow.of(2, 2, 21));
+            TableScan.Plan delta = scan.plan();
+            IncrementalSplit split = (IncrementalSplit) delta.splits().get(0);
+            assertThat(split.beforeFiles())
+                    .hasSize(2)
+                    .allSatisfy(
+                            file -> {
+                                assertThat(file.minSequenceNumber()).isZero();
+                                assertThat(file.maxSequenceNumber()).isEqualTo(1);
+                            });
+            assertThat(read(read, delta)).containsExactly("-U 10", "+U 11", "-U 20", "+U 21");
         }
     }
 

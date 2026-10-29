@@ -465,14 +465,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private Comparator<KeyValue> createSequenceComparator(
             @Nullable UserDefinedSeqComparator comparator) {
-        if (comparator == null) {
-            return Comparator.comparingLong(KeyValue::sequenceNumber);
-        }
         return (left, right) -> {
-            int result = comparator.compare(left.value(), right.value());
-            return result == 0
-                    ? Long.compare(left.sequenceNumber(), right.sequenceNumber())
-                    : result;
+            if (comparator != null) {
+                int result = comparator.compare(left.value(), right.value());
+                if (result != 0) {
+                    return result;
+                }
+            }
+            int result = Long.compare(left.sequenceNumber(), right.sequenceNumber());
+            if (result != 0) {
+                return result;
+            }
+            return Boolean.compare(left.isAdd(), right.isAdd());
         };
     }
 
