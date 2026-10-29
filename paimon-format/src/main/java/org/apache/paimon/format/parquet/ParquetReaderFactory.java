@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
@@ -249,13 +250,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         ParquetReadOptions.Builder readOptionsBuilder =
                 ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
 
-        // Enable selective footer parsing when no predicates are present.
+        // Enable selective footer parsing when no predicates are present and the feature is
+        // enabled.
         // This improves performance by only parsing metadata for requested columns.
         // NOTE: When predicates are present, statistics are needed for row-group filtering,
         // so selective parser is currently disabled in that case. If selective parser is
         // extended to support predicates in the future, set parseStatistics=true to preserve
         // statistics metadata.
-        if (predicates == null || predicates.isEmpty()) {
+        boolean enableSelectiveParser =
+                conf.get(CoreOptions.PARQUET_FOOTER_SELECTIVE_PARSER_ENABLED);
+        if (enableSelectiveParser && (predicates == null || predicates.isEmpty())) {
             StringBuilder requestedColumns = new StringBuilder();
             for (DataField field : readType.getFields()) {
                 if (requestedColumns.length() > 0) {

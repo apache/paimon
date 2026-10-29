@@ -19,7 +19,6 @@
 package org.apache.paimon.format.parquet.metadata;
 
 import org.apache.paimon.format.parquet.ParquetInputFile;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.apache.hadoop.conf.Configuration;
@@ -56,6 +55,7 @@ import shaded.parquet.org.apache.thrift.protocol.TCompactProtocol;
 import shaded.parquet.org.apache.thrift.transport.TMemoryBuffer;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
@@ -102,8 +102,8 @@ public class SelectiveFooterParserTest {
                                             true, LogicalTypeAnnotation.TimeUnit.MILLIS))
                             .named("ts"));
 
-    private java.io.File writeTestFile(int rowCount, long rowGroupSize) throws IOException {
-        java.io.File file = tempDir.resolve("test.parquet").toFile();
+    private File writeTestFile(int rowCount, long rowGroupSize) throws IOException {
+        File file = tempDir.resolve("test.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(SCHEMA);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -134,7 +134,7 @@ public class SelectiveFooterParserTest {
         return file;
     }
 
-    private byte[] readFooterBytes(java.io.File file) throws IOException {
+    private byte[] readFooterBytes(File file) throws IOException {
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
             long fileLen = raf.length();
             raf.seek(fileLen - 8);
@@ -155,7 +155,7 @@ public class SelectiveFooterParserTest {
     /** Equivalence in "parse everything" mode — must match the official NO_FILTER parse. */
     @Test
     public void testFullParseEquivalence() throws IOException {
-        java.io.File file = writeTestFile(300, 1024); // several row groups
+        File file = writeTestFile(300, 1024); // several row groups
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -172,7 +172,7 @@ public class SelectiveFooterParserTest {
     /** Selective mode: only requested column chunks are materialized, block info identical. */
     @Test
     public void testSelectiveSubsetParse() throws IOException {
-        java.io.File file = writeTestFile(300, 1024);
+        File file = writeTestFile(300, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -250,7 +250,7 @@ public class SelectiveFooterParserTest {
     /** Statistics of dropped columns never leak into the selective result. */
     @Test
     public void testDroppedColumnsDoNotAffectBlockLevelInfo() throws IOException {
-        java.io.File file = writeTestFile(300, 1024);
+        File file = writeTestFile(300, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -300,7 +300,7 @@ public class SelectiveFooterParserTest {
      */
     @Test
     public void testSkipStatisticsParse() throws IOException {
-        java.io.File file = writeTestFile(300, 1024);
+        File file = writeTestFile(300, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -383,7 +383,7 @@ public class SelectiveFooterParserTest {
                                         Type.Repetition.OPTIONAL)
                                 .as(LogicalTypeAnnotation.bsonType())
                                 .named("bson_col"));
-        java.io.File file = tempDir.resolve("rich.parquet").toFile();
+        File file = tempDir.resolve("rich.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -442,7 +442,7 @@ public class SelectiveFooterParserTest {
                                 .named("level3_field")
                                 .named("level2_group")
                                 .named("level1_group"));
-        java.io.File file = tempDir.resolve("deep.parquet").toFile();
+        File file = tempDir.resolve("deep.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -494,7 +494,7 @@ public class SelectiveFooterParserTest {
                                                         Type.Repetition.OPTIONAL)
                                                 .named("value"))
                                 .named("properties"));
-        java.io.File file = tempDir.resolve("map.parquet").toFile();
+        File file = tempDir.resolve("map.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -549,7 +549,7 @@ public class SelectiveFooterParserTest {
                                                         Type.Repetition.OPTIONAL)
                                                 .named("element"))
                                 .named("values"));
-        java.io.File file = tempDir.resolve("array.parquet").toFile();
+        File file = tempDir.resolve("array.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -598,7 +598,7 @@ public class SelectiveFooterParserTest {
                                         PrimitiveType.PrimitiveTypeName.INT64,
                                         Type.Repetition.REQUIRED)
                                 .named("id"));
-        java.io.File file = tempDir.resolve("empty.parquet").toFile();
+        File file = tempDir.resolve("empty.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -629,7 +629,7 @@ public class SelectiveFooterParserTest {
     /** Single row group: verifies the parser handles files with exactly one row group. */
     @Test
     public void testSingleRowGroup() throws IOException {
-        java.io.File file = writeTestFile(50, 1024 * 1024); // large row group size = single group
+        File file = writeTestFile(50, 1024 * 1024); // large row group size = single group
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -647,7 +647,7 @@ public class SelectiveFooterParserTest {
     /** All columns requested: verifies behavior when requestedColumns contains all column names. */
     @Test
     public void testAllColumnsRequested() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -667,7 +667,7 @@ public class SelectiveFooterParserTest {
     /** Non-existent columns: verifies behavior when requested columns don't exist in schema. */
     @Test
     public void testNonExistentColumnsRequested() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -692,7 +692,7 @@ public class SelectiveFooterParserTest {
     /** Malformed footer (truncated): verifies the parser handles corrupted data gracefully. */
     @Test
     public void testMalformedFooterTruncated() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         // Truncate the footer to simulate corruption
@@ -707,7 +707,7 @@ public class SelectiveFooterParserTest {
     /** Malformed footer (wrong thrift type): verifies the parser handles type mismatches. */
     @Test
     public void testMalformedFooterWrongType() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         // Corrupt a byte in the middle to trigger type mismatch
@@ -727,7 +727,7 @@ public class SelectiveFooterParserTest {
      */
     @Test
     public void testFallbackSignalExceptionHandling() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         // Create a footer that will trigger fallback (e.g., with encryption_algorithm field)
@@ -760,7 +760,7 @@ public class SelectiveFooterParserTest {
         // by checking the code path. This is a structural test.
 
         // For now, we verify that a normal footer does NOT trigger encryption fallback
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -785,7 +785,7 @@ public class SelectiveFooterParserTest {
     public void testEncryptedColumnFallback() throws IOException {
         // We cannot easily create a parquet file with encrypted columns in a unit test.
         // This test verifies that a normal (unencrypted) file parses successfully.
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -809,7 +809,7 @@ public class SelectiveFooterParserTest {
      */
     @Test
     public void testParquetReadOptionsIntegration() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -902,7 +902,7 @@ public class SelectiveFooterParserTest {
                                         Type.Repetition.REQUIRED)
                                 .named("Amount"));
 
-        java.io.File file = tempDir.resolve("case_test.parquet").toFile();
+        File file = tempDir.resolve("case_test.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -964,7 +964,7 @@ public class SelectiveFooterParserTest {
                                         Type.Repetition.REQUIRED)
                                 .named(" a"));
 
-        java.io.File file = tempDir.resolve("whitespace_test.parquet").toFile();
+        File file = tempDir.resolve("whitespace_test.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -1012,7 +1012,7 @@ public class SelectiveFooterParserTest {
     @Test
     public void testManyRowGroups() throws IOException {
         // Create a file with many small row groups
-        java.io.File file = writeTestFile(1000, 100); // very small row group size
+        File file = writeTestFile(1000, 100); // very small row group size
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -1033,7 +1033,7 @@ public class SelectiveFooterParserTest {
      */
     @Test
     public void testSelectiveParseWithNestedColumns() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
 
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
@@ -1093,7 +1093,7 @@ public class SelectiveFooterParserTest {
         }
         MessageType schema = new MessageType("wide", fields);
 
-        java.io.File file = tempDir.resolve("wide.parquet").toFile();
+        File file = tempDir.resolve("wide.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -1152,8 +1152,8 @@ public class SelectiveFooterParserTest {
      */
     @Test
     public void testParquetFileReaderIntegration() throws IOException {
-        java.io.File file = writeTestFile(300, 1024);
-        Path path = new Path(file.toURI().toString());
+        File file = writeTestFile(300, 1024);
+        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(file.toURI().toString());
         long length = file.length();
         LocalFileIO fileIO = new LocalFileIO();
 
@@ -1252,7 +1252,7 @@ public class SelectiveFooterParserTest {
                                         LogicalTypeAnnotation.timeType(
                                                 true, LogicalTypeAnnotation.TimeUnit.MICROS))
                                 .named("time_micros"));
-        java.io.File file = tempDir.resolve("units.parquet").toFile();
+        File file = tempDir.resolve("units.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -1312,7 +1312,7 @@ public class SelectiveFooterParserTest {
                                 .as(LogicalTypeAnnotation.float16Type())
                                 .length(2)
                                 .named("f"));
-        java.io.File file = tempDir.resolve("uuid_float16.parquet").toFile();
+        File file = tempDir.resolve("uuid_float16.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -1355,7 +1355,7 @@ public class SelectiveFooterParserTest {
      */
     @Test
     public void testByteBufferVariants() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
         ParquetMetadata official =
@@ -1391,7 +1391,7 @@ public class SelectiveFooterParserTest {
                                         PrimitiveType.PrimitiveTypeName.INT64,
                                         Type.Repetition.REQUIRED)
                                 .named("id"));
-        java.io.File file = tempDir.resolve("empty_selective.parquet").toFile();
+        File file = tempDir.resolve("empty_selective.parquet").toFile();
         SimpleGroupFactory groupFactory = new SimpleGroupFactory(schema);
         try (ParquetWriter<Group> writer =
                 ExampleParquetWriter.builder(
@@ -1419,7 +1419,7 @@ public class SelectiveFooterParserTest {
     /** includeStatistics=false with requestedColumns==null: full columns, statistics skipped. */
     @Test
     public void testSkipStatisticsFullMode() throws IOException {
-        java.io.File file = writeTestFile(100, 1024);
+        File file = writeTestFile(100, 1024);
         byte[] footer = readFooterBytes(file);
         ParquetMetadataConverter converter = new ParquetMetadataConverter();
 

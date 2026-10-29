@@ -2178,6 +2178,16 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Turn off the dictionary encoding for all fields in parquet.");
 
+    public static final ConfigOption<Boolean> PARQUET_FOOTER_SELECTIVE_PARSER_ENABLED =
+            key("parquet.footer.selective-parser.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable selective footer parsing for Parquet files. "
+                                    + "When enabled, only the metadata for requested columns is parsed, "
+                                    + "which can significantly improve read performance for wide tables. "
+                                    + "This feature is experimental and disabled by default.");
+
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
                     .stringType()
