@@ -417,6 +417,10 @@ class FileStoreTable(Table):
                 return BucketMode.HASH_FIXED
 
     def new_read_builder(self) -> 'ReadBuilder':
+        fallback_branch = self.options.scan_fallback_branch()
+        if fallback_branch and fallback_branch != self.current_branch():
+            from pypaimon.read.fallback_read_builder import FallbackReadBuilder
+            return FallbackReadBuilder(self, fallback_branch)
         return ReadBuilder(self)
 
     def new_stream_read_builder(self) -> 'StreamReadBuilder':
