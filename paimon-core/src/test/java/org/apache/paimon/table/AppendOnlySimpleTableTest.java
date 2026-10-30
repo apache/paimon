@@ -48,6 +48,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
@@ -2882,6 +2883,45 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch merge requires complete append-only snapshot history"));
+    }
+
+    @Test
+    public void testExpireOnBranchKeepsFilesReferencedByMain() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        // main: write snapshot 1 and tag it; all branches share these physical data files
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            write.write(rowData(2, 20, 200L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+        table.createTag("t1", 1);
+
+        // branch created from the tag starts on a copy of main's snapshot 1
+        table.createBranch(BRANCH_NAME, "t1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        // write a new snapshot on the branch, then drop the branch's own copy of the tag and
+        // expire down to a single snapshot: the branch no longer references main's files
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(3, 30, 300L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+        tableBranch.deleteTag("t1");
+        tableBranch
+                .newExpireSnapshots()
+                .config(ExpireConfig.builder().snapshotRetainMax(1).snapshotRetainMin(1).build())
+                .expire();
+
+        // main still references snapshot 1 and tag t1, so its files must survive branch expiration
+        FileStoreTable mainTable = createFileStoreTable();
+        List<Split> mainSplits = toSplits(mainTable.newSnapshotReader().read().dataSplits());
+        assertThat(getResult(mainTable.newRead(), mainSplits, BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test
