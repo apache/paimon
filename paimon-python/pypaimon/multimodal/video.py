@@ -96,17 +96,29 @@ def _remux_raw_hevc(source, output_path, time_base):
             else:
                 stream = output.add_stream(template=container.streams.video[0])
             stream.time_base = time_base
+            output.start_encoding()
+            if (time_base / stream.time_base).denominator != 1:
+                raise ValueError("MP4 cannot represent source_fps exactly.")
+            packet_time_bases = {}
             count = 0
             for packet in container.demux(video=0):
                 if not packet.size:
                     continue
-                # PyAV 12.0 exposes duration as read-only. Rescale its ticks.
+                # Keep PyAV 12's read-only duration; bound the AVRational denominator.
                 duration = packet.duration
                 if duration <= 0:
                     raise ValueError("Raw HEVC packet has no duration.")
+                if duration not in packet_time_bases:
+                    exact = time_base / duration
+                    bounded = exact.limit_denominator(2147483647)
+                    error = abs(bounded - exact) * duration * (frame_count + delay + 1)
+                    # Every PTS/DTS and duration must round to the same MP4 tick.
+                    if bounded <= 0 or bounded.numerator > 2147483647 or error >= stream.time_base / 2:
+                        raise ValueError("Cannot represent raw HEVC timestamps exactly in MP4.")
+                    packet_time_bases[duration] = bounded
                 packet.pts = ordinals[count] * duration
                 packet.dts = (count - delay) * duration
-                packet.time_base = time_base / duration
+                packet.time_base = packet_time_bases[duration]
                 packet.stream = stream
                 output.mux(packet)
                 count += 1

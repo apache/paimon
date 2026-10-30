@@ -356,7 +356,8 @@ class MultimodalTableTest(unittest.TestCase):
         from pypaimon.table.row.blob import Blob
         from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
-        for number, (b_frames, fps) in enumerate([(0, 24), (3, Fraction(30000, 1001))]):
+        cases = [(0, 24), (3, Fraction(30000, 1001)), (3, 59.94), (3, Fraction(60000, 1001))]
+        for number, (b_frames, fps) in enumerate(cases):
             with self.subTest(b_frames=b_frames, fps=fps):
                 path = self._raw_hevc_file(b_frames)
                 original = Path(path).read_bytes()
@@ -385,8 +386,12 @@ class MultimodalTableTest(unittest.TestCase):
                 payload = bodies["video"][0]
                 self.assertTrue(all(b == payload for b in bodies["video"]))
                 with av.open(io.BytesIO(payload)) as container:
-                    self.assertEqual("hevc", container.streams.video[0].codec_context.name)
+                    stream = container.streams.video[0]
+                    self.assertEqual("hevc", stream.codec_context.name)
+                    self.assertEqual(24 / Fraction(str(fps)), stream.duration * stream.time_base)
                     actual = list(container.decode(video=0))
+                    self.assertEqual([i / Fraction(str(fps)) for i in range(24)],
+                                     [frame.pts * frame.time_base for frame in actual])
                     self.assertEqual(24, len(actual))
                     for expected, frame in zip(pixels, actual):
                         np.testing.assert_array_equal(expected, frame.to_ndarray(format="rgb24"))
