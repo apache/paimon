@@ -34,6 +34,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
@@ -72,6 +73,7 @@ public class KeyValueClusteringFileWriter
     private final Projection clusteringProjection;
     @Nullable private final DataFileIndexWriter dataFileIndexWriter;
     private final int[] keyStatMapping;
+    @Nullable private final DeleteRowFieldsProjector deleteRowFieldsProjector;
 
     private BinaryRow minClusteringFields = null;
     private BinaryRow currentClusteringFields = null;
@@ -90,7 +92,8 @@ public class KeyValueClusteringFileWriter
             boolean thinMode,
             CoreOptions options,
             FileIndexOptions fileIndexOptions,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            @Nullable DeleteRowFieldsProjector deleteRowFieldsProjector) {
         super(
                 fileIO,
                 context,
@@ -116,6 +119,7 @@ public class KeyValueClusteringFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+        this.deleteRowFieldsProjector = deleteRowFieldsProjector;
 
         Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {
@@ -131,6 +135,9 @@ public class KeyValueClusteringFileWriter
 
     @Override
     public void write(KeyValue kv) throws IOException {
+        if (deleteRowFieldsProjector != null && kv.valueKind() == RowKind.DELETE) {
+            kv = deleteRowFieldsProjector.project(kv);
+        }
         super.write(kv);
 
         if (dataFileIndexWriter != null) {

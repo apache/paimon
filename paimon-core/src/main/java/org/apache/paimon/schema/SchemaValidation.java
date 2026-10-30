@@ -187,6 +187,8 @@ public class SchemaValidation {
 
         validateBucket(schema, options);
 
+        validateDeleteRowThinMode(schema, options);
+
         validateStartupMode(options);
 
         validateFieldsPrefix(schema, options);
@@ -876,6 +878,50 @@ public class SchemaValidation {
                             && options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
                     "Sequence group sort-order options are only supported by primary-key tables with the partial-update merge engine.");
             parseSequenceGroupSortOrders(options.toConfiguration());
+        }
+    }
+
+    private static void validateDeleteRowThinMode(TableSchema schema, CoreOptions options) {
+        if (!options.deleteRowThinMode()) {
+            return;
+        }
+
+        String option = CoreOptions.DELETE_ROW_THIN_MODE.key();
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "'%s' can only be enabled for a table with primary keys.",
+                option);
+        checkArgument(
+                options.bucket() != BucketMode.POSTPONE_BUCKET,
+                "'%s' does not support postpone bucket tables (bucket = -2).",
+                option);
+
+        switch (options.mergeEngine()) {
+            case DEDUPLICATE:
+                return;
+            case PARTIAL_UPDATE:
+                checkArgument(
+                        options.partialUpdateRemoveRecordOnDelete(),
+                        "'%s' requires '%s' = true when '%s' = '%s'.",
+                        option,
+                        CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(),
+                        CoreOptions.MERGE_ENGINE.key(),
+                        options.mergeEngine());
+                return;
+            case AGGREGATE:
+                checkArgument(
+                        options.aggregationRemoveRecordOnDelete(),
+                        "'%s' requires '%s' = true when '%s' = '%s'.",
+                        option,
+                        CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE.key(),
+                        CoreOptions.MERGE_ENGINE.key(),
+                        options.mergeEngine());
+                return;
+            default:
+                throw new IllegalArgumentException(
+                        String.format(
+                                "'%s' does not support merge engine '%s'.",
+                                option, options.mergeEngine()));
         }
     }
 

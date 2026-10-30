@@ -54,6 +54,7 @@ import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CloseableIterator;
@@ -66,6 +67,7 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -407,6 +409,11 @@ public class KeyValueFileReadWriteTest {
 
     protected KeyValueFileWriterFactory createWriterFactory(
             String pathStr, String format, Options options) {
+        return createWriterFactory(pathStr, format, options, false);
+    }
+
+    private KeyValueFileWriterFactory createWriterFactory(
+            String pathStr, String format, Options options, boolean useTableSchema) {
         Path path = new Path(pathStr);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
@@ -430,18 +437,26 @@ public class KeyValueFileReadWriteTest {
                                 false,
                                 null);
 
-        return KeyValueFileWriterFactory.builder(
-                        fileIO,
-                        0,
-                        KEY_TYPE,
-                        DEFAULT_ROW_TYPE,
-                        // normal format will buffer changes in memory and we can't determine
-                        // if the written file size is really larger than suggested, so we use a
-                        // special format which flushes for every added element
-                        new FlushingFileFormat(format),
-                        pathFactoryMap,
-                        suggestedFileSize)
-                .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(options));
+        FileFormat fileFormat = new FlushingFileFormat(format);
+        KeyValueFileWriterFactory.Builder builder =
+                useTableSchema
+                        ? KeyValueFileWriterFactory.builder(
+                                fileIO,
+                                createTestSchemaManager(path).schema(0),
+                                KEY_TYPE,
+                                DEFAULT_ROW_TYPE,
+                                fileFormat,
+                                pathFactoryMap,
+                                suggestedFileSize)
+                        : KeyValueFileWriterFactory.builder(
+                                fileIO,
+                                0,
+                                KEY_TYPE,
+                                DEFAULT_ROW_TYPE,
+                                fileFormat,
+                                pathFactoryMap,
+                                suggestedFileSize);
+        return builder.build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(options));
     }
 
     private KeyValueFileReaderFactory createReaderFactory(
@@ -601,6 +616,110 @@ public class KeyValueFileReadWriteTest {
         for (DataFileMeta meta : changelogMetas) {
             assertThat(meta.extraFiles())
                     .noneMatch(f -> f.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX));
+        }
+    }
+
+    @ParameterizedTest(name = "format={0}, thinMode={1}")
+    @CsvSource({
+        "avro, false",
+        "avro, true",
+        "orc, false",
+        "orc, true",
+        "parquet, false",
+        "parquet, true"
+    })
+    void testDeleteRowFieldsProjection(String format, boolean thinMode) throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
+        options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
+        options.set(CoreOptions.METADATA_STATS_DENSE_STORE, false);
+        options.set(CoreOptions.DATA_FILE_THIN_MODE, thinMode);
+        options.set(CoreOptions.SEQUENCE_FIELD, "itemId");
+
+        KeyValueFileWriterFactory writerFactory =
+                createWriterFactory(tempDir.toString(), format, options, true);
+        TestKeyValueGenerator generator = new TestKeyValueGenerator();
+        KeyValue insert =
+                generator.nextInsert("20201110", 9, 42L, new int[] {10, 2}, "delete-before-image");
+        KeyValue delete =
+                new KeyValue()
+                        .replace(
+                                insert.key(),
+                                insert.sequenceNumber(),
+                                RowKind.DELETE,
+                                insert.value());
+
+        RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        dataWriter.write(delete);
+        dataWriter.close();
+        DataFileMeta dataFile = dataWriter.result().get(0);
+
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), format, null, null);
+        KeyValue dataDelete = readSingle(readerFactory, dataFile);
+        assertThat(dataDelete.valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(dataDelete.value().getLong(4)).isEqualTo(42L);
+        assertThat(dataDelete.value().isNullAt(5)).isTrue();
+        assertThat(dataDelete.value().isNullAt(6)).isTrue();
+        assertThat(dataFile.valueStats().nullCounts().getLong(6)).isEqualTo(1L);
+
+        RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
+                writerFactory.createRollingChangelogFileWriter(0);
+        changelogWriter.write(delete);
+        changelogWriter.close();
+
+        KeyValue changelogDelete = readSingle(readerFactory, changelogWriter.result().get(0));
+        assertThat(changelogDelete.valueKind()).isEqualTo(RowKind.DELETE);
+        assertThat(changelogDelete.value().isNullAt(5)).isFalse();
+        assertThat(changelogDelete.value().getString(6).toString())
+                .isEqualTo("delete-before-image");
+    }
+
+    @Test
+    void testDeleteRowFieldsProjectionInClusteringFile() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.DELETE_ROW_THIN_MODE, true);
+        options.set(CoreOptions.CLUSTERING_COLUMNS, "comment");
+        options.set(CoreOptions.SEQUENCE_FIELD, "itemId");
+
+        KeyValueFileWriterFactory writerFactory =
+                createWriterFactory(tempDir.toString(), "avro", options, true);
+        KeyValue insert =
+                new TestKeyValueGenerator()
+                        .nextInsert("20201110", 9, 42L, new int[] {10, 2}, "clustering-field");
+        KeyValue delete =
+                new KeyValue()
+                        .replace(
+                                insert.key(),
+                                insert.sequenceNumber(),
+                                RowKind.DELETE,
+                                insert.value());
+
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
+                writerFactory.createRollingClusteringFileWriter();
+        writer.write(delete);
+        writer.close();
+
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), "avro", null, null);
+        KeyValue actual = readSingle(readerFactory, writer.result().get(0));
+        assertThat(actual.value().isNullAt(5)).isTrue();
+        assertThat(actual.value().getString(6).toString()).isEqualTo("clustering-field");
+    }
+
+    private KeyValue readSingle(KeyValueFileReaderFactory readerFactory, DataFileMeta file)
+            throws Exception {
+        try (RecordReaderIterator<KeyValue> iterator =
+                new RecordReaderIterator<>(readerFactory.createRecordReader(file))) {
+            assertThat(iterator.hasNext()).isTrue();
+            KeyValue result =
+                    iterator.next()
+                            .copy(
+                                    TestKeyValueGenerator.KEY_SERIALIZER,
+                                    TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER);
+            assertThat(iterator.hasNext()).isFalse();
+            return result;
         }
     }
 

@@ -130,7 +130,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
-                        schema.id(),
+                        schema,
                         keyType,
                         valueType,
                         fileFormat,

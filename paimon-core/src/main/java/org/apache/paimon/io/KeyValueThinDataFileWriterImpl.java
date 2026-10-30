@@ -30,6 +30,8 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -57,7 +59,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath,
-            Set<String> managedBlobFields) {
+            Set<String> managedBlobFields,
+            @Nullable DeleteRowFieldsProjector deleteRowFieldsProjector) {
         super(
                 fileIO,
                 context,
@@ -72,7 +75,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 fileSource,
                 fileIndexOptions,
                 isExternalPath,
-                managedBlobFields);
+                managedBlobFields,
+                deleteRowFieldsProjector);
         Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             idToIndex.put(valueType.getFields().get(i).id(), i);

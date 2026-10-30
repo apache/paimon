@@ -2427,6 +2427,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Enable data file thin mode to avoid duplicate columns storage.");
 
+    public static final ConfigOption<Boolean> DELETE_ROW_THIN_MODE =
+            key("delete-row.thin-mode")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable thin mode for whole-record DELETE rows in primary-key data files. "
+                                    + "Non-essential nullable value fields are stored as null. "
+                                    + "Requires a primary-key table using deduplicate, or partial-update "
+                                    + "and aggregation with remove-record-on-delete enabled. "
+                                    + "Postpone bucket tables (bucket = -2) are not supported. "
+                                    + "Unsupported configurations are rejected. Changelog files are unaffected.");
+
     public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
             key("partition.idle-time-to-report-statistic")
                     .durationType()
@@ -4781,8 +4793,16 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_THIN_MODE);
     }
 
+    public boolean deleteRowThinMode() {
+        return options.get(DELETE_ROW_THIN_MODE);
+    }
+
     public boolean aggregationRemoveRecordOnDelete() {
         return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
+    }
+
+    public boolean partialUpdateRemoveRecordOnDelete() {
+        return options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
     }
 
     public Optional<Long> commitLastSafeSnapshot() {
