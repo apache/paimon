@@ -54,17 +54,13 @@ frames.add_video("/data/example.mp4")
 frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
 ```
 
-Omitting `frames` generates zero-based `frame_index` values in presentation order
-and `timestamp` values from actual PTS, in seconds relative to the first frame,
-including variable frame rates. Original video bytes are preserved.
+Generates zero-based frame numbers and PTS-based timestamps in seconds from the
+first frame, preserving variable frame timing and original video bytes.
+`metadata` supplies the same business fields for every frame.
 
-Use a local path, remote URI, or `BlobDescriptor`. Automatic import requires one
-PyAV-decodable video stream and `first_frame=0`. Configure remote credentials on
-the connection and keep the source unchanged during import.
-
-`metadata` supplies shared business fields, including required columns. For multiple
-video columns, specify `video_column`; the others must be nullable. For externally
-aligned state/action or custom timestamps, supply explicit `frames` instead.
+Supports local and remote videos with one PyAV-decodable video stream. Configure
+remote credentials on the connection; keep the source unchanged during import.
+To provide your own frame metadata, pass `frames` explicitly as shown below.
 
 ## Video Frame Storage
 
