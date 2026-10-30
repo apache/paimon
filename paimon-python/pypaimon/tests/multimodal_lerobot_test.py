@@ -664,6 +664,24 @@ class LeRobotValidationTest(unittest.TestCase):
                 finally:
                     decoder.close()
 
+    @unittest.skipUnless(av is not None, "PyAV is required")
+    def test_indexed_plan_prefetches_only_requested_gops(self):
+        source = io.BytesIO(b"x" * 1000)
+        source.video_length = 1000
+        index = VideoKeyframeIndex(
+            [(900, 100)],
+            [(0, 0, 100), (10, 10, 300), (20, 20, 500), (30, 30, 700)])
+        decoder = _PyAVVideoDecoder(source, index)
+        try:
+            self.assertEqual(({1: [12]}, [(300, 200)]),
+                             decoder._indexed_plan([12]))
+            self.assertEqual(({1: [19], 2: [20]}, [(300, 400)]),
+                             decoder._indexed_plan([19, 20]))
+            self.assertEqual(({0: [0], 3: [39]}, [(100, 200), (700, 300)]),
+                             decoder._indexed_plan([0, 39]))
+        finally:
+            decoder.close()
+
     def test_default_video_backend_falls_back_on_os_error(self):
         stream = Mock()
         decoder = object()
