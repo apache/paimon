@@ -459,9 +459,8 @@ last page may be partial. Page `p` starts at `21 + 16 * metadata_count + p * 983
 Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
 The index covers the first video stream; its time base remains in the video.
 
-Readers load pages on demand; writers validate all pages. There is no keyframe-count
-or aggregate index-byte budget. Metadata ranges remain limited to 65,536. PyPaimon
-caches up to 1 MiB of entry pages per index and spools generated indexes to temporary disk.
+Readers load pages on demand; writers validate all pages. Metadata ranges are
+limited to 65,536; keyframe count and total index size have no configured limit.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

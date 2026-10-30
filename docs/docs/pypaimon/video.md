@@ -115,10 +115,9 @@ video = pm.BlobDescriptor(
 frames.add_video(video, episode_43_rows)
 ```
 
-With PyAV, PyPaimon builds keyframe indexes for supported ISO BMFF videos (such
-as MP4); other decodable videos use the scan fallback. Indexes are paged, so long
-videos retain seek indexes without loading all keyframes into memory. Generation
-uses temporary disk space; readers cache up to 1 MiB of entry pages per video.
+PyAV builds seek indexes for supported ISO BMFF videos (such as MP4); other
+decodable videos use scan fallback. Index generation uses temporary disk; reads
+load pages on demand with a 1 MiB entry-page cache per index.
 
 The writer deduplicates exact payload descriptor identity inside each `.video`
 file. Its video grouping policy coordinates normal, BLOB, and vector rolling
