@@ -130,17 +130,14 @@ class MultimodalTable:
             first_frame=0,
             metadata=None,
             source_fps=None):
-        """Append logical frame rows backed by one complete encoded video.
+        """Append frame rows sharing one encoded video.
 
-        ``frames`` supplies every table column except the configured
-        ``video-frame-field``. Frame ordinals are generated from
-        ``first_frame`` and stored in the video descriptor, not in the normal
-        data file. Omit ``frames`` to inspect a video and generate
-        ``frame_index`` (int64) and ``timestamp`` (float64 seconds from the
-        first frame). ``metadata`` supplies constant values for other columns.
-        Automatic discovery requires PyAV and one video stream. For raw HEVC,
-        ``source_fps`` assigns a constant frame rate and remuxes to MP4 without
-        re-encoding. It does not recover original capture timestamps.
+        ``frames`` supplies non-video columns; descriptor ordinals start at
+        ``first_frame``. Omit it to generate ``frame_index`` (int64) and
+        ``timestamp`` (float64 seconds relative to the first frame).
+        ``metadata`` supplies constant fields. Auto import requires PyAV
+        and one video stream. For raw HEVC, ``source_fps`` sets fixed-rate
+        timing and remuxes to MP4 without re-encoding.
         """
         if frames is None:
             import os
@@ -200,7 +197,7 @@ class MultimodalTable:
 
             with ExitStack() as stack:
                 original = source_state()
-                # Resolve through the same factory as the writer, including source credentials.
+                # Reuse the writer's source credentials.
                 reader = self.raw_table.file_io.uri_reader_factory.create(video.uri)
                 with Blob.from_descriptor(reader, video).new_input_stream() as stream:
                     if time_base is not None:
@@ -231,7 +228,7 @@ class MultimodalTable:
                             repeated = constants.take(pa.array([0] * (end - start), type=pa.int32()))
                             values.update({name: repeated[name] for name in repeated.column_names})
                         yield _video_frame_table(video, pa.table(values), column, start, schema)
-                    # add_batches exhausts this iterator before preparing/committing.
+                    # Check again before commit.
                     check_source()
 
                 return self.add_batches(batches())

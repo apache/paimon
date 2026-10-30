@@ -62,7 +62,7 @@ def _remux_raw_hevc(source, output_path, time_base):
     import tempfile
 
     av = _require_video_av()
-    # A disk snapshot permits two passes without reopening a mutable remote source.
+    # Snapshot to disk for both passes.
     with tempfile.TemporaryFile() as raw:
         shutil.copyfileobj(source, raw, length=1024 * 1024)
         raw.seek(0)
@@ -74,7 +74,7 @@ def _remux_raw_hevc(source, output_path, time_base):
                 raise ValueError("source_fps is only supported for a raw H.265/HEVC stream.")
             for packet in container.demux(video=0):
                 if packet.size:
-                    # The decoder carries this packet ID through B-frame reordering.
+                    # Track packet IDs through B-frame reordering.
                     packet.pts = len(ordinals)
                     packet.dts = None
                     packet.time_base = time_base
