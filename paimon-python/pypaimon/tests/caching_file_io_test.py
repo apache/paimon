@@ -26,6 +26,7 @@ import pickle
 import shutil
 import tempfile
 import threading
+import time
 import tracemalloc
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -278,6 +279,53 @@ class CachingInputStreamTest(unittest.TestCase):
         result = stream2.read()
         self.assertEqual(data, result)
         file_io2.new_input_stream.assert_not_called()
+
+    def test_concurrent_read_at_opens_one_remote_stream(self):
+        # read_at is documented as thread-safe and is called concurrently by
+        # the parallel readers, so a cold stream must be opened exactly once.
+        data = bytes(i % 251 for i in range(200000))
+        opened = []
+        lock = threading.Lock()
+
+        class _SeekOnlyStream(io.BytesIO):
+            def fileno(self):
+                raise OSError("no fileno")
+
+        file_io = MagicMock()
+        file_io.get_file_size.side_effect = lambda p: len(data)
+
+        def open_stream(path):
+            # Hold the opener briefly so concurrent misses overlap.
+            time.sleep(0.02)
+            stream = _SeekOnlyStream(data)
+            with lock:
+                opened.append(stream)
+            return stream
+
+        file_io.new_input_stream.side_effect = open_stream
+
+        cache = LocalMemoryCacheManager(2 ** 63 - 1, block_size=4096)
+        stream = CachingInputStream(file_io, "test.index", cache)
+        errors = []
+
+        def reader(offset):
+            try:
+                self.assertEqual(data[offset:offset + 100], stream.read_at(100, offset))
+            except Exception as error:  # noqa: B902 - surfaced through errors
+                errors.append(error)
+
+        threads = [threading.Thread(target=reader, args=(i * 7000,)) for i in range(16)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual([], errors)
+        self.assertEqual(1, len(opened))
+
+        # Closing the stream must leave no remote stream behind.
+        stream.close()
+        self.assertTrue(all(opened_stream.closed for opened_stream in opened))
 
     def test_read_empty(self):
         cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=8)
