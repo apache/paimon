@@ -175,6 +175,10 @@ for batch in aligned.to_arrow_batch_reader(batch_size=128):
     train(batch)
 ```
 
+Set `parallelism=4` in `to_arrow_batch_reader()` to plan and read sources concurrently
+(default: 1). Output order is preserved; per-table reader concurrency still applies.
+Custom catalog and authorization callbacks must be thread-safe.
+
 `direction` is `backward`, `forward`, or `nearest`; tolerance is inclusive and
 zero permits only exact matches. Nearest ties use the earlier time. For duplicate
 timestamps, backward uses the last row and forward uses the first. Nearest uses the last
