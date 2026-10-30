@@ -197,7 +197,7 @@ class RowFileIndexConsistencyTest {
     }
 
     private void patch(Path path, long offset, byte[] bytes) throws IOException {
-        java.nio.file.Path file = java.nio.file.Paths.get(path.toUri().getPath());
+        java.nio.file.Path file = tempDir.resolve(path.getName());
         byte[] all = Files.readAllBytes(file);
         System.arraycopy(bytes, 0, all, (int) offset, bytes.length);
         Files.write(file, all);
