@@ -129,6 +129,12 @@ Video features map to `BLOB`. Each MP4 is copied once per aligned file group and
 reads. Imports require a bucket-unaware table and check rolling before each Episode. Use
 `VideoFrameCollator` for scans or `PaimonLeRobotDataset` for training.
 
+Set `options={"write.lerobot.remux-episodes": "true"}` on import to store
+Episode video clips as separate MP4 payloads without re-encoding. This requires
+PyAV and preserves the keyframes needed for decoding. Each clip is limited to
+64 MiB and 65,536 packets; unsupported timestamps fail the import. The default
+copies the original video payloads.
+
 ## Capture LeRobot frames directly into Paimon
 
 `PaimonLeRobotWriter` implements the write-side surface used by LeRobot's
