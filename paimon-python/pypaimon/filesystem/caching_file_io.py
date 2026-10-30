@@ -170,7 +170,7 @@ class LocalDiskCacheManager:
         return self._block_size
 
     def _cache_path(self, file_path: str, block_index: int) -> str:
-        key = f"{file_path}:{block_index}"
+        key = f"{self._block_size}:{file_path}:{block_index}"
         h = hashlib.sha256(key.encode('utf-8')).hexdigest()
         prefix = h[:2]
         sub_dir = os.path.join(self._cache_dir, prefix)
