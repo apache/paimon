@@ -251,6 +251,7 @@ on `index`; payloads remain lazy. Indexed videos prefetch metadata and target GO
 uncached PyAV reads on demand. Unindexed videos use the TorchCodec/PyAV scan path. Set
 `video_backend` to force either decoder. With `video_backend="torchcodec"`, indexed
 MP4 videos use timestamp seeks verified against their sample table and returned PTS.
+Decoder replicas share read-only timelines; uniform timing is stored compactly.
 Unsupported timelines or mismatched timestamps fall back to TorchCodec exact mode.
 
 With `pypaimon-rust` installed, LeRobot defaults to Rust frame lookup and table reads

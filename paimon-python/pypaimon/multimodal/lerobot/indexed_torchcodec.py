@@ -30,6 +30,56 @@ _MAX_SAMPLES = 1000000
 _MAX_TOP_LEVEL_BOXES = 1024
 
 
+class _TimingValues:
+    """Keep arithmetic sequences compact, otherwise retain a read-only array."""
+
+    def __init__(self, values):
+        self.count = len(values)
+        self.start = int(values[0])
+        self.step = int(values[1]) - self.start if self.count > 1 else 0
+        self.values = None
+        for start in range(1, self.count, 65536):
+            end = min(start + 65536, self.count)
+            if np.any(values[start:end] - values[start - 1:end - 1] != self.step):
+                values.flags.writeable = False
+                self.values = values
+                break
+
+    def __len__(self):
+        return self.count
+
+    def __getitem__(self, positions):
+        if self.values is not None:
+            return self.values[positions]
+        if isinstance(positions, (int, np.integer)):
+            if positions < 0:
+                positions += self.count
+            if not 0 <= positions < self.count:
+                raise IndexError("Timing position is out of range.")
+            return self.start + int(positions) * self.step
+        positions = np.asarray(positions, dtype=np.int64)
+        return self.start + positions * self.step
+
+
+class _SharedTimeline:
+    def __init__(self, source, length):
+        pts, durations, self.scale, self.stream_index = _timeline(source, length)
+        minimum = float('inf')
+        previous = None
+        for start in range(0, len(pts), 65536):
+            seconds = pts[start:start + 65536] / self.scale
+            if previous is not None:
+                minimum = min(minimum, float(seconds[0] - previous))
+            if len(seconds) > 1:
+                minimum = min(minimum, float(np.diff(seconds).min()))
+            previous = seconds[-1]
+        if minimum <= 0:
+            raise ValueError("MP4 timestamps cannot be distinguished as seconds.")
+        self.tolerance = min(1e-7, minimum / 4)
+        self.pts = _TimingValues(pts)
+        self.durations = _TimingValues(durations)
+
+
 def _boxes(data):
     data = memoryview(data)
     offset = 0
@@ -149,15 +199,17 @@ def _timeline(source, length):
     if np.any(values <= 0) or _uint(_child(samples, b"stsz"), 8) != count:
         raise ValueError("Invalid MP4 sample durations or count.")
     durations = np.repeat(values, counts)
-    pts = np.cumsum(durations) - durations
+    pts = np.cumsum(durations)
+    pts -= durations
     composition = _child(samples, b"ctts", required=False)
     if composition is not None:
         counts, values = _runs(composition, composition=True)
         if int(counts.sum()) != count:
             raise ValueError("MP4 composition count mismatch.")
         pts += np.repeat(values, counts)
-    order = np.argsort(pts, kind="stable")
-    pts, durations = pts[order], durations[order]
+    if np.any(pts[1:] <= pts[:-1]):
+        order = np.argsort(pts, kind="stable")
+        pts, durations = pts[order], durations[order]
     edits = _child(track, b"edts", required=False)
     if edits is not None:
         edit = _child(edits, b"elst")
@@ -205,7 +257,7 @@ class _IndexedTorchCodecDecoder:
         self._decoder = None
         self._indexed = False
         self._exact = _open_torchcodec_decoder
-        self._ordinals = [entry[0] for entry in index.keyframes]
+        self._timeline = None
         try:
             self._length = operator.index(stream.video_length)
             self._range_source = _RangeBackedVideo(
@@ -215,19 +267,23 @@ class _IndexedTorchCodecDecoder:
             source.prefetch([(0, min(65536, self._length)),
                              (first, min(65536, self._length - first))]
                             + list(index.metadata_ranges))
-            self._pts, self._durations, self._scale, stream_index = _timeline(
-                source, self._length)
-            if self._ordinals[-1] >= len(self._pts):
+            cache = getattr(stream, "video_metadata_cache", None)
+            cache_key = getattr(stream, "video_metadata_key", None)
+            timeline = cache.get(cache_key) if cache is not None else None
+            if timeline is None:
+                timeline = _SharedTimeline(source, self._length)
+            self._pts, self._durations, self._scale = timeline.pts, timeline.durations, timeline.scale
+            if index.keyframes[-1][0] >= len(self._pts):
                 raise ValueError("Keyframe ordinal exceeds the MP4 timeline.")
             # MP4 stream time base is 1 / media timescale.
             if any(self._pts[o] != pts for o, pts, _ in index.keyframes):
                 raise ValueError("Keyframe PTS does not match the MP4 timeline.")
-            gaps = np.diff(self._pts / self._scale)
-            if len(gaps) and np.any(gaps <= 0):
-                raise ValueError("MP4 timestamps cannot be distinguished as seconds.")
-            self._pts_tolerance = min(1e-7, float(gaps.min()) / 4) if len(gaps) else 1e-7
+            self._timeline = timeline
+            self._pts_tolerance = timeline.tolerance
+            if cache is not None:
+                cache[cache_key] = timeline
             self._decoder = VideoDecoder(
-                source, stream_index=stream_index, device="cpu",
+                source, stream_index=timeline.stream_index, device="cpu",
                 num_ffmpeg_threads=codec_threads, seek_mode="approximate")
             self._indexed = True
         except (AttributeError, TypeError, ValueError, OSError, RuntimeError, OverflowError):
@@ -241,7 +297,7 @@ class _IndexedTorchCodecDecoder:
         self._stream.seek(0)
         self._decoder = self._exact(self._stream)
         self._indexed = False
-        self._pts = self._durations = None
+        self._pts = self._durations = self._timeline = None
 
     def get_frames_at(self, *, indices):
         positions = [operator.index(index) for index in indices]
@@ -253,10 +309,10 @@ class _IndexedTorchCodecDecoder:
             return self._decoder.get_frames_at(indices=positions)
         ranges = []
         for index in sorted(set(positions)):
-            anchor = bisect.bisect_right(self._ordinals, index) - 1
+            anchor = bisect.bisect_right(self._index.keyframes, (index, float("inf"), float("inf"))) - 1
             start = self._index.keyframes[anchor][2]
             end = (self._index.keyframes[anchor + 1][2]
-                   if anchor + 1 < len(self._ordinals) else self._length)
+                   if anchor + 1 < len(self._index.keyframes) else self._length)
             ranges.append((start, end - start))
         try:
             self._range_source.prefetch(ranges)
@@ -282,4 +338,4 @@ class _IndexedTorchCodecDecoder:
         if self._range_source is not None:
             self._range_source.close()
             self._range_source = None
-        self._pts = self._durations = None
+        self._pts = self._durations = self._timeline = None

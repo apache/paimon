@@ -101,7 +101,9 @@ def test_indexed_torchcodec_matches_exact_frames(mp4):
         pts, unused, unused, unused = _timeline(io.BytesIO(mp4), len(mp4))
         if len(np.unique(np.diff(pts))) == 1:
             assert decoder._indexed
-        with pytest.raises(IndexError):
+        # Exact-mode TorchCodec versions differ in their out-of-range exception.
+        errors = IndexError if decoder._indexed else (IndexError, RuntimeError)
+        with pytest.raises(errors, match="[Ii]nvalid frame index|out of range"):
             decoder.get_frames_at(indices=[60])
     finally:
         decoder.close()
@@ -274,3 +276,115 @@ def test_signed_composition_offsets():
     counts, values = _runs(struct.pack(">IIIi", 1 << 24, 1, 3, -2), composition=True)
     np.testing.assert_array_equal(counts, [3])
     np.testing.assert_array_equal(values, [-2])
+
+
+def timing_only_mp4(count, variable=False):
+    def box(kind, body):
+        return struct.pack('>I4s', len(body) + 8, kind) + body
+
+    if variable:
+        runs = np.ones((count, 2), dtype='>u4')
+        runs[:, 1] = 1001
+        runs[1::2, 1] = 1002
+        stts = box(b'stts', struct.pack('>II', 0, count) + runs.tobytes())
+    else:
+        stts = box(b'stts', struct.pack('>IIII', 0, 1, count, 1001))
+    stsz = box(b'stsz', struct.pack('>III', 0, 1, count))
+    media = box(b'mdhd', b'\0' * 12 + struct.pack('>I', 30000))
+    media += box(b'hdlr', b'\0' * 8 + b'vide')
+    media += box(b'minf', box(b'stbl', stts + stsz))
+    return box(b'moov', box(b'trak', box(b'mdia', media)))
+
+
+@pytest.mark.parametrize("variable", [False, True])
+def test_million_sample_timeline_memory(variable):
+    import tracemalloc
+    from pypaimon.multimodal.lerobot.indexed_torchcodec import _MAX_SAMPLES, _SharedTimeline
+
+    payload = timing_only_mp4(_MAX_SAMPLES, variable=variable)
+    tracemalloc.start()
+    try:
+        timeline = _SharedTimeline(io.BytesIO(payload), len(payload))
+        retained, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    if variable:
+        assert timeline.pts.values.nbytes + timeline.durations.values.nbytes == 16_000_000
+        assert retained < 17 * 1024 * 1024
+        assert peak < 64 * 1024 * 1024
+    else:
+        assert timeline.pts.values is None
+        assert timeline.durations.values is None
+        assert retained < 1024 * 1024
+        assert peak < 24 * 1024 * 1024
+    positions = np.array([0, 500000, _MAX_SAMPLES - 1, 0])
+    np.testing.assert_array_equal(timeline.pts[positions], positions * 1001 + (positions // 2 if variable else 0))
+    np.testing.assert_array_equal(timeline.durations[positions], 1001 + positions % 2 if variable else [1001] * 4)
+
+
+def test_irregular_timing_arrays_are_read_only():
+    from pypaimon.multimodal.lerobot.indexed_torchcodec import _TimingValues
+
+    original = np.array([0, 1001, 3003, 4004], dtype=np.int64)
+    timing = _TimingValues(original)
+    assert timing.values is original
+    assert not timing.values.flags.writeable
+    np.testing.assert_array_equal(timing[[3, 0, 1]], [4004, 0, 1001])
+    with pytest.raises(ValueError):
+        timing.values[0] = 1
+
+
+@pytest.mark.parametrize("variable", [False, True])
+def test_replica_decoders_share_and_release_timeline(tmp_path, variable):
+    import sys
+    import weakref
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from pypaimon.common.file_io import FileIO
+    from pypaimon.multimodal.video import VideoFrameCollator
+    from pypaimon.table.row.blob import VideoFrameDescriptor
+
+    payload = timing_only_mp4(1000000, variable=variable)
+    mapping = VideoKeyframeIndex([(0, len(payload))], [(0, 0, 0)]).serialize()
+    path = tmp_path / 'replicas.video'
+    path.write_bytes(payload + mapping)
+    frame = VideoFrameDescriptor(path.as_uri(), 0, len(payload), 0, len(payload), len(mapping))
+    table = SimpleNamespace(file_io=FileIO.get(path.as_uri(), {}))
+    collator = VideoFrameCollator(
+        table, video_column='video', max_open_videos=4,
+        decoder_factory=lambda stream: _IndexedTorchCodecDecoder(stream, stream.video_keyframe_index),
+        decode_fn=lambda *args: None)
+    fake = SimpleNamespace(VideoDecoder=Mock())
+    with patch.dict(sys.modules, {'torchcodec.decoders': fake}), patch(
+            'pypaimon.multimodal.lerobot.indexed_torchcodec._timeline', wraps=_timeline) as parse:
+        try:
+            decoders = [collator._decoder(frame.payload_descriptor, frame.keyframe_index_descriptor, replica=i)
+                        for i in range(4)]
+            assert all(decoder._indexed for decoder in decoders)
+            assert parse.call_count == 1
+            assert all(decoder._timeline is decoders[0]._timeline for decoder in decoders)
+            reference = weakref.ref(decoders[0]._timeline)
+            state = collator.__getstate__()
+            assert state['_video_metadata_cache'] is None
+            worker = VideoFrameCollator.__new__(VideoFrameCollator)
+            worker.__dict__.update(state)
+            worker._ensure_process_local_cache()
+            assert len(worker._video_metadata_cache) == 0
+            assert len(collator._video_metadata_cache) == 1
+            worker.close()
+            decoders[0]._fallback()
+            assert reference() is not None
+            assert decoders[1]._pts[999999] == 999999 * 1001 + (499999 if variable else 0)
+            if variable:
+                assert decoders[1]._pts.values.nbytes == 8_000_000
+                assert all(decoder._pts is decoders[1]._pts for decoder in decoders[1:])
+                assert all(decoder._durations is decoders[1]._durations for decoder in decoders[1:])
+            other_path = tmp_path / 'another.video'
+            other_path.write_bytes(payload + mapping)
+            other_frame = VideoFrameDescriptor(other_path.as_uri(), 0, len(payload), 0, len(payload), len(mapping))
+            other = collator._decoder(other_frame.payload_descriptor, other_frame.keyframe_index_descriptor)
+            assert other._timeline is not reference()
+            assert parse.call_count == 2
+        finally:
+            collator.close()
+        assert reference() is None
