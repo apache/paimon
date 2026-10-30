@@ -407,6 +407,7 @@ public class SchemaValidation {
         validatePrimaryKeySortedIndexes(schema, options);
         validatePrimaryKeyVectorIndex(schema, options);
         validatePrimaryKeyFullTextIndex(schema, options);
+        validateDynamicBucketReuseDeletedSlots(schema, options);
 
         validateMergeFunctionFactory(schema);
 
@@ -1336,6 +1337,43 @@ public class SchemaValidation {
                 CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(),
                 indexColumn);
         options.primaryKeyFullTextIndexOptions(indexColumn);
+    }
+
+    /**
+     * 'dynamic-bucket.reuse-deleted-slots' frees a slot in the bucket of a key as soon as the
+     * assigner sees a delete for it. That is only sound when every delete really removes the row,
+     * otherwise the assigner would believe a slot is free while the row still lives in its bucket.
+     * Each check below rules out one way for a delete to be discarded.
+     */
+    private static void validateDynamicBucketReuseDeletedSlots(
+            TableSchema schema, CoreOptions options) {
+        if (!options.dynamicBucketReuseDeletedSlots()) {
+            return;
+        }
+        String key = CoreOptions.DYNAMIC_BUCKET_REUSE_DELETED_SLOTS.key();
+        // only dynamic bucket has an assigner that tracks the rows of each bucket
+        checkArgument(
+                !schema.primaryKeys().isEmpty() && options.bucket() == -1,
+                "%s requires a primary-key table with dynamic bucket (bucket = -1).",
+                key);
+        // other merge engines may keep the row on a delete (partial-update, aggregation) or never
+        // delete it (first-row)
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE,
+                "%s requires merge-engine = deduplicate, but is %s.",
+                key,
+                options.mergeEngine());
+        // with ignore-delete the delete records are dropped and the row stays in its bucket
+        checkArgument(
+                !options.ignoreDelete(),
+                "%s requires ignore-delete = false, otherwise deletes are not applied.",
+                key);
+        // with a sequence field a delete older than the current row is discarded, and the
+        // assigner cannot tell
+        checkArgument(
+                options.sequenceField().isEmpty(),
+                "%s does not support a sequence field, which may discard a delete.",
+                key);
     }
 
     private static void validatePrimaryKeyIndexColumns(CoreOptions options) {

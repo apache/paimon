@@ -121,6 +121,116 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
+    public void testDeleteFreesBucketForReuse() {
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), new HashMap<>(), 2);
+        assertThat(index.assign(1, b -> true, -1)).isEqualTo(0);
+        assertThat(index.assign(2, b -> true, -1)).isEqualTo(0);
+        // bucket 0 is full, so key 3 opens bucket 1
+        assertThat(index.assign(3, b -> true, -1)).isEqualTo(1);
+
+        index.delete(1);
+        // the freed slot in bucket 0 is reused instead of opening bucket 2
+        assertThat(index.assign(4, b -> true, -1)).isEqualTo(0);
+        assertThat(index.totalBucketSet).containsExactly(0, 1);
+    }
+
+    @Test
+    public void testDeleteIgnoresUnknownAndRepeatedKeys() {
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), new HashMap<>(), 2);
+        assertThat(index.assign(1, b -> true, -1)).isEqualTo(0);
+        assertThat(index.assign(2, b -> true, -1)).isEqualTo(0);
+        assertThat(index.assign(3, b -> true, -1)).isEqualTo(1);
+
+        // an unknown key frees nothing, a repeated delete frees at most one slot
+        index.delete(999);
+        index.delete(2);
+        index.delete(2);
+
+        assertThat(index.assign(4, b -> true, -1)).isEqualTo(0);
+        // bucket 0 is full again: only one slot was freed, so key 5 goes to bucket 1
+        assertThat(index.assign(5, b -> true, -1)).isEqualTo(1);
+        assertThat(index.totalBucketSet).containsExactly(0, 1);
+    }
+
+    @Test
+    public void testDeletedKeyComingBackKeepsItsBucket() {
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), new HashMap<>(), 2);
+        assertThat(index.assign(1, b -> true, -1)).isEqualTo(0);
+        assertThat(index.assign(2, b -> true, -1)).isEqualTo(0);
+        assertThat(index.assign(3, b -> true, -1)).isEqualTo(1);
+
+        index.delete(1);
+        // the key comes back before anyone takes its slot: same bucket, slot taken again
+        assertThat(index.assign(1, b -> true, -1)).isEqualTo(0);
+        // bucket 0 is full again, so a new key opens no slot there
+        assertThat(index.assign(4, b -> true, -1)).isEqualTo(1);
+    }
+
+    @Test
+    public void testDeletedKeyComingBackMayExceedTarget() {
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), new HashMap<>(), 2);
+        assertThat(index.assign(1, b -> true, -1)).isEqualTo(0);
+        assertThat(index.assign(2, b -> true, -1)).isEqualTo(0);
+
+        index.delete(1);
+        // another key takes the freed slot
+        assertThat(index.assign(3, b -> true, -1)).isEqualTo(0);
+        // the deleted key comes back to its own bucket, which goes over the target
+        assertThat(index.assign(1, b -> true, -1)).isEqualTo(0);
+        // an over-target bucket takes no new keys
+        assertThat(index.assign(4, b -> true, -1)).isEqualTo(1);
+    }
+
+    @Test
+    public void testDeleteReusesBucketBeforeRandomPickAtUpperBound() {
+        PartitionIndex index = new PartitionIndex(new Int2ShortHashMap(), new HashMap<>(), 2);
+        assertThat(index.assign(1, b -> true, 2)).isEqualTo(0);
+        assertThat(index.assign(2, b -> true, 2)).isEqualTo(0);
+        assertThat(index.assign(3, b -> true, 2)).isEqualTo(1);
+        assertThat(index.assign(4, b -> true, 2)).isEqualTo(1);
+
+        index.delete(3);
+        // both buckets exist and the cap is 2: the freed slot in bucket 1 wins over the random pick
+        assertThat(index.assign(5, b -> true, 2)).isEqualTo(1);
+    }
+
+    @Test
+    public void testDeleteOnLoadedIndex() {
+        // buckets restored from the index files: bucket 0 holds keys 1 and 2 and is full
+        Int2ShortHashMap hash2Bucket = new Int2ShortHashMap();
+        hash2Bucket.put(1, (short) 0);
+        hash2Bucket.put(2, (short) 0);
+        Map<Integer, Long> loaded = new HashMap<>();
+        loaded.put(0, 2L);
+        PartitionIndex index = new PartitionIndex(hash2Bucket, loaded, 2);
+
+        index.delete(1);
+        assertThat(index.assign(3, b -> true, -1)).isEqualTo(0);
+        assertThat(index.totalBucketSet).containsExactly(0);
+    }
+
+    @Test
+    public void testDeleteThroughAssigner() {
+        HashBucketAssigner assigner = createAssigner(2, 2, 0);
+
+        assertThat(assigner.assign(row(1), 0)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 2)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 4)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 6)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 8)).isEqualTo(0);
+        // full
+        assertThat(assigner.assign(row(1), 10)).isEqualTo(2);
+
+        // a delete on a partition the assigner has not seen yet is harmless
+        assigner.delete(row(3), 0);
+
+        assigner.delete(row(1), 0);
+        // the freed slot in bucket 0 is reused instead of growing to bucket 4
+        assertThat(assigner.assign(row(1), 12)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 14)).isEqualTo(2);
+    }
+
+    @Test
     public void testAssign() {
         HashBucketAssigner assigner = createAssigner(2, 2, 0);
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.index.BucketAssigner;
 import org.apache.paimon.index.HashBucketAssigner;
@@ -50,6 +51,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
 
     private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;
+    private transient boolean reuseDeletedSlots;
 
     public HashBucketAssignerOperator(
             String commitUser,
@@ -93,14 +95,21 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                                 targetRowNum,
                                 maxBucketsNum);
         this.extractor = extractorFunction.apply(table.schema());
+        this.reuseDeletedSlots = table.coreOptions().dynamicBucketReuseDeletedSlots();
     }
 
     @Override
     public void processElement(StreamRecord<T> streamRecord) throws Exception {
         T value = streamRecord.getValue();
-        int bucket =
-                assigner.assign(
-                        extractor.partition(value), extractor.trimmedPrimaryKey(value).hashCode());
+        BinaryRow partition = extractor.partition(value);
+        int hash = extractor.trimmedPrimaryKey(value).hashCode();
+        int bucket = assigner.assign(partition, hash);
+        if (reuseDeletedSlots && extractor.isDelete(value)) {
+            // Assign first: the delete record must still be routed to the bucket of its key. Then
+            // free the slot of the key, so that the bucket can take a new key. A delete of an
+            // unknown key takes a slot in assign and gives it back here, with no net effect.
+            assigner.delete(partition, hash);
+        }
         output.collect(new StreamRecord<>(new Tuple2<>(value, bucket)));
     }
 
