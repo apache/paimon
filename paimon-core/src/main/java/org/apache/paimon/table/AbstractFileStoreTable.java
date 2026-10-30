@@ -19,9 +19,11 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
@@ -30,6 +32,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.FallbackKey;
@@ -72,6 +75,9 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
@@ -90,6 +96,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
@@ -97,6 +104,8 @@ import static org.apache.paimon.CoreOptions.PATH;
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreTable.class);
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -507,7 +516,131 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 changelogManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
-                store().options().scanManifestParallelism());
+                store().options().scanManifestParallelism(),
+                newOtherBranchesLiveFiles());
+    }
+
+    /**
+     * Builds a collector for data files referenced by branches other than the one being expired.
+     *
+     * <p>Every branch shares the same physical data directory, so expiring snapshots on one branch
+     * must not delete files another branch (for example main) still references. Returns {@code
+     * null} when there is no other branch, keeping the common single-branch path untouched.
+     */
+    @Nullable
+    private ExpireSnapshotsImpl.OtherBranchesLiveFiles newOtherBranchesLiveFiles() {
+        String currentBranch = BranchManager.normalizeBranch(currentBranch());
+        List<String> otherBranches;
+        try {
+            List<String> allBranches = new ArrayList<>(branchManager().branches());
+            allBranches.add(Identifier.DEFAULT_MAIN_BRANCH);
+            otherBranches =
+                    allBranches.stream()
+                            .map(BranchManager::normalizeBranch)
+                            .distinct()
+                            .filter(branch -> !branch.equals(currentBranch))
+                            .collect(Collectors.toList());
+        } catch (Exception e) {
+            LOG.warn(
+                    "Failed to list branches before snapshot expiration. "
+                            + "Cross-branch data file protection is disabled for this run.",
+                    e);
+            return null;
+        }
+        if (otherBranches.isEmpty()) {
+            return null;
+        }
+
+        List<String> branches = otherBranches;
+        return new ExpireSnapshotsImpl.OtherBranchesLiveFiles() {
+            @Override
+            public Map<BinaryRow, Map<Integer, Set<String>>> collect(
+                    Map<BinaryRow, Map<Integer, Set<String>>> candidates) throws IOException {
+                Map<BinaryRow, Map<Integer, Set<String>>> referenced = new HashMap<>();
+                for (String branch : branches) {
+                    collectBranchReferencedDataFiles(branch, candidates, referenced);
+                }
+                return referenced;
+            }
+
+            @Override
+            public Set<String> manifestSkippingSet() {
+                Set<String> skippingSet = new HashSet<>();
+                for (String branch : branches) {
+                    collectBranchManifestSkippingSet(branch, skippingSet);
+                }
+                return skippingSet;
+            }
+        };
+    }
+
+    private void collectBranchManifestSkippingSet(String branch, Set<String> skippingSet) {
+        FileStoreTable branchTable;
+        try {
+            branchTable = switchToBranch(branch);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+
+        FileStore<?> branchStore = branchTable.store();
+        SnapshotManager branchSnapshotManager = branchTable.snapshotManager();
+        TagManager branchTagManager = branchStore.newTagManager();
+        SnapshotDeletion branchDeletion = branchStore.newSnapshotDeletion();
+
+        List<Snapshot> liveSnapshots = new ArrayList<>();
+        Long earliest = branchSnapshotManager.earliestSnapshotId();
+        Long latest = branchSnapshotManager.latestSnapshotId();
+        if (earliest != null && latest != null) {
+            for (long id = earliest; id <= latest; id++) {
+                try {
+                    liveSnapshots.add(branchSnapshotManager.tryGetSnapshot(id));
+                } catch (FileNotFoundException ignored) {
+                    // snapshot may have expired concurrently
+                }
+            }
+        }
+        liveSnapshots.addAll(branchTagManager.taggedSnapshots());
+        if (!liveSnapshots.isEmpty()) {
+            skippingSet.addAll(branchDeletion.manifestSkippingSet(liveSnapshots));
+        }
+    }
+
+    private void collectBranchReferencedDataFiles(
+            String branch,
+            Map<BinaryRow, Map<Integer, Set<String>>> candidates,
+            Map<BinaryRow, Map<Integer, Set<String>>> referenced)
+            throws IOException {
+        FileStoreTable branchTable;
+        try {
+            branchTable = switchToBranch(branch);
+        } catch (IllegalArgumentException e) {
+            // The branch may have been dropped concurrently, or have no schema yet.
+            return;
+        }
+
+        FileStore<?> branchStore = branchTable.store();
+        SnapshotManager branchSnapshotManager = branchTable.snapshotManager();
+        TagManager branchTagManager = branchStore.newTagManager();
+        SnapshotDeletion branchDeletion = branchStore.newSnapshotDeletion();
+
+        // live snapshots of the other branch
+        Long earliest = branchSnapshotManager.earliestSnapshotId();
+        Long latest = branchSnapshotManager.latestSnapshotId();
+        if (earliest != null && latest != null) {
+            for (long id = earliest; id <= latest; id++) {
+                try {
+                    Snapshot snapshot = branchSnapshotManager.tryGetSnapshot(id);
+                    branchDeletion.addReferencedDataFiles(referenced, snapshot, candidates);
+                } catch (FileNotFoundException ignored) {
+                    // snapshot may have expired concurrently
+                }
+            }
+        }
+
+        // tags of the other branch keep files alive independently of its snapshots
+        for (Snapshot taggedSnapshot : branchTagManager.taggedSnapshots()) {
+            branchDeletion.addReferencedDataFiles(referenced, taggedSnapshot, candidates);
+        }
     }
 
     @Override
