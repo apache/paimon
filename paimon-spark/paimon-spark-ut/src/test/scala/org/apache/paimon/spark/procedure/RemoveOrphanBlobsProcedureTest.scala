@@ -29,9 +29,11 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.{FileStoreTable, FileStoreTableFactory}
 import org.apache.paimon.utils.{DataFilePathFactories, DateTimeUtils, TraceableFileIO}
 
+import org.apache.spark.SparkException
 import org.apache.spark.sql.Row
 
 import java.io.{File, IOException}
+import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 
@@ -577,13 +579,31 @@ class RemoveOrphanBlobsProcedureTest extends PaimonSparkTestBase {
       .getMethod("shuffleStatuses")
       .invoke(mapOutputTracker)
       .asInstanceOf[scala.collection.Map[Int, _]]
-    val unregister = mapOutputTracker.getClass
-      .getMethod("unregisterAllMapAndMergeOutput", Integer.TYPE)
-    shuffleStatuses.keys.toSeq.foreach(id => unregister.invoke(mapOutputTracker, Int.box(id)))
+    RemoveOrphanBlobsProcedureTest.clearShuffleOutputs(
+      mapOutputTracker,
+      shuffleStatuses.keys.toArray)
   }
 }
 
 private object RemoveOrphanBlobsProcedureTest {
+
+  def clearShuffleOutputs(mapOutputTracker: AnyRef, shuffleIds: Array[Int]): Unit = {
+    val unregister = mapOutputTracker.getClass
+      .getMethod("unregisterAllMapAndMergeOutput", Integer.TYPE)
+    shuffleIds.foreach {
+      id =>
+        try {
+          unregister.invoke(mapOutputTracker, Int.box(id))
+        } catch {
+          case e: InvocationTargetException
+              if e.getCause.isInstanceOf[SparkException] &&
+                e.getCause.getMessage ==
+                s"unregisterAllMapAndMergeOutput called for nonexistent shuffle ID $id." =>
+            // Spark may unregister a shuffle after we enumerate its ID. Keep clearing the others.
+            ()
+        }
+    }
+  }
 
   private val sidecarReadCounts = new ConcurrentHashMap[String, AtomicInteger]()
   private val failSidecarReads = new AtomicBoolean()
