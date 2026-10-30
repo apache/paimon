@@ -202,6 +202,48 @@ class MultimodalTemporalTest(unittest.TestCase):
                 aligned.to_arrow_batch_reader(parallelism=4)
             self.assertEqual(3, len(finished))
 
+    def test_source_failure_skips_queued_work_before_slow_source_finishes(self):
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+        slow_finished = threading.Event()
+        queued_started = threading.Event()
+        original_wait = temporal.wait
+        failure = RuntimeError("source failed")
+
+        def slow():
+            slow_started.set()
+            try:
+                if not release_slow.wait(timeout=10):
+                    raise AssertionError("Slow source was not released")
+            finally:
+                slow_finished.set()
+
+        def fail():
+            if not slow_started.wait(timeout=10):
+                raise AssertionError("Slow source did not start")
+            raise failure
+
+        def observe(futures, **kwargs):
+            try:
+                # Let the worker dequeue the third wrapper before cancellation.
+                self.assertIsNone(futures[2].result(timeout=10))
+                self.assertFalse(queued_started.is_set())
+                self.assertFalse(slow_finished.is_set())
+                done, pending = original_wait(futures, **kwargs)
+                self.assertIn(futures[1], done)
+                self.assertIn(futures[0], pending)
+                return done, pending
+            finally:
+                release_slow.set()
+
+        with mock.patch.object(temporal, "wait", side_effect=observe) as waiting:
+            with self.assertRaises(RuntimeError) as error:
+                temporal._run_source_tasks([slow, fail, queued_started.set], 2)
+            self.assertIs(failure, error.exception)
+            waiting.assert_called_once()
+        self.assertTrue(slow_finished.is_set())
+        self.assertFalse(queued_started.is_set())
+
     def test_temporal_parallelism_validation(self):
         aligned = self._parallel_alignment()
         for value in (True, 0, -1, 1.5, None):

@@ -17,13 +17,14 @@
 """Temporal alignment for multimodal table scans."""
 
 from bisect import bisect_left, bisect_right
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from datetime import timedelta
 from fractions import Fraction
 from functools import lru_cache, partial
 import json
 import math
 from numbers import Integral, Real
+from threading import Event
 
 import numpy as np
 import pyarrow as pa
@@ -361,11 +362,30 @@ class TemporalAlignment:
 def _run_source_tasks(tasks, parallelism):
     if parallelism == 1 or len(tasks) < 2:
         return [task() for task in tasks]
-    with ThreadPoolExecutor(max_workers=min(parallelism, len(tasks))) as executor:
-        futures = [executor.submit(task) for task in tasks]
+    failed = Event()
+
+    def run(task):
+        # A worker may dequeue another task before the caller observes failure.
+        if failed.is_set():
+            return None
         try:
+            return task()
+        except BaseException:
+            failed.set()
+            raise
+
+    with ThreadPoolExecutor(max_workers=min(parallelism, len(tasks))) as executor:
+        futures = []
+        try:
+            for task in tasks:
+                futures.append(executor.submit(run, task))
+            done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+            for future in done:
+                if future.exception() is not None:
+                    future.result()
             return [future.result() for future in futures]
         except BaseException:
+            failed.set()
             for future in futures:
                 future.cancel()
             raise
