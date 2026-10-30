@@ -55,12 +55,23 @@ frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 4
 ```
 
 Generates zero-based frame numbers and PTS-based timestamps in seconds from the
-first frame, preserving variable frame timing and original video bytes.
+first frame, preserving variable frame timing and original container bytes.
 `metadata` supplies the same business fields for every frame.
 
 Supports local and remote videos with one PyAV-decodable video stream and strictly
 increasing timestamps. Configure remote credentials on the connection; keep the source unchanged during import.
 To provide your own frame metadata, pass `frames` explicitly as shown below.
+
+For raw H.265/HEVC without timestamps, supply its fixed frame rate:
+
+```python
+frames.add_video("oss://source-bucket/episode-42.h265", source_fps=30)
+```
+
+The SDK remuxes to MP4 without re-encoding, then imports the frames. Timestamps
+start at zero using `source_fps`; they do not recover capture times or variable
+frame timing. Import uses temporary disk space for the raw stream and MP4,
+removed on completion or failure. Omit `source_fps` for containerized videos.
 
 ## Video Frame Storage
 

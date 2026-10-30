@@ -41,6 +41,77 @@ def _require_video_av():
     return av
 
 
+def _raw_video_time_base(fps):
+    from numbers import Real
+
+    if isinstance(fps, bool) or not isinstance(fps, Real):
+        raise ValueError("source_fps must be a positive finite number.")
+    try:
+        rate = Fraction(str(fps))
+        if rate <= 0 or max(rate.numerator, rate.denominator) > 2147483647:
+            raise ValueError()
+    except (ValueError, OverflowError):
+        raise ValueError("source_fps must be a positive finite representable frame rate.")
+    return 1 / rate
+
+
+def _remux_raw_hevc(source, output_path, time_base):
+    """Preserve HEVC packets and assign constant-rate presentation timestamps."""
+    from array import array
+    import shutil
+    import tempfile
+
+    av = _require_video_av()
+    # A disk snapshot permits two passes without reopening a mutable remote source.
+    with tempfile.TemporaryFile() as raw:
+        shutil.copyfileobj(source, raw, length=1024 * 1024)
+        raw.seek(0)
+        ordinals = array("q")
+        frame_count = 0
+        delay = 0
+        with av.open(raw) as container:
+            if container.format.name != "hevc" or len(container.streams) != 1:
+                raise ValueError("source_fps is only supported for a raw H.265/HEVC stream.")
+            for packet in container.demux(video=0):
+                if packet.size:
+                    # The decoder carries this packet ID through B-frame reordering.
+                    packet.pts = len(ordinals)
+                    packet.dts = None
+                    packet.time_base = time_base
+                    ordinals.append(-1)
+                for frame in packet.decode():
+                    identity = frame.pts
+                    if frame.is_corrupt or identity is None or not 0 <= identity < len(ordinals) \
+                            or ordinals[identity] != -1:
+                        raise ValueError("Cannot determine raw HEVC frame order.")
+                    ordinals[identity] = frame_count
+                    delay = max(delay, identity - frame_count)
+                    frame_count += 1
+        if not frame_count or frame_count != len(ordinals):
+            raise ValueError("Raw HEVC must contain one decodable frame per packet.")
+        raw.seek(0)
+        with av.open(raw) as container, av.open(output_path, "w", format="mp4") as output:
+            if hasattr(output, "add_stream_from_template"):
+                stream = output.add_stream_from_template(container.streams.video[0], opaque=True)
+            else:
+                stream = output.add_stream(template=container.streams.video[0])
+            stream.time_base = time_base
+            count = 0
+            for packet in container.demux(video=0):
+                if not packet.size:
+                    continue
+                packet.pts = ordinals[count]
+                packet.dts = count - delay
+                packet.duration = 1
+                packet.time_base = time_base
+                packet.stream = stream
+                output.mux(packet)
+                count += 1
+            if count != frame_count:
+                raise ValueError("Raw HEVC packet count changed during remux.")
+        return frame_count
+
+
 def _inspect_video_frames(source):
     """Read presentation timestamps without retaining decoded images."""
     av = _require_video_av()

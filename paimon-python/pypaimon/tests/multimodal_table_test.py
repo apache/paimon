@@ -322,6 +322,188 @@ class MultimodalTableTest(unittest.TestCase):
                     for expected, frame in zip(pixels, container.decode(video=0)):
                         np.testing.assert_array_equal(expected, frame.to_ndarray(format="rgb24"))
 
+    def _raw_hevc_file(self, b_frames=3):
+        av = pytest.importorskip("av")
+        import numpy as np
+        if "libx265" not in av.codecs_available:
+            self.skipTest("libx265 is unavailable")
+        path = os.path.join(self.temp_dir, "source.h265")
+        with av.open(path, "w", format="hevc") as container:
+            stream = container.add_stream("libx265", rate=24)
+            stream.width = stream.height = 64
+            stream.pix_fmt = "yuv420p"
+            stream.codec_context.gop_size = 8
+            stream.codec_context.max_b_frames = b_frames
+            stream.codec_context.options = {
+                "preset": "ultrafast",
+                "x265-params": "log-level=error:pools=none:frame-threads=1:scenecut=0",
+            }
+            for i in range(24):
+                frame = av.VideoFrame.from_ndarray(
+                    np.full((64, 64, 3), i * 9, dtype=np.uint8), format="rgb24")
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        return path
+
+    def test_auto_video_raw_hevc_remux_and_indexed_read(self):
+        av = pytest.importorskip("av")
+        import numpy as np
+        from fractions import Fraction
+        from pathlib import Path
+        from pypaimon.multimodal.lerobot.dataset import _PyAVVideoDecoder
+        from pypaimon.table.row.blob import Blob
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        for number, (b_frames, fps) in enumerate([(0, 24), (3, Fraction(30000, 1001))]):
+            with self.subTest(b_frames=b_frames, fps=fps):
+                path = self._raw_hevc_file(b_frames)
+                original = Path(path).read_bytes()
+                with av.open(path) as container:
+                    decoded = list(container.decode(video=0))
+                    pixels = [f.to_ndarray(format="rgb24") for f in decoded]
+                    self.assertTrue(all(f.pts is None for f in decoded))
+                    self.assertEqual(bool(b_frames), any(f.pict_type == 3 for f in decoded))
+                table = self._auto_video_table("hevc_%d" % number)
+                self.assertIs(table, table.add_video(path, source_fps=fps, metadata={"episode_id": 42}))
+                self.assertEqual(original, Path(path).read_bytes())
+                rows = sorted(table.scan().to_list(), key=lambda r: r["frame_index"])
+                self.assertEqual(list(range(24)), [r["frame_index"] for r in rows])
+                np.testing.assert_allclose([i / float(fps) for i in range(24)],
+                                           [r["timestamp"] for r in rows], rtol=0, atol=1e-9)
+                self.assertTrue(all(r["episode_id"] == 42 for r in rows))
+                descriptor = pmm.VideoFrameDescriptor.deserialize(rows[0]["video"])
+                self.assertTrue(descriptor.uri.endswith(".video"))
+                index_descriptor = descriptor.keyframe_index_descriptor
+                self.assertIsNotNone(index_descriptor)
+                index = VideoKeyframeIndex.deserialize(Blob.from_file(
+                    table.raw_table.file_io, index_descriptor.uri,
+                    index_descriptor.offset, index_descriptor.length).to_data(), descriptor.length)
+                self.assertGreater(len(index.keyframes), 1)
+                _, bodies = table.scan().read_blobs("video")
+                payload = bodies["video"][0]
+                self.assertTrue(all(b == payload for b in bodies["video"]))
+                with av.open(io.BytesIO(payload)) as container:
+                    self.assertEqual("hevc", container.streams.video[0].codec_context.name)
+                    actual = list(container.decode(video=0))
+                    self.assertEqual(24, len(actual))
+                    for expected, frame in zip(pixels, actual):
+                        np.testing.assert_array_equal(expected, frame.to_ndarray(format="rgb24"))
+                decoder = _PyAVVideoDecoder(io.BytesIO(payload), keyframe_index=index)
+                try:
+                    for i in [23, 0, 12, 7, 18, 1]:
+                        np.testing.assert_array_equal(pixels[i], decoder[i].permute(1, 2, 0).numpy())
+                finally:
+                    decoder.close()
+
+    def test_auto_video_raw_hevc_remote_descriptor(self):
+        from pathlib import Path
+        from unittest.mock import Mock
+        original = Path(self._raw_hevc_file()).read_bytes()
+        uri = "oss://source-bucket/video.h265"
+        table = self._auto_video_table()
+        factory = table.raw_table.file_io.uri_reader_factory
+        create = factory.create
+        stream = io.BytesIO(b"prefix" + original + b"suffix")
+        reader = Mock()
+        reader.new_input_stream.return_value = stream
+        with patch.object(factory, "create", side_effect=lambda path: reader if path == uri else create(path)):
+            table.add_video(pmm.BlobDescriptor(uri, 6, len(original)), source_fps=24)
+        reader.new_input_stream.assert_called_once_with(uri)
+        self.assertTrue(stream.closed)
+        self.assertEqual(24, len(table.scan().to_list()))
+
+    def test_auto_video_raw_hevc_http(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from pathlib import Path
+        from threading import Thread
+        original = Path(self._raw_hevc_file()).read_bytes()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(original)))
+                self.end_headers()
+                self.wfile.write(original)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            table = self._auto_video_table()
+            with tempfile.TemporaryDirectory() as directory:
+                with patch("tempfile.tempdir", directory):
+                    table.add_video("http://127.0.0.1:%d/video.h265" % server.server_port, source_fps=30)
+                    self.assertEqual([], os.listdir(directory))
+            rows = table.scan().select(["frame_index", "timestamp"]).to_list()
+            self.assertEqual(24, len(rows))
+            self.assertTrue(all(abs(r["timestamp"] - r["frame_index"] / 30) < 1e-9 for r in rows))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_auto_video_raw_hevc_source_change_before_write(self):
+        from pathlib import Path
+        from pypaimon.multimodal.video import _remux_raw_hevc
+        path = self._raw_hevc_file()
+        table = self._auto_video_table()
+
+        def remux(*args):
+            count = _remux_raw_hevc(*args)
+            Path(path).write_bytes(b"replaced")
+            return count
+
+        with patch("pypaimon.multimodal.video._remux_raw_hevc", side_effect=remux):
+            with self.assertRaisesRegex(ValueError, "source changed"):
+                table.add_video(path, source_fps=30)
+        self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_auto_video_raw_hevc_frame_count_mismatch(self):
+        table = self._auto_video_table()
+        path = self._raw_hevc_file()
+        with patch("pypaimon.multimodal.video._inspect_video_frames", return_value=[0.0]):
+            with self.assertRaisesRegex(ValueError, "frame count changed"):
+                table.add_video(path, source_fps=30)
+        self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_auto_video_raw_hevc_invalid_input_and_cleanup(self):
+        from pathlib import Path
+        table = self._auto_video_table()
+        factory = table.raw_table.file_io.uri_reader_factory
+        import sys
+        with patch.dict(sys.modules, {"av": None}), patch.object(factory, "create") as create:
+            with self.assertRaises(ImportError):
+                table.add_video("oss://bucket/video.h265", source_fps=30)
+            create.assert_not_called()
+        with patch.object(factory, "create") as create:
+            for fps in [0, -1, True, "30", float("nan"), float("inf"), 1e20]:
+                with self.subTest(fps=fps), self.assertRaisesRegex(ValueError, "source_fps"):
+                    table.add_video("oss://bucket/video.h265", source_fps=fps)
+            with self.assertRaisesRegex(ValueError, "frames is omitted"):
+                table.add_video("oss://bucket/video.h265", [], source_fps=30)
+            create.assert_not_called()
+        path = self._raw_hevc_file()
+        with self.assertRaisesRegex(ValueError, "missing a presentation timestamp"):
+            table.add_video(path)
+        with self.assertRaisesRegex(ValueError, "raw H.265"):
+            table.add_video(self._auto_video_file(), source_fps=30)
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("tempfile.tempdir", directory):
+                with patch.object(table, "add_batches", side_effect=RuntimeError("write failed")):
+                    with self.assertRaisesRegex(RuntimeError, "write failed"):
+                        table.add_video(path, source_fps=30)
+                self.assertEqual([], os.listdir(directory))
+                Path(path).write_bytes(b"not a video")
+                with self.assertRaises(Exception):
+                    table.add_video(path, source_fps=30)
+                self.assertEqual([], os.listdir(directory))
+        self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
+
     def test_auto_video_missing_pyav_does_not_access_source(self):
         import sys
         table = self._auto_video_table()

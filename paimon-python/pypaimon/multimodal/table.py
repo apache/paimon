@@ -128,7 +128,8 @@ class MultimodalTable:
             *,
             video_column=None,
             first_frame=0,
-            metadata=None):
+            metadata=None,
+            source_fps=None):
         """Append logical frame rows backed by one complete encoded video.
 
         ``frames`` supplies every table column except the configured
@@ -137,17 +138,25 @@ class MultimodalTable:
         data file. Omit ``frames`` to inspect a video and generate
         ``frame_index`` (int64) and ``timestamp`` (float64 seconds from the
         first frame). ``metadata`` supplies constant values for other columns.
-        Automatic discovery requires PyAV and one video stream.
+        Automatic discovery requires PyAV and one video stream. For raw HEVC,
+        ``source_fps`` assigns a constant frame rate and remuxes to MP4 without
+        re-encoding. It does not recover original capture timestamps.
         """
         if frames is None:
             import os
             import stat
+            import tempfile
+            from contextlib import ExitStack
             from urllib.parse import urlparse
 
             from pypaimon.table.row.blob import Blob, BlobDescriptor
             from pypaimon.common.file_io import _is_local_path
             from pypaimon.filesystem.local_file_io import LocalFileIO
-            from pypaimon.multimodal.video import _inspect_video_frames, _require_video_av
+            from pypaimon.multimodal.video import (
+                _inspect_video_frames, _require_video_av, _raw_video_time_base, _remux_raw_hevc,
+            )
+
+            time_base = _raw_video_time_base(source_fps) if source_fps is not None else None
 
             if isinstance(first_frame, bool) or not isinstance(first_frame, int) or first_frame != 0:
                 raise ValueError("first_frame must be 0 when frames is omitted.")
@@ -189,35 +198,45 @@ class MultimodalTable:
                     raise ValueError("Automatic video import requires a regular local file.")
                 return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
-            original = source_state()
-            # Resolve through the same factory as the writer, including source credentials.
-            reader = self.raw_table.file_io.uri_reader_factory.create(video.uri)
-            with Blob.from_descriptor(reader, video).new_input_stream() as stream:
-                timestamps = _inspect_video_frames(stream)
+            with ExitStack() as stack:
+                original = source_state()
+                # Resolve through the same factory as the writer, including source credentials.
+                reader = self.raw_table.file_io.uri_reader_factory.create(video.uri)
+                with Blob.from_descriptor(reader, video).new_input_stream() as stream:
+                    if time_base is not None:
+                        directory = stack.enter_context(tempfile.TemporaryDirectory(prefix="paimon_hevc_"))
+                        path = os.path.join(directory, "video.mp4")
+                        count = _remux_raw_hevc(stream, path, time_base)
+                        video = BlobDescriptor(path, 0, os.path.getsize(path))
+                        timestamps = _inspect_video_frames(path)
+                        if len(timestamps) != count:
+                            raise ValueError("HEVC frame count changed during remux.")
+                    else:
+                        timestamps = _inspect_video_frames(stream)
 
-            def check_source():
-                if source_state() != original:
-                    raise ValueError("Video source changed during import.")
+                def check_source():
+                    if source_state() != original:
+                        raise ValueError("Video source changed during import.")
 
-            check_source()
-
-            def batches():
-                for start in range(0, len(timestamps), 1024):
-                    end = min(start + 1024, len(timestamps))
-                    values = {
-                        "frame_index": pa.array(range(start, end), type=pa.int64()),
-                        "timestamp": pa.array(timestamps[start:end], type=pa.float64()),
-                    }
-                    if constants is not None:
-                        repeated = constants.take(pa.array([0] * (end - start), type=pa.int32()))
-                        values.update({name: repeated[name] for name in repeated.column_names})
-                    yield _video_frame_table(video, pa.table(values), column, start, schema)
-                # add_batches exhausts this iterator before preparing/committing.
                 check_source()
 
-            return self.add_batches(batches())
-        elif metadata is not None:
-            raise ValueError("metadata is only supported when frames is omitted.")
+                def batches():
+                    for start in range(0, len(timestamps), 1024):
+                        end = min(start + 1024, len(timestamps))
+                        values = {
+                            "frame_index": pa.array(range(start, end), type=pa.int64()),
+                            "timestamp": pa.array(timestamps[start:end], type=pa.float64()),
+                        }
+                        if constants is not None:
+                            repeated = constants.take(pa.array([0] * (end - start), type=pa.int32()))
+                            values.update({name: repeated[name] for name in repeated.column_names})
+                        yield _video_frame_table(video, pa.table(values), column, start, schema)
+                    # add_batches exhausts this iterator before preparing/committing.
+                    check_source()
+
+                return self.add_batches(batches())
+        elif metadata is not None or source_fps is not None:
+            raise ValueError("metadata and source_fps are only supported when frames is omitted.")
         return self.add_videos(
             [(video, frames, first_frame)], video_column=video_column
         )
