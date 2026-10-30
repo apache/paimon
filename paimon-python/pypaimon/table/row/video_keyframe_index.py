@@ -20,6 +20,44 @@
 import operator
 import struct
 import zlib
+from array import array
+from collections.abc import Sequence
+
+
+class _PackedKeyframes(Sequence):
+    """Immutable int64 triples, unpacked only as individual entries are read."""
+
+    ENTRY = struct.Struct('<qqq')
+
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data) // self.ENTRY.size
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return tuple(self[i] for i in range(*index.indices(len(self))))
+        index = operator.index(index)
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError("Keyframe index out of range.")
+        return self.ENTRY.unpack_from(self.data, index * self.ENTRY.size)
+
+    def __iter__(self):
+        return self.ENTRY.iter_unpack(self.data)
+
+    def __eq__(self, other):
+        if isinstance(other, _PackedKeyframes):
+            return self.data == other.data
+        if not isinstance(other, Sequence):
+            return NotImplemented
+        return len(self) == len(other) and all(a == b for a, b in zip(self, other))
+
+
+class VideoKeyframeIndexLimitError(ValueError):
+    """A video index exceeds a bounded resource budget."""
 
 
 class VideoKeyframeIndex:
@@ -31,7 +69,8 @@ class VideoKeyframeIndex:
     METADATA_RANGE = struct.Struct('<qq')
     ENTRY = struct.Struct('<qqq')
     MAX_METADATA_RANGE_COUNT = 64 * 1024
-    MAX_KEYFRAME_COUNT = 64 * 1024
+    MAX_DECODED_KEYFRAME_BYTES = 16 * 1024 * 1024
+    MAX_KEYFRAME_COUNT = MAX_DECODED_KEYFRAME_BYTES // ENTRY.size
     _CHUNK_SIZE = 64 * 1024
 
     def __init__(self, metadata_ranges, keyframes):
@@ -54,18 +93,7 @@ class VideoKeyframeIndex:
                     continue
             normalized_metadata_ranges.append((offset, length))
         self.metadata_ranges = tuple(normalized_metadata_ranges)
-        normalized_keyframes = []
-        for ordinal, pts, position in keyframes:
-            if len(normalized_keyframes) >= self.MAX_KEYFRAME_COUNT:
-                raise ValueError(
-                    "Video keyframe index exceeds the %s-entry limit."
-                    % self.MAX_KEYFRAME_COUNT
-                )
-            normalized_keyframes.append((
-                operator.index(ordinal), operator.index(pts),
-                operator.index(position),
-            ))
-        self.keyframes = tuple(normalized_keyframes)
+        self.keyframes = keyframes
         previous_end = 0
         for offset, length in self.metadata_ranges:
             if offset < previous_end or length <= 0:
@@ -92,18 +120,21 @@ class VideoKeyframeIndex:
 
     @property
     def keyframes(self):
-        entries = self._keyframes
-        if isinstance(entries, bytes):
-            entries = tuple(self.ENTRY.iter_unpack(entries))
-            self._keyframes = entries
-        return entries
+        return self._keyframes
 
     @keyframes.setter
     def keyframes(self, entries):
-        self._keyframes = entries
+        data = bytearray()
+        for entry in entries:
+            if len(data) // self.ENTRY.size >= self.MAX_KEYFRAME_COUNT:
+                raise VideoKeyframeIndexLimitError(
+                    "Video keyframe index exceeds the %s-entry limit."
+                    % self.MAX_KEYFRAME_COUNT)
+            data.extend(self.ENTRY.pack(*(operator.index(value) for value in entry)))
+        self._keyframes = _PackedKeyframes(bytes(data))
 
     def serialize(self):
-        entries = b''.join(self.ENTRY.pack(*entry) for entry in self.keyframes)
+        entries = self._keyframes.data
         return self.HEADER.pack(
             self.VERSION,
             self.MAGIC,
@@ -124,6 +155,8 @@ class VideoKeyframeIndex:
                 "Video seek-index generation requires PyAV."
             ) from error
 
+        import numpy as np
+
         metadata_ranges = cls._iso_bmff_metadata_ranges(
             source, payload_length)
         source.seek(0)
@@ -131,7 +164,7 @@ class VideoKeyframeIndex:
             if not container.streams.video:
                 raise ValueError("Video has no video stream.")
             stream = container.streams.video[0]
-            packet_positions = {}
+            packet_data = array("q")
             for packet in container.demux(stream):
                 if (not packet.is_keyframe or packet.pts is None
                         or packet.pos is None or packet.pos < 0
@@ -142,46 +175,41 @@ class VideoKeyframeIndex:
                     packet.time_base or stream.time_base,
                     stream.time_base,
                 )
-                if pts in packet_positions:
-                    raise ValueError("Video has duplicate keyframe timestamps.")
-                if len(packet_positions) >= cls.MAX_KEYFRAME_COUNT:
-                    raise ValueError(
+                if len(packet_data) // 2 >= cls.MAX_KEYFRAME_COUNT:
+                    raise VideoKeyframeIndexLimitError(
                         "Video keyframe index exceeds the %s-entry limit."
                         % cls.MAX_KEYFRAME_COUNT
                     )
-                packet_positions[pts] = int(packet.pos)
+                packet_data.extend((pts, int(packet.pos)))
+
+        packets = np.asarray(packet_data, dtype=np.int64).reshape(-1, 2)
+        order = np.argsort(packets[:, 0])
+        packet_pts = packets[order, 0]
+        packet_positions = packets[order, 1]
+        del packet_data, packets, order
+        if np.any(packet_pts[1:] == packet_pts[:-1]):
+            raise ValueError("Video has duplicate keyframe timestamps.")
 
         source.seek(0)
         with av.open(source) as container:
             stream = container.streams.video[0]
-            keyframes = []
-            previous_pts = None
-            for ordinal, frame in enumerate(container.decode(stream)):
-                if frame.pts is None:
-                    raise ValueError("Video frame has no presentation timestamp.")
-                pts = cls._stream_pts(
-                    frame.pts,
-                    frame.time_base or stream.time_base,
-                    stream.time_base,
-                )
-                if previous_pts is not None and pts <= previous_pts:
-                    raise ValueError(
-                        "Video frame timestamps must be strictly increasing."
-                    )
-                if frame.key_frame:
-                    position = packet_positions.get(pts)
-                    if position is None:
-                        raise ValueError(
-                            "Video keyframe has no packet byte position."
-                        )
-                    if len(keyframes) >= cls.MAX_KEYFRAME_COUNT:
-                        raise ValueError(
-                            "Video keyframe index exceeds the %s-entry limit."
-                            % cls.MAX_KEYFRAME_COUNT
-                        )
-                    keyframes.append((ordinal, pts, position))
-                previous_pts = pts
-        return cls(metadata_ranges, keyframes)
+
+            def entries():
+                previous_pts = None
+                for ordinal, frame in enumerate(container.decode(stream)):
+                    if frame.pts is None:
+                        raise ValueError("Video frame has no presentation timestamp.")
+                    pts = cls._stream_pts(
+                        frame.pts, frame.time_base or stream.time_base, stream.time_base)
+                    if previous_pts is not None and pts <= previous_pts:
+                        raise ValueError("Video frame timestamps must be strictly increasing.")
+                    if frame.key_frame:
+                        match = np.searchsorted(packet_pts, pts)
+                        if match == len(packet_pts) or packet_pts[match] != pts:
+                            raise ValueError("Video keyframe has no packet byte position.")
+                        yield ordinal, pts, int(packet_positions[match])
+                    previous_pts = pts
+            return cls(metadata_ranges, entries())
 
     @staticmethod
     def _stream_pts(pts, time_base, stream_time_base):
@@ -259,7 +287,7 @@ class VideoKeyframeIndex:
             else:
                 metadata_ranges.append((start, length))
 
-        # The header caps this buffer at 1.5 MiB. One extra byte detects
+        # The header caps this buffer at MAX_DECODED_KEYFRAME_BYTES. One extra byte detects
         # excess output without expanding an untrusted compressed stream.
         expected_size = keyframe_count * cls.ENTRY.size
         decoder = zlib.decompressobj()
@@ -292,11 +320,10 @@ class VideoKeyframeIndex:
                 "video payload and strictly increasing."
             )
 
-        # Validation is eager, but decoders that do not consume keyframes need
-        # not allocate Python tuples and integers for every entry.
+        # Keep entries compact even after a decoder starts consuming them.
         result = cls.__new__(cls)
         result.metadata_ranges = tuple(metadata_ranges)
-        result._keyframes = raw
+        result._keyframes = _PackedKeyframes(raw)
         return result
 
     @classmethod
@@ -317,7 +344,7 @@ class VideoKeyframeIndex:
                 % cls.MAX_METADATA_RANGE_COUNT
             )
         if keyframe_count > cls.MAX_KEYFRAME_COUNT:
-            raise ValueError(
+            raise VideoKeyframeIndexLimitError(
                 "Video keyframe index exceeds the %s-entry limit."
                 % cls.MAX_KEYFRAME_COUNT
             )

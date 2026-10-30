@@ -445,7 +445,8 @@ A keyframe-index block contains a 17-byte header (version `1`: uint8; magic `0x5
 uint64; metadata-range and keyframe counts: uint32 each), metadata `(offset, length)` pairs
 (int64 each), and zlib-compressed `(frame ordinal, PTS, packet position)` entries (int64 each).
 Numeric fields are little endian; offsets are payload-relative. Limits: 65,536 metadata ranges
-and 65,536 keyframes, 16 MiB per block, 64 MiB per file. The index covers the first video
+and 16 MiB of decoded keyframe entries (699,050 entries), 16 MiB per stored block,
+64 MiB per file. Older readers limited to 65,536 entries cannot read larger indexes. The index covers the first video
 stream; its time base stays in the video.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:

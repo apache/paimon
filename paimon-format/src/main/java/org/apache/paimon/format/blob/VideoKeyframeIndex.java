@@ -32,7 +32,8 @@ final class VideoKeyframeIndex {
     private static final int METADATA_RANGE_LENGTH = Long.BYTES * 2;
     private static final int ENTRY_LENGTH = Long.BYTES * 3;
     static final long MAX_METADATA_RANGE_COUNT = 64 * 1024;
-    static final long MAX_KEYFRAME_COUNT = 64 * 1024;
+    static final long MAX_DECODED_KEYFRAME_BYTES = 16 * 1024 * 1024;
+    static final long MAX_KEYFRAME_COUNT = MAX_DECODED_KEYFRAME_BYTES / ENTRY_LENGTH;
 
     private VideoKeyframeIndex() {}
 

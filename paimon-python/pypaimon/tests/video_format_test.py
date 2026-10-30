@@ -405,6 +405,22 @@ class VideoFormatTest(unittest.TestCase):
                 self.assertEqual(payload, output.getvalue())
                 self.assertEqual([b""], writer._keyframe_indexes)
 
+    def test_index_memory_limit_warns_and_preserves_payload(self):
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndexLimitError
+        payload = b"video"
+        source = self.root / "large-index.mp4"
+        source.write_bytes(payload)
+        descriptor = VideoFrameDescriptor(source.as_uri(), 0, len(payload), 0, -1, 0)
+        blob = Blob.from_descriptor(self.file_io.uri_reader_factory.create(descriptor.uri), descriptor)
+        output = io.BytesIO()
+        writer = VideoFormatWriter(output)
+        with mock.patch.object(VideoKeyframeIndex, "inspect", side_effect=VideoKeyframeIndexLimitError("limit")):
+            with self.assertLogs("pypaimon.execution.python.write.video_format_writer", level="WARNING") as logs:
+                writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+        self.assertIn("without a seek index", logs.output[0])
+        self.assertEqual(payload, output.getvalue())
+        self.assertEqual([b""], writer._keyframe_indexes)
+
     def test_rejects_invalid_keyframe_index(self):
         video = b"video"
         mapping = b"mapping"
@@ -501,7 +517,7 @@ class VideoFormatTest(unittest.TestCase):
         try:
             with self.assertRaisesRegex(
                     ValueError,
-                    "entry limit"):
+                    "ordinals must be strictly increasing"):
                 writer.add_element(
                     GenericRow([blob], [self.field], RowKind.INSERT)
                 )

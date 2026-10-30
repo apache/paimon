@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import struct
 import sys
 
@@ -25,7 +26,7 @@ from pypaimon.table.row.blob import (
     BlobRef,
     VideoFrameDescriptor,
 )
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex, VideoKeyframeIndexLimitError
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
@@ -185,7 +186,11 @@ class VideoFormatWriter(BlobFormatWriter):
                         stream.seek(position)
                     mapping = VideoKeyframeIndex.inspect(
                         stream, payload_length).serialize()
-                except _video_index_fallback_errors():
+                except _video_index_fallback_errors() as error:
+                    if isinstance(error, VideoKeyframeIndexLimitError):
+                        logging.getLogger(__name__).warning(
+                            "Video seek index exceeds its memory budget; storing video without "
+                            "a seek index. Random reads may require scanning: %s", error)
                     return b''
             finally:
                 stream.close()

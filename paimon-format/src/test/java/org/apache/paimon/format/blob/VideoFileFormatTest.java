@@ -47,6 +47,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
@@ -55,6 +56,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.zip.DeflaterOutputStream;
 
 import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -215,6 +217,32 @@ public class VideoFileFormatTest {
         assertThatThrownBy(() -> write(frame))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Invalid video keyframe index");
+    }
+
+    @Test
+    public void testKeyframeIndexAboveOldLimit() throws IOException {
+        int count = 65537;
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (DeflaterOutputStream output = new DeflaterOutputStream(compressed)) {
+            ByteBuffer entry = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < count; i++) {
+                entry.clear();
+                entry.putLong(i).putLong(i).putLong(i);
+                output.write(entry.array());
+            }
+        }
+        byte[] mapping =
+                ByteBuffer.allocate(17 + compressed.size())
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .put((byte) 1)
+                        .putLong(0x564944454F4B4649L)
+                        .putInt(0)
+                        .putInt(count)
+                        .put(compressed.toByteArray())
+                        .array();
+        VideoKeyframeIndex.validate(mapping, count);
+        assertThat(VideoKeyframeIndex.MAX_KEYFRAME_COUNT * 24)
+                .isLessThanOrEqualTo(VideoKeyframeIndex.MAX_DECODED_KEYFRAME_BYTES);
     }
 
     @Test

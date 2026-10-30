@@ -31,21 +31,67 @@ from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 class VideoKeyframeIndexTest(unittest.TestCase):
 
-    def test_deserialize_materializes_keyframes_only_when_used(self):
-        index = VideoKeyframeIndex([(0, 10)], [(0, -100, 20), (12, 120, 200)])
+    def test_keyframes_stay_compact_when_read_and_pickled(self):
+        values = ((0, -100, 20), (12, 120, 200))
+        index = VideoKeyframeIndex([(0, 10)], values)
         data = index.serialize()
-        entry = VideoKeyframeIndex.ENTRY
-        with mock.patch.object(VideoKeyframeIndex, 'ENTRY', mock.Mock(
-                size=entry.size, iter_unpack=mock.Mock(wraps=entry.iter_unpack))):
-            restored = VideoKeyframeIndex.deserialize(data, 1000)
-            self.assertEqual(index.metadata_ranges, restored.metadata_ranges)
-            restored = pickle.loads(pickle.dumps(restored))
-            VideoKeyframeIndex.ENTRY.iter_unpack.assert_not_called()
-
-            self.assertEqual(index.keyframes, restored.keyframes)
-            self.assertIs(restored.keyframes, restored.keyframes)
-            VideoKeyframeIndex.ENTRY.iter_unpack.assert_called_once()
+        restored = pickle.loads(pickle.dumps(VideoKeyframeIndex.deserialize(data, 1000)))
+        packed = restored.keyframes.data
+        self.assertEqual(values, restored.keyframes)
+        self.assertEqual(values[-1], restored.keyframes[-1])
+        self.assertEqual(values[::-1], restored.keyframes[::-1])
+        self.assertEqual(list(values), list(restored.keyframes))
+        self.assertIs(packed, restored.keyframes.data)
+        self.assertEqual(2 * VideoKeyframeIndex.ENTRY.size, len(packed))
+        with self.assertRaises(IndexError):
+            _ = restored.keyframes[2]
+        with self.assertRaises(IndexError):
+            _ = restored.keyframes[-3]
         self.assertEqual(data, restored.serialize())
+
+    def test_real_video_above_old_keyframe_limit(self):
+        import tempfile
+        from pathlib import Path
+        import pytest
+        av = pytest.importorskip("av")
+        np = pytest.importorskip("numpy")
+        pytest.importorskip("torch")
+        from pypaimon.multimodal.lerobot.dataset import _PyAVVideoDecoder
+
+        count = 65537
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "all-keyframes.mp4")
+            with av.open(path, "w") as output:
+                stream = output.add_stream("libx264", rate=30, options={"preset": "ultrafast", "crf": "0"})
+                stream.width = stream.height = 16
+                stream.pix_fmt = "yuv420p"
+                stream.gop_size = 1
+                stream.codec_context.max_b_frames = 0
+                for ordinal in range(count):
+                    frame = av.VideoFrame.from_ndarray(
+                        np.full((16, 16, 3), ordinal % 200, dtype=np.uint8), format="rgb24")
+                    frame.pts = ordinal
+                    for packet in stream.encode(frame):
+                        output.mux(packet)
+                for packet in stream.encode():
+                    output.mux(packet)
+            with open(path, "rb") as source:
+                index = VideoKeyframeIndex.inspect(source, Path(path).stat().st_size)
+            self.assertEqual(count, len(index.keyframes))
+            restored = VideoKeyframeIndex.deserialize(index.serialize())
+            ordinals = [count - 1, 0, 32768]
+            with av.open(path) as container:
+                expected = {i: frame.to_ndarray(format="rgb24")
+                            for i, frame in enumerate(container.decode(video=0)) if i in ordinals}
+            with open(path, "rb") as source:
+                decoder = _PyAVVideoDecoder(source, keyframe_index=restored, thread_count=1)
+                try:
+                    actual = decoder.get_frames_at(indices=ordinals).data.numpy()
+                    for ordinal, pixels in zip(ordinals, actual):
+                        np.testing.assert_array_equal(expected[ordinal], pixels.transpose(1, 2, 0))
+                finally:
+                    decoder.close()
+            self.assertEqual(count * 24, len(restored.keyframes.data))
 
     def test_replace_unmaterialized_keyframes(self):
         index = VideoKeyframeIndex([(0, 10)], [(0, 0, 20), (12, 120, 200)])
