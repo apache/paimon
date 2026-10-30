@@ -90,6 +90,38 @@ def inline_blob_value(value: Any, descriptor: bool, view: bool) -> Any:
     return value
 
 
+def normalize_inline_blob_row(
+        row: InternalRow,
+        values_by_name: Dict[str, Any],
+        field_dict: Dict[str, DataField],
+        column_names: List[str],
+        descriptor_fields: Iterable[str],
+        view_fields: Iterable[str]):
+    """Normalize inline BLOB reference fields in a row and value map to bytes."""
+    descriptor_set = set(descriptor_fields)
+    view_set = set(view_fields)
+    inline_columns = [
+        name for name in column_names
+        if name in descriptor_set or name in view_set
+    ]
+    if not inline_columns:
+        return row, values_by_name
+    values_by_name = dict(values_by_name)
+    for name in inline_columns:
+        values_by_name[name] = inline_blob_value(
+            values_by_name[name],
+            name in descriptor_set,
+            name in view_set,
+        )
+    from pypaimon.table.row.generic_row import GenericRow
+    row = GenericRow(
+        [values_by_name[name] for name in column_names],
+        [field_dict[name] for name in column_names],
+        row.get_row_kind(),
+    )
+    return row, values_by_name
+
+
 def value_for_arrow(value: Any, field: DataField) -> Any:
     if isinstance(value, Vector):
         return value.to_list()
