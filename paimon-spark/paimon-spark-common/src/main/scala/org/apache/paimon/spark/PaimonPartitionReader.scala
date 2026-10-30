@@ -26,7 +26,7 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.{BlobDescriptorResolvingRow, UriReaderFactory}
+import org.apache.paimon.utils.{BlobDescriptorResolvingRow, ProjectedRow, UriReaderFactory}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
@@ -44,7 +44,8 @@ case class PaimonPartitionReader(
     metadataColumns: Seq[PaimonMetadataColumn],
     blobAsDescriptor: Boolean,
     uriReaderFactory: UriReaderFactory,
-    blobDescriptorFieldIndices: Array[Int]
+    blobDescriptorFieldIndices: Array[Int],
+    dataProjection: Array[Int] = null
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
@@ -53,11 +54,22 @@ case class PaimonPartitionReader(
   private val ioManager: IOManager = createIOManager()
   @Nullable private var currentRecordReader = readSplit()
   private val sparkRow: SparkInternalRow = {
-    val dataFields = new JList(readBuilder.readType().getFields)
+    val outputType =
+      if (dataProjection == null) readBuilder.readType()
+      else readBuilder.readType().project(dataProjection)
+    val dataFields = new JList(outputType.getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
     val rowType = new RowType(dataFields)
     SparkInternalRow.create(rowType, blobAsDescriptor)
   }
+  // Remove ordinary columns added for partition metadata. Metadata columns start after all
+  // fields in the expanded read type, so retain their positions in the joined row.
+  private lazy val outputProjection =
+    if (dataProjection == null) null
+    else {
+      ProjectedRow.from(
+        dataProjection ++ metadataColumns.indices.map(_ + readBuilder.readType().getFieldCount))
+    }
   private var totalReadBatchTimeMs: Long = 0L
 
   private lazy val read = readBuilder.newRead().withIOManager(ioManager)
@@ -78,7 +90,8 @@ case class PaimonPartitionReader(
       null
     } else {
       advanced = false
-      sparkRow.replace(resolveBlobDescriptors(currentRow))
+      val row = resolveBlobDescriptors(currentRow)
+      sparkRow.replace(if (outputProjection == null) row else outputProjection.replaceRow(row))
     }
   }
 
@@ -117,7 +130,11 @@ case class PaimonPartitionReader(
   private def readSplit(): PaimonRecordReaderIterator = {
     if (splits.hasNext) {
       val split = splits.next()
-      PaimonRecordReaderIterator(read.createReader(split), metadataColumns, split)
+      PaimonRecordReaderIterator(
+        read.createReader(split),
+        metadataColumns,
+        split,
+        readBuilder.readType())
     } else {
       null
     }

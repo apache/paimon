@@ -33,6 +33,7 @@ import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_
 import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
@@ -117,8 +118,28 @@ abstract class PaimonSparkTableBase(val table: Table)
     capabilities
   }
 
+  // Masks can return NULL even for partition keys declared NOT NULL. Expose this on the
+  // relation as well as the metadata struct so Spark retains null checks and IS NULL filters.
+  override lazy val schema: StructType = {
+    val tableType = SparkTypeUtils.fromPaimonRowType(table.rowType())
+    if (coreOptions.queryAuthEnabled()) {
+      StructType(tableType.fields.map {
+        field =>
+          if (table.partitionKeys().contains(field.name)) field.copy(nullable = true) else field
+      })
+    } else {
+      tableType
+    }
+  }
+
   override def metadataColumns: Array[MetadataColumn] = {
-    val partitionType = SparkTypeUtils.toSparkPartitionType(table)
+    val rawPartitionType = SparkTypeUtils.toSparkPartitionType(table)
+    val partitionType =
+      if (coreOptions.queryAuthEnabled()) {
+        StructType(rawPartitionType.fields.map(_.copy(nullable = true)))
+      } else {
+        rawPartitionType
+      }
 
     val _metadataColumns = ArrayBuffer[MetadataColumn]()
 
