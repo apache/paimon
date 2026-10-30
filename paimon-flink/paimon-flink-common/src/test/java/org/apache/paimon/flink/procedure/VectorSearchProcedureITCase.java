@@ -48,6 +48,8 @@ import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.client.program.ClusterClient;
+import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -55,6 +57,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -197,6 +200,86 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                                         && row.endsWith("}")
                                         && !row.contains("\"id\"")
                                         && !row.contains("\"vec\""));
+    }
+
+    @Test
+    public void testDistributedPrimaryKeySearchWithMultipleVectorIndexes() throws Exception {
+        sql(
+                "CREATE TABLE MULTI_VECTOR_PK_T ("
+                        + "id INT, image_vec ARRAY<FLOAT>, text_vec ARRAY<FLOAT>, "
+                        + "PRIMARY KEY (id) NOT ENFORCED) WITH ("
+                        + "'bucket' = '4', "
+                        + "'file.format' = 'json', "
+                        + "'file.compression' = 'none', "
+                        + "'deletion-vectors.enabled' = 'true', "
+                        + "'vector-field' = 'image_vec,text_vec', "
+                        + "'field.image_vec.vector-dim' = '2', "
+                        + "'field.text_vec.vector-dim' = '2', "
+                        + "'pk-vector.index.columns' = 'image_vec,text_vec', "
+                        + "'fields.image_vec.pk-vector.index.type' = '%s', "
+                        + "'fields.text_vec.pk-vector.index.type' = '%s', "
+                        + "'fields.image_vec.pk-vector.distance.metric' = 'l2', "
+                        + "'fields.text_vec.pk-vector.distance.metric' = 'l2', "
+                        + "'vector-index.search-mode' = 'fast', "
+                        + "'vector-search.distribute.enabled' = 'true', "
+                        + "'global-index.thread-num' = '2')",
+                TestVectorGlobalIndexerFactory.IDENTIFIER,
+                TestVectorGlobalIndexerFactory.IDENTIFIER);
+        String values =
+                IntStream.range(0, 32)
+                        .mapToObj(
+                                i ->
+                                        String.format(
+                                                "(%d, ARRAY[CAST(%d AS FLOAT), CAST(0 AS FLOAT)], "
+                                                        + "ARRAY[CAST(%d AS FLOAT), CAST(0 AS FLOAT)])",
+                                                i, i, 31 - i))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO MULTI_VECTOR_PK_T VALUES " + values);
+        sql(
+                "CALL sys.compact(`table` => 'default.MULTI_VECTOR_PK_T', "
+                        + "compact_strategy => 'full', "
+                        + "options => 'compaction.force-rewrite-all-files=true')");
+        assertThat(sql("SELECT DISTINCT bucket FROM `MULTI_VECTOR_PK_T$files`")).hasSize(4);
+        FileStoreTable table = paimonTable("MULTI_VECTOR_PK_T");
+        for (int bucket = 0; bucket < 4; bucket++) {
+            assertThat(
+                            table.store()
+                                    .newIndexFileHandler()
+                                    .scanSourceIndexes(
+                                            table.latestSnapshot().get(),
+                                            BinaryRow.EMPTY_ROW,
+                                            bucket))
+                    .extracting(payload -> payload.globalIndexMeta().indexFieldId())
+                    .containsExactlyInAnyOrder(
+                            table.rowType().getField("image_vec").id(),
+                            table.rowType().getField("text_vec").id());
+        }
+
+        for (String field : Arrays.asList("image_vec", "text_vec")) {
+            assertThat(
+                            sql(
+                                    "CALL sys.vector_search("
+                                            + "`table` => 'default.MULTI_VECTOR_PK_T', "
+                                            + "vector_column => '%s', "
+                                            + "query_vector => '0.0,0.0', "
+                                            + "top_k => 1, projection => 'id')",
+                                    field))
+                    .extracting(row -> row.getField(0).toString())
+                    .containsExactly(
+                            field.equals("image_vec") ? "{\"id\":\"0\"}" : "{\"id\":\"31\"}");
+        }
+
+        // Both fields must run the distributed search operator, not the local fallback.
+        try (ClusterClient<?> client = MINI_CLUSTER_EXTENSION.createRestClusterClient()) {
+            assertThat(client.listJobs().get(30, TimeUnit.SECONDS))
+                    .filteredOn(
+                            job ->
+                                    job.getJobName().contains("Primary-Key Vector Search")
+                                            && job.getJobName().contains("MULTI_VECTOR_PK_T"))
+                    .extracting(JobStatusMessage::getJobId)
+                    .hasSize(2)
+                    .doesNotHaveDuplicates();
+        }
     }
 
     @Test

@@ -403,6 +403,7 @@ public class SchemaValidation {
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
+        options.primaryKeyIndexBuildParallelism();
         validatePrimaryKeyIndexColumns(options);
         validatePrimaryKeySortedIndexes(schema, options);
         validatePrimaryKeyVectorIndex(schema, options);
@@ -1237,19 +1238,6 @@ public class SchemaValidation {
                 "pk-vector.index.columns must not contain duplicate columns, but is %s.",
                 indexColumns);
         checkArgument(
-                indexColumns.size() == 1,
-                "pk-vector.index.columns must contain exactly one column in the first release, but is %s.",
-                indexColumns);
-        String indexColumn = indexColumns.get(0);
-        String indexType = options.primaryKeyVectorIndexType(indexColumn);
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(indexColumn),
-                "pk-vector.index.columns must contain a non-empty column.");
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(indexType),
-                "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
-                indexColumn);
-        checkArgument(
                 !schema.primaryKeys().isEmpty(),
                 "Primary-key vector index requires a primary-key table.");
         checkArgument(
@@ -1267,28 +1255,39 @@ public class SchemaValidation {
         checkArgument(
                 !options.pkClusteringOverride(),
                 "Primary-key vector index does not support pk-clustering-override.");
-        options.primaryKeyVectorIndexOptions(indexColumn);
 
-        DataField vectorField =
-                schema.fields().stream()
-                        .filter(field -> field.name().equals(indexColumn))
-                        .findFirst()
-                        .orElse(null);
-        checkArgument(
-                vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
-                "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
-                indexColumn);
-        checkArgument(
-                ((VectorType) vectorField.type()).getElementType().getTypeRoot()
-                        == DataTypeRoot.FLOAT,
-                "pk-vector.index.columns entry '%s' must use FLOAT elements.",
-                indexColumn);
-        checkArgument(
-                Arrays.asList("l2", "cosine", "inner_product")
-                        .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
-                "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
-                indexColumn,
-                options.primaryKeyVectorDistanceMetric(indexColumn));
+        for (String indexColumn : indexColumns) {
+            checkArgument(
+                    !StringUtils.isNullOrWhitespaceOnly(indexColumn),
+                    "pk-vector.index.columns must contain a non-empty column.");
+            String indexType = options.primaryKeyVectorIndexType(indexColumn);
+            checkArgument(
+                    !StringUtils.isNullOrWhitespaceOnly(indexType),
+                    "fields.%s.pk-vector.index.type must be configured when a primary-key vector index is defined.",
+                    indexColumn);
+            options.primaryKeyVectorIndexOptions(indexColumn);
+
+            DataField vectorField =
+                    schema.fields().stream()
+                            .filter(field -> field.name().equals(indexColumn))
+                            .findFirst()
+                            .orElse(null);
+            checkArgument(
+                    vectorField != null && vectorField.type().getTypeRoot() == VECTOR,
+                    "pk-vector.index.columns entry '%s' must reference a VECTOR column.",
+                    indexColumn);
+            checkArgument(
+                    ((VectorType) vectorField.type()).getElementType().getTypeRoot()
+                            == DataTypeRoot.FLOAT,
+                    "pk-vector.index.columns entry '%s' must use FLOAT elements.",
+                    indexColumn);
+            checkArgument(
+                    Arrays.asList("l2", "cosine", "inner_product")
+                            .contains(options.primaryKeyVectorDistanceMetric(indexColumn)),
+                    "fields.%s.pk-vector.distance.metric must be one of l2, cosine, inner_product, but is %s.",
+                    indexColumn,
+                    options.primaryKeyVectorDistanceMetric(indexColumn));
+        }
     }
 
     private static void validatePrimaryKeyFullTextIndex(TableSchema schema, CoreOptions options) {
