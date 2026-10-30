@@ -322,6 +322,65 @@ public class PartitionExpireTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+        "values-time, false",
+        "values-time, true",
+        "update-time, false",
+        "update-time, true"
+    })
+    public void testExpireTimestampPartitionWithoutMetastore(
+            String expirationStrategy, boolean legacyPartitionName) throws Exception {
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
+        tableOptions.put(
+                CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(),
+                String.valueOf(legacyPartitionName));
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(DataTypes.TIMESTAMP(0), VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        tableOptions,
+                        ""));
+        newTable();
+        org.apache.paimon.data.Timestamp expiredTs =
+                org.apache.paimon.data.Timestamp.fromLocalDateTime(date(1));
+        org.apache.paimon.data.Timestamp retainedTs =
+                org.apache.paimon.data.Timestamp.fromLocalDateTime(date(5));
+        write(GenericRow.of(expiredTs, BinaryString.fromString("expired")));
+        write(GenericRow.of(retainedTs, BinaryString.fromString("retained")));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(PARTITION_EXPIRATION_TIME.key(), "2 d");
+        options.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expirationStrategy);
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        table = table.copy(options);
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("", table);
+        expire.setLastCheck(date(1));
+        // the legacy name is Timestamp#toString, the new name is the SQL timestamp string
+        String expiredName = legacyPartitionName ? "2023-01-01T00:00" : "2023-01-01 00:00:00";
+        String retainedName = legacyPartitionName ? "2023-01-05T00:00" : "2023-01-05 00:00:00";
+        List<Map<String, String>> expectedExpired = new ArrayList<>();
+        expectedExpired.add(Collections.singletonMap("f0", expiredName));
+        LocalDateTime checkTime = date(6);
+        List<org.apache.paimon.data.Timestamp> expectedRemaining = singletonList(retainedTs);
+        if ("update-time".equals(expirationStrategy)) {
+            checkTime = LocalDateTime.now().plusDays(3);
+            expectedExpired.add(Collections.singletonMap("f0", retainedName));
+            expectedRemaining = emptyList();
+        }
+        assertThat(expire.expire(checkTime, Long.MAX_VALUE))
+                .containsExactlyElementsOf(expectedExpired);
+        List<org.apache.paimon.data.Timestamp> remaining = new ArrayList<>();
+        table.newRead()
+                .createReader(table.newScan().plan().splits())
+                .forEachRemaining(row -> remaining.add(row.getTimestamp(0, 0)));
+        assertThat(remaining).containsExactlyElementsOf(expectedRemaining);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"values-time", "update-time"})
     public void testExpireDatePartitionWithoutMetastore(String expirationStrategy)
             throws Exception {
