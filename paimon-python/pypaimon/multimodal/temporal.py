@@ -19,6 +19,7 @@
 from bisect import bisect_left, bisect_right
 from datetime import timedelta
 from fractions import Fraction
+from functools import lru_cache
 import json
 import math
 from numbers import Integral, Real
@@ -216,11 +217,8 @@ class TemporalAlignment:
         def batches():
             try:
                 for metadata in anchor_metadata:
-                    rows = _metadata_rows(
-                        metadata, self._on,
-                        self._anchor_table_schema.field(self._on).type)
                     yield from self._build_batches(
-                        rows, anchor_fetcher, source_fetchers, schema)
+                        metadata, anchor_fetcher, source_fetchers, schema)
             finally:
                 anchor_metadata.close()
 
@@ -311,13 +309,21 @@ class TemporalAlignment:
 
     def _build_batch(
             self, anchor_rows, anchor_fetcher, source_fetchers, schema):
-        anchor_ids = [row[_ROW_ID] for row in anchor_rows]
+        native_keys = None
+        if isinstance(anchor_rows, pa.Table):
+            time_type = self._anchor_table_schema.field(self._on).type
+            native_keys = _native_anchor_keys(anchor_rows, self._on, self._by, time_type)
+            anchor_ids = anchor_rows[_ROW_ID].to_pylist()
+            if native_keys is None:
+                anchor_rows = _metadata_rows(anchor_rows, self._on, time_type)
+        else:
+            anchor_ids = [row[_ROW_ID] for row in anchor_rows]
         anchor = anchor_fetcher.fetch(anchor_ids)
         anchor.validate()
         arrays = [anchor[name] for name in self._anchor_schema.names]
 
         for source, fetcher in zip(self._sources, source_fetchers):
-            arrays.extend(source.build_arrays(anchor_rows, fetcher))
+            arrays.extend(source.build_arrays(anchor_rows, fetcher, native_keys))
 
         if arrays:
             table = pa.Table.from_arrays(
@@ -447,7 +453,21 @@ class _AsOfJoinRight:
             for name in self.payload_schema.names
         ]
 
-    def build_arrays(self, anchor_rows, fetcher):
+    def build_arrays(self, anchor_rows, fetcher, native_keys=None):
+        native = _native_matches(self, native_keys, self.direction)
+        if native is not None:
+            first, _ = native
+            missing = first < 0
+            ids = self._row_ids.to_numpy(zero_copy_only=False)
+            requested = (ids[np.maximum(first, 0)] if len(ids)
+                         else np.zeros(len(first), dtype=np.int64))
+            unique = np.unique(requested[~missing])
+            values = fetcher.fetch(unique.tolist())
+            take = pa.array(np.searchsorted(unique, requested),
+                            mask=missing, type=pa.int64())
+            return [pc.take(values[field.name], take)
+                    for field in self.payload_schema]
+        anchor_rows = _reference_rows(anchor_rows, self)
         matches = [self.match(row) for row in anchor_rows]
         matched_ids = [match for match in matches if match is not None]
         unique_ids = list(dict.fromkeys(matched_ids))
@@ -474,6 +494,12 @@ class _LinearInterpolationRight(_AsOfJoinRight):
         super().__init__(
             label, query, anchor_on, by, "nearest", tolerance,
             right_on, suffix)
+
+    def plan(self):
+        super().plan()
+        times = self._time_keys
+        self._time_min = times.min() if len(times) else None
+        self._time_max = times.max() if len(times) else None
 
     @staticmethod
     def output_field(field, effective=True):
@@ -517,8 +543,28 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             *_linear_weight(target, before_time, after_time, self.time_type),
         )
 
-    def build_arrays(self, anchor_rows, fetcher):
-        matches = [self.match(row) for row in anchor_rows]
+    def build_arrays(self, anchor_rows, fetcher, native_keys=None):
+        native = _native_matches(self, native_keys, "interpolate")
+        if native is None:
+            anchor_rows = _reference_rows(anchor_rows, self)
+            matches = [self.match(row) for row in anchor_rows]
+        else:
+            arrays = self._native_float_arrays(native_keys[0], fetcher, native)
+            if arrays is not None:
+                return arrays
+            first, second = native
+            matches = []
+            for index, (before, after) in enumerate(zip(first, second)):
+                if before < 0:
+                    matches.append(None)
+                    continue
+                before_id = self._row_ids[int(before)].as_py()
+                after_id = self._row_ids[int(after)].as_py()
+                ratio = ((0.0, 0, 1) if before == after else _linear_weight(
+                    _python_scalar(native_keys[0][index]),
+                    _python_scalar(self._time_keys[before]),
+                    _python_scalar(self._time_keys[after]), self.time_type))
+                matches.append((before_id, after_id, *ratio))
         matched_ids = []
         for match in matches:
             if match is not None:
@@ -556,6 +602,34 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             array.validate()
             arrays.append(array)
         return arrays
+
+    def _native_float_arrays(self, targets, fetcher, indices):
+        if (not len(targets) or not len(self._row_ids)
+                or not all(pa.types.is_floating(fetcher.schema.field(field.name).type)
+                           for field in self.payload_schema)):
+            return None
+        times = self._time_keys
+        # Keep exact-ratio interpolation for wide spans and integer payloads.
+        if (max(int(self._time_max), int(targets.max()))
+                - min(int(self._time_min), int(targets.min())) > 2 ** 53):
+            return None
+        first, second = indices
+        missing = first < 0
+        first, second = np.maximum(first, 0), np.maximum(second, 0)
+        ids = self._row_ids.to_numpy(zero_copy_only=False)
+        before_ids, after_ids = ids[first], ids[second]
+        unique = np.unique(np.concatenate((before_ids[~missing], after_ids[~missing])))
+        values = fetcher.fetch(unique.tolist())
+        before = pa.array(np.searchsorted(unique, before_ids), mask=missing, type=pa.int64())
+        after = pa.array(np.searchsorted(unique, after_ids), mask=missing, type=pa.int64())
+        numerator = targets - times[first]
+        denominator = times[second] - times[first]
+        weights = np.zeros(len(targets), dtype=np.float64)
+        np.divide(numerator, denominator, out=weights, where=denominator != 0)
+        weights = pa.array(weights, mask=missing)
+        return [_interpolate_array(pc.take(values[field.name], before),
+                                   pc.take(values[field.name], after), weights, None)
+                for field in self.payload_schema]
 
 
 class _WindowJoinRight(_AsOfJoinRight):
@@ -653,8 +727,13 @@ class _WindowJoinRight(_AsOfJoinRight):
             )
         return first, last
 
-    def build_arrays(self, anchor_rows, fetcher):
-        ranges = [self._match_range(row) for row in anchor_rows]
+    def build_arrays(self, anchor_rows, fetcher, native_keys=None):
+        native = _native_matches(self, native_keys, "window")
+        ranges = ([self._match_range(row) for row in
+                   _reference_rows(anchor_rows, self)]
+                  if native is None else [
+                      (0, 0) if start < 0 else (int(start), int(end))
+                      for start, end in zip(*native)])
         slices = [(0, 0)] * len(ranges)
         unique_ids = []
         covered_end = 0
@@ -1025,11 +1104,23 @@ def _metadata_batches(query, on, by, batch_size):
         return
     reader = read_builder.new_read()._to_managed_arrow_batch_reader(splits)
     try:
+        pending = []
+        pending_rows = 0
         for batch in reader:
             metadata = pa.Table.from_batches([batch]).select(output_columns)
             _validate_metadata(query, metadata, key_columns)
-            for start in range(0, len(metadata), batch_size):
-                yield metadata.slice(start, batch_size)
+            start = 0
+            while start < len(metadata):
+                size = min(batch_size - pending_rows, len(metadata) - start)
+                pending.append(metadata.slice(start, size))
+                pending_rows += size
+                start += size
+                if pending_rows == batch_size:
+                    yield pa.concat_tables(pending)
+                    pending = []
+                    pending_rows = 0
+        if pending:
+            yield pa.concat_tables(pending)
     finally:
         reader.close()
 
@@ -1334,6 +1425,75 @@ def _arrow_rows(table):
         {name: columns[name][index] for name in table.column_names}
         for index in range(table.num_rows)
     ]
+
+
+def _reference_rows(metadata, source):
+    return (_metadata_rows(metadata, source.anchor_on, source.time_type)
+            if isinstance(metadata, pa.Table) else metadata)
+
+
+def _native_anchor_keys(metadata, on, by, time_type):
+    targets = _time_search_keys(metadata[on].combine_chunks(), time_type)
+    if targets.dtype != np.dtype("int64") or _temporal_match_kernel() is None:
+        return None
+    if len(by) == 1:
+        column = metadata[by[0]].combine_chunks()
+        data_type = column.type
+        if (pa.types.is_integer(data_type)
+                or pa.types.is_string(data_type)
+                or pa.types.is_large_string(data_type)
+                or pa.types.is_binary(data_type)
+                or pa.types.is_large_binary(data_type)
+                or pa.types.is_boolean(data_type)):
+            encoded = pc.dictionary_encode(column)
+            return (targets,
+                    [(key,) for key in encoded.dictionary.to_pylist()],
+                    encoded.indices.to_numpy(zero_copy_only=False))
+    keys, positions, codes = [], {}, []
+    for row in metadata.select(list(by)).to_pylist():
+        key = tuple(row[name] for name in by)
+        if key not in positions:
+            positions[key] = len(keys)
+            keys.append(key)
+        codes.append(positions[key])
+    return targets, keys, np.asarray(codes, dtype=np.int64)
+
+
+@lru_cache(maxsize=1)
+def _temporal_match_kernel():
+    try:
+        import pypaimon_rust
+    except ImportError:
+        return None
+    return getattr(pypaimon_rust, "temporal_match", None)
+
+
+def _native_matches(source, native_keys, mode):
+    if native_keys is None or source._time_keys.dtype != np.dtype("int64"):
+        return None
+    tolerance = source._tolerance_key
+    preceding = getattr(source, "_preceding_key", 0)
+    following = getattr(source, "_following_key", 0)
+    if any(value is not None and (
+            not isinstance(value, Integral) or not 0 <= value <= _MAX_INT64)
+            for value in (tolerance, preceding, following)):
+        return None
+    kernel = _temporal_match_kernel()
+    if kernel is None:
+        return None
+    targets, keys, codes = native_keys
+    bounds = np.asarray([source._index.get(key, (0, 0)) for key in keys],
+                        dtype=np.int64).reshape((-1, 2))
+    closed = getattr(source, "closed", "both")
+    result = kernel(
+        pa.array(source._time_keys), pa.array(targets),
+        pa.array(bounds[:, 0][codes]), pa.array(bounds[:, 1][codes]),
+        mode, exact=source.allow_exact_matches, tolerance=tolerance,
+        preceding=preceding, following=following,
+        left_closed=closed in ("both", "left"),
+        right_closed=closed in ("both", "right"))
+    return tuple(column.to_numpy(zero_copy_only=False)
+                 for column in result.columns)
 
 
 def _metadata_rows(table, on, time_type):

@@ -85,6 +85,136 @@ class MultimodalTemporalTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def test_metadata_batches_coalesce_without_reading_ahead(self):
+        metadata = pa.table({"episode_id": [1] * 11,
+                             "event_time": list(range(11)),
+                             temporal._ROW_ID: list(range(11))})
+        consumed = []
+        closed = []
+
+        class Reader:
+            def __iter__(self):
+                for start, size in ((0, 2), (2, 0), (2, 3), (5, 6)):
+                    consumed.append(start)
+                    if size:
+                        yield metadata.slice(start, size).to_batches()[0]
+                    else:
+                        yield pa.RecordBatch.from_arrays(
+                            [pa.array([], type=field.type) for field in metadata.schema],
+                            schema=metadata.schema)
+
+            def close(self):
+                closed.append(True)
+
+        builder = mock.Mock()
+        builder.new_read.return_value._to_managed_arrow_batch_reader.return_value = Reader()
+        query = mock.Mock(_temporal_empty=False)
+        with mock.patch.object(temporal, "_metadata_builders", return_value=(
+                builder, [], ["episode_id", "event_time"], metadata.column_names)):
+            batches = temporal._metadata_batches(query, "event_time", ("episode_id",), 4)
+            first = next(batches)
+            self.assertEqual([0, 1, 2, 3], first["event_time"].to_pylist())
+            self.assertEqual([0, 2, 2], consumed)
+            remaining = list(batches)
+        self.assertEqual([4, 3], [len(batch) for batch in remaining])
+        self.assertEqual(metadata, pa.concat_tables([first] + remaining))
+        self.assertEqual([True], closed)
+
+    def test_native_interpolation_scans_right_time_bounds_only_during_plan(self):
+        reductions = []
+
+        class TrackedTimes(np.ndarray):
+            def min(self, *args, **kwargs):
+                reductions.append("min")
+                return super().min(*args, **kwargs)
+
+            def max(self, *args, **kwargs):
+                reductions.append("max")
+                return super().max(*args, **kwargs)
+
+        right = temporal._LinearInterpolationRight.__new__(
+            temporal._LinearInterpolationRight)
+        right.query = mock.Mock()
+        right.on = "event_time"
+        right.by = ("episode_id",)
+        right.time_type = pa.int64()
+        right.payload_schema = pa.schema([("value", pa.float64())])
+        row_ids = np.arange(1_000_000, dtype=np.int64)
+        times = (row_ids * 2).view(TrackedTimes)
+        metadata = pa.table({"episode_id": np.zeros(len(times), dtype=np.int32),
+                             "event_time": times, temporal._ROW_ID: row_ids})
+        fetcher = mock.Mock(schema=right.payload_schema)
+        fetcher.fetch.side_effect = lambda ids: pa.table({
+            "value": pa.array(ids, type=pa.float64())})
+        with mock.patch.object(temporal, "_metadata_table", return_value=metadata), \
+                mock.patch.object(temporal, "_time_search_keys", return_value=times):
+            right.plan()
+        self.assertEqual(["min", "max"], reductions)
+        for batch_size in (32, 1024):
+            for start in (0, 1024, 2048):
+                before = np.arange(start, start + batch_size, dtype=np.int64)
+                targets = before * 2 + 1
+                arrays = right._native_float_arrays(
+                    targets, fetcher, (before, before + 1))
+                self.assertEqual((before + 0.5).tolist(), arrays[0].to_pylist())
+            # Wide target spans still fall back without scanning the right side.
+            self.assertIsNone(right._native_float_arrays(
+                np.array([2 ** 54], dtype=np.int64), fetcher,
+                (np.array([0]), np.array([1]))))
+        self.assertEqual(["min", "max"], reductions)
+
+    def test_native_anchor_keys_preserve_timestamp_precision(self):
+        times = pa.array([1, 2, 3], type=pa.timestamp("ns"))
+        metadata = pa.table({"episode_id": [1, 1, 2], "event_time": times,
+                             temporal._ROW_ID: [8, 9, 10]})
+        with mock.patch.object(temporal, "_temporal_match_kernel", return_value=object()):
+            targets, keys, codes = temporal._native_anchor_keys(
+                metadata, "event_time", ("episode_id",), times.type)
+        self.assertEqual([1, 2, 3], targets.tolist())
+        self.assertEqual([(1,), (2,)], keys)
+        self.assertEqual([0, 0, 1], codes.tolist())
+
+    def test_native_temporal_kernel_is_optional(self):
+        for module in (None, mock.Mock(spec=[])):
+            with self.subTest(module=module):
+                temporal._temporal_match_kernel.cache_clear()
+                with mock.patch.dict(sys.modules, {"pypaimon_rust": module}):
+                    self.assertIsNone(temporal._temporal_match_kernel())
+        temporal._temporal_match_kernel.cache_clear()
+
+    def test_native_ci_rejects_missing_temporal_kernel(self):
+        with mock.patch.dict(os.environ, {"PYPAIMON_TEST_NATIVE_READ": "1"}), \
+                mock.patch.object(temporal, "_temporal_match_kernel", return_value=None):
+            with self.assertRaisesRegex(AssertionError, "Native CI requires temporal_match"):
+                self.test_native_temporal_matching_matches_reference()
+
+    def test_native_temporal_matching_matches_reference(self):
+        kernel = temporal._temporal_match_kernel()
+        if os.environ.get("PYPAIMON_TEST_NATIVE_READ") == "1":
+            self.assertIsNotNone(kernel, "Native CI requires temporal_match")
+        if kernel is None:
+            self.skipTest("Requires pypaimon_rust temporal_match")
+        rng = np.random.default_rng(123)
+        for direction in ("backward", "forward", "nearest"):
+            for exact in (False, True):
+                for tolerance in (None, 0, 3):
+                    source = object.__new__(temporal._AsOfJoinRight)
+                    source.by = ("episode_id",)
+                    source._time_keys = np.sort(rng.integers(-20, 20, size=40))
+                    source._row_ids = pa.array(range(40), type=pa.int64())
+                    source._index = {(1,): (0, 40)}
+                    source.direction = direction
+                    source.allow_exact_matches = exact
+                    source._tolerance_key = tolerance
+                    metadata = pa.table({"episode_id": [1] * 50 + [2],
+                                         "event_time": rng.integers(-30, 30, size=51)})
+                    native_keys = temporal._native_anchor_keys(
+                        metadata, "event_time", ("episode_id",), pa.int64())
+                    first, _ = temporal._native_matches(source, native_keys, direction)
+                    expected = [source.match(row) for row in
+                                temporal._metadata_rows(metadata, "event_time", pa.int64())]
+                    self.assertEqual(expected, [None if value < 0 else int(value) for value in first])
+
     def test_alignment_requires_an_explicit_group_boundary(self):
         table = self._table("missing_group", {
             "event_time": pa.int64(),
