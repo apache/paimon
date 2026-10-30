@@ -52,6 +52,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -315,6 +316,51 @@ public class TableWriteTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("partition.timestamp-formatter");
         write.close();
+    }
+
+    @Test
+    public void testPartitionTimestampValidationWithDatePartition() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DATE().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"dt", "k", "v"});
+        int dt = (int) LocalDate.of(2026, 10, 29).toEpochDay();
+
+        // valid partition value: 2026-10-29 matches yyyy-MM-dd
+        Options conf = new Options();
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyy-MM-dd");
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt");
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMAT_STRICT, true);
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType, Collections.singletonList("dt"), Arrays.asList("dt", "k"), conf);
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(dt, 1, 1L));
+        commit.commit(0, write.prepareCommit(false, 0));
+        assertThat(readRows(table)).hasSize(1);
+        write.close();
+        commit.close();
+
+        // invalid partition value: 2026-10-29 does not match yyyyMMdd
+        Options mismatchConf = new Options();
+        mismatchConf.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        mismatchConf.set(CoreOptions.PARTITION_TIMESTAMP_FORMAT_STRICT, true);
+        FileStoreTable mismatchTable =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("dt"),
+                        Arrays.asList("dt", "k"),
+                        mismatchConf);
+        TableWriteImpl<?> mismatchWrite = mismatchTable.newWrite(commitUser);
+        assertThatThrownBy(() -> mismatchWrite.write(GenericRow.of(dt, 1, 1L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dt=2026-10-29");
+        mismatchWrite.close();
     }
 
     @Test
