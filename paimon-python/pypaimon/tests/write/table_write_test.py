@@ -37,6 +37,7 @@ from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.execution.python.write.file_store_commit import DedupEvidenceMissing
 from pypaimon.write.table_write import TableWrite
 from pypaimon.execution.python.write.table_write import PythonTableWrite
 from pypaimon.execution.python.write.row_key_extractor import create_row_key_extractor
@@ -1676,6 +1677,7 @@ class TableWriteTest(unittest.TestCase):
             commit_two.close()
             commit_three.close()
 
+    @pytest.mark.python_commit
     def test_uncertain_commit_with_unavailable_snapshot_fails_closed(self):
         table = self._create_postpone_table(
             'default.test_uncertain_commit_with_unavailable_snapshot',
@@ -1740,7 +1742,7 @@ class TableWriteTest(unittest.TestCase):
                 '_commit_retry_wait',
             ):
                 with self.assertRaisesRegex(
-                        RuntimeError, 'snapshot 1 cannot be found'):
+                        DedupEvidenceMissing, r'unreadable ids: \[1\]'):
                     commit.commit(messages)
 
             self.assertEqual(1, attempts)

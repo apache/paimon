@@ -29,6 +29,7 @@ from pypaimon.write.ray_datasink import (
     PaimonDatasink,
     _consume_write_results,
     _cast_binary_to_table_schema,
+    write_paimon_dataset,
 )
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import TableWrite
@@ -181,6 +182,429 @@ class RaySinkTest(unittest.TestCase):
         finally:
             stream_write.close()
 
+    def test_write_options_are_applied_before_repartitioning(self):
+        table = self.table.copy({
+            'commit.metadata.source': 'copied',
+            'target-file-size': '8 mb',
+        })
+        dataset = Mock()
+        with patch('pypaimon.ray.shuffle.maybe_apply_repartition',
+                   return_value=dataset) as repartition:
+            write_paimon_dataset(
+                dataset, table, options={'commit.metadata.source': 'explicit'})
+
+        effective_table = repartition.call_args[0][1]
+        effective_options = effective_table.options.options.to_map()
+        self.assertEqual(effective_options['commit.metadata.source'], 'explicit')
+        self.assertEqual(effective_options['target-file-size'], '8 mb')
+        self.assertEqual(table.options.options.to_map()['commit.metadata.source'], 'copied')
+        sink = dataset.write_datasink.call_args[0][0]
+        self.assertIs(sink.table, effective_table)
+        self.assertIsNone(sink._options)
+
+    def test_write_options_are_applied_before_postpone_dispatch(self):
+        identifier = 'test_db.test_postpone_effective_options'
+        schema = Schema.from_pyarrow_schema(
+            self.pk_pa_schema, primary_keys=['id'], options={
+                'bucket': '-2',
+                'postpone.batch-write-fixed-bucket': 'false',
+                'postpone.default-bucket-num': '1',
+            })
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        dataset = Mock()
+        with patch('pypaimon.write.backend_dispatch.create_postpone_bucket_planner') as planner, \
+                patch('pypaimon.write.ray_datasink._write_primary_key_groups') as grouped:
+            planner.return_value.current_plan.return_value.contains.return_value = True
+            write_paimon_dataset(dataset, table, options={
+                'postpone.batch-write-fixed-bucket': 'true',
+                'postpone.default-bucket-num': '3',
+            })
+
+        planner.assert_called_once()
+        effective_table = planner.call_args[0][0]
+        self.assertTrue(effective_table.options.postpone_batch_write_fixed_bucket())
+        self.assertEqual(effective_table.options.postpone_default_bucket_num(), 3)
+        self.assertFalse(table.options.postpone_batch_write_fixed_bucket())
+        self.assertIs(grouped.call_args[0][1], effective_table)
+        self.assertIsNone(grouped.call_args[1]['options'])
+
+    def test_actor_branch_options_preserve_reload_baseline(self):
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.ray_datasink import PaimonCommitterActor
+
+        identifier = 'test_db.test_actor_branch_options'
+        schema = Schema.from_pyarrow_schema(self.pk_pa_schema, options={
+            'bucket': '1',
+            'bucket-key': 'id',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        self.catalog.create_table(identifier, schema, False)
+        self.catalog.create_branch(identifier, 'dev')
+        branch_identifier = identifier + '$branch_dev'
+        self.catalog.alter_table(
+            branch_identifier, [SchemaChange.set_option('bucket', '3')], False)
+        table = self.catalog.get_table(identifier).copy({
+            'commit.metadata.source': 'copied',
+            'commit.metadata.removed': 'copied',
+        })
+        dataset = Mock()
+        dataset.write_datasink.side_effect = lambda sink, **kwargs: sink.on_write_complete([])
+        with patch('pypaimon.ray.shuffle.maybe_apply_repartition',
+                   return_value=dataset) as repartition:
+            write_paimon_dataset(dataset, table, commit_mode='actor', options={
+                'branch': 'dev',
+                'commit.metadata.source': 'explicit',
+                'commit.metadata.removed': None,
+            })
+
+        sink = dataset.write_datasink.call_args[0][0]
+        self.assertEqual(sink._table_identifier, identifier)
+        effective_table = repartition.call_args[0][1]
+        self.assertIs(sink.table, effective_table)
+        self.assertEqual(effective_table.identifier.get_full_name(), branch_identifier)
+        self.assertEqual(effective_table.options.bucket(), 1)
+        self.assertEqual(sink._options['commit.metadata.source'], 'explicit')
+        self.assertIsNone(sink._options['commit.metadata.removed'])
+        with patch('pypaimon.write.ray_datasink._is_first_actor_incarnation', return_value=False):
+            committer = PaimonCommitterActor(
+                sink._catalog_options, sink._table_identifier, options=sink._options)
+        actor_table = committer._target_table()
+        self.assertEqual(actor_table.identifier.get_full_name(), branch_identifier)
+        self.assertEqual(actor_table.table_schema.id, effective_table.table_schema.id)
+        self.assertEqual(actor_table.options.options.to_map(),
+                         effective_table.options.options.to_map())
+        self.assertNotIn('commit.metadata.removed', actor_table.options.options.to_map())
+        self.assertEqual(table.identifier.get_full_name(), identifier)
+        self.assertEqual(table.options.options.to_map()['commit.metadata.source'], 'copied')
+        self.assertEqual(table.options.options.to_map()['commit.metadata.removed'], 'copied')
+
+    def test_actor_datasink_preserves_pre_copied_table_origin(self):
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.ray_datasink import PaimonActorDatasink, PaimonCommitterActor
+
+        identifier = 'test_db.test_actor_copied_origin'
+        schema = Schema.from_pyarrow_schema(self.pk_pa_schema, options={
+            'bucket': '1',
+            'bucket-key': 'id',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        self.catalog.create_table(identifier, schema, False)
+        self.catalog.create_branch(identifier, 'dev')
+        branch_identifier = identifier + '$branch_dev'
+        self.catalog.alter_table(
+            branch_identifier, [SchemaChange.set_option('bucket', '3')], False)
+        source = self.catalog.get_table(identifier)
+        copied = source.copy({'branch': 'dev', 'commit.metadata.removed': 'first'})
+        copied = copied.copy({'commit.metadata.source': 'copied'})
+        copied = copied.copy_without_time_travel({'commit.metadata.removed': None})
+        sink = PaimonActorDatasink(
+            copied, {'warehouse': self.warehouse_path}, branch_identifier,
+            options={'commit.metadata.source': 'explicit'})
+
+        self.assertEqual(sink._table_identifier, identifier)
+        self.assertEqual(source.identifier.get_full_name(), identifier)
+        self.assertEqual(copied.identifier.get_full_name(), branch_identifier)
+        with patch('pypaimon.write.ray_datasink._is_first_actor_incarnation', return_value=False):
+            committer = PaimonCommitterActor(
+                sink._catalog_options, sink._table_identifier, options=sink._options)
+        actor_table = committer._target_table()
+        writer_table = sink._target_table()
+        self.assertEqual(actor_table.identifier.get_full_name(), branch_identifier)
+        self.assertEqual(actor_table.options.bucket(), 1)
+        self.assertEqual(actor_table.table_schema, writer_table.table_schema)
+        self.assertEqual(actor_table.options.options.to_map()['commit.metadata.source'], 'explicit')
+        self.assertNotIn('commit.metadata.removed', actor_table.options.options.to_map())
+
+    def test_actor_datasink_keeps_explicit_identifier_for_path_table(self):
+        from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.write.ray_datasink import PaimonActorDatasink
+
+        identifier = 'test_db.test_actor_path_table'
+        schema = Schema.from_pyarrow_schema(self.pk_pa_schema, options={
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        self.catalog.create_table(identifier, schema, False)
+        table = FileStoreTable.from_path(self.catalog.get_table(identifier).table_path)
+        copied = table.copy({'commit.metadata.source': 'copied'})
+        copied = copied.copy_without_time_travel({'target-file-size': '8 mb'})
+        sink = PaimonActorDatasink(copied, {'warehouse': self.warehouse_path}, identifier)
+
+        self.assertEqual(sink._table_identifier, identifier)
+
+    def _new_actor_bucket_sink(self, name, options=None):
+        from pypaimon.write.ray_datasink import PaimonActorDatasink
+
+        identifier = 'test_db.' + name
+        schema = Schema.from_pyarrow_schema(pa.schema([
+            ('id', pa.int32()), ('other_id', pa.int64()), ('value', pa.string()),
+        ]), options={
+            'bucket': '3',
+            'bucket-key': 'id,other_id',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        sink = PaimonActorDatasink(
+            table, {'warehouse': self.warehouse_path}, identifier, options=options)
+        return table, sink
+
+    def _start_actor_locally(self, sink):
+        from pypaimon.write.ray_datasink import PaimonCommitterActor
+
+        actor_arguments = []
+
+        def create_actor(**kwargs):
+            actor_arguments.append(kwargs)
+            committer = PaimonCommitterActor(**kwargs)
+            handle = Mock()
+            handle.dedup_base.remote.side_effect = committer.dedup_base
+            return handle
+
+        with patch('pypaimon.write.ray_datasink.ray.remote') as remote, \
+                patch('pypaimon.write.ray_datasink.ray.get', side_effect=lambda value: value), \
+                patch('pypaimon.write.ray_datasink._is_first_actor_incarnation', return_value=False):
+            remote.return_value.options.return_value.remote.side_effect = create_actor
+            sink.on_write_start()
+        return actor_arguments[0]
+
+    def test_actor_rejects_changed_bucket_configuration(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        changes = [
+            ('count', SchemaChange.set_option('bucket', '5')),
+            ('keys', SchemaChange.set_option('bucket-key', 'value')),
+            ('order', SchemaChange.set_option('bucket-key', 'other_id,id')),
+            ('type', SchemaChange.update_column_type('id', AtomicType('BIGINT'))),
+            ('function', SchemaChange.set_option('bucket-function.type', 'hive')),
+        ]
+        for label, change in changes:
+            with self.subTest(change=label):
+                table, sink = self._new_actor_bucket_sink('test_actor_bucket_drift_' + label)
+                self.catalog.alter_table(table.identifier.get_full_name(), [change], False)
+                with self.assertRaisesRegex(ValueError, 'bucket configuration.*writer'):
+                    self._start_actor_locally(sink)
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_actor_rechecks_bucket_configuration_on_reconstruction(self):
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.ray_datasink import PaimonCommitterActor
+
+        table, sink = self._new_actor_bucket_sink('test_actor_reconstructed_bucket_drift')
+        actor_arguments = self._start_actor_locally(sink)
+        self.catalog.alter_table(
+            table.identifier.get_full_name(), [SchemaChange.set_option('bucket', '5')], False)
+        with patch('pypaimon.write.ray_datasink._is_first_actor_incarnation', return_value=False):
+            with self.assertRaisesRegex(ValueError, 'bucket configuration.*writer'):
+                PaimonCommitterActor(**actor_arguments)
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_actor_serialization_keeps_writer_bucket_configuration(self):
+        import pickle
+
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.ray_datasink import PaimonActorDatasink
+
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                table, sink = self._new_actor_bucket_sink(
+                    'test_actor_serialized_bucket_config_' + str(legacy))
+                state = sink.__getstate__()
+                if legacy:
+                    state.pop('_expected_bucket_config', None)
+                serialized = pickle.dumps(state)
+                self.catalog.alter_table(
+                    table.identifier.get_full_name(), [SchemaChange.set_option('bucket', '5')], False)
+                restored = PaimonActorDatasink.__new__(PaimonActorDatasink)
+                restored.__setstate__(pickle.loads(serialized))
+                with self.assertRaisesRegex(ValueError, 'bucket configuration.*writer'):
+                    self._start_actor_locally(restored)
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+
+    def test_actor_bucket_check_uses_effective_options(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        table, sink = self._new_actor_bucket_sink(
+            'test_actor_effective_bucket_config', options={'bucket-key': 'value'})
+        self.catalog.alter_table(
+            table.identifier.get_full_name(), [SchemaChange.set_option('bucket-key', 'other_id')], False)
+        self._start_actor_locally(sink)
+
+    def test_actor_bucket_check_allows_unrelated_metadata_changes(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        table, sink = self._new_actor_bucket_sink('test_actor_unrelated_metadata')
+        self.catalog.alter_table(
+            table.identifier.get_full_name(), [SchemaChange.set_option('target-file-size', '8 mb')], False)
+        self._start_actor_locally(sink)
+
+    def test_actor_bucket_check_allows_equivalent_layout(self):
+        from pypaimon.schema.schema_change import Move, SchemaChange
+
+        table, sink = self._new_actor_bucket_sink('test_actor_equivalent_layout')
+        self.catalog.alter_table(table.identifier.get_full_name(), [
+            SchemaChange.update_column_position(Move.first('other_id')),
+            SchemaChange.update_column_comment('id', 'updated comment'),
+            SchemaChange.set_option('bucket-function.type', ' DEFAULT '),
+        ], False)
+        self._start_actor_locally(sink)
+
+    def test_actor_bucket_check_ignores_nested_field_metadata(self):
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.ray_datasink import PaimonActorDatasink
+
+        identifier = 'test_db.test_actor_nested_metadata'
+        schema = Schema.from_pyarrow_schema(pa.schema([
+            ('id', pa.struct([('inner_id', pa.int32())])), ('value', pa.string()),
+        ]), options={
+            'bucket': '3', 'bucket-key': 'id',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        })
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        sink = PaimonActorDatasink(table, {'warehouse': self.warehouse_path}, identifier)
+        self.catalog.alter_table(identifier, [
+            SchemaChange.update_column_comment(['id', 'inner_id'], 'updated comment'),
+        ], False)
+        self._start_actor_locally(sink)
+
+    def test_actor_failed_startup_kills_handle_and_preserves_error(self):
+        for kill_fails in (False, True):
+            with self.subTest(kill_fails=kill_fails):
+                _, sink = self._new_actor_bucket_sink('test_actor_failed_startup_' + str(kill_fails))
+                error = ValueError('bucket configuration does not match writer')
+                handle = Mock()
+                with patch('pypaimon.write.ray_datasink.ray.remote') as remote, \
+                        patch('pypaimon.write.ray_datasink.ray.get', side_effect=error), \
+                        patch('pypaimon.write.ray_datasink.ray.kill') as kill:
+                    remote.return_value.options.return_value.remote.return_value = handle
+                    if kill_fails:
+                        kill.side_effect = RuntimeError('kill failed')
+                    with self.assertRaises(ValueError) as raised:
+                        sink.on_write_start()
+                    self.assertIs(raised.exception, error)
+                    kill.assert_called_once_with(handle)
+                    self.assertIsNone(sink._actor)
+
+    def test_actor_input_failure_aborts_owned_output(self):
+        for rolled in (False, True):
+            with self.subTest(rolled=rolled):
+                table, sink = self._new_actor_bucket_sink(
+                    'test_actor_input_failure_' + str(rolled),
+                    options={'target-file-size': '1 b'} if rolled else None)
+                sink._actor = Mock()
+                error = RuntimeError('Input iterator failed')
+                data = pa.table({
+                    'id': pa.array([1, 1], type=pa.int32()),
+                    'other_id': [2, 2],
+                    'value': ['a', 'b'],
+                })
+
+                def blocks():
+                    yield data
+                    self.assertEqual(bool(self._data_files_under(table)), rolled)
+                    raise error
+
+                with self.assertRaises(RuntimeError) as raised:
+                    sink.write(blocks(), Mock(spec=TaskContext, task_idx=0))
+
+                self.assertIs(raised.exception, error)
+                sink._actor.commit.remote.assert_not_called()
+                self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+                self.assertEqual(self._data_files_under(table), [])
+
+    def test_actor_prepare_failure_aborts_owned_output(self):
+        from pypaimon.execution.python.write.writer.data_writer import DataWriter
+
+        table, sink = self._new_actor_bucket_sink('test_actor_prepare_failure')
+        sink._actor = Mock()
+        error = RuntimeError('Prepare failed')
+        data = pa.table({
+            'id': pa.array([1], type=pa.int32()), 'other_id': [2], 'value': ['a'],
+        })
+        original_prepare = DataWriter.prepare_commit
+
+        def fail_prepare(writer):
+            original_prepare(writer)
+            self.assertTrue(self._data_files_under(table))
+            raise error
+
+        with patch.object(DataWriter, 'prepare_commit', fail_prepare):
+            with self.assertRaises(RuntimeError) as raised:
+                sink.write([data], Mock(spec=TaskContext, task_idx=0))
+
+        self.assertIs(raised.exception, error)
+        sink._actor.commit.remote.assert_not_called()
+        self.assertIsNone(table.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(self._data_files_under(table), [])
+
+    def test_actor_cleanup_errors_preserve_write_failure(self):
+        for close_fails in (False, True):
+            with self.subTest(close_fails=close_fails):
+                _, sink = self._new_actor_bucket_sink('test_actor_cleanup_error_' + str(close_fails))
+                sink._actor = Mock()
+                error = RuntimeError('Write failed')
+                writer = Mock()
+                writer.write_arrow.side_effect = error
+                writer.abort.side_effect = RuntimeError('Abort failed')
+                if close_fails:
+                    writer.close.side_effect = RuntimeError('Close failed')
+                data = pa.table({
+                    'id': pa.array([1], type=pa.int32()), 'other_id': [2], 'value': ['a'],
+                })
+
+                with patch.object(sink.table, 'new_batch_write_builder') as new_builder:
+                    new_builder.return_value.new_write.return_value = writer
+                    with self.assertRaises(RuntimeError) as raised:
+                        sink.write([data], Mock(spec=TaskContext, task_idx=0))
+
+                self.assertIs(raised.exception, error)
+                self.assertEqual([entry[0] for entry in writer.method_calls],
+                                 ['write_arrow', 'abort', 'close'])
+                sink._actor.commit.remote.assert_not_called()
+
+    def test_actor_rpc_failure_preserves_prepared_output(self):
+        from pypaimon.write.ray_datasink import PaimonCommitterActor
+
+        for committed in (False, True):
+            with self.subTest(committed=committed):
+                table, sink = self._new_actor_bucket_sink('test_actor_rpc_failure_' + str(committed))
+                data = pa.table({
+                    'id': pa.array([1], type=pa.int32()), 'other_id': [2], 'value': ['a'],
+                })
+                error = RuntimeError('Commit acknowledgement lost')
+                with patch('pypaimon.write.ray_datasink._is_first_actor_incarnation', return_value=False):
+                    committer = PaimonCommitterActor(
+                        {'warehouse': self.warehouse_path}, table.identifier.get_full_name())
+                sink._dedup_base = committer.dedup_base()
+                sink._actor = Mock()
+                if committed:
+                    sink._actor.commit.remote.side_effect = committer.commit
+
+                with patch('pypaimon.write.ray_datasink._current_job_id', return_value='test-job'), \
+                        patch('pypaimon.write.ray_datasink.ray.get', side_effect=error), \
+                        patch.object(TableWrite, 'abort', autospec=True) as abort:
+                    with self.assertRaises(RuntimeError) as raised:
+                        sink.write([data], Mock(spec=TaskContext, task_idx=0))
+                    abort.assert_not_called()
+
+                self.assertIs(raised.exception, error)
+                sink._actor.commit.remote.assert_called_once()
+                self.assertTrue(self._data_files_under(table))
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot() is not None, committed)
+
+                arguments, keywords = sink._actor.commit.remote.call_args
+                committer.commit(*arguments, **keywords)
+                self.assertEqual(table.snapshot_manager().get_latest_snapshot().id, 1)
+                read_builder = table.new_read_builder()
+                splits = read_builder.new_scan().plan().splits()
+                self.assertEqual(read_builder.new_read().to_arrow(splits).to_pydict(), data.to_pydict())
+
     def test_on_write_start(self):
         """Test on_write_start with normal and overwrite modes."""
         datasink = PaimonDatasink(self.table, overwrite=False)
@@ -321,10 +745,8 @@ class RaySinkTest(unittest.TestCase):
             mock_write.abort.assert_called_once()
 
     def test_postpone_worker_uses_driver_bucket_plan_without_manifest_scan(self):
-        from pypaimon.write.postpone_bucket import (
-            PostponeBucketPlan,
-            PostponeBucketPlanner,
-        )
+        from pypaimon.execution.python.write.postpone_bucket import PythonPostponeBucketPlanner
+        from pypaimon.write.postpone_bucket import PostponeBucketPlan
 
         pa_schema = pa.schema([
             pa.field('id', pa.int64(), nullable=False),
@@ -352,7 +774,7 @@ class RaySinkTest(unittest.TestCase):
         }, schema=pa_schema)
 
         with patch.object(
-            PostponeBucketPlanner,
+            PythonPostponeBucketPlanner,
             '_load_bucket_metadata',
             side_effect=AssertionError("worker must not scan manifests"),
         ) as load:
@@ -566,6 +988,7 @@ class RaySinkTest(unittest.TestCase):
                 self.table,
                 overwrite=False,
                 static_partition={'dt': '2024-01-01'},
+                options=None,
             )
             dataset.write_datasink.assert_called_once_with(
                 datasink,
@@ -592,6 +1015,7 @@ class RaySinkTest(unittest.TestCase):
                 self.table,
                 overwrite=False,
                 static_partition={'dt': '2024-01-02'},
+                options=None,
             )
 
     def test_on_write_failed(self):

@@ -23,6 +23,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock, patch
 
+import pyarrow as pa
+import pytest
+
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -35,15 +39,18 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.execution.python.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
+from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_options import CommitDedup
 from pypaimon.execution.python.write.file_store_commit import (
     CommitFailRetryResult,
+    DedupEvidenceMissing,
     FileStoreCommit,
     RewriteResult,
     _reject_compact_increment,
     _row_id_check_from_messages,
 )
-from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory, canonical_data_file_path
 
 
 class TestRowIdCheckFromMessages(unittest.TestCase):
@@ -140,6 +147,7 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.options.to_map.return_value = {}
         self.mock_snapshot_commit = Mock()
 
     def _create_file_store_commit(self):
@@ -366,6 +374,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.options.to_map.return_value = {}
 
         # Mock snapshot commit
         self.mock_snapshot_commit = Mock()
@@ -390,6 +399,45 @@ class TestFileStoreCommit(unittest.TestCase):
                 BinaryRow(row, []), BinaryRow(row, []), []),
             schema_id=0,
         )
+
+    def test_legacy_snapshot_identity_includes_manifest_references(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        """Without uuids, the commit fields alone do not identify a snapshot.
+
+        commit_user/identifier/kind can be reused by a replay and time_millis
+        is wall-clock, so a replaced snapshot can match all four while
+        referencing entirely different manifests. The manifest list names are
+        generated per commit and persisted in the snapshot, so they are the
+        durable content identity the legacy comparison must include.
+        """
+        file_store_commit = self._create_file_store_commit()
+
+        def legacy_snapshot(**overrides):
+            fields = dict(
+                id=3, uuid=None, commit_user='u', commit_identifier=11,
+                commit_kind='APPEND', time_millis=123,
+                base_manifest_list='manifest-list-aaa-0',
+                delta_manifest_list='manifest-list-aaa-1',
+            )
+            fields.update(overrides)
+            return Mock(**fields)
+
+        observed = legacy_snapshot()
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            legacy_snapshot())
+        self.assertEqual(
+            'same',
+            file_store_commit._observed_snapshot_identity(observed))
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = (
+            legacy_snapshot(base_manifest_list='manifest-list-bbb-0',
+                            delta_manifest_list='manifest-list-bbb-1'))
+        self.assertEqual(
+            'different',
+            file_store_commit._observed_snapshot_identity(observed),
+            'a snapshot with the same commit fields but different manifest '
+            'references was treated as the one previously read')
 
     def test_conflict_preserves_committed_snapshot_without_rollback(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -424,19 +472,36 @@ class TestFileStoreCommit(unittest.TestCase):
 
     def test_commit_fail_retry_missing_snapshot_still_fails_closed(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
+        """Every id the scan would have to inspect is unreadable, so whether
+        this commit already landed cannot be established either way.
+
+        Scanning on is what distinguishes this from a readable hole next to a
+        found commit: here nothing is found and nothing is ruled out, so the
+        only safe answer is to refuse rather than commit a possible duplicate.
+        """
         file_store_commit = self._create_file_store_commit()
         file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = None
+        latest_snapshot = Mock(id=3, uuid='latest-snapshot-uuid')
+        # The rescans re-read LATEST to widen the window; nothing new lands.
+        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
+            latest_snapshot)
 
-        with self.assertRaisesRegex(
-                RuntimeError, "snapshot 1 cannot be found"):
+        with self.assertRaises(DedupEvidenceMissing):
             file_store_commit._is_duplicate_commit(
                 CommitFailRetryResult(None),
-                Mock(id=3),
+                latest_snapshot,
                 11,
                 "APPEND",
+                commit_result_may_be_uncertain=True,
             )
 
-        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_called_once_with(1)
+        # The whole window was walked, not abandoned at the first hole.
+        scanned = {
+            call.args[0]
+            for call in file_store_commit.snapshot_manager
+            .get_snapshot_by_id.call_args_list
+        }
+        self.assertEqual(scanned, {1, 2, 3})
 
     def _run_manifest_commit_attempt(self, commit_side_effect=None,
                                      commit_result=None, retry_result=None,
@@ -1101,3 +1166,221 @@ class TestFileStoreCommit(unittest.TestCase):
                     file=file
                 ))
         return commit_entries
+
+
+@pytest.mark.python_commit
+class TestFileStoreCommitRecovery(unittest.TestCase):
+
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        catalog = CatalogFactory.create({'warehouse': directory.name})
+        catalog.create_database('default', True)
+        self.arrow_schema = pa.schema([('value', pa.int64())])
+        schema = Schema.from_pyarrow_schema(self.arrow_schema, options={
+            'read.native.enabled': 'false',
+            'write.native.enabled': 'false',
+            'commit.native.enabled': 'false',
+        })
+        catalog.create_table('default.recovery', schema, False)
+        self.table = catalog.get_table('default.recovery')
+        self.manager = self.table.snapshot_manager()
+        self._append(1)
+
+    def _prepare(self, value, dedup=None):
+        builder = self.table.new_batch_write_builder()
+        writer = builder.new_write()
+        self.addCleanup(writer.close)
+        committer = builder.new_commit(dedup=dedup)
+        self.addCleanup(committer.close)
+        writer.write_arrow(pa.Table.from_pydict(
+            {'value': [value]}, schema=self.arrow_schema))
+        return committer, writer.prepare_commit()
+
+    def _append(self, value):
+        committer, messages = self._prepare(value)
+        committer.commit(messages)
+
+    def _rows(self):
+        builder = self.table.new_read_builder()
+        splits = builder.new_scan().plan().splits()
+        return sorted(builder.new_read().to_arrow(splits)['value'].to_pylist())
+
+    def test_definite_cas_failure_retries_after_observation_expires(self):
+        committer, messages = self._prepare(4)
+        file_store_commit = python_commit(committer).file_store_commit
+        snapshot_committer = file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        outcomes = []
+
+        def race_commit(base_uuid, snapshot, statistics):
+            if not outcomes:
+                self._append(2)
+                self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            result = original_commit(base_uuid, snapshot, statistics)
+            outcomes.append(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
+                patch.object(file_store_commit, '_commit_retry_wait'):
+            committer.commit(messages)
+
+        self.assertEqual(outcomes, [False, True])
+        self.assertEqual(self.manager.get_latest_snapshot().id, 3)
+        self.assertEqual(self._rows(), [1, 2, 4])
+
+    def test_unknown_cas_outcome_with_expired_observation_fails_closed(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
+
+        def lose_ack(base_uuid, snapshot, statistics):
+            self._append(2)
+            self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            raise OSError('commit acknowledgement unavailable')
+
+        with patch.object(snapshot_committer, 'commit', side_effect=lose_ack) as publish, \
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
+            with self.assertRaises(DedupEvidenceMissing):
+                committer.commit(messages)
+
+        self.assertEqual(publish.call_count, 1)
+        self.assertEqual(self._rows(), [1, 2])
+
+    def test_replay_still_requires_evidence_after_a_definite_cas_failure(self):
+        committer, messages = self._prepare(4, CommitDedup(on_first_attempt=True))
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+
+        def race_commit(base_uuid, snapshot, statistics):
+            self._append(2)
+            self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            result = original_commit(base_uuid, snapshot, statistics)
+            self.assertFalse(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit) as publish, \
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
+            with self.assertRaises(DedupEvidenceMissing):
+                committer.commit(messages)
+
+        self.assertEqual(publish.call_count, 1)
+        self.assertEqual(self._rows(), [1, 2])
+
+    def test_unknown_cas_outcome_acknowledges_a_persisted_commit(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+
+        def lose_ack(base_uuid, snapshot, statistics):
+            self.assertTrue(original_commit(base_uuid, snapshot, statistics))
+            self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            raise OSError('commit acknowledgement unavailable')
+
+        with patch.object(snapshot_committer, 'commit', side_effect=lose_ack) as publish, \
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'), \
+                patch('pypaimon.execution.python.write.file_store_commit.check_commit_files') as check_files:
+            committer.commit(messages)
+
+        self.assertEqual(publish.call_count, 1)
+        check_files.assert_not_called()
+        self.assertEqual(self._rows(), [1, 4])
+
+    def test_unknown_outcome_survives_a_later_definite_cas_failure(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        attempts = []
+
+        def race_commit(base_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            if len(attempts) == 1:
+                raise OSError('commit acknowledgement unavailable')
+            if len(attempts) == 2:
+                self._append(2)
+                self.table.file_io.delete(self.manager.get_snapshot_path(1))
+            result = original_commit(base_uuid, snapshot, statistics)
+            if len(attempts) == 2:
+                self.assertFalse(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
+            with self.assertRaises(DedupEvidenceMissing):
+                committer.commit(messages)
+
+        self.assertEqual(attempts, [2, 2])
+        self.assertEqual(self._rows(), [1, 2])
+
+    def test_definite_cas_failure_still_checks_prepared_files(self):
+        committer, messages = self._prepare(4)
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        outcomes = []
+
+        def race_commit(base_uuid, snapshot, statistics):
+            self._append(2)
+            for message in messages:
+                for data_file in message.new_files:
+                    self.table.file_io.delete(canonical_data_file_path(
+                        self.table, message.partition, message.bucket,
+                        data_file.file_name))
+            result = original_commit(base_uuid, snapshot, statistics)
+            outcomes.append(result)
+            return result
+
+        with patch.object(snapshot_committer, 'commit', side_effect=race_commit), \
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
+            with self.assertRaisesRegex(RuntimeError, 'required file is missing'):
+                committer.commit(messages)
+
+        self.assertEqual(outcomes, [False])
+        self.assertEqual(self._rows(), [1, 2])
+
+
+@pytest.mark.parametrize('on_first_attempt', [True, False])
+def test_overwrite_recovery_checks_prepared_indexes(tmp_path, on_first_attempt):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('default', True)
+    data = pa.table({'id': pa.array([1, 2], pa.int64()), 'value': ['a', 'b']})
+    catalog.create_table('default.overwrite_indexes', Schema.from_pyarrow_schema(
+        data.schema, primary_keys=['id'], options={
+            'bucket': '-1', 'read.native.enabled': 'false',
+            'write.native.enabled': 'false', 'commit.native.enabled': 'false',
+        }), False)
+    table = catalog.get_table('default.overwrite_indexes')
+    builder = table.new_batch_write_builder().overwrite()
+    writer = builder.new_write()
+    committer = builder.new_commit(dedup=CommitDedup(on_first_attempt=on_first_attempt))
+    try:
+        writer.write_arrow(data)
+        messages = writer.prepare_commit()
+        indexes = [entry for message in messages for entry in message.index_adds]
+        assert indexes
+
+        def remove_indexes():
+            for entry in indexes:
+                table.file_io.delete(table.path_factory().bucket_index_path(
+                    tuple(entry.partition.values), entry.bucket, entry.index_file))
+
+        snapshot_committer = python_commit(committer).file_store_commit.snapshot_commit
+        original_commit = snapshot_committer.commit
+        attempts = []
+
+        def fail_first_commit(base_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            if not on_first_attempt and len(attempts) == 1:
+                remove_indexes()
+                return False
+            return original_commit(base_uuid, snapshot, statistics)
+
+        if on_first_attempt:
+            remove_indexes()
+        with patch.object(snapshot_committer, 'commit', side_effect=fail_first_commit), \
+                patch.object(python_commit(committer).file_store_commit, '_commit_retry_wait'):
+            with pytest.raises(RuntimeError, match='required file is missing'):
+                committer.commit(messages)
+        assert len(attempts) == (0 if on_first_attempt else 1)
+        assert table.snapshot_manager().get_latest_snapshot() is None
+    finally:
+        writer.close()
+        committer.close()

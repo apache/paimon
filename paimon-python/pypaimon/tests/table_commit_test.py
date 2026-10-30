@@ -17,14 +17,16 @@
 
 import unittest
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+import pytest
 from parameterized import parameterized
 
 from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.execution.python.write.table_commit import PythonTableCommit
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.commit_options import CommitDedup
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 
@@ -38,7 +40,6 @@ class TestTableCommit(unittest.TestCase):
     ])
     def test_writer_abort_preserves_files_after_commit_exception(self, mode, stream, published):
         import pyarrow as pa
-        from unittest.mock import patch
         from pypaimon import CatalogFactory, Schema
 
         with TemporaryDirectory(prefix='paimon-uncertain-commit-') as warehouse:
@@ -255,3 +256,74 @@ class TestTableCommit(unittest.TestCase):
             commit_identifier=42,
             snapshot_properties={"checkpoint": "42"},
         )
+
+    @parameterized.expand([
+        (stream, on_first_attempt)
+        for stream in (False, True)
+        for on_first_attempt in (False, True)
+    ])
+    @pytest.mark.python_commit
+    def test_dedup_identity_survives_lazy_backend_initialization(self, stream, on_first_attempt):
+        import pyarrow as pa
+        from pypaimon import CatalogFactory, Schema
+
+        with TemporaryDirectory(prefix='paimon-lazy-commit-') as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', True)
+            catalog.create_table('default.t', Schema.from_pyarrow_schema(
+                pa.schema([('id', pa.int64())]),
+                options={'commit.native.enabled': 'false'}), False)
+            table = catalog.get_table('default.t')
+            builder = table.new_stream_write_builder() if stream else table.new_batch_write_builder()
+            dedup = CommitDedup(
+                on_first_attempt=on_first_attempt, base_snapshot_id=7, base_file_millis=123)
+
+            with patch.object(table, 'new_snapshot_commit', wraps=table.new_snapshot_commit) as snapshot_commit:
+                commit = builder.new_commit(dedup=dedup)
+                try:
+                    self.assertIsNone(commit._python_commit)
+                    self.assertIs(commit._dedup, dedup)
+                    self.assertFalse(hasattr(commit, 'file_store_commit'))
+                    snapshot_commit.assert_not_called()
+
+                    execution = python_commit(commit)
+
+                    self.assertIsInstance(execution, PythonTableCommit)
+                    self.assertIs(commit._python_commit, execution)
+                    self.assertIs(commit._dedup, dedup)
+                    self.assertIs(execution.file_store_commit.dedup, dedup)
+                    self.assertIs(python_commit(commit), execution)
+                    self.assertFalse(hasattr(commit, 'file_store_commit'))
+                    snapshot_commit.assert_called_once_with()
+                finally:
+                    commit.close()
+
+    def test_native_commit_raises_when_first_attempt_dedup_requested(self):
+        """actor mode + native commit is unsupported: the native committer
+        has no dedup scan, so a replayed commit would publish the same files
+        twice. Initialising the commit must raise NotImplementedError."""
+        table = Mock()
+        table.identifier = 'default.test_table'
+        table.new_snapshot_commit.return_value = Mock()
+        table.options.native_commit_enabled.return_value = True
+
+        with self.assertRaises(NotImplementedError) as ctx:
+            BatchTableCommit(
+                table, 'stable-user', None,
+                dedup=CommitDedup(on_first_attempt=True))
+
+        self.assertIn('commit.native.enabled', str(ctx.exception))
+        self.assertIn("commit_mode='actor'", str(ctx.exception))
+
+    def test_native_commit_does_not_raise_without_first_attempt_dedup(self):
+        """native commit without actor-mode dedup is fine."""
+        table = Mock()
+        table.identifier = 'default.test_table'
+        table.new_snapshot_commit.return_value = Mock()
+        table.options.native_commit_enabled.return_value = True
+
+        # Neither of these combinations should raise.
+        BatchTableCommit(
+            table, 'stable-user', None,
+            dedup=CommitDedup(on_first_attempt=False))
+        BatchTableCommit(table, 'stable-user', None, dedup=None)
