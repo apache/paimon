@@ -24,9 +24,9 @@ under the License.
 
 # Video Frames
 
-Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). You can import a local video directly or provide frame metadata explicitly.
+Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). You can import a video directly or provide frame metadata explicitly.
 
-## Import a Local Video
+## Import a Video
 
 With Python 3.10 or newer, install `pypaimon[video]`:
 
@@ -51,7 +51,7 @@ frames = conn.create_table(
 )
 frames.add_video("/data/example.mp4")
 # Supply constant business fields for another video:
-frames.add_video("/data/episode-42.mp4", metadata={"episode_id": 42})
+frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
 ```
 
 Omitting `frames` generates one row per decoded frame: `frame_index` starts at
@@ -59,8 +59,10 @@ zero in presentation order; `timestamp` is the actual PTS × time base in second
 relative to the first frame. This preserves variable frame timing. The encoded
 video bytes are stored unchanged in `.video`.
 
-Automatic import accepts a local path with exactly one video stream and requires
-`first_frame=0`. Keep the source file unchanged until the call returns. PyAV/FFmpeg
+Automatic import accepts a local path, remote URI, or `BlobDescriptor`, with exactly
+one video stream and `first_frame=0`. Remote sources use the same URI reader and
+storage credentials as other BLOB writes; configure source access on the connection.
+Keep the source unchanged until the call returns, including between remote reads. PyAV/FFmpeg
 must support decoding it; missing or decreasing timestamps and decode errors fail
 the import. Timing discovery decodes the video without retaining images.
 

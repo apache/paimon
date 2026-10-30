@@ -30,7 +30,7 @@ from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
-def _inspect_video_frames(path):
+def _inspect_video_frames(source):
     """Read presentation timestamps without retaining decoded images."""
     try:
         import av
@@ -44,7 +44,7 @@ def _inspect_video_frames(path):
     timestamps = array("d")
     first_time = None
     previous_time = None
-    with av.open(path) as container:
+    with av.open(source) as container:
         if len(container.streams.video) != 1:
             raise ValueError("Automatic video import requires one video stream.")
         for frame in container.decode(container.streams.video[0]):

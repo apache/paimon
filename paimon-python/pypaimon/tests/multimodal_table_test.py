@@ -322,6 +322,93 @@ class MultimodalTableTest(unittest.TestCase):
                     for expected, frame in zip(pixels, container.decode(video=0)):
                         np.testing.assert_array_equal(expected, frame.to_ndarray(format="rgb24"))
 
+    def test_auto_video_remote_uri_and_descriptor(self):
+        from pathlib import Path
+        from unittest.mock import Mock
+        original = Path(self._auto_video_file((50, 51, 54, 60, 62))).read_bytes()
+        uri = "oss://source-bucket/episode.mp4"
+        for number, source in enumerate([uri, pmm.BlobDescriptor(uri, 6, len(original))]):
+            with self.subTest(source=source):
+                table = self._auto_video_table("remote_%d" % number)
+                factory = table.raw_table.file_io.uri_reader_factory
+                create = factory.create
+                streams = []
+
+                def open_source(path):
+                    self.assertEqual(uri, path)
+                    stream = io.BytesIO(original if number == 0 else b"prefix" + original + b"suffix")
+                    streams.append(stream)
+                    return stream
+
+                reader = Mock()
+                reader.new_input_stream.side_effect = open_source
+                with patch.object(factory, "create", side_effect=lambda path: reader if path == uri else create(path)):
+                    table.add_video(source, metadata={"episode_id": 42})
+                self.assertGreaterEqual(len(streams), 2)
+                self.assertTrue(all(stream.closed for stream in streams))
+                rows = sorted(table.scan().select(["frame_index", "timestamp"]).to_list(),
+                              key=lambda row: row["frame_index"])
+                self.assertEqual(list(range(5)), [row["frame_index"] for row in rows])
+                self.assertEqual([0.0, 0.1, 0.4, 1.0, 1.2], [row["timestamp"] for row in rows])
+                _, bodies = table.scan().read_blobs("video")
+                self.assertEqual([original] * 5, bodies["video"])
+
+    def test_auto_video_http(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from pathlib import Path
+        from threading import Thread
+        original = Path(self._auto_video_file()).read_bytes()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(original)))
+                self.end_headers()
+                self.wfile.write(original)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            table = self._auto_video_table()
+            table.add_video("http://127.0.0.1:%d/video.mp4" % server.server_port)
+            _, bodies = table.scan().read_blobs("video")
+            self.assertEqual([original] * 5, bodies["video"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_auto_video_remote_failures_close_streams(self):
+        from pathlib import Path
+        from unittest.mock import Mock
+        original = Path(self._auto_video_file()).read_bytes()
+        uri = "oss://source-bucket/episode.mp4"
+        for number, (data, fail_after) in enumerate([(b"corrupt", 100), (original, 0), (original, 1)]):
+            with self.subTest(fail_after=fail_after):
+                table = self._auto_video_table("remote_failure_%d" % number)
+                factory = table.raw_table.file_io.uri_reader_factory
+                create = factory.create
+                streams = []
+
+                def open_source(path):
+                    if len(streams) >= fail_after:
+                        raise IOError("Source unavailable")
+                    stream = io.BytesIO(data)
+                    streams.append(stream)
+                    return stream
+
+                reader = Mock()
+                reader.new_input_stream.side_effect = open_source
+                with patch.object(factory, "create", side_effect=lambda path: reader if path == uri else create(path)):
+                    with self.assertRaises(Exception):
+                        table.add_video(uri)
+                self.assertTrue(all(stream.closed for stream in streams))
+                self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
+
     def test_auto_video_documented_schema(self):
         table = self.conn.create_table(
             "documented_frames",
@@ -359,7 +446,7 @@ class MultimodalTableTest(unittest.TestCase):
                            {"first_frame": False}, {"first_frame": 0.0}]:
                 with self.subTest(kwargs=kwargs), self.assertRaises((ValueError, TypeError, pa.ArrowException)):
                     table.add_video("missing.mp4", **kwargs)
-            for source in [b"bytes", io.BytesIO(), "oss://bucket/video.mp4", self.temp_dir]:
+            for source in [b"bytes", io.BytesIO(), self.temp_dir]:
                 with self.subTest(source=source), self.assertRaises(ValueError):
                     table.add_video(source)
             inspect.assert_not_called()
@@ -458,7 +545,7 @@ class MultimodalTableTest(unittest.TestCase):
 
         def inspect_changed(source):
             result = _inspect_video_frames(source)
-            with open(source, "ab") as output:
+            with open(path, "ab") as output:
                 output.write(b"changed")
             return result
 

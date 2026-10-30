@@ -134,7 +134,7 @@ class MultimodalTable:
         ``frames`` supplies every table column except the configured
         ``video-frame-field``. Frame ordinals are generated from
         ``first_frame`` and stored in the video descriptor, not in the normal
-        data file. Omit ``frames`` to inspect a local video and generate
+        data file. Omit ``frames`` to inspect a video and generate
         ``frame_index`` (int64) and ``timestamp`` (float64 seconds from the
         first frame). ``metadata`` supplies constant values for other columns.
         Automatic discovery requires PyAV and one video stream.
@@ -142,7 +142,9 @@ class MultimodalTable:
         if frames is None:
             import os
             import stat
+            from urllib.parse import urlparse, unquote
 
+            from pypaimon.table.row.blob import Blob, BlobDescriptor
             from pypaimon.multimodal.video import _inspect_video_frames
 
             if isinstance(first_frame, bool) or not isinstance(first_frame, int) or first_frame != 0:
@@ -166,21 +168,30 @@ class MultimodalTable:
             for field in fields:
                 if not field.nullable and constants[field.name].null_count:
                     raise ValueError("Missing required metadata: %s." % field.name)
-            if not isinstance(video, (str, os.PathLike)):
-                raise ValueError("Automatic video import requires a local path.")
-            video = os.fspath(video)
-            if not isinstance(video, str) or "://" in video:
-                raise ValueError("Automatic video import requires a local path.")
-            video = os.path.abspath(video)
+            if isinstance(video, os.PathLike):
+                video = os.fspath(video)
+            if isinstance(video, str):
+                if not urlparse(video).scheme:
+                    video = os.path.abspath(video)
+                video = BlobDescriptor(video, 0, -1)
+            if not isinstance(video, BlobDescriptor):
+                raise ValueError("Automatic video import requires a path, URI, or BlobDescriptor.")
+            parsed = urlparse(video.uri)
+            local_path = unquote(parsed.path) if parsed.scheme == "file" else video.uri
 
             def source_state():
-                info = os.stat(video)
+                if parsed.scheme not in ("", "file"):
+                    return None
+                info = os.stat(local_path)
                 if not stat.S_ISREG(info.st_mode):
                     raise ValueError("Automatic video import requires a regular local file.")
                 return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
             original = source_state()
-            timestamps = _inspect_video_frames(video)
+            # Resolve through the same factory as the writer, including source credentials.
+            reader = self.raw_table.file_io.uri_reader_factory.create(video.uri)
+            with Blob.from_descriptor(reader, video).new_input_stream() as stream:
+                timestamps = _inspect_video_frames(stream)
 
             def check_source():
                 if source_state() != original:
