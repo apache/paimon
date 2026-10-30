@@ -525,6 +525,12 @@ under the License.
             <td>The TTL in local index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.discard-conflicting-tasks</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Skip complete data-evolution compaction tasks with row-range conflicts. Skipped inputs remain live for later compaction. Applies only to data-only compaction messages without row-id validation baselines.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
             <td style="word-wrap: break-word;">2.0</td>
             <td>Double</td>
