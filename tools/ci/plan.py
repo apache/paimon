@@ -98,7 +98,7 @@ def select(paths, full=False):
             selected.update(FLINK | E2E | {"core", "iceberg"})
         elif path.startswith("paimon-e2e-tests/"):
             selected.update(E2E)
-        elif path.startswith("paimon-eslib/"):
+        elif path.startswith("paimon-elasticsearch/"):
             selected.add("eslib")
         elif path.startswith("paimon-iceberg/"):
             selected.update({"core", "iceberg"})
