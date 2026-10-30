@@ -58,8 +58,8 @@ def _inspect_video_frames(source):
             if frame.pts is None or frame.time_base is None:
                 raise ValueError("Video frame is missing a presentation timestamp.")
             current_time = frame.pts * frame.time_base
-            if previous_time is not None and current_time < previous_time:
-                raise ValueError("Video presentation timestamps must be nondecreasing.")
+            if previous_time is not None and current_time <= previous_time:
+                raise ValueError("Video presentation timestamps must be strictly increasing.")
             if first_time is None:
                 first_time = current_time
             timestamps.append(float(current_time - first_time))

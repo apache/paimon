@@ -58,8 +58,8 @@ Generates zero-based frame numbers and PTS-based timestamps in seconds from the
 first frame, preserving variable frame timing and original video bytes.
 `metadata` supplies the same business fields for every frame.
 
-Supports local and remote videos with one PyAV-decodable video stream. Configure
-remote credentials on the connection; keep the source unchanged during import.
+Supports local and remote videos with one PyAV-decodable video stream and strictly
+increasing timestamps. Configure remote credentials on the connection; keep the source unchanged during import.
 To provide your own frame metadata, pass `frames` explicitly as shown below.
 
 ## Video Frame Storage

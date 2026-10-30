@@ -560,7 +560,9 @@ class MultimodalTableTest(unittest.TestCase):
                                 ([Mock(is_corrupt=False, pts=None, time_base=Fraction(1, 10))], "missing"),
                                 ([Mock(is_corrupt=False, pts=0, time_base=None)], "missing"),
                                 ([Mock(is_corrupt=False, pts=2, time_base=Fraction(1, 10)),
-                                  Mock(is_corrupt=False, pts=1, time_base=Fraction(1, 10))], "nondecreasing")]:
+                                  Mock(is_corrupt=False, pts=1, time_base=Fraction(1, 10))], "strictly increasing"),
+                                ([Mock(is_corrupt=False, pts=1, time_base=Fraction(1, 10)),
+                                  Mock(is_corrupt=False, pts=1, time_base=Fraction(1, 10))], "strictly increasing")]:
             container = MagicMock()
             container.__enter__.return_value = container
             container.streams.video = [object()]
@@ -568,6 +570,7 @@ class MultimodalTableTest(unittest.TestCase):
             with patch("av.open", return_value=container), self.assertRaisesRegex(ValueError, message):
                 table.add_video(path)
             container.__exit__.assert_called_once()
+            self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
         container = MagicMock()
         container.__enter__.return_value = container
         container.streams.video = []
