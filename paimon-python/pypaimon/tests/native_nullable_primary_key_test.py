@@ -140,6 +140,7 @@ def test_nullable_primary_key_source_uses_sql_merge_equality(rest_catalog, nativ
     source = _table(rest_catalog[0], 'nullable_source', -1, engine)
     _write(source, [(None, None, 10), (None, 1, 11), (1, None, 12), (1, 1, 100)], False)
     _write(source, [(None, None, 20), (None, 1, 21), (1, None, 22), (1, 1, 200)], True)
+    source_snapshot_id = source.snapshot_manager().get_latest_snapshot().id
     target = _table(rest_catalog[0], 'target', -1, primary_key=False)
     _write(target, [(None, None, -1), (None, 1, -3), (1, None, -4), (1, 1, -2)], False)
     target = target.copy({'write.native.enabled': str(native).lower()})
@@ -166,7 +167,7 @@ def test_nullable_primary_key_source_uses_sql_merge_equality(rest_catalog, nativ
             (1, None, -4), (1, None, values[2]), (1, 1, values[3])]
     assert _read(source, True, all_files=engine == 'first-row') == [
         (None, None, values[0]), (None, 1, values[1]), (1, None, values[2]), (1, 1, values[3])]
-    assert source.snapshot_manager().get_latest_snapshot().id == 2
+    assert source.snapshot_manager().get_latest_snapshot().id == source_snapshot_id
 
 
 @pytest.mark.parametrize('bucket', [3, -1], ids=['fixed', 'dynamic'])
