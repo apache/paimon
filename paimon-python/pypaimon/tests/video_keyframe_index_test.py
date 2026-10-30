@@ -25,7 +25,6 @@ import unittest
 import zlib
 from unittest import mock
 
-import pypaimon.table.row.video_keyframe_index as keyframe_index_module
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
@@ -142,7 +141,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
             VideoKeyframeIndex(
                 [(0, 1), (1, 1)], [(0, 0, 0)]).metadata_ranges,
         )
-        self.assertEqual(17, index.HEADER.size)
+        self.assertEqual(21, index.HEADER.size)
         self.assertFalse(hasattr(restored, 'time_base'))
         self.assertFalse(hasattr(restored, 'frame_count'))
         self.assertFalse(hasattr(restored, 'stream_index'))
@@ -159,7 +158,8 @@ class VideoKeyframeIndexTest(unittest.TestCase):
             with self.subTest(anchors=anchors):
                 with self.assertRaises(ValueError):
                     VideoKeyframeIndex([], anchors)
-        for data in (b'', index.serialize()[:-1], index.serialize() + b'junk'):
+        for data in (b'', index.serialize()[:-1], index.serialize() + b'junk',
+                     b'\x02' + index.serialize()[1:]):
             with self.assertRaises(ValueError):
                 VideoKeyframeIndex.deserialize(data)
         header = index.serialize()[:index.HEADER.size]
@@ -168,13 +168,14 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                 header + zlib.compress(struct.pack('<qqq', 0, 1, 2)))
 
     def test_deserialize_matches_streaming_validation(self):
-        def encode(entries, count=None, compressed=None):
+        def encode(entries, count=None, page=None):
+            if page is None:
+                page = b''.join(VideoKeyframeIndex.ENTRY.pack(*entry) for entry in entries)
+                page += struct.pack('<I', zlib.crc32(page))
             return VideoKeyframeIndex.HEADER.pack(
                 VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC,
                 0, len(entries) if count is None else count,
-            ) + (zlib.compress(b''.join(
-                VideoKeyframeIndex.ENTRY.pack(*entry) for entry in entries
-            )) if compressed is None else compressed)
+            ) + page
 
         valid = [(0, -(2 ** 63), 0), (2 ** 63 - 1, 2 ** 63 - 1, 99)]
         for entries in ([(0, -10, 0)], valid):
@@ -201,8 +202,8 @@ class VideoKeyframeIndexTest(unittest.TestCase):
             encode(valid)[:-1],
             encode(valid) + b'trailing',
             encode(valid) + zlib.compress(b''),
-            encode(valid, compressed=b'not zlib'),
-            encode(valid, compressed=zlib.compress(b'partial entry')),
+            encode(valid, page=b'invalid page'),
+            encode(valid, page=b'partial entry'),
         ]
         for data in invalid:
             with self.subTest(data=data):
@@ -216,36 +217,11 @@ class VideoKeyframeIndexTest(unittest.TestCase):
             VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 3, 1
         ) + b''.join(VideoKeyframeIndex.METADATA_RANGE.pack(*entry)
                      for entry in [(0, 2), (2, 3), (8, 2)])
-        data += zlib.compress(VideoKeyframeIndex.ENTRY.pack(0, -1, 10))
+        page = VideoKeyframeIndex.ENTRY.pack(0, -1, 10)
+        data += page + struct.pack('<I', zlib.crc32(page))
         restored = VideoKeyframeIndex.deserialize(data, 11)
         self.assertEqual(((0, 5), (8, 2)), restored.metadata_ranges)
         self.assertEqual(((0, -1, 10),), restored.keyframes)
-
-    def test_deserialize_bounds_output_before_materializing_entries(self):
-        data = VideoKeyframeIndex.HEADER.pack(
-            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, 1
-        ) + zlib.compress(b'\0' * (4 * 1024 * 1024))
-        real_decompressobj = zlib.decompressobj
-        output_sizes = []
-
-        class TrackingDecompressor:
-            def __init__(self):
-                self._delegate = real_decompressobj()
-
-            def decompress(self, value, max_length=0):
-                output = self._delegate.decompress(value, max_length)
-                output_sizes.append(len(output))
-                return output
-
-            def __getattr__(self, name):
-                return getattr(self._delegate, name)
-
-        with mock.patch.object(keyframe_index_module.zlib, 'decompressobj',
-                               side_effect=TrackingDecompressor):
-            with self.assertRaises(ValueError):
-                VideoKeyframeIndex.deserialize(data)
-        self.assertTrue(output_sizes)
-        self.assertLessEqual(max(output_sizes), VideoKeyframeIndex._CHUNK_SIZE)
 
     def test_large_index_is_read_in_pages(self):
         import bisect
@@ -276,7 +252,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
     def test_paged_corruption_and_boundary_validation(self):
         with VideoKeyframeIndex([], ((i, i, i) for i in range(8193))) as index:
             data = index.serialize()
-        second = VideoKeyframeIndex.PAGED_HEADER.size + 4096 * 24 + 4
+        second = VideoKeyframeIndex.HEADER.size + 4096 * 24 + 4
         corrupt = bytearray(data)
         corrupt[second] ^= 1
         with VideoKeyframeIndex.open(lambda o, n: corrupt[o:o + n], len(corrupt)) as index:
@@ -304,44 +280,9 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "video payload"):
                     VideoKeyframeIndex.deserialize(data, payload_length=10)
 
-    def test_valid_large_index_uses_bounded_input_chunks(self):
-        count = 60_000
-        entries = b''.join(
-            VideoKeyframeIndex.ENTRY.pack(value, value, value)
-            for value in range(count)
-        )
-        data = VideoKeyframeIndex.HEADER.pack(
-            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, count
-        ) + zlib.compress(entries)
-        real_decompressobj = zlib.decompressobj
-        input_sizes = []
-
-        class TrackingDecompressor:
-
-            def __init__(self):
-                self._delegate = real_decompressobj()
-
-            def decompress(self, value, max_length=0):
-                input_sizes.append(len(value))
-                return self._delegate.decompress(value, max_length)
-
-            def __getattr__(self, name):
-                return getattr(self._delegate, name)
-
-        with mock.patch.object(
-                keyframe_index_module.zlib,
-                'decompressobj',
-                side_effect=TrackingDecompressor):
-            VideoKeyframeIndex.validate(data)
-
-        self.assertGreater(len(data), VideoKeyframeIndex._CHUNK_SIZE)
-        self.assertLessEqual(
-            max(input_sizes), VideoKeyframeIndex._CHUNK_SIZE
-        )
-
     def test_rejects_forged_paged_count_before_reading_entries(self):
-        data = VideoKeyframeIndex.PAGED_HEADER.pack(
-            VideoKeyframeIndex.PAGED_VERSION, VideoKeyframeIndex.MAGIC, 0, 2 ** 63)
+        data = VideoKeyframeIndex.HEADER.pack(
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, 2 ** 63)
         read = mock.Mock(side_effect=lambda o, n: data[o:o + n])
         with self.assertRaisesRegex(ValueError, 'entries length'):
             VideoKeyframeIndex.open(read, len(data))

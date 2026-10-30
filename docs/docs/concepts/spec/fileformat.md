@@ -441,12 +441,12 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-Keyframe-index version `2` uses this layout. Numeric fields are little endian;
+Keyframe-index version `1` uses this layout. Numeric fields are little endian;
 byte offsets are relative to the embedded video payload.
 
 | Field | Size |
 | --- | ---: |
-| Version (`2`) | 1 byte |
+| Version (`1`) | 1 byte |
 | Magic (`0x564944454F4B4649`) | 8 bytes |
 | Metadata-range count | 4 bytes |
 | Keyframe count | 8 bytes |
@@ -462,8 +462,6 @@ The index covers the first video stream; its time base remains in the video.
 Readers load pages on demand; writers validate all pages. There is no keyframe-count
 or aggregate index-byte budget. Metadata ranges remain limited to 65,536. PyPaimon
 caches up to 1 MiB of entry pages per index and spools generated indexes to temporary disk.
-Version `1` remains readable: its 17-byte header has two uint32 counts and its entries
-form one zlib stream. Version-1-only readers must be upgraded before reading version `2`.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

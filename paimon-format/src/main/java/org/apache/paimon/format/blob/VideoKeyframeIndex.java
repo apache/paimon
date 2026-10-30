@@ -25,10 +25,8 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.zip.CRC32;
-import java.util.zip.DataFormatException;
-import java.util.zip.Inflater;
 
-/** Streaming validation for legacy and paged video seek indexes. */
+/** Streaming validation for paged video seek indexes. */
 final class VideoKeyframeIndex {
     private static final long MAGIC = 0x564944454F4B4649L;
     private static final int ENTRY_LENGTH = 24;
@@ -46,21 +44,18 @@ final class VideoKeyframeIndex {
     }
 
     static void validate(InputStream source, long length, long payloadLength) throws IOException {
-        if (length < 17 || payloadLength <= 0) {
+        if (length < 21 || payloadLength <= 0) {
             throw invalid("header or empty video payload");
         }
         DataInputStream in = new DataInputStream(source);
         int version = in.readUnsignedByte();
         long magic = Long.reverseBytes(in.readLong());
         long metadataCount = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
-        if ((version != 1 && version != 2) || magic != MAGIC) {
+        if (version != 1 || magic != MAGIC) {
             throw invalid("version or magic");
         }
-        long count =
-                version == 1
-                        ? Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()))
-                        : Long.reverseBytes(in.readLong());
-        long offset = (version == 1 ? 17 : 21) + metadataCount * 16;
+        long count = Long.reverseBytes(in.readLong());
+        long offset = 21 + metadataCount * 16;
         if (metadataCount > MAX_METADATA_RANGE_COUNT) {
             throw invalid("metadata range count exceeds limit");
         }
@@ -77,76 +72,27 @@ final class VideoKeyframeIndex {
             previousEnd = start + size;
         }
         EntryValidator validator = new EntryValidator(payloadLength);
-        if (version == 2) {
-            long pages = (count - 1) / PAGE_ENTRIES + 1;
-            if (count > (length - offset) / ENTRY_LENGTH
-                    || pages * 4 != length - offset - count * ENTRY_LENGTH) {
-                throw invalid("entries length");
-            }
-            byte[] page = new byte[PAGE_ENTRIES * ENTRY_LENGTH];
-            for (long done = 0; done < count; ) {
-                int entries = (int) Math.min(PAGE_ENTRIES, count - done);
-                int bytes = entries * ENTRY_LENGTH;
-                in.readFully(page, 0, bytes);
-                long expected = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
-                CRC32 crc = new CRC32();
-                crc.update(page, 0, bytes);
-                if (crc.getValue() != expected) {
-                    throw invalid("page checksum");
-                }
-                ByteBuffer values = ByteBuffer.wrap(page, 0, bytes).order(ByteOrder.LITTLE_ENDIAN);
-                for (int i = 0; i < entries; i++) {
-                    validator.accept(values);
-                }
-                done += entries;
-            }
-        } else {
-            validateLegacy(in, length - offset, count, validator);
+        long pages = (count - 1) / PAGE_ENTRIES + 1;
+        if (count > (length - offset) / ENTRY_LENGTH
+                || pages * 4 != length - offset - count * ENTRY_LENGTH) {
+            throw invalid("entries length");
         }
-    }
-
-    private static void validateLegacy(
-            InputStream in, long remaining, long count, EntryValidator validator)
-            throws IOException {
-        Inflater inflater = new Inflater();
-        byte[] input = new byte[64 * 1024];
-        byte[] entry = new byte[ENTRY_LENGTH];
-        int filled = 0;
-        long decoded = 0;
-        try {
-            while (!inflater.finished()) {
-                if (inflater.needsInput() && remaining > 0) {
-                    int n = in.read(input, 0, (int) Math.min(input.length, remaining));
-                    if (n <= 0) {
-                        throw invalid("truncated compressed entries");
-                    }
-                    remaining -= n;
-                    inflater.setInput(input, 0, n);
-                }
-                int n = inflater.inflate(entry, filled, ENTRY_LENGTH - filled);
-                filled += n;
-                if (filled == ENTRY_LENGTH) {
-                    if (decoded++ >= count) {
-                        throw invalid("entry count");
-                    }
-                    validator.accept(ByteBuffer.wrap(entry).order(ByteOrder.LITTLE_ENDIAN));
-                    filled = 0;
-                }
-                if (n == 0
-                        && !inflater.finished()
-                        && (inflater.needsDictionary()
-                                || !inflater.needsInput()
-                                || remaining == 0)) {
-                    throw invalid("compressed entries");
-                }
+        byte[] page = new byte[PAGE_ENTRIES * ENTRY_LENGTH];
+        for (long done = 0; done < count; ) {
+            int entries = (int) Math.min(PAGE_ENTRIES, count - done);
+            int bytes = entries * ENTRY_LENGTH;
+            in.readFully(page, 0, bytes);
+            long expected = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
+            CRC32 crc = new CRC32();
+            crc.update(page, 0, bytes);
+            if (crc.getValue() != expected) {
+                throw invalid("page checksum");
             }
-            if (filled != 0 || decoded != count || remaining != 0 || inflater.getRemaining() != 0) {
-                throw invalid("entry count or trailing data");
+            ByteBuffer values = ByteBuffer.wrap(page, 0, bytes).order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < entries; i++) {
+                validator.accept(values);
             }
-        } catch (DataFormatException e) {
-            throw new IllegalArgumentException("Invalid video keyframe index payload.", e);
-        } finally {
-            inflater.end();
+            done += entries;
         }
     }
 

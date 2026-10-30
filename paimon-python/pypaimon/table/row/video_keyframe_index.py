@@ -29,20 +29,6 @@ from collections.abc import Sequence
 from contextlib import closing
 
 
-class _RangeView:
-    def __init__(self, read_at, length):
-        self.read_at, self.length = read_at, length
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, key):
-        start, end, step = key.indices(self.length)
-        if step != 1:
-            raise ValueError("Non-contiguous index read.")
-        return self.read_at(start, end - start)
-
-
 class _PagedKeyframes(Sequence):
     ENTRY = struct.Struct('<qqq')
     PAGE_ENTRIES = 4096
@@ -136,15 +122,12 @@ def _validate_entries(data, payload_length, initial=False):
 
 
 class VideoKeyframeIndex:
-    VERSION = 1  # Legacy zlib stream.
-    PAGED_VERSION = 2
+    VERSION = 1
     MAGIC = 0x564944454F4B4649
-    HEADER = struct.Struct('<BQII')
-    PAGED_HEADER = struct.Struct('<BQIQ')
+    HEADER = struct.Struct('<BQIQ')
     METADATA_RANGE = struct.Struct('<qq')
     ENTRY = struct.Struct('<qqq')
     MAX_METADATA_RANGE_COUNT = 64 * 1024
-    _CHUNK_SIZE = 64 * 1024
 
     def __init__(self, metadata_ranges, keyframes):
         self.metadata_ranges = self._metadata(metadata_ranges)
@@ -231,8 +214,8 @@ class VideoKeyframeIndex:
         return (type(self).deserialize, (self.serialize(),))
 
     def write_to(self, output):
-        output.write(self.PAGED_HEADER.pack(
-            self.PAGED_VERSION, self.MAGIC, len(self.metadata_ranges), len(self.keyframes)))
+        output.write(self.HEADER.pack(
+            self.VERSION, self.MAGIC, len(self.metadata_ranges), len(self.keyframes)))
         for value in self.metadata_ranges:
             output.write(self.METADATA_RANGE.pack(*value))
         for page in range((len(self.keyframes) + _PagedKeyframes.PAGE_ENTRIES - 1) // _PagedKeyframes.PAGE_ENTRIES):
@@ -249,8 +232,8 @@ class VideoKeyframeIndex:
     def open(cls, read_at, length, payload_length=None):
         if length < cls.HEADER.size:
             raise ValueError("Invalid video keyframe index length.")
-        prefix = read_at(0, min(length, cls.PAGED_HEADER.size + _PagedKeyframes.PAGE_BYTES + 4))
-        if len(prefix) != min(length, cls.PAGED_HEADER.size + _PagedKeyframes.PAGE_BYTES + 4):
+        prefix = read_at(0, min(length, cls.HEADER.size + _PagedKeyframes.PAGE_BYTES + 4))
+        if len(prefix) != min(length, cls.HEADER.size + _PagedKeyframes.PAGE_BYTES + 4):
             raise ValueError("Invalid video keyframe index: truncated read.")
 
         def read(offset, size):
@@ -266,12 +249,9 @@ class VideoKeyframeIndex:
             return data
 
         version = read(0, 1)[0]
-        if version == cls.VERSION:
-            header = cls.HEADER
-        elif version == cls.PAGED_VERSION:
-            header = cls.PAGED_HEADER
-        else:
+        if version != cls.VERSION:
             raise ValueError("Invalid video keyframe index version.")
+        header = cls.HEADER
         _, magic, metadata_count, count = header.unpack(read(0, header.size))
         if magic != cls.MAGIC or count == 0:
             raise ValueError("Invalid video keyframe index header.")
@@ -280,8 +260,6 @@ class VideoKeyframeIndex:
         offset = header.size + metadata_count * cls.METADATA_RANGE.size
         ranges = cls._metadata(cls.METADATA_RANGE.iter_unpack(
             read(header.size, metadata_count * 16)), payload_length)
-        if version == cls.VERSION:
-            return cls(ranges, cls._iter_keyframes(_RangeView(read, length), offset, count, payload_length))
         pages = (count + _PagedKeyframes.PAGE_ENTRIES - 1) // _PagedKeyframes.PAGE_ENTRIES
         if offset + count * 24 + pages * 4 != length:
             raise ValueError("Invalid video keyframe index entries length.")
@@ -419,62 +397,3 @@ class VideoKeyframeIndex:
         if offset != payload_length or not has_moov:
             raise ValueError("Video is not a supported ISO BMFF file.")
         return ranges
-
-    @classmethod
-    def _iter_keyframes(cls, data, input_offset, count, payload_length):
-        try:
-            decoder = zlib.decompressobj()
-            pending = b''
-            remainder = b''
-            decoded_count = 0
-            previous_ordinal, previous_pts, previous_position = -1, None, -1
-            while not decoder.eof:
-                if not pending and input_offset < len(data):
-                    end = min(input_offset + cls._CHUNK_SIZE, len(data))
-                    pending = data[input_offset:end]
-                    input_offset = end
-                output = decoder.decompress(pending, cls._CHUNK_SIZE)
-                pending = decoder.unconsumed_tail
-                entries = remainder + output
-                complete = len(entries) - len(entries) % cls.ENTRY.size
-                remainder = entries[complete:]
-                for ordinal, pts, position in cls.ENTRY.iter_unpack(
-                        entries[:complete]):
-                    if decoded_count >= count:
-                        raise ValueError(
-                            "Invalid video keyframe index entries."
-                        )
-                    if decoded_count == 0 and ordinal != 0:
-                        raise ValueError(
-                            "Video keyframe index requires an initial "
-                            "keyframe."
-                        )
-                    if ordinal <= previous_ordinal:
-                        raise ValueError(
-                            "Keyframe ordinals must be strictly increasing."
-                        )
-                    if previous_pts is not None and pts <= previous_pts:
-                        raise ValueError(
-                            "Keyframe timestamps must be strictly increasing."
-                        )
-                    if (position <= previous_position
-                            or (payload_length is not None
-                                and position >= payload_length)):
-                        raise ValueError(
-                            "Keyframe packet positions must be within the "
-                            "video payload and strictly increasing."
-                        )
-                    decoded_count += 1
-                    previous_ordinal, previous_pts, previous_position = (
-                        ordinal, pts, position)
-                    yield ordinal, pts, position
-                if not output and not pending and input_offset == len(data):
-                    break
-            if (not decoder.eof or decoder.unused_data
-                    or pending or input_offset != len(data)
-                    or remainder or decoded_count != count):
-                raise ValueError("Invalid video keyframe index entries.")
-        except (struct.error, zlib.error) as error:
-            raise ValueError(
-                "Invalid video keyframe index payload."
-            ) from error

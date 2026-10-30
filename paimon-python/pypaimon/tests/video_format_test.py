@@ -159,16 +159,9 @@ class VideoFormatTest(unittest.TestCase):
 
     def test_cross_language_video_v1_fixture(self):
         fixture = self._fixture_bytes(self.VIDEO_FIXTURE)
-        encoded = VideoKeyframeIndex.HEADER.pack(1, VideoKeyframeIndex.MAGIC, 1, 2)
-        encoded += struct.pack('<qq', 0, 1)
-        encoded += zlib.compress(struct.pack('<qqqqqq', 0, 0, 0, 12, 36000, 2))
-        self._check_video_fixture(fixture, encoded)
-
-    def test_cross_language_paged_index_fixture(self):
         with VideoKeyframeIndex([(0, 1)], [(0, 0, 0), (12, 36000, 2)]) as index:
             encoded = index.serialize()
-        self._check_video_fixture(self._fixture_bytes(
-            self.VIDEO_FIXTURE.with_name("video-paged-index.hex")), encoded)
+        self._check_video_fixture(fixture, encoded)
 
     def _check_video_fixture(self, fixture, encoded):
         video = b"abc"
@@ -545,7 +538,7 @@ class VideoFormatTest(unittest.TestCase):
         try:
             with self.assertRaisesRegex(
                     ValueError,
-                    "ordinals must be strictly increasing"):
+                    "entries length"):
                 writer.add_element(
                     GenericRow([blob], [self.field], RowKind.INSERT)
                 )
