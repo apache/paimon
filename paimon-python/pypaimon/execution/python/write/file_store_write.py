@@ -127,9 +127,12 @@ class FileStoreWrite:
         require_columns(values_by_name, column_names, 'write_row')
         writer = self.data_writers.get(key)
         data = None
-        if writer is None and self._has_blob_columns():
+        if (writer is None and self._has_blob_columns()
+                and not self.table.is_primary_key_table):
             # Dedicated writers consume live payloads themselves. Inline fields
             # instead encode to Arrow before the writer captures its layout.
+            # Primary-key Blob tables use KeyValueDataWriter, which consumes
+            # an Arrow batch like every other key-value writer.
             descriptor_fields = self.options.blob_descriptor_fields()
             view_fields = self.options.blob_view_fields()
             inline_columns = [name for name in column_names if name in descriptor_fields or name in view_fields]
@@ -220,13 +223,10 @@ class FileStoreWrite:
             default = -1 if self.table.is_primary_key_table else 1
             return self._seq_number_stats(partition).get(bucket, default)
 
-        # Dedicated Blob files are an append-table layout. PK tables require
-        # managed packs and references attached to their key-value Parquet files.
-        if self._has_blob_columns():
-            if self.table.is_primary_key_table:
-                raise NotImplementedError(
-                    'Primary-key Blob writes require the native writer; '
-                    'enable write.native.enabled and write Arrow batches')
+        # Dedicated Blob files are an append-table layout. Primary-key tables
+        # store descriptors in the key-value file and list packs in a .blobref
+        # sidecar written by KeyValueDataWriter.
+        if self._has_blob_columns() and not self.table.is_primary_key_table:
             return DedicatedFormatWriter(
                 table=self.table,
                 partition=partition,
@@ -238,7 +238,8 @@ class FileStoreWrite:
                 changelog_producer=self.changelog_producer,
                 blob_uri_reader_factory=self.blob_uri_reader_factory,
             )
-        elif self._has_vector_columns() and options.with_vector_format():
+        elif (self._has_vector_columns() and options.with_vector_format()
+              and not (self.table.is_primary_key_table and self._has_blob_columns())):
             return DataVectorWriter(
                 table=self.table,
                 partition=partition,
@@ -257,7 +258,8 @@ class FileStoreWrite:
                 max_seq_number=(0 if bucket == BucketMode.POSTPONE_BUCKET.value else max_seq_number()),
                 options=options,
                 merge_function=self._build_pk_merge_function(),
-                changelog_producer=self.changelog_producer)
+                changelog_producer=self.changelog_producer,
+                blob_uri_reader_factory=self.blob_uri_reader_factory)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(

@@ -103,6 +103,19 @@ class TestBlobPartitionValidation(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def test_primary_key_video_frame_field_is_rejected(self):
+        fields = [DataField(0, 'id', AtomicType('INT', False)), DataField(1, 'payload', AtomicType('BLOB'))]
+        manager = SchemaManager(self.file_io, self.temp_dir + '/video')
+        with self.assertRaisesRegex(ValueError, 'only supports append-only tables'):
+            manager.create_table(Schema(fields=fields, primary_keys=['id'], options={
+                'bucket': '1', 'video-frame-field': 'payload'}))
+        self.assertIsNone(manager.latest())
+        manager.create_table(Schema(fields=fields, primary_keys=['id'], options={'bucket': '1'}))
+        with self.assertRaisesRegex(RuntimeError, 'only supports append-only tables'):
+            manager.commit_changes([SetOption('video-frame-field', 'payload')])
+        self.assertEqual(manager.latest().id, 0)
+        self.assertNotIn('video-frame-field', manager.latest().options)
+
     @staticmethod
     def _schema(blob_type):
         return Schema(
@@ -214,7 +227,7 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 ):
                     manager.create_table(schema)
 
-    def test_create_table_still_rejects_primary_key_map_blob(self):
+    def test_create_table_accepts_primary_key_map_blob(self):
         manager = SchemaManager(
             self.file_io,
             f"{self.temp_dir}/test_db.db/pk_map_blob",
@@ -233,17 +246,127 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 ),
             ],
             primary_keys=["id"],
-            options={
-                "row-tracking.enabled": "true",
-                "data-evolution.enabled": "true",
-            },
+            options={"bucket": "1"},
         )
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "MAP<X, BLOB> type is not supported with primary key",
-        ):
+        manager.create_table(schema)
+        self.assertEqual(manager.latest().primary_keys, ["id"])
+
+    def test_create_table_rejects_managed_blob_primary_key(self):
+        manager = SchemaManager(
+            self.file_io,
+            f"{self.temp_dir}/test_db.db/pk_blob_key",
+        )
+        schema = Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT", False)),
+                DataField(1, "payload", AtomicType("BLOB")),
+            ],
+            primary_keys=["payload", "id"],
+            options={"bucket": "1"},
+        )
+
+        with self.assertRaisesRegex(ValueError, "cannot be primary keys"):
             manager.create_table(schema)
+
+
+class TestPartialUpdateBlobValidation(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.file_io = FileIO.get(self.temp_dir, Options({}))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(options, payload_type=None):
+        return Schema(fields=[
+            DataField(0, 'id', AtomicType('INT', False)),
+            DataField(1, 'payload', payload_type or AtomicType('BLOB')),
+            DataField(2, 'ts', AtomicType('INT')),
+        ], primary_keys=['id'], options=dict({'bucket': '1', 'merge-engine': 'partial-update'}, **options))
+
+    def test_rejects_blob_sequence_group_ordering(self):
+        types = [AtomicType('BLOB'), ArrayType(True, AtomicType('BLOB')),
+                 MapType(True, AtomicType('STRING', False), AtomicType('BLOB'))]
+        for index, payload_type in enumerate(types):
+            for ordering in ('payload', 'ts,payload'):
+                with self.subTest(payload_type=payload_type, ordering=ordering):
+                    manager = SchemaManager(self.file_io, '%s/ordering_%s_%s' % (
+                        self.temp_dir, index, ordering))
+                    options = {'fields.%s.sequence-group' % ordering: 'ts'}
+                    with self.assertRaisesRegex(ValueError, 'sequence-group ordering field'):
+                        manager.create_table(self._schema(options, payload_type))
+                    self.assertIsNone(manager.latest())
+        for inline in ('blob-descriptor-field', 'blob-view-field'):
+            manager = SchemaManager(self.file_io, self.temp_dir + '/' + inline)
+            options = {inline: 'payload', 'fields.payload.sequence-group': 'ts'}
+            with self.assertRaisesRegex(ValueError, 'sequence-group ordering field'):
+                manager.create_table(self._schema(options))
+            self.assertIsNone(manager.latest())
+
+    def test_managed_blob_aggregate_retract_validation(self):
+        for key in ('fields.payload.aggregate-function', 'fields.default-aggregate-function'):
+            for index, extra in enumerate(({}, {'fields.payload.ignore-retract': 'true'},
+                                           {'partial-update.ignore-delete': 'true'},
+                                           {key: 'last_value'},
+                                           {'blob-descriptor-field': 'payload'})):
+                with self.subTest(key=key, extra=extra):
+                    manager = SchemaManager(self.file_io, '%s/%s_%s' % (self.temp_dir, key, index))
+                    options = {'fields.ts.sequence-group': 'payload', key: 'last_non_null_value'}
+                    options.update(extra)
+                    if extra:
+                        manager.create_table(self._schema(options))
+                        self.assertIsNotNone(manager.latest())
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'fields.payload.ignore-retract'):
+                            manager.create_table(self._schema(options))
+                        self.assertIsNone(manager.latest())
+
+    def test_alter_rejects_invalid_blob_options_without_persisting(self):
+        cases = [
+            ({}, {'fields.payload.sequence-group': 'ts'}, 'sequence-group ordering field'),
+            ({'fields.ts.sequence-group': 'payload'},
+             {'fields.payload.aggregate-function': 'last_non_null_value'}, 'ignore-retract'),
+            ({'fields.ts.sequence-group': 'payload', 'fields.default-aggregate-function': 'last_non_null_value',
+              'fields.payload.ignore-retract': 'true'},
+             {'fields.payload.ignore-retract': 'false'}, 'ignore-retract'),
+        ]
+        for index, (options, changes, message) in enumerate(cases):
+            with self.subTest(options=options, changes=changes):
+                manager = SchemaManager(self.file_io, '%s/alter_%s' % (self.temp_dir, index))
+                manager.create_table(self._schema(options))
+                original = manager.latest().options.copy()
+                with self.assertRaisesRegex(RuntimeError, message):
+                    manager.commit_changes([SetOption(key, value) for key, value in changes.items()])
+                self.assertEqual(manager.latest().id, 0)
+                self.assertEqual(manager.latest().options, original)
+
+    def test_managed_blob_ignore_retract_requires_java_boolean(self):
+        for index, value in enumerate(('yes', '1', ' true ', 'on', '0', 'no', 'false ', 'TRUE', 'TrUe')):
+            with self.subTest(value=value):
+                manager = SchemaManager(self.file_io, '%s/boolean_%s' % (self.temp_dir, index))
+                options = {'fields.ts.sequence-group': 'payload',
+                           'fields.payload.aggregate-function': 'last_non_null_value',
+                           'fields.payload.ignore-retract': value}
+                if value.lower() == 'true':
+                    manager.create_table(self._schema(options))
+                    self.assertIsNotNone(manager.latest())
+                else:
+                    with self.assertRaisesRegex(ValueError, 'fields.payload.ignore-retract'):
+                        manager.create_table(self._schema(options))
+                    self.assertIsNone(manager.latest())
+
+    def test_accepts_unprotected_and_inactive_sequence_group_options(self):
+        for index, options in enumerate((
+                {'fields.payload.aggregate-function': 'last_non_null_value'},
+                {'fields.ts.sequence-group': 'payload'},
+                {'merge-engine': 'deduplicate', 'fields.payload.sequence-group': 'ts'})):
+            manager = SchemaManager(self.file_io, '%s/valid_%s' % (self.temp_dir, index))
+            manager.create_table(self._schema(options))
+            self.assertIsNotNone(manager.latest())
 
 
 class TestOptionValidation(unittest.TestCase):

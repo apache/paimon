@@ -70,6 +70,8 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
         self.file_io = self._file_io
         self.blob_field_indices = self._blob_field_indices
         self.descriptor_field_indices = self._descriptor_field_indices
+        self.resolved_blob_field_indices = _project_top_level_field_indices(
+            getattr(inner, 'resolved_blob_field_indices', None), self._specs)
         self.vector_field_indices = self._vector_field_indices
         self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
 
@@ -82,7 +84,8 @@ class OuterProjectionRecordReader(RecordReader[InternalRow]):
             inner_batch, self._specs, self._flat_arity, self._file_io,
             self._blob_field_indices, self._vector_field_indices,
             self._descriptor_field_indices,
-            blob_view_lookup=self.blob_view_lookup)
+            blob_view_lookup=self.blob_view_lookup,
+            resolved_blob_field_indices=self.resolved_blob_field_indices)
 
     def close(self) -> None:
         self._inner.close()
@@ -101,6 +104,7 @@ class _OuterProjectionIterator(RecordIterator[InternalRow]):
         vector_field_indices=None,
         descriptor_field_indices=None,
         blob_view_lookup=None,
+        resolved_blob_field_indices=None,
     ):
         self._inner = inner
         self._specs = specs
@@ -110,7 +114,8 @@ class _OuterProjectionIterator(RecordIterator[InternalRow]):
                                      blob_field_indices=blob_field_indices,
                                      vector_field_indices=vector_field_indices,
                                      descriptor_field_indices=descriptor_field_indices,
-                                     blob_view_lookup=blob_view_lookup)
+                                     blob_view_lookup=blob_view_lookup,
+                                     resolved_blob_field_indices=resolved_blob_field_indices)
 
     def next(self) -> Optional[InternalRow]:
         inner_row = self._inner.next()
