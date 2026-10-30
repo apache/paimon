@@ -1,0 +1,350 @@
+---
+title: "Clone to Paimon"
+sidebar_position: 2
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Clone to Paimon
+
+Clone copies data into separate Paimon tables while keeping source tables and files available.
+Use it to validate a Paimon copy before switching workloads, or to refresh selected target
+partitions. Unlike [migration](./migration-from-hive), clone does not move source files.
+
+Clone runs as a Flink job, started from Flink SQL with the `sys.clone` procedure or with the
+`clone` action. Both support Hive and Paimon sources. This guide starts with Hive tables in ORC,
+Parquet, or Avro format, which become Paimon [append tables](../append-table/).
+
+## Before You Start
+
+- For the action, install the matching [Flink action jar](../flink/action-jars) and set
+  `FLINK_HOME`. The procedure can be called from any Paimon catalog in Flink SQL.
+- Configure source and target catalogs separately. Hive sources require a Hive catalog; the
+  examples use a filesystem catalog with a separate warehouse for the target. The procedure
+  does not use the options of the catalog it is called from: pass both `catalog_conf` and
+  `target_catalog_conf`, with options separated by `;`.
+- The procedure returns the job id once the job is submitted. Run
+  `SET 'table.dml-sync' = 'true';` first to wait for the clone to finish.
+- Ensure the job can read the source and write the target. Keep source data stable during the
+  copy when you need a consistent validation baseline.
+- Use distinct source and target locations. For an existing Hive-clone target, use an append
+  table with `bucket = -1`, compatible file format, all source fields with compatible types,
+  and the same partition fields.
+
+## Understand Overwrite Behavior
+
+With the default target option `dynamic-partition-overwrite = true`, clone replaces target
+partitions represented in the copied data. Other target partitions remain unchanged. For a
+non-partitioned target, the copied data replaces the table contents.
+
+![Cloning source partition dt=2026-09-10 replaces that target partition, keeps dt=2026-09-09, and leaves the Hive source unchanged.](/img/migration-clone-overwrite.svg)
+
+Re-running clone refreshes the copied partitions; it does not append a second copy. It also
+does not synchronize source deletions for partitions absent from the copied data. If an
+existing target sets `dynamic-partition-overwrite = false`, overwrite can replace the entire
+target table even when the source is filtered. Check this option before cloning a subset.
+
+## Clone Hive Table
+
+The following example copies `default.hivetable` to `analytics.hivetable_copy`:
+
+<Tabs groupId="clone-engine">
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CREATE CATALOG paimon WITH (
+    'type' = 'paimon',
+    'warehouse' = 'hdfs:///paimon-warehouse'
+);
+
+USE CATALOG paimon;
+
+-- Flink 1.19 and later
+CALL sys.clone(
+    clone_from => 'hive',
+    database => 'default',
+    `table` => 'hivetable',
+    catalog_conf => 'metastore=hive;uri=thrift://localhost:9083',
+    target_database => 'analytics',
+    target_table => 'hivetable_copy',
+    target_catalog_conf => 'warehouse=hdfs:///paimon-warehouse',
+    parallelism => 10
+);
+```
+
+</TabItem>
+<TabItem value="flink-action" label="Flink Action">
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    clone \
+    --clone_from hive \
+    --database default \
+    --table hivetable \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --target_database analytics \
+    --target_table hivetable_copy \
+    --target_catalog_conf warehouse=hdfs:///paimon-warehouse \
+    --parallelism 10
+```
+
+</TabItem>
+</Tabs>
+
+To copy only selected partitions, add a partition predicate. For a source partitioned by the
+string column `dt`, add this argument to the call:
+
+```sql
+`where` => 'dt = ''2026-09-10'''
+```
+
+Or append this argument to the command:
+
+```bash
+--where "dt = '2026-09-10'"
+```
+
+`--where` selects partitions, not arbitrary rows within a partition. Omit it to copy all
+partitions. Table include/exclude lists are not accepted when cloning a single table.
+
+## Clone Hive Database
+
+Omit the source table and supply the target database. Source table names are preserved in the
+target database, which is created if needed.
+
+<Tabs groupId="clone-engine">
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CALL sys.clone(
+    clone_from => 'hive',
+    database => 'default',
+    catalog_conf => 'metastore=hive;uri=thrift://localhost:9083',
+    target_database => 'analytics',
+    target_catalog_conf => 'warehouse=hdfs:///paimon-warehouse',
+    parallelism => 10,
+    included_tables => 'default.orders,default.customers'
+);
+```
+
+</TabItem>
+<TabItem value="flink-action" label="Flink Action">
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    clone \
+    --clone_from hive \
+    --database default \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --target_database analytics \
+    --target_catalog_conf warehouse=hdfs:///paimon-warehouse \
+    --parallelism 10 \
+    --included_tables default.orders,default.customers
+```
+
+</TabItem>
+</Tabs>
+
+Omit `included_tables` to consider all tables in the source database. Use `excluded_tables` to
+remove tables from that selection.
+
+## Clone Hive Catalog
+
+Omit source and target database/table arguments to preserve database and table names across
+the catalog. The following example limits the selection to two source tables:
+
+<Tabs groupId="clone-engine">
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CALL sys.clone(
+    clone_from => 'hive',
+    catalog_conf => 'metastore=hive;uri=thrift://localhost:9083',
+    target_catalog_conf => 'warehouse=hdfs:///paimon-warehouse',
+    parallelism => 10,
+    included_tables => 'sales.orders,crm.customers'
+);
+```
+
+</TabItem>
+<TabItem value="flink-action" label="Flink Action">
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    clone \
+    --clone_from hive \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --target_catalog_conf warehouse=hdfs:///paimon-warehouse \
+    --parallelism 10 \
+    --included_tables sales.orders,crm.customers
+```
+
+</TabItem>
+</Tabs>
+
+## Selection and Retry Options
+
+The options below are written as action arguments. Each one is also a procedure argument with the
+same name, such as `clone_if_exists => false`. See the
+[Flink `clone` procedure](../flink/procedures/table-operations#clone) for its full syntax.
+
+| Option | Behavior |
+| --- | --- |
+| `--included_tables db.table,db.other` | Selects fully qualified source table names for database or catalog cloning. Omit to consider all tables in scope. |
+| `--excluded_tables db.table,db.other` | Removes tables from the selection. Exclusion wins when a table is also included. |
+| `--where "dt = '2026-09-10'"` | Restricts copied data using a partition predicate. |
+| `--clone_if_exists false` | Skips targets that already exist. The default is `true`, which clones into existing compatible targets. |
+| `--meta_only true` | Clones the schema without copying data. The default is `false`. |
+| `--parallelism 10` | Sets the clone job parallelism. |
+| `--copy_files true` | For Hive sources in ORC, Parquet or Avro format, copies the data files as they are instead of reading and rewriting their rows. The default is `false`. See [Copy Data Files](#copy-data-files). |
+| `--recursive_listing true` | With `--copy_files true`, also copies files in sub directories of each partition. The default is `false`. |
+
+A multi-table clone does not commit all tables atomically. After a failure, inspect target
+tables and rerun the required scope. `--clone_if_exists false` is useful for skipping existing
+tables, but is not a resume mechanism: an existing table may have been created before its
+data was copied.
+
+## Copy Data Files
+
+By default, a Hive table in ORC or Parquet format is cloned by reading its rows and writing them
+again. With `--copy_files true`, the data files are copied as they are, which avoids decoding and
+re-encoding every row. Only ORC, Parquet and Avro sources are supported, and the target keeps the
+format of the source, so `--prefer_file_format` is rejected. When several tables are cloned, all
+of them are checked before the job starts; exclude the tables in other formats with
+`--excluded_tables`.
+
+<Tabs groupId="clone-engine">
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CALL sys.clone(
+    clone_from => 'hive',
+    database => 'default',
+    `table` => 'hivetable',
+    catalog_conf => 'metastore=hive;uri=thrift://localhost:9083',
+    target_database => 'analytics',
+    target_table => 'hivetable_copy',
+    target_catalog_conf => 'warehouse=hdfs:///paimon-warehouse',
+    copy_files => true
+);
+```
+
+</TabItem>
+<TabItem value="flink-action" label="Flink Action">
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    clone \
+    --clone_from hive \
+    --database default \
+    --table hivetable \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --target_database analytics \
+    --target_table hivetable_copy \
+    --target_catalog_conf warehouse=hdfs:///paimon-warehouse \
+    --copy_files true
+```
+
+</TabItem>
+</Tabs>
+
+Copied files keep the columns they were written with, and Paimon reads them by column name:
+
+- An existing target must have every source field, nested fields included, with the same type.
+  It may have more fields at the top level or inside structs, also structs in arrays and maps, in
+  any position, which read as null for the copied files. All its fields must be nullable, otherwise clone fails before copying.
+- A partition whose metastore columns have other types than the table columns fails the clone.
+  Columns missing from a partition are read as null.
+- The column names inside the files must match the metastore columns exactly. Positional names,
+  such as `_col0` in old Hive ORC files, and names that differ only in case are not mapped to the
+  table columns.
+
+Files are committed like any clone, by overwriting: a rerun replaces the partitions that receive
+files, or the whole table if it is not partitioned.
+
+Only the partitions registered in the metastore are copied. A partitioned table without
+registered partitions copies nothing, even if its location holds files.
+
+By default only the files directly inside each partition directory are copied. Add
+`--recursive_listing true` when a partition keeps its files in sub directories. Files inside
+directories whose names start with `_` or `.`, such as `_temporary` and `.hive-staging`, and files
+whose own names start with `_` or `.`, are never copied. Every other file in the listed
+directories is copied, so make sure they only hold data files of the table. A file listed by more
+than one partition, because one partition is located inside another, fails the clone.
+
+## Clone a Paimon Source
+
+Use `--clone_from paimon` and configure the source Paimon catalog. For example, to copy between
+two filesystem catalogs:
+
+<Tabs groupId="clone-engine">
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CALL sys.clone(
+    clone_from => 'paimon',
+    database => 'sales',
+    `table` => 'orders',
+    catalog_conf => 'warehouse=hdfs:///source-paimon-warehouse',
+    target_database => 'analytics',
+    target_table => 'orders_copy',
+    target_catalog_conf => 'warehouse=hdfs:///target-paimon-warehouse',
+    parallelism => 10
+);
+```
+
+</TabItem>
+<TabItem value="flink-action" label="Flink Action">
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    clone \
+    --clone_from paimon \
+    --catalog_conf warehouse=hdfs:///source-paimon-warehouse \
+    --database sales \
+    --table orders \
+    --target_catalog_conf warehouse=hdfs:///target-paimon-warehouse \
+    --target_database analytics \
+    --target_table orders_copy \
+    --parallelism 10
+```
+
+</TabItem>
+</Tabs>
+
+Paimon sources can retain primary keys in the newly created target. The Hive append-table
+restriction above applies to Hive sources. For Paimon sources, repeated
+`--target_table_conf key=value` arguments can override options when creating the target;
+these overrides are not supported for Hive sources.
+
+## Verify the Clone
+
+1. Confirm that the Flink job completed and that every selected target exists.
+2. Connect an engine to the target catalog and inspect the schema and partition keys.
+3. Compare row counts and aggregates with the stable source data, using the same partition
+   predicate when cloning a subset. Confirm that unrelated target partitions remain as expected.
+4. Verify that source readers still work, then switch workloads when the target is ready.

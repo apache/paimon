@@ -18,16 +18,35 @@
 
 package org.apache.paimon.hive.clone;
 
-import org.junit.jupiter.api.Test;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.io.IOException;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
-/** Tests for the format-prefixed option filtering in {@link HiveTableCloneExtractor}. */
+/** Tests for {@link HiveTableCloneExtractor}. */
 class HiveTableCloneExtractorTest {
 
     /** U+0130, whose lower case under {@link Locale#ROOT} is the two characters below. */
@@ -65,5 +84,124 @@ class HiveTableCloneExtractorTest {
         // this key is shorter than the lower-cased prefix, so slicing at its length overruns it
         assertThat(HiveTableCloneExtractor.getIdentifierPrefixOptions(DOTTED_CAPITAL_I, options))
                 .containsExactly(entry(LOWER_CASE_DOTTED_I + ".", "zstd"));
+    }
+
+    @TempDir java.nio.file.Path tmp;
+
+    @ParameterizedTest(name = "objectStore = {0}")
+    @ValueSource(booleans = {true, false})
+    void recursiveListingSkipsHiddenFilesAndDirectories(boolean objectStore) throws IOException {
+        // hidden directories above the partition root, such as a hidden warehouse, hide nothing
+        java.nio.file.Path root = tmp.resolve(".warehouse/_db/t");
+        String[] files = {
+            "a.parquet",
+            "_SUCCESS",
+            ".a.parquet.crc",
+            "sub/b.parquet",
+            "sub/deep/c.parquet",
+            "_temporary/0/d.parquet",
+            ".hive-staging_1/e.parquet",
+            "sub/_tmp/f.parquet",
+            "sub/deep/.stage/g.parquet",
+        };
+        for (String file : files) {
+            java.nio.file.Path path = root.resolve(file);
+            Files.createDirectories(path.getParent());
+            Files.createFile(path);
+        }
+
+        assertThat(
+                        recursivelyListedFiles(
+                                new HiddenUnreadableFileIO(objectStore), root.toUri().toString()))
+                .containsExactlyInAnyOrder("a.parquet", "sub/b.parquet", "sub/deep/c.parquet");
+    }
+
+    @Test
+    void aFileListedByTwoPartitionsIsRejected() {
+        Identifier identifier = Identifier.create("db", "t");
+        Path outer = new Path("s3://bucket/t/dt=1/part-0.parquet");
+        Path inner = new Path("s3://bucket/t/dt=1/dt=2/part-0.parquet");
+        HivePartitionFiles first =
+                new HivePartitionFiles(
+                        BinaryRow.EMPTY_ROW,
+                        Arrays.asList(outer, inner),
+                        Arrays.asList(1L, 1L),
+                        "parquet");
+        HivePartitionFiles second =
+                new HivePartitionFiles(
+                        BinaryRow.EMPTY_ROW,
+                        Collections.singletonList(inner),
+                        Collections.singletonList(1L),
+                        "parquet");
+
+        HiveTableCloneExtractor.checkNoSharedFiles(identifier, Collections.singletonList(first));
+        assertThatThrownBy(
+                        () ->
+                                HiveTableCloneExtractor.checkNoSharedFiles(
+                                        identifier, Arrays.asList(first, second)))
+                .hasMessageContaining(inner.toString());
+    }
+
+    @Test
+    void partitionKeysMustMatchTheTarget() {
+        Identifier identifier = Identifier.create("db", "t");
+        List<String> source = Arrays.asList("a", "b", "c");
+
+        assertThatThrownBy(
+                        () ->
+                                HiveTableCloneExtractor.partitionValueIndexes(
+                                        identifier, source, Arrays.asList("a", "b", "c", "d")))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(
+                        () ->
+                                HiveTableCloneExtractor.partitionValueIndexes(
+                                        identifier, source, Arrays.asList("a", "b", "d")))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void copyingFilesOfTransactionalTablesIsRejected() {
+        Table table = new Table();
+        table.setParameters(Collections.singletonMap("transactional", "true"));
+
+        assertThatThrownBy(() -> HiveTableCloneExtractor.INSTANCE.extractOptions(table, true))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    private static List<String> recursivelyListedFiles(FileIO fileIO, String location)
+            throws IOException {
+        String root = new Path(location).toUri().getPath();
+        return HiveTableCloneExtractor.listFiles(
+                        fileIO, location, BinaryRow.EMPTY_ROW, "parquet", true)
+                .paths().stream()
+                .map(p -> p.toUri().getPath().substring(root.length()).replaceAll("^/", ""))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * A file system whose hidden directories can not be read. Object stores list them with their
+     * parent prefix, so there they stay readable.
+     */
+    private static class HiddenUnreadableFileIO extends LocalFileIO {
+
+        private final boolean objectStore;
+
+        private HiddenUnreadableFileIO(boolean objectStore) {
+            this.objectStore = objectStore;
+        }
+
+        @Override
+        public boolean isObjectStore() {
+            return objectStore;
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            String name = path.getName();
+            if (!objectStore && (name.startsWith("_") || name.startsWith("."))) {
+                throw new AccessDeniedException(path.toString());
+            }
+            return super.listStatus(path);
+        }
     }
 }

@@ -44,13 +44,23 @@ public class ListCloneFilesFunction
     private static final long serialVersionUID = 1L;
 
     @Nullable private final String whereSql;
+    private final boolean recursive;
 
     public ListCloneFilesFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
             @Nullable String whereSql) {
+        this(sourceCatalogConfig, targetCatalogConfig, whereSql, false);
+    }
+
+    public ListCloneFilesFunction(
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            @Nullable String whereSql,
+            boolean recursive) {
         super(sourceCatalogConfig, targetCatalogConfig);
         this.whereSql = whereSql;
+        this.recursive = recursive;
     }
 
     @Override
@@ -72,7 +82,8 @@ public class ListCloneFilesFunction
                             tuple.f0,
                             table.schema().logicalPartitionType(),
                             table.coreOptions().partitionDefaultName(),
-                            predicate);
+                            predicate,
+                            recursive);
             for (HivePartitionFiles partitionFiles : allPartitions) {
                 CloneFileInfo.fromHive(tuple.f1, partitionFiles).forEach(collector::collect);
             }

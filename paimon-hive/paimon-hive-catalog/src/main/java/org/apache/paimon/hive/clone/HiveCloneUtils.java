@@ -133,6 +133,41 @@ public class HiveCloneUtils {
 
     public static Schema hiveTableToPaimonSchema(HiveCatalog hiveCatalog, Identifier identifier)
             throws Exception {
+        return hiveTableToPaimonSchema(hiveCatalog, identifier, false);
+    }
+
+    /**
+     * Checks that the data files of all the tables can be copied as they are, so that a clone of
+     * many tables fails before creating any of them.
+     */
+    public static void checkCopyFilesSupported(
+            HiveCatalog hiveCatalog, List<Identifier> identifiers) throws Exception {
+        IMetaStoreClient client = hiveCatalog.getHmsClient();
+        List<String> errors = new ArrayList<>();
+        for (Identifier identifier : identifiers) {
+            Table hiveTable =
+                    client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+            try {
+                HiveCloneExtractor.getExtractor(hiveTable).extractOptions(hiveTable, true);
+            } catch (UnsupportedOperationException e) {
+                errors.add(identifier.getFullName() + ": " + e.getMessage());
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Can not copy the data files of these tables, exclude them or clone without copy_files:\n"
+                            + String.join("\n", errors));
+        }
+    }
+
+    /**
+     * Converts a Hive table to a Paimon schema.
+     *
+     * @param copyFiles whether the data files are copied as they are instead of being read and
+     *     rewritten, which changes the options of the schema
+     */
+    public static Schema hiveTableToPaimonSchema(
+            HiveCatalog hiveCatalog, Identifier identifier, boolean copyFiles) throws Exception {
         String database = identifier.getDatabaseName();
         String table = identifier.getObjectName();
 
@@ -152,7 +187,7 @@ public class HiveCloneUtils {
         HiveCloneExtractor extractor = HiveCloneExtractor.getExtractor(hiveTable);
         List<FieldSchema> fields = extractor.extractSchema(client, hiveTable, database, table);
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
-        Map<String, String> options = extractor.extractOptions(hiveTable);
+        Map<String, String> options = extractor.extractOptions(hiveTable, copyFiles);
         if (hiveTable.isSetPartitionKeys()) {
             options.put(
                     PARTITION_DEFAULT_NAME.key(),
@@ -183,6 +218,24 @@ public class HiveCloneUtils {
             String defaultPartitionName,
             @Nullable PartitionPredicate predicate)
             throws Exception {
+        return listFiles(
+                hiveCatalog, identifier, partitionRowType, defaultPartitionName, predicate, false);
+    }
+
+    /**
+     * Lists the files of a Hive table by partition.
+     *
+     * @param recursive whether to also list the files in sub directories of each partition,
+     *     skipping hidden directories whose names start with '_' or '.'
+     */
+    public static List<HivePartitionFiles> listFiles(
+            HiveCatalog hiveCatalog,
+            Identifier identifier,
+            RowType partitionRowType,
+            String defaultPartitionName,
+            @Nullable PartitionPredicate predicate,
+            boolean recursive)
+            throws Exception {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         Table sourceTable =
                 client.getTable(identifier.getDatabaseName(), identifier.getTableName());
@@ -195,7 +248,8 @@ public class HiveCloneUtils {
                         identifier,
                         partitionRowType,
                         defaultPartitionName,
-                        predicate);
+                        predicate,
+                        recursive);
     }
 
     private static String parseFormat(StorageDescriptor sd) {
