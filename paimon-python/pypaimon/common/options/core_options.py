@@ -1227,7 +1227,7 @@ class CoreOptions:
         .int_type()
         .default_value(1)
         .with_description(
-            "FFmpeg threads per PyAV video decoder in a LeRobot worker. "
+            "FFmpeg threads per PyAV or indexed TorchCodec decoder in a LeRobot worker. "
             "0 keeps automatic selection; 1 avoids nested codec parallelism.")
     )
 

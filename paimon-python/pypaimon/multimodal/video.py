@@ -19,6 +19,7 @@
 
 import io
 import os
+import weakref
 from collections import OrderedDict, deque
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -224,6 +225,7 @@ class VideoFrameCollator:
         self.collate_fn = collate_fn
         self.range_parallelism = range_parallelism
         self._decoders = OrderedDict()
+        self._video_metadata_cache = weakref.WeakValueDictionary()
         self._owner_pid = os.getpid()
 
     def __call__(self, rows):
@@ -238,6 +240,7 @@ class VideoFrameCollator:
     def close(self):
         resources = list(self._decoders.values())
         self._decoders.clear()
+        self._video_metadata_cache = weakref.WeakValueDictionary()
         first_error = None
         for resource in resources:
             try:
@@ -253,6 +256,7 @@ class VideoFrameCollator:
         # stream state opened in the parent process.
         state = self.__dict__.copy()
         state["_decoders"] = OrderedDict()
+        state["_video_metadata_cache"] = None
         state["_owner_pid"] = None
         return state
 
@@ -382,6 +386,9 @@ class VideoFrameCollator:
             descriptor.length,
         ).new_input_stream()
         try:
+            # Replica decoders share metadata, while their decode state stays separate.
+            stream.video_metadata_cache = self._video_metadata_cache
+            stream.video_metadata_key = (descriptor, keyframe_index_descriptor)
             if keyframe_index_descriptor is not None:
                 mapping = self.file_io.read_file_range(
                     keyframe_index_descriptor.uri,
