@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileStatus;
@@ -47,6 +48,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -108,11 +110,19 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         }
         candidateDeletes = new HashSet<>(candidates.keySet());
 
+        AtomicBoolean missingManifest = new AtomicBoolean(false);
+
         // find used files
         Set<String> usedFiles =
                 branches.stream()
-                        .flatMap(branch -> getUsedFiles(branch).stream())
+                        .flatMap(branch -> getUsedFiles(branch, missingManifest).stream())
                         .collect(Collectors.toSet());
+
+        if (missingManifest.get()) {
+            LOG.warn("Detected missing manifest during used-files collection, aborting clean.");
+            return new CleanOrphanFilesResult(
+                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+        }
 
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
@@ -157,35 +167,58 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     private void collectWithoutDataFile(
-            String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
+            String branch,
+            Consumer<String> usedFileConsumer,
+            Consumer<String> manifestConsumer,
+            Consumer<String> liveManifestConsumer,
+            AtomicBoolean missingManifest)
             throws IOException {
+        Set<Snapshot> liveSnapshots = safelyGetLiveSnapshots(branch);
+        Set<Snapshot> snapshots = snapshotsIncludingTagsAndChangelogs(branch, liveSnapshots);
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {
                     try {
+                        boolean live = liveSnapshots.contains(snapshot);
+                        Consumer<String> perSnapshotManifestConsumer =
+                                live
+                                        ? manifest -> {
+                                            manifestConsumer.accept(manifest);
+                                            liveManifestConsumer.accept(manifest);
+                                        }
+                                        : manifestConsumer;
                         collectWithoutDataFile(
-                                branch, snapshot, usedFileConsumer, manifestConsumer);
+                                branch,
+                                snapshot,
+                                usedFileConsumer,
+                                perSnapshotManifestConsumer,
+                                live ? missingManifest : null);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
                 },
-                safelyGetAllSnapshots(branch));
+                snapshots);
     }
 
-    private Set<String> getUsedFiles(String branch) {
+    private Set<String> getUsedFiles(String branch, AtomicBoolean missingManifest) {
         Set<String> usedFiles = ConcurrentHashMap.newKeySet();
         ManifestFile manifestFile =
                 table.switchToBranch(branch).store().manifestFileFactory().create();
         try {
             Set<String> manifests = ConcurrentHashMap.newKeySet();
-            collectWithoutDataFile(branch, usedFiles::add, manifests::add);
+            Set<String> liveManifests = ConcurrentHashMap.newKeySet();
+            collectWithoutDataFile(
+                    branch, usedFiles::add, manifests::add, liveManifests::add, missingManifest);
             randomlyOnlyExecute(
                     executor,
                     manifestName -> {
                         try {
+                            AtomicBoolean fnfFallback =
+                                    liveManifests.contains(manifestName) ? missingManifest : null;
                             retryReadingFiles(
                                             () -> manifestFile.readWithIOException(manifestName),
-                                            Collections.<ManifestEntry>emptyList())
+                                            Collections.<ManifestEntry>emptyList(),
+                                            fnfFallback)
                                     .stream()
                                     .map(ManifestEntry::file)
                                     .forEach(
