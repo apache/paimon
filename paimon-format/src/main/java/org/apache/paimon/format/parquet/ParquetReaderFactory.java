@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
@@ -28,6 +29,7 @@ import org.apache.paimon.format.FileMetadataCache;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.ParquetListLayoutResolver.LayoutContext;
+import org.apache.paimon.format.parquet.metadata.SelectiveFooterParser;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.shredding.ShreddingFormatReader;
@@ -247,6 +249,41 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 ParquetInputFile.fromPath(context.fileIO(), context.filePath(), context.fileSize());
         ParquetReadOptions.Builder readOptionsBuilder =
                 ParquetUtil.getParquetReadOptionsBuilder(conf).withRange(0, context.fileSize());
+
+        // Enable selective footer parsing when no predicates are present and the feature is
+        // enabled.
+        // This improves performance by only parsing metadata for requested columns.
+        // NOTE: When predicates are present, statistics are needed for row-group filtering,
+        // so selective parser is currently disabled in that case. If selective parser is
+        // extended to support predicates in the future, set parseStatistics=true to preserve
+        // statistics metadata.
+        boolean enableSelectiveParser =
+                conf.get(CoreOptions.PARQUET_FOOTER_SELECTIVE_PARSER_ENABLED);
+        if (enableSelectiveParser && (predicates == null || predicates.isEmpty())) {
+            StringBuilder requestedColumns = new StringBuilder();
+            for (DataField field : readType.getFields()) {
+                if (requestedColumns.length() > 0) {
+                    // Use null character as separator to support column names containing commas
+                    requestedColumns.append(SelectiveFooterParser.COLUMN_NAME_SEPARATOR);
+                }
+                requestedColumns.append(field.name());
+            }
+            readOptionsBuilder.set(
+                    SelectiveFooterParser.REQUESTED_COLUMNS_KEY, requestedColumns.toString());
+            readOptionsBuilder.set(
+                    SelectiveFooterParser.CASE_SENSITIVE_KEY, String.valueOf(caseSensitive));
+
+            // Skip statistics parsing by default for better performance.
+            // Statistics are only needed for row-group filtering with predicates.
+            // Since selective parser is only enabled when predicates is empty (see line 254),
+            // statistics are not needed here. If selective parser is extended to support
+            // predicates in the future, this should be set to true.
+            boolean parseStatistics = conf.getBoolean("parquet.footer.parse-statistics", false);
+            if (!parseStatistics) {
+                readOptionsBuilder.set(SelectiveFooterParser.SKIP_STATISTICS_KEY, "true");
+            }
+        }
+
         ParquetInputStream inputStream = inputFile.newStream();
         ParquetMetadata footer =
                 readFooter(context, inputFile, readOptionsBuilder.build(), inputStream);
