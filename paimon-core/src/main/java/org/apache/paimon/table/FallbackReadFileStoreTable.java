@@ -216,13 +216,34 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
             Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
-            long otherId;
             if (otherSnapshot == null) {
-                otherId = Snapshot.FIRST_SNAPSHOT_ID;
-            } else {
-                otherId = otherSnapshot.id();
+                otherSnapshot = other.snapshotManager().earliestSnapshot();
+                if (otherSnapshot != null) {
+                    Preconditions.checkArgument(
+                            new Options(wrapped.options(), options)
+                                    .get(CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT),
+                            "No snapshot at or before %s is available in branch '%s'. "
+                                    + "The earliest available snapshot is %s (time %s). "
+                                    + "Set '%s' to true to allow reading it.",
+                            millis,
+                            other.coreOptions().branch(),
+                            otherSnapshot.id(),
+                            otherSnapshot.timeMillis(),
+                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+                    LOG.warn(
+                            "No snapshot at or before {} is available in branch '{}'; reading earliest "
+                                    + "snapshot {} (time {}) because '{}' is enabled.",
+                            millis,
+                            other.coreOptions().branch(),
+                            otherSnapshot.id(),
+                            otherSnapshot.timeMillis(),
+                            CoreOptions.SCAN_FALLBACK_BRANCH_ALLOW_EARLIEST_SNAPSHOT.key());
+                }
             }
-            result.put(scanSnapshotIdOptionKey, String.valueOf(otherId));
+            // An empty branch is skipped by newFallbackScan instead of loading this ID.
+            result.put(
+                    scanSnapshotIdOptionKey,
+                    otherSnapshot == null ? scanSnapshotId : String.valueOf(otherSnapshot.id()));
         }
 
         // bucket number of main branch and other branch are very likely different,
@@ -246,7 +267,53 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         validateSchema();
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
-        return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
+        boolean otherIsEmpty =
+                other.coreOptions().scanSnapshotId() != null
+                        && other.snapshotManager().latestSnapshotId() == null;
+        if (otherIsEmpty) {
+            LOG.warn(
+                    "Branch '{}' has no snapshots; skipping it when reading branch '{}'.",
+                    other.coreOptions().branch(),
+                    wrapped.coreOptions().branch());
+        }
+        return new FallbackReadScan(
+                first,
+                second,
+                wrapped.schema(),
+                table -> {
+                    if (table == other && otherIsEmpty) {
+                        return new EmptyBranchScan();
+                    }
+                    return scanCreator.apply(table);
+                });
+    }
+
+    private static class EmptyBranchScan implements DataTableScan {
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withInternalPartitionFilter(PartitionPredicate partitionPredicate) {
+            return this;
+        }
+
+        @Override
+        public Plan plan() {
+            return new DataFilePlan<>(Collections.emptyList());
+        }
+
+        @Override
+        public List<PartitionEntry> listPartitionEntries() {
+            return Collections.emptyList();
+        }
     }
 
     protected void validateSchema() {

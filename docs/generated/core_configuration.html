@@ -1567,6 +1567,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
         </tr>
         <tr>
+            <td><h5>scan.fallback-branch.allow-earliest-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to allow reading the earliest available snapshot of a fallback or primary branch when no snapshot exists at or before the current branch's requested snapshot time. This applies to snapshot-ID time travel, including numeric scan.version. By default, such reads fail unless the other branch has no snapshots. Enabling this option may read data committed after the requested time.</td>
+        </tr>
+        <tr>
             <td><h5>scan.fallback-branch.read-fail-fast</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
