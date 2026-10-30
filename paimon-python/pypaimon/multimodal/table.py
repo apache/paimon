@@ -142,10 +142,12 @@ class MultimodalTable:
         if frames is None:
             import os
             import stat
-            from urllib.parse import urlparse, unquote
+            from urllib.parse import urlparse
 
             from pypaimon.table.row.blob import Blob, BlobDescriptor
-            from pypaimon.multimodal.video import _inspect_video_frames
+            from pypaimon.common.file_io import _is_local_path
+            from pypaimon.filesystem.local_file_io import LocalFileIO
+            from pypaimon.multimodal.video import _inspect_video_frames, _require_video_av
 
             if isinstance(first_frame, bool) or not isinstance(first_frame, int) or first_frame != 0:
                 raise ValueError("first_frame must be 0 when frames is omitted.")
@@ -176,11 +178,11 @@ class MultimodalTable:
                 video = BlobDescriptor(video, 0, -1)
             if not isinstance(video, BlobDescriptor):
                 raise ValueError("Automatic video import requires a path, URI, or BlobDescriptor.")
-            parsed = urlparse(video.uri)
-            local_path = unquote(parsed.path) if parsed.scheme == "file" else video.uri
+            _require_video_av()
+            local_path = LocalFileIO._to_file(video.uri) if _is_local_path(video.uri) else None
 
             def source_state():
-                if parsed.scheme not in ("", "file"):
+                if local_path is None:
                     return None
                 info = os.stat(local_path)
                 if not stat.S_ISREG(info.st_mode):

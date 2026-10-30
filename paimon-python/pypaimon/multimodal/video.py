@@ -30,15 +30,20 @@ from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
-def _inspect_video_frames(source):
-    """Read presentation timestamps without retaining decoded images."""
+def _require_video_av():
+    """Check the optional decoder before opening a video source."""
     try:
         import av
     except ImportError as error:
         raise ImportError(
             "Automatic video import requires PyAV; install pypaimon[video]."
         ) from error
+    return av
 
+
+def _inspect_video_frames(source):
+    """Read presentation timestamps without retaining decoded images."""
+    av = _require_video_av()
     from array import array
 
     timestamps = array("d")

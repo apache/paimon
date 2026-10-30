@@ -322,6 +322,53 @@ class MultimodalTableTest(unittest.TestCase):
                     for expected, frame in zip(pixels, container.decode(video=0)):
                         np.testing.assert_array_equal(expected, frame.to_ndarray(format="rgb24"))
 
+    def test_auto_video_missing_pyav_does_not_access_source(self):
+        import sys
+        table = self._auto_video_table()
+        factory = table.raw_table.file_io.uri_reader_factory
+        for source in ["http://example.invalid/video.mp4", "oss://bucket/video.mp4", "/missing.mp4"]:
+            with self.subTest(source=source), patch.dict(sys.modules, {"av": None}), \
+                    patch.object(factory, "create") as create, patch("os.stat") as stat:
+                with self.assertRaisesRegex(ImportError, r"pypaimon\[video\]"):
+                    table.add_video(source)
+                create.assert_not_called()
+                stat.assert_not_called()
+        self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_auto_video_local_uri_changes_use_fileio_path(self):
+        from pathlib import PurePosixPath, PureWindowsPath
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        pytest.importorskip("av")
+        table = self._auto_video_table()
+        factory = table.raw_table.file_io.uri_reader_factory
+        cases = [
+            ("nt", r"C:\video.mp4", r"C:\video.mp4"),
+            ("nt", "file://server/share/video%20one.mp4", r"\\server\share\video one.mp4"),
+            ("posix", "file://server/share/video%20one.mp4", "//server/share/video one.mp4"),
+            ("nt", "file://C:/video.mp4", r"C:\video.mp4"),
+            ("nt", r"\\server\share\video.mp4", r"\\server\share\video.mp4"),
+        ]
+        for platform, uri, expected in cases:
+            with self.subTest(platform=platform, uri=uri):
+                source = io.BytesIO(b"video")
+                reader = Mock()
+                reader.new_input_stream.return_value = source
+                states = [SimpleNamespace(st_mode=0o100644, st_dev=1, st_ino=2,
+                                          st_size=5, st_mtime_ns=i, st_ctime_ns=i) for i in (1, 2)]
+                with patch.object(os, "name", platform), \
+                        patch("pypaimon.filesystem.local_file_io.Path",
+                              PureWindowsPath if platform == "nt" else PurePosixPath), \
+                        patch("os.stat", side_effect=states) as stat, \
+                        patch.object(factory, "create", return_value=reader), \
+                        patch("pypaimon.multimodal.video._inspect_video_frames", return_value=[0.0]):
+                    with self.assertRaisesRegex(ValueError, "source changed"):
+                        value = pmm.BlobDescriptor(uri, 0, -1) if uri.startswith("\\\\") else uri
+                        table.add_video(value)
+                    self.assertEqual([expected, expected], [str(call[0][0]) for call in stat.call_args_list])
+                self.assertTrue(source.closed)
+        self.assertIsNone(table.raw_table.snapshot_manager().get_latest_snapshot())
+
     def test_auto_video_remote_uri_and_descriptor(self):
         from pathlib import Path
         from unittest.mock import Mock
@@ -439,7 +486,7 @@ class MultimodalTableTest(unittest.TestCase):
     def test_auto_video_validation_before_decode(self):
         table = self._auto_video_table()
         module = "pypaimon.multimodal.video._inspect_video_frames"
-        with patch(module) as inspect:
+        with patch(module) as inspect, patch("pypaimon.multimodal.video._require_video_av"):
             for kwargs in [{"metadata": []}, {"metadata": {"timestamp": 1}},
                            {"metadata": {"video": b"x"}}, {"metadata": {"unknown": 1}},
                            {"metadata": {"episode_id": "wrong"}}, {"first_frame": 1},
