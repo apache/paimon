@@ -413,7 +413,7 @@ trailers, or per-entry CRC. On-disk order:
 +----------------------------+
 | ...                        |
 +----------------------------+
-| Keyframe Index 1           |  Video metadata ranges and compressed keyframe entries
+| Keyframe Index 1           |  Video metadata ranges and keyframe entries
 +----------------------------+
 | Keyframe Index 2           |
 +----------------------------+
@@ -441,13 +441,29 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-A keyframe-index block contains a 17-byte header (version `1`: uint8; magic `0x564944454F4B4649`:
-uint64; metadata-range and keyframe counts: uint32 each), metadata `(offset, length)` pairs
-(int64 each), and zlib-compressed `(frame ordinal, PTS, packet position)` entries (int64 each).
-Numeric fields are little endian; offsets are payload-relative. Limits: 65,536 metadata ranges
-and 16 MiB of decoded keyframe entries (699,050 entries), 16 MiB per stored block,
-64 MiB per file. Older readers limited to 65,536 entries cannot read larger indexes. The index covers the first video
-stream; its time base stays in the video.
+Keyframe-index version `2` uses this layout. Numeric fields are little endian;
+byte offsets are relative to the embedded video payload.
+
+| Field | Size |
+| --- | ---: |
+| Version (`2`) | 1 byte |
+| Magic (`0x564944454F4B4649`) | 8 bytes |
+| Metadata-range count | 4 bytes |
+| Keyframe count | 8 bytes |
+| Metadata `(offset, length)` pairs | 16 bytes each |
+| Keyframe pages | Variable |
+
+Each page contains up to 4,096 uncompressed `(frame ordinal, PTS, packet position)`
+entries (three int64 values), followed by a 4-byte CRC32 of its entries. Only the
+last page may be partial. Page `p` starts at `21 + 16 * metadata_count + p * 98308`.
+Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
+The index covers the first video stream; its time base remains in the video.
+
+Readers load pages on demand; writers validate all pages. There is no keyframe-count
+or aggregate index-byte budget. Metadata ranges remain limited to 65,536. PyPaimon
+caches up to 1 MiB of entry pages per index and spools generated indexes to temporary disk.
+Version `1` remains readable: its 17-byte header has two uint32 counts and its entries
+form one zlib stream. Version-1-only readers must be upgraded before reading version `2`.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

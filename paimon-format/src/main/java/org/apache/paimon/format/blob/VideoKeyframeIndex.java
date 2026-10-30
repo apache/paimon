@@ -18,102 +18,130 @@
 
 package org.apache.paimon.format.blob;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.zip.CRC32;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-/** Validates persisted video metadata ranges and sparse keyframe entries. */
+/** Streaming validation for legacy and paged video seek indexes. */
 final class VideoKeyframeIndex {
-
-    private static final int VERSION = 1;
-    private static final long MAGIC = 0x564944454F4B4649L; // "VIDEOKFI"
-    private static final int HEADER_LENGTH = Byte.BYTES + Long.BYTES + Integer.BYTES * 2;
-    private static final int METADATA_RANGE_LENGTH = Long.BYTES * 2;
-    private static final int ENTRY_LENGTH = Long.BYTES * 3;
+    private static final long MAGIC = 0x564944454F4B4649L;
+    private static final int ENTRY_LENGTH = 24;
+    private static final int PAGE_ENTRIES = 4096;
     static final long MAX_METADATA_RANGE_COUNT = 64 * 1024;
-    static final long MAX_DECODED_KEYFRAME_BYTES = 16 * 1024 * 1024;
-    static final long MAX_KEYFRAME_COUNT = MAX_DECODED_KEYFRAME_BYTES / ENTRY_LENGTH;
 
     private VideoKeyframeIndex() {}
 
     static void validate(byte[] data, long payloadLength) {
-        if (data == null || data.length <= HEADER_LENGTH) {
-            throw invalid("too short");
+        try {
+            validate(new ByteArrayInputStream(data), data.length, payloadLength);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid video keyframe index.", e);
         }
-        if (payloadLength <= 0) {
-            throw invalid("empty video payload");
-        }
+    }
 
-        ByteBuffer header = ByteBuffer.wrap(data, 0, HEADER_LENGTH).order(ByteOrder.LITTLE_ENDIAN);
-        int version = Byte.toUnsignedInt(header.get());
-        long magic = header.getLong();
-        long metadataRangeCount = Integer.toUnsignedLong(header.getInt());
-        long keyframeCount = Integer.toUnsignedLong(header.getInt());
-        if (version != VERSION || magic != MAGIC) {
+    static void validate(InputStream source, long length, long payloadLength) throws IOException {
+        if (length < 17 || payloadLength <= 0) {
+            throw invalid("header or empty video payload");
+        }
+        DataInputStream in = new DataInputStream(source);
+        int version = in.readUnsignedByte();
+        long magic = Long.reverseBytes(in.readLong());
+        long metadataCount = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
+        if ((version != 1 && version != 2) || magic != MAGIC) {
             throw invalid("version or magic");
         }
-        if (keyframeCount == 0) {
-            throw invalid("empty");
-        }
-        if (metadataRangeCount > MAX_METADATA_RANGE_COUNT) {
+        long count =
+                version == 1
+                        ? Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()))
+                        : Long.reverseBytes(in.readLong());
+        long offset = (version == 1 ? 17 : 21) + metadataCount * 16;
+        if (metadataCount > MAX_METADATA_RANGE_COUNT) {
             throw invalid("metadata range count exceeds limit");
         }
-        if (keyframeCount > MAX_KEYFRAME_COUNT) {
-            throw invalid("keyframe count exceeds limit");
+        if (count <= 0 || offset >= length) {
+            throw invalid("count or metadata ranges");
         }
-
-        long entriesOffset = HEADER_LENGTH + metadataRangeCount * METADATA_RANGE_LENGTH;
-        if (entriesOffset >= data.length) {
-            throw invalid("metadata ranges");
-        }
-        ByteBuffer ranges = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
-        ranges.position(HEADER_LENGTH);
         long previousEnd = 0;
-        for (long i = 0; i < metadataRangeCount; i++) {
-            long offset = ranges.getLong();
-            long length = ranges.getLong();
-            if (offset < previousEnd || length <= 0 || offset > Long.MAX_VALUE - length) {
-                throw invalid("metadata ranges");
-            }
-            previousEnd = offset + length;
-            if (previousEnd > payloadLength) {
+        for (long i = 0; i < metadataCount; i++) {
+            long start = Long.reverseBytes(in.readLong());
+            long size = Long.reverseBytes(in.readLong());
+            if (start < previousEnd || size <= 0 || start > payloadLength - size) {
                 throw invalid("metadata range outside video payload");
             }
+            previousEnd = start + size;
         }
-
-        Inflater inflater = new Inflater();
-        inflater.setInput(data, (int) entriesOffset, data.length - (int) entriesOffset);
-        byte[] entry = new byte[ENTRY_LENGTH];
-        long previousOrdinal = -1;
-        long previousPts = 0;
-        long previousPacketPosition = -1;
-        try {
-            for (long i = 0; i < keyframeCount; i++) {
-                inflateEntry(inflater, entry);
-                ByteBuffer values = ByteBuffer.wrap(entry).order(ByteOrder.LITTLE_ENDIAN);
-                long ordinal = values.getLong();
-                long pts = values.getLong();
-                long packetPosition = values.getLong();
-                if ((i == 0 && ordinal != 0) || ordinal <= previousOrdinal) {
-                    throw invalid("keyframe ordinals must be strictly increasing from zero");
-                }
-                if (i > 0 && pts <= previousPts) {
-                    throw invalid("keyframe timestamps must be strictly increasing");
-                }
-                if (packetPosition <= previousPacketPosition || packetPosition >= payloadLength) {
-                    throw invalid(
-                            "keyframe packet positions must be within the video payload and strictly increasing");
-                }
-                previousOrdinal = ordinal;
-                previousPts = pts;
-                previousPacketPosition = packetPosition;
+        EntryValidator validator = new EntryValidator(payloadLength);
+        if (version == 2) {
+            long pages = (count - 1) / PAGE_ENTRIES + 1;
+            if (count > (length - offset) / ENTRY_LENGTH
+                    || pages * 4 != length - offset - count * ENTRY_LENGTH) {
+                throw invalid("entries length");
             }
+            byte[] page = new byte[PAGE_ENTRIES * ENTRY_LENGTH];
+            for (long done = 0; done < count; ) {
+                int entries = (int) Math.min(PAGE_ENTRIES, count - done);
+                int bytes = entries * ENTRY_LENGTH;
+                in.readFully(page, 0, bytes);
+                long expected = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
+                CRC32 crc = new CRC32();
+                crc.update(page, 0, bytes);
+                if (crc.getValue() != expected) {
+                    throw invalid("page checksum");
+                }
+                ByteBuffer values = ByteBuffer.wrap(page, 0, bytes).order(ByteOrder.LITTLE_ENDIAN);
+                for (int i = 0; i < entries; i++) {
+                    validator.accept(values);
+                }
+                done += entries;
+            }
+        } else {
+            validateLegacy(in, length - offset, count, validator);
+        }
+    }
 
-            if (inflater.inflate(entry, 0, 1) != 0
-                    || !inflater.finished()
-                    || inflater.getRemaining() != 0) {
-                throw invalid("entry count");
+    private static void validateLegacy(
+            InputStream in, long remaining, long count, EntryValidator validator)
+            throws IOException {
+        Inflater inflater = new Inflater();
+        byte[] input = new byte[64 * 1024];
+        byte[] entry = new byte[ENTRY_LENGTH];
+        int filled = 0;
+        long decoded = 0;
+        try {
+            while (!inflater.finished()) {
+                if (inflater.needsInput() && remaining > 0) {
+                    int n = in.read(input, 0, (int) Math.min(input.length, remaining));
+                    if (n <= 0) {
+                        throw invalid("truncated compressed entries");
+                    }
+                    remaining -= n;
+                    inflater.setInput(input, 0, n);
+                }
+                int n = inflater.inflate(entry, filled, ENTRY_LENGTH - filled);
+                filled += n;
+                if (filled == ENTRY_LENGTH) {
+                    if (decoded++ >= count) {
+                        throw invalid("entry count");
+                    }
+                    validator.accept(ByteBuffer.wrap(entry).order(ByteOrder.LITTLE_ENDIAN));
+                    filled = 0;
+                }
+                if (n == 0
+                        && !inflater.finished()
+                        && (inflater.needsDictionary()
+                                || !inflater.needsInput()
+                                || remaining == 0)) {
+                    throw invalid("compressed entries");
+                }
+            }
+            if (filled != 0 || decoded != count || remaining != 0 || inflater.getRemaining() != 0) {
+                throw invalid("entry count or trailing data");
             }
         } catch (DataFormatException e) {
             throw new IllegalArgumentException("Invalid video keyframe index payload.", e);
@@ -122,14 +150,30 @@ final class VideoKeyframeIndex {
         }
     }
 
-    private static void inflateEntry(Inflater inflater, byte[] entry) throws DataFormatException {
-        int offset = 0;
-        while (offset < entry.length) {
-            int length = inflater.inflate(entry, offset, entry.length - offset);
-            if (length == 0) {
-                throw invalid("entries");
+    private static final class EntryValidator {
+        private final long payloadLength;
+        private long ordinal = -1;
+        private long pts;
+        private long position = -1;
+
+        private EntryValidator(long payloadLength) {
+            this.payloadLength = payloadLength;
+        }
+
+        private void accept(ByteBuffer values) {
+            long nextOrdinal = values.getLong();
+            long nextPts = values.getLong();
+            long nextPosition = values.getLong();
+            if ((ordinal == -1 && nextOrdinal != 0)
+                    || nextOrdinal <= ordinal
+                    || (ordinal != -1 && nextPts <= pts)
+                    || nextPosition <= position
+                    || nextPosition >= payloadLength) {
+                throw invalid("ordinals, timestamps or packet positions outside video payload");
             }
-            offset += length;
+            ordinal = nextOrdinal;
+            pts = nextPts;
+            position = nextPosition;
         }
     }
 

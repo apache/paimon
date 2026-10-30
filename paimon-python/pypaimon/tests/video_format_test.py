@@ -159,9 +159,18 @@ class VideoFormatTest(unittest.TestCase):
 
     def test_cross_language_video_v1_fixture(self):
         fixture = self._fixture_bytes(self.VIDEO_FIXTURE)
-        encoded = VideoKeyframeIndex(
-            [(0, 1)], [(0, 0, 0), (12, 36000, 2)]
-        ).serialize()
+        encoded = VideoKeyframeIndex.HEADER.pack(1, VideoKeyframeIndex.MAGIC, 1, 2)
+        encoded += struct.pack('<qq', 0, 1)
+        encoded += zlib.compress(struct.pack('<qqqqqq', 0, 0, 0, 12, 36000, 2))
+        self._check_video_fixture(fixture, encoded)
+
+    def test_cross_language_paged_index_fixture(self):
+        with VideoKeyframeIndex([(0, 1)], [(0, 0, 0), (12, 36000, 2)]) as index:
+            encoded = index.serialize()
+        self._check_video_fixture(self._fixture_bytes(
+            self.VIDEO_FIXTURE.with_name("video-paged-index.hex")), encoded)
+
+    def _check_video_fixture(self, fixture, encoded):
         video = b"abc"
         source_path = self.root / "indexed.mp4"
         source_path.write_bytes(video + encoded)
@@ -403,23 +412,54 @@ class VideoFormatTest(unittest.TestCase):
                         side_effect=error_type(1, "Cannot index video")):
                     writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
                 self.assertEqual(payload, output.getvalue())
-                self.assertEqual([b""], writer._keyframe_indexes)
+                self.assertEqual([0], writer._keyframe_indexes)
 
-    def test_index_memory_limit_warns_and_preserves_payload(self):
-        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndexLimitError
-        payload = b"video"
+    def test_generated_large_index_is_kept(self):
+        count = 700_000
+        payload = b'x' * count
         source = self.root / "large-index.mp4"
         source.write_bytes(payload)
         descriptor = VideoFrameDescriptor(source.as_uri(), 0, len(payload), 0, -1, 0)
         blob = Blob.from_descriptor(self.file_io.uri_reader_factory.create(descriptor.uri), descriptor)
-        output = io.BytesIO()
-        writer = VideoFormatWriter(output)
-        with mock.patch.object(VideoKeyframeIndex, "inspect", side_effect=VideoKeyframeIndexLimitError("limit")):
-            with self.assertLogs("pypaimon.execution.python.write.video_format_writer", level="WARNING") as logs:
+        target = (self.root / "large-index.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        with mock.patch.object(VideoKeyframeIndex, "inspect",
+                               return_value=VideoKeyframeIndex([], ((i, i, i) for i in range(count)))):
+            writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+        self.assertGreater(writer._keyframe_indexes[0], 16 * 1024 * 1024)
+        self.assertTrue(writer._index_spool._rolled)
+        writer.close()
+        result = VideoFrameDescriptor.deserialize(self._read(target)[0])
+        self.assertGreater(result.keyframe_index_descriptor.length, 16 * 1024 * 1024)
+
+    def test_index_spool_failure_does_not_silently_drop_index(self):
+        import errno
+        blob = self._source_frame("spool-failure.mp4", b"video", 0)
+        writer = VideoFormatWriter(io.BytesIO())
+        for error in (OSError(errno.ENOSPC, "Disk full"), OSError(errno.EDQUOT, "Quota")):
+            with mock.patch.object(VideoKeyframeIndex, "inspect", side_effect=error):
+                with self.assertRaises(OSError):
+                    writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+        with VideoKeyframeIndex([], [(0, 0, 0)]) as index:
+            with mock.patch.object(VideoKeyframeIndex, "inspect", return_value=index), mock.patch.object(
+                    index, "write_to", side_effect=OSError("Spool write failed")):
+                with self.assertRaises(OSError):
+                    writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
+        self.assertEqual(0, writer._index_spool.tell())
+        self.assertEqual([], writer._keyframe_indexes)
+        writer.close()
+
+    def test_payload_failure_discards_staged_index(self):
+        with VideoKeyframeIndex([], [(0, 0, 0)]) as index:
+            mapping = index.serialize()
+        blob = self._indexed_frame("payload-failure.mp4", b"video", mapping)
+        writer = VideoFormatWriter(io.BytesIO())
+        with mock.patch.object(writer, "_write_video_payload", side_effect=IOError("Failed payload")):
+            with self.assertRaises(IOError):
                 writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
-        self.assertIn("without a seek index", logs.output[0])
-        self.assertEqual(payload, output.getvalue())
-        self.assertEqual([b""], writer._keyframe_indexes)
+        self.assertEqual(0, writer._index_spool.seek(0, 2))
+        self.assertEqual([], writer._keyframe_indexes)
+        writer.close()
 
     def test_rejects_invalid_keyframe_index(self):
         video = b"video"
@@ -439,42 +479,30 @@ class VideoFormatTest(unittest.TestCase):
                 GenericRow([blob], [self.field], RowKind.INSERT)
             )
 
-    def test_rejects_oversized_keyframe_indexes_before_fetch(self):
-        descriptor = VideoFrameDescriptor(
-            (self.root / "missing.mp4").as_uri(),
-            0,
-            1,
-            0,
-            1,
-            VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES + 1,
-        )
-        blob = Blob.from_descriptor(
-            self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
-        )
-
-        with self.assertRaisesRegex(ValueError, "keyframe index length.*limit"):
-            VideoFormatWriter(io.BytesIO()).add_element(
-                GenericRow([blob], [self.field], RowKind.INSERT)
-            )
-
-    def test_rejects_cumulative_keyframe_indexes_before_fetch(self):
-        mapping = VideoKeyframeIndex([], [(0, 0, 0)]).serialize()
-        first = self._indexed_frame("first-indexed.mp4", b"a", mapping)
-        second = self._indexed_frame("second-indexed.mp4", b"b", mapping)
-        writer = VideoFormatWriter(io.BytesIO())
-
-        with mock.patch.object(
-                VideoFormatWriter,
-                'MAX_TOTAL_KEYFRAME_INDEX_BYTES',
-                len(mapping)):
-            writer.add_element(
-                GenericRow([first], [self.field], RowKind.INSERT)
-            )
-            with self.assertRaisesRegex(
-                    ValueError, "Buffered video keyframe indexes.*limit"):
-                writer.add_element(
-                    GenericRow([second], [self.field], RowKind.INSERT)
-                )
+    def test_large_indexes_survive_rewrite(self):
+        count = 750_000
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as index:
+            mapping = index.serialize()
+        video = b'x' * count
+        target = (self.root / "many-indexes.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        for i in range(4):
+            frame = self._indexed_frame("large-%s.mp4" % i, video, mapping)
+            writer.add_element(GenericRow([frame], [self.field], RowKind.INSERT))
+        self.assertGreater(writer._keyframe_index_bytes, 64 * 1024 * 1024)
+        self.assertTrue(writer._index_spool._rolled)
+        writer.close()
+        values = self._read(target)
+        rewritten = (self.root / "large-rewritten.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(rewritten))
+        for value in values:
+            writer.add_element(GenericRow([Blob.from_bytes(value, file_io=self.file_io)],
+                                          [self.field], RowKind.INSERT))
+        writer.close()
+        for value in self._read(rewritten):
+            descriptor = VideoFrameDescriptor.deserialize(value).keyframe_index_descriptor
+            self.assertEqual(mapping, Blob.from_file(self.file_io, descriptor.uri,
+                                                     descriptor.offset, descriptor.length).to_data())
 
     def test_rejects_seek_offsets_outside_video_payload(self):
         video = b"video"
@@ -660,11 +688,9 @@ class VideoFormatTest(unittest.TestCase):
                 blob_as_descriptor=True,
             )
 
-    def test_reader_keyframe_index_size_limits(self):
+    def test_reader_large_keyframe_index_offsets(self):
         limit = 16 * 1024 * 1024
-        for lengths, error in (([limit + 1], "16 MiB"),
-                               ([limit] * 4 + [1], "64 MiB"),
-                               ([limit] * 4, None), ([0], None)):
+        for lengths in ([limit + 1], [limit] * 4 + [1], [limit] * 4, [0]):
             with self.subTest(lengths=lengths):
                 indexes = [DeltaVarintCompressor.compress(values) for values in
                            ([1] * len(lengths), lengths, [], [], [])]
@@ -677,11 +703,7 @@ class VideoFormatTest(unittest.TestCase):
                         '<IIIIIIB', *(len(index) for index in indexes),
                         VideoFormatWriter.FOOTER_MAGIC_NUMBER, VideoFormatWriter.VERSION))
                 with path.open("rb") as stream:
-                    if error:
-                        with self.assertRaisesRegex(IOError, error):
-                            VideoFileMeta(stream, path.stat().st_size)
-                    else:
-                        VideoFileMeta(stream, path.stat().st_size)
+                    VideoFileMeta(stream, path.stat().st_size)
 
     def _read(self, target, row_indices=None):
         reader = FormatBlobReader(

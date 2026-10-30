@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import logging
+import errno
+import shutil
+import tempfile
 import struct
 import sys
 
@@ -26,7 +28,7 @@ from pypaimon.table.row.blob import (
     BlobRef,
     VideoFrameDescriptor,
 )
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex, VideoKeyframeIndexLimitError
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
@@ -45,8 +47,6 @@ class VideoFormatWriter(BlobFormatWriter):
     FOOTER_SIZE = 25
     NULL_REFERENCE = -1
     PLACE_HOLDER_REFERENCE = -2
-    MAX_KEYFRAME_INDEX_BYTES = 16 * 1024 * 1024
-    MAX_TOTAL_KEYFRAME_INDEX_BYTES = 64 * 1024 * 1024
 
     def __init__(
             self,
@@ -61,6 +61,7 @@ class VideoFormatWriter(BlobFormatWriter):
         )
         self._physical_lengths = []
         self._keyframe_indexes = []
+        self._index_spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
         self._physical_videos = {}
         self._physical_video_keyframe_indexes = {}
         self._run_lengths = []
@@ -105,11 +106,16 @@ class VideoFormatWriter(BlobFormatWriter):
         ordinal = self._physical_videos.get(payload)
         if ordinal is None:
             keyframe_index = self._keyframe_index(value, frame)
-            length = self._write_video_payload(value)
+            try:
+                length = self._write_video_payload(value)
+            except BaseException:
+                self._index_spool.seek(self._keyframe_index_bytes)
+                self._index_spool.truncate()
+                raise
             ordinal = len(self._physical_lengths)
             self._physical_lengths.append(length)
             self._keyframe_indexes.append(keyframe_index)
-            self._keyframe_index_bytes += len(keyframe_index)
+            self._keyframe_index_bytes += keyframe_index
             self._physical_videos[payload] = ordinal
             self._physical_video_keyframe_indexes[
                 payload] = keyframe_index_descriptor
@@ -135,91 +141,80 @@ class VideoFormatWriter(BlobFormatWriter):
     def close(self) -> None:
         if self._closed:
             return
-        self._flush_run()
-        for keyframe_index in self._keyframe_indexes:
-            self.output_stream.write(keyframe_index)
-        physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
-        keyframe_length_index = DeltaVarintCompressor.compress(
-            [len(mapping) for mapping in self._keyframe_indexes]
-        )
-        run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
-        run_reference_index = DeltaVarintCompressor.compress(
-            self._run_references
-        )
-        first_frame_index = DeltaVarintCompressor.compress(
-            self._run_first_frames
-        )
-        for index in (
-                physical_index,
-                keyframe_length_index,
-                run_length_index,
-                run_reference_index,
-                first_frame_index):
-            self.output_stream.write(index)
-        footer = struct.pack(
-            '<IIIIIIB',
-            len(physical_index),
-            len(keyframe_length_index),
-            len(run_length_index),
-            len(run_reference_index),
-            len(first_frame_index),
-            self.FOOTER_MAGIC_NUMBER,
-            self.VERSION,
-        )
-        self.output_stream.write(footer)
-        if hasattr(self.output_stream, 'flush'):
-            self.output_stream.flush()
-        if hasattr(self.output_stream, 'close'):
-            self.output_stream.close()
-        self._closed = True
+        try:
+            self._flush_run()
+            self._index_spool.seek(0)
+            shutil.copyfileobj(self._index_spool, self.output_stream, self.copy_buffer_size)
+            physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
+            keyframe_length_index = DeltaVarintCompressor.compress(
+                self._keyframe_indexes
+            )
+            run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
+            run_reference_index = DeltaVarintCompressor.compress(
+                self._run_references
+            )
+            first_frame_index = DeltaVarintCompressor.compress(
+                self._run_first_frames
+            )
+            for index in (
+                    physical_index,
+                    keyframe_length_index,
+                    run_length_index,
+                    run_reference_index,
+                    first_frame_index):
+                self.output_stream.write(index)
+            footer = struct.pack(
+                '<IIIIIIB',
+                len(physical_index),
+                len(keyframe_length_index),
+                len(run_length_index),
+                len(run_reference_index),
+                len(first_frame_index),
+                self.FOOTER_MAGIC_NUMBER,
+                self.VERSION,
+            )
+            self.output_stream.write(footer)
+            if hasattr(self.output_stream, 'flush'):
+                self.output_stream.flush()
+            if hasattr(self.output_stream, 'close'):
+                self.output_stream.close()
+        finally:
+            self._index_spool.close()
+            self._closed = True
 
     def _keyframe_index(self, blob, frame):
         descriptor = frame.keyframe_index_descriptor
-        if descriptor is None:
-            stream = blob.new_input_stream()
-            try:
-                try:
+        start = self._index_spool.tell()
+        try:
+            if descriptor is None:
+                with blob.new_input_stream() as stream:
                     payload_length = frame.payload_descriptor.length
                     if payload_length < 0:
-                        position = stream.tell()
-                        payload_length = stream.seek(0, 2)
-                        stream.seek(position)
-                    mapping = VideoKeyframeIndex.inspect(
-                        stream, payload_length).serialize()
-                except _video_index_fallback_errors() as error:
-                    if isinstance(error, VideoKeyframeIndexLimitError):
-                        logging.getLogger(__name__).warning(
-                            "Video seek index exceeds its memory budget; storing video without "
-                            "a seek index. Random reads may require scanning: %s", error)
-                    return b''
-            finally:
-                stream.close()
-            self._check_keyframe_index_size(len(mapping))
-            return mapping
-
-        self._check_keyframe_index_size(descriptor.length)
-        mapping = Blob.from_descriptor(blob.uri_reader, descriptor).to_data()
-        if len(mapping) != descriptor.length:
-            raise ValueError(
-                "Video keyframe index length changed while reading: "
-                "expected %s, read %s."
-                % (descriptor.length, len(mapping))
-            )
-        VideoKeyframeIndex.validate(mapping, frame.payload_descriptor.length)
-        return mapping
-
-    def _check_keyframe_index_size(self, length):
-        if length > self.MAX_KEYFRAME_INDEX_BYTES:
-            raise ValueError(
-                "Video keyframe index length %s exceeds the %s-byte limit."
-                % (length, self.MAX_KEYFRAME_INDEX_BYTES)
-            )
-        if (self._keyframe_index_bytes
-                > self.MAX_TOTAL_KEYFRAME_INDEX_BYTES - length):
-            raise ValueError(
-                "Buffered video keyframe indexes exceed the %s-byte limit."
-                % self.MAX_TOTAL_KEYFRAME_INDEX_BYTES
-            )
+                        stream.seek(0, 2)
+                        payload_length = stream.tell()
+                        stream.seek(0)
+                    try:
+                        mapping = VideoKeyframeIndex.inspect(stream, payload_length)
+                    except _video_index_fallback_errors() as error:
+                        if isinstance(error, OSError) and error.errno in (errno.ENOSPC, errno.EDQUOT, errno.EIO):
+                            raise
+                        return 0
+                    with mapping:
+                        mapping.write_to(self._index_spool)
+            else:
+                with tempfile.TemporaryFile() as mapping:
+                    with Blob.from_descriptor(blob.uri_reader, descriptor).new_input_stream() as source:
+                        shutil.copyfileobj(source, mapping, self.copy_buffer_size)
+                    if mapping.tell() != descriptor.length:
+                        raise ValueError("Video keyframe index length changed while reading.")
+                    VideoKeyframeIndex.validate_stream(mapping, descriptor.length, frame.payload_descriptor.length)
+                    mapping.seek(0)
+                    shutil.copyfileobj(mapping, self._index_spool, self.copy_buffer_size)
+            return self._index_spool.tell() - start
+        except BaseException:
+            self._index_spool.seek(start)
+            self._index_spool.truncate()
+            raise
 
     def _write_video_payload(self, blob: BlobRef) -> int:
         start = self.position

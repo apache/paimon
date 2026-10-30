@@ -132,8 +132,19 @@ public class VideoFileFormatTest {
     @Test
     public void testCrossLanguageV1Fixture() throws IOException {
         byte[] fixture = fixture("video-v1.hex");
+        checkVideoFixture(fixture, fromHex(KEYFRAME_INDEX_HEX));
+    }
+
+    @Test
+    public void testCrossLanguagePagedIndexFixture() throws IOException {
+        byte[] fixture = fixture("video-paged-index.hex");
+        byte[] mapping = java.util.Arrays.copyOfRange(fixture, 7, 7 + 89);
+        VideoKeyframeIndex.validate(mapping, 3);
+        checkVideoFixture(fixture, mapping);
+    }
+
+    private void checkVideoFixture(byte[] fixture, byte[] mapping) throws IOException {
         byte[] video = "abc".getBytes(StandardCharsets.UTF_8);
-        byte[] mapping = fromHex(KEYFRAME_INDEX_HEX);
         java.nio.file.Path source = tempPath.resolve("indexed.mp4");
         byte[] sourceBytes = new byte[video.length + mapping.length];
         System.arraycopy(video, 0, sourceBytes, 0, video.length);
@@ -221,7 +232,7 @@ public class VideoFileFormatTest {
 
     @Test
     public void testKeyframeIndexAboveOldLimit() throws IOException {
-        int count = 65537;
+        int count = 700001;
         ByteArrayOutputStream compressed = new ByteArrayOutputStream();
         try (DeflaterOutputStream output = new DeflaterOutputStream(compressed)) {
             ByteBuffer entry = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN);
@@ -241,25 +252,86 @@ public class VideoFileFormatTest {
                         .put(compressed.toByteArray())
                         .array();
         VideoKeyframeIndex.validate(mapping, count);
-        assertThat(VideoKeyframeIndex.MAX_KEYFRAME_COUNT * 24)
-                .isLessThanOrEqualTo(VideoKeyframeIndex.MAX_DECODED_KEYFRAME_BYTES);
     }
 
     @Test
-    public void testRejectTooManyKeyframes() {
+    public void testRejectForgedPagedCount() {
         byte[] mapping =
-                ByteBuffer.allocate(18)
+                ByteBuffer.allocate(21)
                         .order(ByteOrder.LITTLE_ENDIAN)
-                        .put((byte) 1)
+                        .put((byte) 2)
                         .putLong(0x564944454F4B4649L)
                         .putInt(0)
-                        .putInt((int) VideoKeyframeIndex.MAX_KEYFRAME_COUNT + 1)
-                        .put((byte) 0)
+                        .putLong(Long.MAX_VALUE)
                         .array();
-
         assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void testPagedIndexValidation() throws IOException {
+        int count = 750000;
+        byte[] mapping = pagedIndex(count);
+        assertThat(mapping.length).isGreaterThan(16 * 1024 * 1024);
+        VideoKeyframeIndex.validate(mapping, count);
+        java.nio.file.Path source = tempPath.resolve("large-index.mp4");
+        try (java.io.OutputStream out = Files.newOutputStream(source)) {
+            out.write(new byte[count]);
+            out.write(mapping);
+        }
+        Blob frame =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                new Path(source.toUri()).toString(),
+                                0,
+                                count,
+                                0,
+                                count,
+                                mapping.length));
+        write(frame);
+        VideoFrameDescriptor restored = descriptor(read(null).get(0));
+        assertThat(
+                        VideoFrameDescriptor.keyframeIndexBlob(
+                                        Blob.fromDescriptor(
+                                                org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                                                restored))
+                                .toData())
+                .isEqualTo(mapping);
+        mapping[21 + 4096 * 24 + 4] ^= 1;
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, count))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("keyframe count exceeds limit");
+                .hasMessageContaining("checksum");
+        byte[] descending = pagedIndex(8192);
+        System.arraycopy(descending, 21, descending, 21 + 4096 * 24 + 4, 4096 * 24 + 4);
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(descending, 8192))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ordinals");
+    }
+
+    private static byte[] pagedIndex(int count) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(
+                ByteBuffer.allocate(21)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .put((byte) 2)
+                        .putLong(0x564944454F4B4649L)
+                        .putInt(0)
+                        .putLong(count)
+                        .array());
+        for (int start = 0; start < count; start += 4096) {
+            int end = Math.min(count, start + 4096);
+            ByteBuffer page =
+                    ByteBuffer.allocate((end - start) * 24).order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = start; i < end; i++) {
+                page.putLong(i).putLong(i).putLong(i);
+            }
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            crc.update(page.array());
+            out.write(page.array());
+            out.write(intToLittleEndian((int) crc.getValue()));
+        }
+        return out.toByteArray();
     }
 
     @Test
@@ -277,33 +349,6 @@ public class VideoFileFormatTest {
         assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("metadata range count exceeds limit");
-    }
-
-    @Test
-    public void testRejectOversizedKeyframeIndexesBeforeFetch() throws IOException {
-        String missing = new Path(tempPath.resolve("missing.mp4").toUri()).toString();
-        Blob frame =
-                Blob.fromDescriptor(
-                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
-                        new VideoFrameDescriptor(
-                                missing,
-                                0,
-                                1,
-                                0,
-                                1,
-                                VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES + 1));
-
-        assertThatThrownBy(() -> write(frame))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("keyframe index length")
-                .hasMessageContaining("limit");
-        assertThatThrownBy(
-                        () ->
-                                VideoFormatWriter.checkKeyframeIndexSize(
-                                        1, VideoFormatWriter.MAX_TOTAL_KEYFRAME_INDEX_BYTES))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Buffered video keyframe indexes")
-                .hasMessageContaining("limit");
     }
 
     @Test
@@ -492,8 +537,8 @@ public class VideoFileFormatTest {
     }
 
     @Test
-    public void testReaderKeyframeIndexSizeLimits() throws IOException {
-        long limit = VideoFormatWriter.MAX_KEYFRAME_INDEX_BYTES;
+    public void testReaderLargeKeyframeIndexOffsets() throws IOException {
+        long limit = 16 * 1024 * 1024;
         long[][] cases = {
             {limit + 1}, {limit, limit, limit, limit, 1}, {limit, limit, limit, limit}, {0}
         };
@@ -526,14 +571,7 @@ public class VideoFileFormatTest {
                 out.write(VideoFormatWriter.VERSION);
             }
             try (SeekableInputStream in = fileIO.newInputStream(file)) {
-                if (i < 2) {
-                    String message = i == 0 ? "16 MiB" : "64 MiB";
-                    assertThatThrownBy(() -> new VideoFileMeta(in, fileIO.getFileSize(file), null))
-                            .isInstanceOf(IOException.class)
-                            .hasMessageContaining(message);
-                } else {
-                    new VideoFileMeta(in, fileIO.getFileSize(file), null);
-                }
+                new VideoFileMeta(in, fileIO.getFileSize(file), null);
             }
         }
     }

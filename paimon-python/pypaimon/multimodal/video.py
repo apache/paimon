@@ -383,13 +383,11 @@ class VideoFrameCollator:
         ).new_input_stream()
         try:
             if keyframe_index_descriptor is not None:
-                mapping = self.file_io.read_file_range(
-                    keyframe_index_descriptor.uri,
-                    keyframe_index_descriptor.offset,
-                    keyframe_index_descriptor.length,
-                )
-                stream.video_keyframe_index = (
-                    VideoKeyframeIndex.deserialize(mapping, descriptor.length))
+                index = keyframe_index_descriptor
+                stream.video_keyframe_index = VideoKeyframeIndex.open(
+                    lambda offset, length: self.file_io.read_file_range(
+                        index.uri, index.offset + offset, length),
+                    index.length, descriptor.length)
                 stream.video_length = descriptor.length
                 stream.video_read_ranges = lambda ranges: (
                     self.file_io.read_ranges_coalesced(
@@ -403,6 +401,9 @@ class VideoFrameCollator:
                 )
             decoder = self.decoder_factory(stream)
         except Exception:
+            mapping = getattr(stream, "video_keyframe_index", None)
+            if mapping is not None:
+                mapping.close()
             stream.close()
             raise
         resource = (decoder, stream)
@@ -443,4 +444,7 @@ class VideoFrameCollator:
             if close is not None:
                 close()
         finally:
+            mapping = getattr(stream, "video_keyframe_index", None)
+            if mapping is not None:
+                mapping.close()
             stream.close()
