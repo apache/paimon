@@ -72,6 +72,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
@@ -635,6 +636,16 @@ final class SchemaManagerUtils {
             List<String> newSequenceFields =
                     applyNotNestedColumnRename(sequenceFields, renameMappings);
             newOptions.put(SEQUENCE_FIELD.key(), String.join(",", newSequenceFields));
+        }
+
+        // changelog preservation field rename
+        List<String> preserveFields = new CoreOptions(options).changelogPreserveFieldOnRetract();
+        if (!preserveFields.isEmpty()) {
+            List<String> newPreserveFields =
+                    applyNotNestedColumnRename(preserveFields, renameColumns);
+            newOptions.put(
+                    CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT.key(),
+                    String.join(",", newPreserveFields));
         }
 
         // case 2: the option key is composed of certain fixed prefixes, suffixes, and the field
