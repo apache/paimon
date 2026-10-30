@@ -850,7 +850,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 tagManager(),
                 schemaManager(),
-                new BranchMergeHandler(this::switchToBranch));
+                new BranchMergeHandler(this::switchToBranch),
+                () -> catalogEnvironment.snapshotCommit(snapshotManager(), coreOptions(), null));
     }
 
     @Override
