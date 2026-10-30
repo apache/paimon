@@ -50,28 +50,22 @@ frames = conn.create_table(
     options={"video-frame-field": "video"},
 )
 frames.add_video("/data/example.mp4")
-# Remote video with shared metadata:
 frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
-```
-
-Generates zero-based frame numbers and PTS-based timestamps in seconds from the
-first frame, preserving variable frame timing and original container bytes.
-`metadata` supplies the same business fields for every frame.
-
-Supports local and remote videos with one PyAV-decodable video stream and strictly
-increasing timestamps. Configure remote credentials on the connection; keep the source unchanged during import.
-To provide your own frame metadata, pass `frames` explicitly as shown below.
-
-For raw H.265/HEVC without timestamps, supply its fixed frame rate:
-
-```python
+# Raw HEVC: explicitly supply a fixed frame rate.
 frames.add_video("oss://source-bucket/episode-42.h265", source_fps=30)
 ```
 
-The SDK remuxes to MP4 without re-encoding, then imports the frames. Timestamps
-start at zero using `source_fps`; they do not recover capture times or variable
-frame timing. Import uses temporary disk space for the raw stream and MP4,
-removed on completion or failure. Omit `source_fps` for containerized videos.
+Generates zero-based `frame_index` and `timestamp` in seconds from the first
+frame. `metadata` supplies per-video constants. Containerized videos retain
+original bytes and variable frame timing; require one decodable video stream
+with strictly increasing PTS.
+
+Raw HEVC is remuxed to MP4 without re-encoding. `source_fps` generates fixed-rate
+timestamps, not original capture times. Temporary raw/MP4 files are cleaned up
+after import, including failures. Omit `source_fps` for containerized videos.
+
+Configure remote credentials on the connection and keep the source unchanged
+during import. To supply frame metadata yourself, pass `frames` as shown below.
 
 ## Video Frame Storage
 
