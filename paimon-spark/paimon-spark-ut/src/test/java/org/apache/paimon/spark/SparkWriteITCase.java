@@ -50,6 +50,7 @@ import java.util.stream.Collectors;
 
 import scala.collection.JavaConverters;
 
+import static org.apache.paimon.spark.ShowCreateTableTestUtils.showCreateTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -97,8 +98,8 @@ public class SparkWriteITCase {
                         + " ('file.format'='avro')");
 
         // test show create table
-        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
-        assertThat(show.toString())
+        String show = showCreateTable(spark, "T");
+        assertThat(show)
                 .contains("a INT,\n" + "  b INT DEFAULT 2,\n" + "  c STRING DEFAULT 'my_value'");
 
         // test partial write
@@ -140,8 +141,8 @@ public class SparkWriteITCase {
                         + " ('file.format'='avro')");
 
         // test show create table for array
-        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
-        assertThat(show.toString())
+        String show = showCreateTable(spark, "T");
+        assertThat(show)
                 .contains("tags ARRAY<STRING> DEFAULT ARRAY('tag1', 'tag2')")
                 .contains("numbers ARRAY<INT> DEFAULT ARRAY(1, 2, 3)");
 
@@ -199,8 +200,8 @@ public class SparkWriteITCase {
                         + " ('file.format'='avro')");
 
         // test show create table for map
-        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
-        assertThat(show.toString())
+        String show = showCreateTable(spark, "T");
+        assertThat(show)
                 .contains(
                         "properties MAP<STRING, STRING> DEFAULT MAP('key1', 'value1', 'key2', 'value2')");
 
@@ -243,8 +244,8 @@ public class SparkWriteITCase {
                         + " ('file.format'='avro')");
 
         // test show create table for struct
-        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
-        assertThat(show.toString())
+        String show = showCreateTable(spark, "T");
+        assertThat(show)
                 .contains("nested STRUCT<x: INT, y: STRING> DEFAULT STRUCT(42, 'default_value')");
 
         // test partial write with struct defaults
@@ -281,8 +282,8 @@ public class SparkWriteITCase {
                         + " ('file.format'='avro')");
 
         // test show create table for nested complex types
-        List<Row> show = spark.sql("SHOW CREATE TABLE T").collectAsList();
-        assertThat(show.toString())
+        String show = showCreateTable(spark, "T");
+        assertThat(show)
                 .contains(
                         "nested_array ARRAY<STRUCT<name: STRING, value: INT>> DEFAULT ARRAY(STRUCT('item1', 10), STRUCT('item2', 20))")
                 .contains(

@@ -25,6 +25,7 @@ import org.apache.spark.sql.catalyst.catalog.{CatalogTable, CatalogTablePartitio
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.execution.datasources.v2.V2SessionCatalog
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -78,8 +79,10 @@ class SparkV1PartitionManagement(catalogTable: CatalogTable, catalog: SessionCat
         val location = scalaProperties.get("location")
         CatalogTablePartition(
           toPartitionSpec(ident),
-          catalogTable.storage.copy(locationUri = location.map(CatalogUtils.stringToURI)),
-          parameters = scalaProperties - "location")
+          SparkShimLoader.shim
+            .withStorageLocation(catalogTable.storage, location.map(CatalogUtils.stringToURI)),
+          parameters = scalaProperties - "location"
+        )
     }
     catalog.createPartitions(catalogTable.identifier, partitions, ignoreIfExists = false)
   }
@@ -119,7 +122,9 @@ class SparkV1PartitionManagement(catalogTable: CatalogTable, catalog: SessionCat
     val scalaProperties = properties.asScala.toMap
     val storage = scalaProperties.get("location") match {
       case Some(location) =>
-        partition.storage.copy(locationUri = Some(CatalogUtils.stringToURI(location)))
+        SparkShimLoader.shim.withStorageLocation(
+          partition.storage,
+          Some(CatalogUtils.stringToURI(location)))
       case None => partition.storage
     }
     catalog.alterPartitions(

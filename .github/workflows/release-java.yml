@@ -121,7 +121,7 @@ jobs:
               mvn -ntp -B "${enforcer_goal}" \
                 -Denforcer.rules="${enforcer_rules}" \
                 -Papache-release,docs-and-source,spark4 \
-                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13,org.apache.paimon:paimon-spark-4.2_2.13 \
                 -am
               ;;
             *)
@@ -186,14 +186,14 @@ jobs:
             jdk17)
               capture_expected_projects \
                 -Papache-release,docs-and-source,spark4 \
-                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13,org.apache.paimon:paimon-spark-4.2_2.13
               # This install only supplies reactor dependencies for the deploy
               # below. Their Javadocs are built by the owning release lane.
               mvn clean install -ntp -B \
                 -Pdocs-and-source,spark4 \
                 -DskipTests -Dmaven.javadoc.skip=true \
                 -Dstyle.color=never \
-                -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
+                -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1,paimon-spark/paimon-spark-4.2 \
                 -am \
                 2>&1 | tee "${log}"
               mvn deploy -ntp -B \
@@ -201,7 +201,7 @@ jobs:
                 -DskipTests -Dgpg.skip=true -Dstyle.color=never \
                 -DdeployAtEnd=true \
                 -DaltDeploymentRepository="${alt_repository}" \
-                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13,org.apache.paimon:paimon-spark-4.2_2.13 \
                 2>&1 | tee -a "${log}"
               ;;
             *)
