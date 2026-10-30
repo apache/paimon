@@ -26,6 +26,9 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.TableEnvironment;
@@ -33,12 +36,16 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +79,102 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         tEnv.executeSql(
                 "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')");
         innerTestWriteRead();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testMetadataOperationsWithInvalidOptions(boolean cacheEnabled) throws Exception {
+        tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG metadata WITH ('type'='paimon', 'warehouse'='%s', 'cache-enabled'='%s')",
+                        path, cacheEnabled));
+        tEnv.useCatalog("metadata");
+        tEnv.executeSql(
+                "CREATE TABLE legacy (id INT, seq INT, v INT, PRIMARY KEY (id) NOT ENFORCED) "
+                        + "WITH ('bucket'='1', 'merge-engine'='partial-update', "
+                        + "'changelog-producer'='lookup', 'fields.seq.sequence-group'='v')");
+        Catalog catalog = ((FlinkCatalog) tEnv.getCatalog("metadata").get()).catalog();
+        Identifier identifier = Identifier.create(DB_NAME, "legacy");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        FileSystemSchemaManager schemas =
+                new FileSystemSchemaManager(table.fileIO(), table.location());
+        overwriteOption(table, schemas, "fields.seq.sequence-group", "id,v");
+        catalog.invalidateTable(identifier);
+
+        try (CloseableIterator<Row> rows = tEnv.executeSql("SHOW CREATE TABLE legacy").collect()) {
+            assertThat(rows.next().getField(0).toString())
+                    .contains("fields.seq.sequence-group", "id,v");
+        }
+        assertThatThrownBy(
+                        () -> tEnv.executeSql("SELECT * FROM legacy").await(30, TimeUnit.SECONDS))
+                .hasStackTraceContaining("primary key");
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql("INSERT INTO legacy VALUES (1, 10, 100)")
+                                        .await(30, TimeUnit.SECONDS))
+                .hasStackTraceContaining("primary key");
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE legacy SET ('bucket'='1')"))
+                .hasStackTraceContaining("primary key");
+        assertThat(schemas.listAllIds()).containsExactly(0L);
+
+        tEnv.executeSql("ALTER TABLE legacy SET ('fields.seq.sequence-group'='v')");
+        assertThat(schemas.latest().get().id()).isEqualTo(1L);
+        tEnv.executeSql("INSERT INTO legacy VALUES (1, 10, 100)").await(30, TimeUnit.SECONDS);
+        try (CloseableIterator<Row> rows = tEnv.executeSql("SELECT * FROM legacy").collect()) {
+            assertThat(rows.next()).isEqualTo(Row.of(1, 10, 100));
+            assertThat(rows.hasNext()).isFalse();
+        }
+
+        overwriteOption(table, schemas, "fields.seq.sequence-group", null);
+        overwriteOption(table, schemas, "fields.v.aggregate-function", "max");
+        catalog.invalidateTable(identifier);
+        try (CloseableIterator<Row> rows = tEnv.executeSql("SHOW CREATE TABLE legacy").collect()) {
+            assertThat(rows.next().getField(0).toString()).contains("fields.v.aggregate-function");
+        }
+        assertThatThrownBy(
+                        () -> tEnv.executeSql("SELECT * FROM legacy").await(30, TimeUnit.SECONDS))
+                .hasStackTraceContaining("Must use sequence group");
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql("INSERT INTO legacy VALUES (1, 10, 100)")
+                                        .await(30, TimeUnit.SECONDS))
+                .hasStackTraceContaining("Must use sequence group");
+        tEnv.executeSql("ALTER TABLE legacy RESET ('fields.v.aggregate-function')");
+        tEnv.executeSql("ALTER TABLE legacy SET ('fields.seq.sequence-group'='v')");
+        try (CloseableIterator<Row> rows = tEnv.executeSql("SELECT * FROM legacy").collect()) {
+            assertThat(rows.next()).isEqualTo(Row.of(1, 10, 100));
+            assertThat(rows.hasNext()).isFalse();
+        }
+
+        overwriteOption(table, schemas, "full-compaction.delta-commits", "1");
+        catalog.invalidateTable(identifier);
+        assertThatThrownBy(() -> ((FileStoreTable) catalog.getTable(identifier)).newScan())
+                .isInstanceOf(RuntimeException.class);
+        tEnv.executeSql("ALTER TABLE legacy RESET ('full-compaction.delta-commits')");
+        assertThat(catalog.getTable(identifier).options())
+                .doesNotContainKey("full-compaction.delta-commits");
+
+        overwriteOption(table, schemas, "fields.seq.sequence-group", "id,v");
+        catalog.invalidateTable(identifier);
+        tEnv.executeSql("DROP TABLE legacy");
+        assertThat(catalog.listTables(DB_NAME)).doesNotContain("legacy");
+        assertThat(table.fileIO().exists(table.location())).isFalse();
+    }
+
+    private void overwriteOption(
+            FileStoreTable table, FileSystemSchemaManager schemas, String key, String value)
+            throws IOException {
+        TableSchema schema = schemas.latest().get();
+        Map<String, String> options = new HashMap<>(schema.options());
+        if (value == null) {
+            options.remove(key);
+        } else {
+            options.put(key, value);
+        }
+        table.fileIO()
+                .overwriteFileUtf8(
+                        schemas.toSchemaPath(schema.id()), schema.copy(options).toString());
     }
 
     @Test

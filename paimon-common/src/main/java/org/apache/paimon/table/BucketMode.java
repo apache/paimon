@@ -71,4 +71,19 @@ public enum BucketMode {
     public static final int UNAWARE_BUCKET = 0;
 
     public static final int POSTPONE_BUCKET = -2;
+
+    public static BucketMode fromOptions(
+            int bucket, boolean hasPrimaryKey, boolean crossPartitionUpdate) {
+        if (!hasPrimaryKey) {
+            return bucket == -1 ? BUCKET_UNAWARE : HASH_FIXED;
+        }
+        switch (bucket) {
+            case -2:
+                return POSTPONE_MODE;
+            case -1:
+                return crossPartitionUpdate ? KEY_DYNAMIC : HASH_DYNAMIC;
+            default:
+                return HASH_FIXED;
+        }
+    }
 }

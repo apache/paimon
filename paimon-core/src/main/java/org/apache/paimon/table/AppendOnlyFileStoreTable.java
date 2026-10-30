@@ -58,8 +58,6 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private transient AppendOnlyFileStore lazyStore;
-
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this(fileIO, path, tableSchema, CatalogEnvironment.empty());
     }
@@ -74,20 +72,21 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public AppendOnlyFileStore store() {
-        if (lazyStore == null) {
-            lazyStore =
-                    new AppendOnlyFileStore(
-                            fileIO,
-                            schemaManager(),
-                            tableSchema,
-                            new CoreOptions(tableSchema.options()),
-                            tableSchema.logicalPartitionType(),
-                            tableSchema.logicalBucketKeyType(),
-                            tableSchema.logicalRowType().notNull(),
-                            name(),
-                            catalogEnvironment);
-        }
-        return lazyStore;
+        return (AppendOnlyFileStore) runtimeStore();
+    }
+
+    @Override
+    protected AppendOnlyFileStore createStore(TableSchema runtimeSchema) {
+        return new AppendOnlyFileStore(
+                fileIO,
+                schemaManager(),
+                runtimeSchema,
+                coreOptions(),
+                runtimeSchema.logicalPartitionType(),
+                runtimeSchema.logicalBucketKeyType(),
+                runtimeSchema.logicalRowType().notNull(),
+                name(),
+                catalogEnvironment);
     }
 
     @Override
@@ -113,7 +112,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead newRead() {
+    protected InnerTableRead createRead() {
         List<Function<SplitReadConfig, SplitReadProvider>> providerFactories = new ArrayList<>();
         if (coreOptions().dataEvolutionEnabled()) {
             // add data evolution first
@@ -139,12 +138,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public DataTableScan newScan() {
-        return newScan(FileStoreTable::newSnapshotReader);
-    }
-
-    @Override
-    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+    protected DataTableScan createScan(SnapshotReaderFactory snapshotReaderFactory) {
         CoreOptions options = coreOptions();
         AppendBatchTableScan scan =
                 new AppendBatchTableScan(

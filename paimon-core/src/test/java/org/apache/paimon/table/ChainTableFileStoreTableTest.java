@@ -137,6 +137,24 @@ public class ChainTableFileStoreTableTest {
                                                                                         keyRange))));
     }
 
+    @Test
+    public void testMetadataCopyDefersRuntimeValidation() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable table = loadTable();
+        FileStoreTable invalid =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "missing"));
+        assertThat(invalid).isInstanceOf(ChainTableFileStoreTable.class);
+        assertThat(invalid.rowType()).isEqualTo(table.rowType());
+        assertThat(invalid.coreOptions().recordLevelTimeField()).isEqualTo("missing");
+        assertThatThrownBy(invalid::newRead).hasMessageContaining("missing");
+        assertThatThrownBy(invalid::newScan).hasMessageContaining("missing");
+        assertThatThrownBy(invalid::newStreamScan).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newWrite("test")).hasMessageContaining("missing");
+        assertThatThrownBy(() -> invalid.newCommit("test")).hasMessageContaining("missing");
+    }
+
     @ParameterizedTest
     @MethodSource("filterPushdownParams")
     public void testFilterPushdownAcrossChainMerge(

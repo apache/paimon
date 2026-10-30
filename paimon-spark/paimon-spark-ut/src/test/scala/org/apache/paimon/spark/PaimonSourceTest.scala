@@ -994,10 +994,10 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
   test("Paimon Source: with error options") {
     withTempDir {
       checkpointDir =>
-        val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
+        val TableSnapshotState(_, location, _, _, _) =
           prepareTableAndGetLocation(3, true)
 
-        assertThrows[IllegalArgumentException] {
+        withStartedQuery(
           spark.readStream
             .format("paimon")
             .option("scan.snapshot-id", 3)
@@ -1009,7 +1009,19 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
             .queryName("mem_table")
             .outputMode("append")
             .trigger(Trigger.ProcessingTime(5, TimeUnit.SECONDS))
-            .start()
+            .start()) {
+          query =>
+            val error = intercept[StreamingQueryException] {
+              query.processAllAvailable()
+            }
+            val cause = Iterator
+              .iterate(error: Throwable)(_.getCause)
+              .takeWhile(_ != null)
+              .collectFirst { case cause: IllegalArgumentException => cause }
+              .getOrElse(fail("Expected an IllegalArgumentException in the cause chain", error))
+            assert(cause.getMessage.contains("scan.snapshot-id"))
+            assert(cause.getMessage.contains("scan.timestamp-millis"))
+            assert(cause.getMessage.contains("must be null when you set"))
         }
     }
   }
