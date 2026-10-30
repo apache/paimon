@@ -1037,19 +1037,6 @@ class ParquetFiltersTest {
     public void testTimestampFileUnitMismatchCannotPushDown() {
         Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000);
 
-        RowType millisReadType =
-                new RowType(
-                        Collections.singletonList(new DataField(0, "ts1", new TimestampType(3))));
-        MessageType microsFileSchema =
-                new MessageType(
-                        "paimon_schema",
-                        Types.required(PrimitiveTypeName.INT64)
-                                .as(
-                                        LogicalTypeAnnotation.timestampType(
-                                                false, LogicalTypeAnnotation.TimeUnit.MICROS))
-                                .named("ts1"));
-        test(microsFileSchema, new PredicateBuilder(millisReadType).equal(0, value), "", false);
-
         RowType microsReadType =
                 new RowType(
                         Collections.singletonList(new DataField(0, "ts1", new TimestampType(6))));
@@ -1062,6 +1049,55 @@ class ParquetFiltersTest {
                                                 false, LogicalTypeAnnotation.TimeUnit.MILLIS))
                                 .named("ts1"));
         test(millisFileSchema, new PredicateBuilder(microsReadType).equal(0, value), "", false);
+    }
+
+    @Test
+    public void testMillisTimestampOnMicrosFile() {
+        // a precision 3 field reads the micros v as the millisecond floor(v / 1000), so the
+        // literal millisecond covers the micros [123000, 123999]
+        Timestamp value = Timestamp.fromEpochMillis(1704067200123L);
+        String lower = "1704067200123000";
+        String upper = "1704067200123999";
+        for (boolean localZoned : new boolean[] {false, true}) {
+            RowType rowType =
+                    new RowType(
+                            Collections.singletonList(
+                                    new DataField(
+                                            0,
+                                            "ts1",
+                                            localZoned
+                                                    ? new LocalZonedTimestampType(3)
+                                                    : new TimestampType(3))));
+            MessageType schema =
+                    new MessageType(
+                            "paimon_schema",
+                            Types.required(PrimitiveTypeName.INT64)
+                                    .as(
+                                            LogicalTypeAnnotation.timestampType(
+                                                    localZoned,
+                                                    LogicalTypeAnnotation.TimeUnit.MICROS))
+                                    .named("ts1"));
+            PredicateBuilder builder = new PredicateBuilder(rowType);
+
+            test(schema, builder.lessThan(0, value), "lt(ts1, " + lower + ")", true);
+            test(schema, builder.greaterOrEqual(0, value), "gteq(ts1, " + lower + ")", true);
+            test(schema, builder.lessOrEqual(0, value), "lteq(ts1, " + upper + ")", true);
+            test(schema, builder.greaterThan(0, value), "gt(ts1, " + upper + ")", true);
+            test(
+                    schema,
+                    builder.equal(0, value),
+                    "and(gteq(ts1, " + lower + "), lteq(ts1, " + upper + "))",
+                    true);
+            test(schema, builder.notEqual(0, value), "", false);
+            // more than 20 literals are kept as an IN leaf instead of ORed equalities
+            test(schema, builder.in(0, Collections.nCopies(21, value)), "", false);
+            // a millisecond beyond the INT64 microsecond range is not pushed down
+            test(
+                    schema,
+                    builder.lessThan(0, Timestamp.fromEpochMillis(Long.MAX_VALUE / 1000 + 1)),
+                    "",
+                    false);
+        }
     }
 
     @Test

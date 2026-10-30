@@ -26,6 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
@@ -33,6 +34,7 @@ import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -43,6 +45,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -54,6 +57,8 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.MessageType;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -63,6 +68,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -666,5 +672,220 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         Assertions.assertThat(readPks(declaredType, isNull))
                 .as("every row must survive: `x.y` is simply absent, with nothing to collide with")
                 .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    public void testIcebergTimestampMicros() throws Exception {
+        Options options = new Options();
+        options.set("metadata.iceberg.storage", "table-location");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType rowType =
+                RowType.builder()
+                        .field("local_timestamp", DataTypes.TIMESTAMP(3))
+                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                        .build();
+        Timestamp min = Timestamp.fromEpochMillis(1691827200123L);
+        Timestamp max = Timestamp.fromEpochMillis(1691827200456L);
+
+        // repeated values, so that the columns are dictionary encoded
+        write(
+                format.createWriterFactory(rowType),
+                file,
+                GenericRow.of(min, min),
+                GenericRow.of(max, max),
+                GenericRow.of(min, min));
+
+        // Iceberg requires MICROS for both timestamp and timestamptz
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            MessageType schema = reader.getFooter().getFileMetaData().getSchema();
+            Assertions.assertThat(schema.getType("local_timestamp").getLogicalTypeAnnotation())
+                    .isEqualTo(
+                            LogicalTypeAnnotation.timestampType(
+                                    false, LogicalTypeAnnotation.TimeUnit.MICROS));
+            Assertions.assertThat(schema.getType("utc_timestamp").getLogicalTypeAnnotation())
+                    .isEqualTo(
+                            LogicalTypeAnnotation.timestampType(
+                                    true, LogicalTypeAnnotation.TimeUnit.MICROS));
+            Assertions.assertThat(reader.getFooter().getBlocks().get(0).getColumns())
+                    .allSatisfy(
+                            column ->
+                                    Assertions.assertThat(column.getEncodings())
+                                            .anyMatch(e -> e.name().contains("DICTIONARY")));
+        }
+
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, Collections.emptyList())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        Assertions.assertThat(rows).hasSize(3);
+        Assertions.assertThat(rows.get(1).getTimestamp(0, 3)).isEqualTo(max);
+        Assertions.assertThat(rows.get(1).getTimestamp(1, 3)).isEqualTo(max);
+    }
+
+    @Test
+    public void testIcebergTimestampMicrosPushdownKeepsMatchingRows() throws Exception {
+        Options options = new Options();
+        options.set("metadata.iceberg.storage", "table-location");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType rowType =
+                RowType.builder()
+                        .field("local_timestamp", DataTypes.TIMESTAMP(3))
+                        .field("utc_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                        .build();
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        for (long millis : new long[] {-1704067200123L, 0L, 1704067200123L}) {
+            // the micros of both stored values are read as the millisecond itself
+            for (int storedNanos : new int[] {0, 999_000}) {
+                Timestamp stored = Timestamp.fromEpochMillis(millis, storedNanos);
+                // a single row per file, so that a wrongly pruned row group loses the row
+                fileIO.deleteQuietly(file);
+                write(format.createWriterFactory(rowType), file, GenericRow.of(stored, stored));
+                List<InternalRow> unfiltered = readRows(format, rowType, Collections.emptyList());
+                Assertions.assertThat(unfiltered).hasSize(1);
+                Assertions.assertThat(unfiltered.get(0).getTimestamp(0, 3))
+                        .isEqualTo(Timestamp.fromEpochMillis(millis));
+
+                for (int literalNanos : new int[] {0, 1, 456_000}) {
+                    Timestamp literal = Timestamp.fromEpochMillis(millis, literalNanos);
+                    for (int field = 0; field < 2; field++) {
+                        for (Predicate predicate :
+                                Arrays.asList(
+                                        builder.lessThan(field, literal),
+                                        builder.lessOrEqual(field, literal),
+                                        builder.greaterThan(field, literal),
+                                        builder.greaterOrEqual(field, literal),
+                                        builder.equal(field, literal))) {
+                            List<InternalRow> pushed =
+                                    readRows(format, rowType, Collections.singletonList(predicate));
+                            Assertions.assertThat(pushed.stream().filter(predicate::test))
+                                    .as("%s on a file storing %s", predicate, stored)
+                                    .hasSize(
+                                            (int)
+                                                    unfiltered.stream()
+                                                            .filter(predicate::test)
+                                                            .count());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private List<InternalRow> readRows(
+            ParquetFileFormat format, RowType rowType, List<Predicate> filters) throws IOException {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, filters)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        }
+        return rows;
+    }
+
+    @Test
+    public void testMillisFieldOnMicrosFileWithSubMillis() throws Exception {
+        Options options = new Options();
+        // a tiny row-group size gives a row group per 100 rows
+        options.set("parquet.block.size", "1");
+        options.set("parquet.enable.dictionary", "false");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType microsType =
+                RowType.builder().field("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6)).build();
+        RowType millisType =
+                RowType.builder().field("ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)).build();
+        long baseMillis = 1691827200000L;
+        int rowCount = 1000;
+        GenericRow[] written = new GenericRow[rowCount];
+        for (int i = 0; i < rowCount; i++) {
+            // every value is 456 microseconds past its millisecond
+            written[i] = GenericRow.of(Timestamp.fromEpochMillis(baseMillis + i, 456_000));
+        }
+        write(format.createWriterFactory(microsType), file, written);
+
+        // the first row of the third row group: its millisecond is below the group's micros
+        long firstRowOfGroup;
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            List<BlockMetaData> blocks = reader.getFooter().getBlocks();
+            Assertions.assertThat(blocks).hasSizeGreaterThan(2);
+            firstRowOfGroup = blocks.get(0).getRowCount() + blocks.get(1).getRowCount();
+        }
+        Timestamp target = Timestamp.fromEpochMillis(baseMillis + firstRowOfGroup);
+
+        List<Timestamp> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(
+                                millisType,
+                                millisType,
+                                Collections.singletonList(
+                                        new PredicateBuilder(millisType).equal(0, target)))
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> values.add(row.getTimestamp(0, 3)));
+        }
+        Assertions.assertThat(values).contains(target).hasSizeLessThan(rowCount);
+
+        // statistics bound the millisecond values the field reads
+        SimpleColStats[] stats =
+                format.createStatsExtractor(
+                                millisType,
+                                new SimpleColStatsCollector.Factory[] {
+                                    SimpleColStatsCollector.from("full")
+                                })
+                        .get()
+                        .extract(fileIO, file, fileIO.getFileSize(file));
+        Assertions.assertThat(stats[0].min()).isEqualTo(Timestamp.fromEpochMillis(baseMillis));
+        Assertions.assertThat(stats[0].max())
+                .isEqualTo(Timestamp.fromEpochMillis(baseMillis + rowCount - 1));
+    }
+
+    @Test
+    public void testIcebergStorageOptionEnablesMicros() throws Exception {
+        RowType rowType = RowType.builder().field("ts", DataTypes.TIMESTAMP(3)).build();
+        Timestamp timestamp = Timestamp.fromEpochMillis(1691827200123L);
+        String[][] cases = {
+            {null, "MILLIS"},
+            {"DISABLED", "MILLIS"},
+            {"hive-catalog", "MICROS"}
+        };
+        for (String[] c : cases) {
+            Options options = new Options();
+            if (c[0] != null) {
+                options.set("metadata.iceberg.storage", c[0]);
+            }
+            ParquetFileFormat format =
+                    new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+            fileIO.deleteQuietly(file);
+            write(format.createWriterFactory(rowType), file, GenericRow.of(timestamp));
+            try (ParquetFileReader reader =
+                    ParquetUtil.getParquetReader(
+                            fileIO, file, fileIO.getFileSize(file), new Options())) {
+                Assertions.assertThat(
+                                reader.getFooter()
+                                        .getFileMetaData()
+                                        .getSchema()
+                                        .getType("ts")
+                                        .getLogicalTypeAnnotation())
+                        .as("metadata.iceberg.storage=%s", c[0])
+                        .isEqualTo(
+                                LogicalTypeAnnotation.timestampType(
+                                        false, LogicalTypeAnnotation.TimeUnit.valueOf(c[1])));
+            }
+        }
     }
 }

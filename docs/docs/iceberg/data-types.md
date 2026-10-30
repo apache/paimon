@@ -60,6 +60,23 @@ support the table's file format, format version, and column types.
 - Any other precision is rejected while Iceberg metadata is enabled. A precision above 6 is written
   as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the
   nanoseconds the column declares. Use a precision from 3 to 6.
+- Iceberg requires microseconds, so while Iceberg metadata is enabled, `TIMESTAMP(3)` and
+  `TIMESTAMP_LTZ(3)` are written to Parquet as `TIMESTAMP_MICROS` instead of `TIMESTAMP_MILLIS`.
+  This also applies to existing tables as soon as their writer is upgraded.
+
+:::
+
+:::warning
+
+Paimon readers released before this encoding was introduced can read these values 1000 times too
+large, without an error: for dictionary-encoded pages, and for all pages in older releases. Before any writer of an Iceberg-enabled table is upgraded, upgrade every Paimon reader and
+compaction job of that table. Disabling Iceberg metadata afterwards does not make the files readable
+by old readers: rolling back the readers requires rewriting the new files or restoring a snapshot
+from before the upgrade.
+
+:::
+
+:::info
 
 **Note on Time Types:**
 `TIME` types with a precision above 3 are rejected while Iceberg metadata is enabled: Iceberg

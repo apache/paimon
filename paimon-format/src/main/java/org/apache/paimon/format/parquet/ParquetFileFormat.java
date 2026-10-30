@@ -62,9 +62,19 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
                             ShreddingWritePlanType.VARIANT,
                             ShreddingWritePlanType.MAP_SHARED_SHREDDING));
 
+    /**
+     * IcebergOptions#METADATA_ICEBERG_STORAGE, which paimon-format cannot depend on. Values other
+     * than the storage types are rejected by schema validation, so anything but "disabled" means
+     * that Iceberg metadata is published.
+     */
+    private static final String ICEBERG_STORAGE = "metadata.iceberg.storage";
+
+    private static final String ICEBERG_STORAGE_DISABLED = "disabled";
+
     private final FormatContext formatContext;
     private final Options options;
     private final int readBatchSize;
+    private final boolean timestampMillisAsMicros;
 
     public ParquetFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -72,6 +82,11 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
         this.formatContext = formatContext;
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
+        this.timestampMillisAsMicros =
+                !ICEBERG_STORAGE_DISABLED.equalsIgnoreCase(
+                        formatContext
+                                .options()
+                                .getString(ICEBERG_STORAGE, ICEBERG_STORAGE_DISABLED));
     }
 
     @VisibleForTesting
@@ -110,7 +125,8 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         FormatWriterFactory rawFactory =
-                new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+                new ParquetWriterFactory(
+                        new RowDataParquetBuilder(type, options, timestampMillisAsMicros));
         ShreddingWritePlanFactory writePlanFactory =
                 ShreddingWritePlanWriterFactories.createWritePlanFactory(
                         type, formatContext.options(), SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
@@ -121,7 +137,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
 
     @Override
     public void validateDataFields(RowType rowType) {
-        ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        ParquetSchemaConverter.convertToParquetMessageType(rowType, timestampMillisAsMicros);
     }
 
     @Override
