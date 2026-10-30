@@ -100,10 +100,13 @@ def _remux_raw_hevc(source, output_path, time_base):
             for packet in container.demux(video=0):
                 if not packet.size:
                     continue
-                packet.pts = ordinals[count]
-                packet.dts = count - delay
-                packet.duration = 1
-                packet.time_base = time_base
+                # PyAV 12.0 exposes duration as read-only. Rescale its ticks.
+                duration = packet.duration
+                if duration <= 0:
+                    raise ValueError("Raw HEVC packet has no duration.")
+                packet.pts = ordinals[count] * duration
+                packet.dts = (count - delay) * duration
+                packet.time_base = time_base / duration
                 packet.stream = stream
                 output.mux(packet)
                 count += 1
