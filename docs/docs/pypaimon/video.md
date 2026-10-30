@@ -24,7 +24,7 @@ under the License.
 
 # Video Frames
 
-Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). You can import a video directly or provide frame metadata explicitly.
+Store encoded videos in `.video` and read individual frames for training.
 
 ## Import a Video
 
@@ -50,26 +50,21 @@ frames = conn.create_table(
     options={"video-frame-field": "video"},
 )
 frames.add_video("/data/example.mp4")
-# Supply constant business fields for another video:
+# Remote video with shared metadata:
 frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
 ```
 
-Omitting `frames` generates one row per decoded frame: `frame_index` starts at
-zero in presentation order; `timestamp` is the actual PTS × time base in seconds,
-relative to the first frame. This preserves variable frame timing. The encoded
-video bytes are stored unchanged in `.video`.
+Omitting `frames` generates zero-based `frame_index` values in presentation order
+and `timestamp` values from actual PTS, in seconds relative to the first frame,
+including variable frame rates. Original video bytes are preserved.
 
-Automatic import accepts a local path, remote URI, or `BlobDescriptor`, with exactly
-one video stream and `first_frame=0`. Remote sources use the same URI reader and
-storage credentials as other BLOB writes; configure source access on the connection.
-Keep the source unchanged until the call returns, including between remote reads. PyAV/FFmpeg
-must support decoding it; missing or decreasing timestamps and decode errors fail
-the import. Timing discovery decodes the video without retaining images.
+Use a local path, remote URI, or `BlobDescriptor`. Automatic import requires one
+PyAV-decodable video stream and `first_frame=0`. Configure remote credentials on
+the connection and keep the source unchanged during import.
 
-`metadata` fills other columns on every row; supply all required business fields.
-For multiple configured video columns, select one with `video_column`; the others
-must be nullable. To supply externally aligned state/action or custom timestamps,
-pass explicit `frames` instead of `metadata`.
+`metadata` supplies shared business fields, including required columns. For multiple
+video columns, specify `video_column`; the others must be nullable. For externally
+aligned state/action or custom timestamps, supply explicit `frames` instead.
 
 ## Video Frame Storage
 
