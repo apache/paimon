@@ -231,6 +231,21 @@ public class DataEvolutionFullTextRead implements FullTextRead {
             Optional<GlobalIndexEvaluator.Evaluation> evaluation =
                     evaluateWithIndexes(scalarIndexFiles, planSnapshot);
             if (evaluation.isPresent()) {
+                if (evaluation.get().coveredRanges() != null) {
+                    RoaringNavigableMap64 evaluated = new RoaringNavigableMap64();
+                    for (Range range : evaluation.get().coveredRanges()) {
+                        evaluated.addRange(range);
+                    }
+                    if (table.coreOptions().scalarIndexSearchMode() != GlobalIndexSearchMode.FAST) {
+                        RoaringNavigableMap64 unsupported =
+                                RoaringNavigableMap64.or(
+                                        new RoaringNavigableMap64(), decidedByIndex);
+                        unsupported.andNot(evaluated);
+                        unindexed.or(unsupported);
+                    }
+                    // A shard that declined the predicate must not contribute candidates to top-k.
+                    decidedByIndex.and(evaluated);
+                }
                 RoaringNavigableMap64 fromIndex =
                         RoaringNavigableMap64.and(
                                 evaluation.get().result().results(), decidedByIndex);

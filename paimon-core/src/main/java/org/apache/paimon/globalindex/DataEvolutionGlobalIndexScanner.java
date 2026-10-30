@@ -220,7 +220,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return create(table, null, null, indexFiles);
     }
 
-    /** Search pre-filters use per-column coverage, so they require single-field definitions. */
+    /** Search pre-filters require indexes that can serve independent scalar lookups. */
     public static Optional<DataEvolutionGlobalIndexScanner> createForScalarFilters(
             FileStoreTable table,
             @Nullable Snapshot pinnedSnapshot,
@@ -231,7 +231,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                 pinnedSnapshot,
                 partitionFilter,
                 indexFiles.stream()
-                        .filter(file -> !isMultiFieldIndex(file))
+                        .filter(
+                                file ->
+                                        !isMultiFieldIndex(file)
+                                                || GlobalIndexerFactoryUtils
+                                                        .supportsGroupedIndexScalarQueries(
+                                                                file.indexType()))
                         .collect(Collectors.toList()));
     }
 
@@ -410,7 +415,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         ? null
                         : GlobalIndexQuery.create(
                                 rowType, predicate, indexFiles, indexPathFactory, options);
-        if (query != null && query.hasCompositeQuery()) {
+        if (query != null && query.hasMultiFieldQuery()) {
             try {
                 return query.evaluateWithCoverage(
                         fileIO,
@@ -419,7 +424,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                 .map(file -> file.globalIndexMeta().rowRange())
                                 .collect(Collectors.toList()));
             } catch (IOException e) {
-                throw new RuntimeException("Failed to evaluate composite global index query", e);
+                throw new RuntimeException("Failed to evaluate multi-field global index query", e);
             }
         }
         return globalIndexEvaluator.evaluateWithContributingFields(predicate);
@@ -446,7 +451,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         ? null
                         : GlobalIndexQuery.create(
                                 rowType, predicate, indexFiles, indexPathFactory, options);
-        if (query != null && query.hasCompositeQuery() && query.hasScalarQuery()) {
+        if (query != null && query.hasMultiFieldQuery() && query.hasScalarQuery()) {
             // Scalar shards can decline a predicate at runtime, so the legacy API must use
             // evaluated coverage as well. Internal callers retain the evaluation directly.
             Optional<GlobalIndexEvaluator.Evaluation> evaluation = scanWithCoverage(predicate);
@@ -456,7 +461,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                             coverage.unindexedRangesFromCoverage(Collections.emptyList(), null));
         }
         List<Range> unindexed =
-                query != null && query.hasCompositeQuery()
+                query != null && query.hasMultiFieldQuery()
                         ? coverage.unindexedRangesFromCoverage(query.coveredRanges(), null)
                         : coverage.unindexedRanges(rowType, predicate);
         for (Range range : unindexed) {
@@ -496,13 +501,13 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             GlobalIndexFileReader indexFileReadWrite, IndexMetaFileGroup group, RowType rowType) {
         List<DataField> indexFields =
                 group.fieldIds.stream().map(rowType::getField).collect(Collectors.toList());
-        if (indexFields.size() > 1) {
-            return Collections.emptyList();
-        }
-
         Set<GlobalIndexReader> readers = new HashSet<>();
         for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : group.metas.entrySet()) {
             String indexType = entry.getKey();
+            if (indexFields.size() > 1
+                    && !GlobalIndexerFactoryUtils.supportsGroupedIndexScalarQueries(indexType)) {
+                continue;
+            }
             Map<Range, List<IndexFileMeta>> metas = entry.getValue();
             GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(indexType);
             GlobalIndexer globalIndexer = globalIndexerFactory.create(indexFields, options);

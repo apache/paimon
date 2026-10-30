@@ -44,10 +44,15 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.elasticsearch.eslib.api.ESIndexSearcher;
+import org.elasticsearch.eslib.api.model.IndexFilter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -67,6 +72,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -444,13 +450,11 @@ class ESIndexGlobalIndexE2ETest {
                 20,
                 reader.visitLike(titleRef, "doc%").join().get().results().getIntCardinality(),
                 "LIKE 'doc%' on title.keyword matches all 20 'document ...' titles");
-        // A range predicate on a string keyword sub-field is unsupported. Return the complete
-        // shard as a conservative result so a union with differently configured shards cannot
-        // drop rows; Paimon's residual predicate performs the actual comparison.
+        // A range predicate on a string keyword sub-field is unsupported. Do not return all rows
+        // as though they exactly matched: search callers must fall back before selecting top-k.
         Optional<GlobalIndexResult> unsupportedTitleRange =
                 reader.visitGreaterThan(titleRef, "abc").join();
-        assertTrue(unsupportedTitleRange.isPresent());
-        assertEquals(20, unsupportedTitleRange.get().results().getIntCardinality());
+        assertTrue(unsupportedTitleRange.isEmpty());
 
         // --- scalar filter: price >= 100 means rows 10..19 (price = i*10) ---
         FieldRef priceRef = new FieldRef(3, "price", DataTypes.INT());
@@ -594,11 +598,9 @@ class ESIndexGlobalIndexE2ETest {
                             .visitLessThan(
                                     new FieldRef(3, "cost", DataTypes.BIGINT()), 3_000_000_000L)
                             .join();
-            assertTrue(widenedFallback.isPresent());
-            assertEquals(
-                    2,
-                    widenedFallback.get().results().getIntCardinality(),
-                    "a widened field must keep every old INT-indexed row");
+            assertTrue(
+                    widenedFallback.isEmpty(),
+                    "an incompatible old INT index must request fallback for the widened field");
         } finally {
             widenedReader.close();
         }
@@ -678,11 +680,17 @@ class ESIndexGlobalIndexE2ETest {
                     union.visitLessThan(
                                     new FieldRef(0, "value", DataTypes.BIGINT()), 3_000_000_000L)
                             .join();
-            assertTrue(candidates.isPresent());
-            assertEquals(3, candidates.get().results().getIntCardinality());
-            assertTrue(contains(candidates.get().results(), 0L));
-            assertTrue(contains(candidates.get().results(), 1L));
-            assertTrue(contains(candidates.get().results(), 3L));
+            assertTrue(
+                    candidates.isEmpty(),
+                    "one unsupported shard makes the union unsupported, not a partial answer");
+            Optional<GlobalIndexResult> supported =
+                    currentReader
+                            .visitLessThan(
+                                    new FieldRef(0, "value", DataTypes.BIGINT()), 3_000_000_000L)
+                            .join();
+            assertTrue(supported.isPresent());
+            assertEquals(1, supported.get().results().getIntCardinality());
+            assertTrue(contains(supported.get().results(), 1L));
         } finally {
             union.close();
         }
@@ -838,16 +846,33 @@ class ESIndexGlobalIndexE2ETest {
                     notInWithNull.get().results().isEmpty(),
                     "NOT IN containing NULL is UNKNOWN for every row");
 
+            Optional<GlobalIndexResult> immutableNotIn =
+                    reader.visitNotIn(kRef, List.of("a")).join();
+            assertTrue(immutableNotIn.isPresent());
+            assertEquals(2, immutableNotIn.get().results().getIntCardinality());
+            assertTrue(contains(immutableNotIn.get().results(), 0L));
+            assertTrue(contains(immutableNotIn.get().results(), 3L));
+
             Optional<GlobalIndexResult> nullRange = reader.visitGreaterThan(kRef, null).join();
             assertTrue(nullRange.isPresent());
             assertTrue(nullRange.get().results().isEmpty());
 
-            Optional<GlobalIndexResult> keywordRange = reader.visitGreaterThan(kRef, "a").join();
-            assertTrue(keywordRange.isPresent());
-            assertEquals(
-                    4,
-                    keywordRange.get().results().getIntCardinality(),
-                    "unsupported KEYWORD ordering must conservatively retain the whole shard");
+            for (CompletableFuture<Optional<GlobalIndexResult>> keywordRange :
+                    Arrays.asList(
+                            reader.visitGreaterThan(kRef, "a"),
+                            reader.visitGreaterOrEqual(kRef, "a"),
+                            reader.visitLessThan(kRef, "b"),
+                            reader.visitLessOrEqual(kRef, "b"),
+                            reader.visitBetween(kRef, "a", "b"),
+                            reader.visitNotBetween(kRef, "a", "b"))) {
+                assertTrue(
+                        keywordRange.join().isEmpty(),
+                        "unsupported KEYWORD ordering must not claim an exact all-rows result");
+            }
+
+            Optional<GlobalIndexResult> zeroHits = reader.visitEqual(kRef, "absent").join();
+            assertTrue(zeroHits.isPresent(), "supported zero-hit predicates remain supported");
+            assertTrue(zeroHits.get().results().isEmpty());
         } finally {
             reader.close();
         }
@@ -1569,14 +1594,97 @@ class ESIndexGlobalIndexE2ETest {
             FieldRef ts = new FieldRef(0, "ts", DataTypes.TIMESTAMP(6));
             Optional<GlobalIndexResult> fallback =
                     reader.visitEqual(ts, Timestamp.fromEpochMillis(1_000L, 2_000)).join();
-            assertTrue(fallback.isPresent());
-            assertEquals(
-                    1,
-                    fallback.get().results().getIntCardinality(),
-                    "a lossy millisecond index must conservatively retain every row");
+            assertTrue(
+                    fallback.isEmpty(),
+                    "a lossy millisecond index cannot evaluate microsecond comparisons");
+            assertTrue(
+                    reader.visitNotEqual(ts, Timestamp.fromEpochMillis(1_000L, 2_000))
+                            .join()
+                            .isEmpty());
+            assertTrue(
+                    reader.visitBetween(
+                                    ts,
+                                    Timestamp.fromEpochMillis(1_000L, 1_000),
+                                    Timestamp.fromEpochMillis(1_000L, 2_000))
+                            .join()
+                            .isEmpty());
+            assertTrue(
+                    reader.visitNotBetween(
+                                    ts,
+                                    Timestamp.fromEpochMillis(1_000L, 1_000),
+                                    Timestamp.fromEpochMillis(1_000L, 2_000))
+                            .join()
+                            .isEmpty());
             assertTrue(reader.visitIsNotNull(ts).join().isPresent());
         } finally {
             reader.close();
+        }
+    }
+
+    @Test
+    void unsupportedSdkOperationsMustNotBecomeExactMatches(@TempDir java.nio.file.Path tmp)
+            throws Exception {
+        List<DataField> fields = List.of(new DataField(0, "n", DataTypes.INT()));
+        ESIndexOptions options = new ESIndexOptions(fields, new Options());
+        java.nio.file.Path dir = tmp.resolve("sdk-unsupported");
+        Files.createDirectories(dir);
+        ESIndexGlobalIndexWriter writer =
+                new ESIndexGlobalIndexWriter(new LocalDirWriter(dir), fields, options);
+        writer.write(1, 0);
+        writer.write(2, 1);
+        ResultEntry entry = writer.finish().get(0);
+        try (ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta(dir, entry)), fields, options)) {
+            FieldRef ref = new FieldRef(0, "n", DataTypes.INT());
+            assertTrue(reader.visitEqual(ref, 1).join().isPresent());
+            Field searcherField = ESIndexGlobalIndexReader.class.getDeclaredField("searcher");
+            searcherField.setAccessible(true);
+            ESIndexSearcher actual = (ESIndexSearcher) searcherField.get(reader);
+            AtomicBoolean failExists = new AtomicBoolean();
+            AtomicReference<Exception> failure = new AtomicReference<>();
+            // Keep the real archive loaded; inject only an SDK capability or I/O failure.
+            searcherField.set(
+                    reader,
+                    Proxy.newProxyInstance(
+                            ESIndexSearcher.class.getClassLoader(),
+                            new Class<?>[] {ESIndexSearcher.class},
+                            (proxy, method, args) -> {
+                                if (method.getName().equals("filter")
+                                        && (((IndexFilter) args[1]).filterType()
+                                                        == IndexFilter.FilterType.EXISTS)
+                                                == failExists.get()) {
+                                    throw failure.get();
+                                }
+                                try {
+                                    return method.invoke(actual, args);
+                                } catch (InvocationTargetException e) {
+                                    throw e.getCause();
+                                }
+                            }));
+            for (Exception unsupported :
+                    Arrays.asList(
+                            new UnsupportedOperationException("unsupported SDK operation"),
+                            new IllegalArgumentException("unsupported SDK type"))) {
+                failure.set(unsupported);
+                for (boolean exists : new boolean[] {false, true}) {
+                    failExists.set(exists);
+                    assertTrue(reader.visitNotEqual(ref, 1).join().isEmpty());
+                    assertTrue(reader.visitNotIn(ref, List.of(1)).join().isEmpty());
+                    assertTrue(reader.visitNotBetween(ref, 1, 2).join().isEmpty());
+                    if (exists) {
+                        assertTrue(reader.visitIsNotNull(ref).join().isEmpty());
+                    } else {
+                        assertTrue(reader.visitEqual(ref, 1).join().isEmpty());
+                        assertTrue(reader.visitLessThan(ref, 2).join().isEmpty());
+                    }
+                }
+            }
+            failExists.set(false);
+            failure.set(new IOException("read failure is not an unsupported operation"));
+            CompletionException ioFailure =
+                    assertThrows(CompletionException.class, () -> reader.visitEqual(ref, 1).join());
+            assertTrue(ioFailure.getCause().getCause() instanceof IOException);
         }
     }
 

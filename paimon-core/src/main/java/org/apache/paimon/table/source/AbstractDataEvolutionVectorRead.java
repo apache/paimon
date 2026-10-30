@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
@@ -64,6 +65,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,6 +75,7 @@ import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base implementation for vector reads. */
@@ -99,6 +102,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
      * the single thread performing the read.
      */
     @Nullable private transient RoaringNavigableMap64 scalarPreFilter;
+
+    /** Metric of indexed splits moved to the raw path for the current read. */
+    @Nullable private transient String fallbackVectorMetric;
 
     private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
@@ -128,6 +134,62 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return createGlobalIndexer(firstFile.indexType(), firstMeta);
     }
 
+    /** One indexer per definition, aligned with the splits and shared across matching shards. */
+    protected List<GlobalIndexer> createGlobalIndexers(List<IndexVectorSearchSplit> splits) {
+        return createGlobalIndexers(splits, createGlobalIndexer(splits));
+    }
+
+    protected List<GlobalIndexer> createGlobalIndexers(
+            List<IndexVectorSearchSplit> splits, GlobalIndexer first) {
+        Map<String, Map<List<Integer>, GlobalIndexer>> definitions = new HashMap<>();
+        IndexFileMeta firstFile = firstVectorIndexFile(splits);
+        definitions
+                .computeIfAbsent(firstFile.indexType(), k -> new HashMap<>())
+                .put(checkNotNull(firstFile.globalIndexMeta()).getIndexedFieldIds(), first);
+        List<GlobalIndexer> indexers = new ArrayList<>(splits.size());
+        for (IndexVectorSearchSplit split : splits) {
+            indexers.add(
+                    split.vectorIndexFiles().isEmpty()
+                            ? first
+                            : indexerForDefinition(split, definitions));
+        }
+        return indexers;
+    }
+
+    private GlobalIndexer indexerForDefinition(
+            IndexVectorSearchSplit split,
+            Map<String, Map<List<Integer>, GlobalIndexer>> definitions) {
+        IndexFileMeta file = split.vectorIndexFiles().get(0);
+        return definitions
+                .computeIfAbsent(file.indexType(), k -> new HashMap<>())
+                .computeIfAbsent(
+                        checkNotNull(file.globalIndexMeta()).getIndexedFieldIds(),
+                        k -> createGlobalIndexer(Collections.singletonList(split)));
+    }
+
+    /** Resolve metrics after every shard has registered its metadata with its own indexer. */
+    protected GlobalIndexer metricIndexer(List<GlobalIndexer> indexers) {
+        GlobalIndexer first = indexers.get(0);
+        String metric = null;
+        for (GlobalIndexer indexer : indexers) {
+            if (indexer == first) {
+                continue;
+            }
+            if (metric == null) {
+                metric = rawSearchMetric(first);
+            }
+            String current = rawSearchMetric(indexer);
+            if (!metric.equals(current)) {
+                throw new IllegalArgumentException(
+                        "Cannot combine vector indexes with different metrics: "
+                                + metric
+                                + " and "
+                                + current);
+            }
+        }
+        return first;
+    }
+
     protected GlobalIndexer createGlobalIndexer(String indexType) {
         return GlobalIndexerFactoryUtils.load(indexType)
                 .create(
@@ -152,9 +214,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
      * silently drops every covered row) nor ignore it (the top-K would be polluted by non-matching
      * rows). Instead, suppress the index splits and route their ranges through the raw search,
      * where the exact final-read filter decides; the raw read merges ranges, so overlap with an
-     * existing raw split is deduplicated. Splits routed this way reuse the vector index type so raw
-     * scoring keeps its metric. The computed scalar pre-filter is cached for {@link #preFilters} to
-     * reuse.
+     * existing raw split is deduplicated. Splits routed this way retain the metric from the vector
+     * index metadata, which can differ from the current table options. The computed scalar
+     * pre-filter is cached for {@link #preFilters} to reuse.
      */
     protected void prepareSplits(
             List<? extends VectorSearchSplit> splits,
@@ -162,6 +224,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<RawVectorSearchSplit> rawSplits) {
         splitSearchSplits(splits, indexSplits, rawSplits);
         scalarPreFilter = null;
+        fallbackVectorMetric = null;
         if (filter == null || indexSplits.isEmpty()) {
             return;
         }
@@ -178,7 +241,50 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
         rawSplits.add(
                 new RawVectorSearchSplit(ranges, scalarIndexFiles, vectorIndexType(indexSplits)));
+        fallbackVectorMetric = fallbackVectorMetric(indexSplits);
         indexSplits.clear();
+    }
+
+    private String fallbackVectorMetric(List<IndexVectorSearchSplit> splits) {
+        Map<String, Map<List<Integer>, GlobalIndexer>> indexers = new HashMap<>();
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+        ExecutorService executor =
+                GlobalIndexReadThreadPool.getExecutorService(
+                        table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM));
+        for (IndexVectorSearchSplit split : splits) {
+            if (split.vectorIndexFiles().isEmpty()) {
+                continue;
+            }
+            // Share an indexer within each definition so the backend retains its own policy for
+            // conflicting shard metrics. Different definitions must use their own field lists.
+            GlobalIndexer indexer = indexerForDefinition(split, indexers);
+            try (GlobalIndexReader ignored =
+                    indexer.createReader(
+                            meta -> table.fileIO().newInputStream(meta.filePath()),
+                            buildIOMetaList(indexPathFactory, split.vectorIndexFiles()),
+                            split.rowRangeEnd() - split.rowRangeStart() + 1,
+                            null,
+                            executor)) {
+                // Reader creation registers persisted metadata; no search is necessary.
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to initialize vector fallback metric", e);
+            }
+        }
+        String metric = null;
+        for (Map<List<Integer>, GlobalIndexer> definitions : indexers.values()) {
+            for (GlobalIndexer indexer : definitions.values()) {
+                String definitionMetric = rawSearchMetric(indexer);
+                if (metric != null && !metric.equals(definitionMetric)) {
+                    throw new IllegalArgumentException(
+                            "Cannot combine vector indexes with different metrics: "
+                                    + metric
+                                    + " and "
+                                    + definitionMetric);
+                }
+                metric = definitionMetric;
+            }
+        }
+        return metric;
     }
 
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
@@ -253,6 +359,14 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             if (!evaluation.isPresent()) {
                 return null;
             }
+            List<Range> evaluatedRanges = evaluation.get().coveredRanges();
+            List<Range> indexedRanges = splitRows.toRangeList();
+            if (evaluatedRanges != null
+                    && !Range.and(evaluatedRanges, indexedRanges).equals(indexedRanges)) {
+                // Metadata coverage is not proof that every scalar reader accepted the filter.
+                // Reuse the raw path to decide unsupported shards before vector top-k ranking.
+                return null;
+            }
             RoaringNavigableMap64 matched = evaluation.get().result().results();
             if (FilteredRowIdReader.isExact(table.rowType(), filter, evaluation.get())) {
                 return matched;
@@ -299,9 +413,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 return null;
             }
             include.or(result.get().result().results());
-            include.or(
-                    scanner.unindexedRowsForContributingFields(result.get().contributingFieldIds())
-                            .results());
+            include.or(scanner.unindexedRowsForEvaluation(result.get()).results());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -712,9 +824,38 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             List<RawVectorSearchSplit> rawSplits) {
         for (VectorSearchSplit split : splits) {
             if (split instanceof IndexVectorSearchSplit) {
-                indexSplits.add((IndexVectorSearchSplit) split);
+                addIndexDefinitionSplits((IndexVectorSearchSplit) split, indexSplits);
             } else if (split instanceof RawVectorSearchSplit) {
                 rawSplits.add((RawVectorSearchSplit) split);
+            }
+        }
+    }
+
+    private static void addIndexDefinitionSplits(
+            IndexVectorSearchSplit split, List<IndexVectorSearchSplit> indexSplits) {
+        Map<String, Map<List<Integer>, List<IndexFileMeta>>> definitions = new LinkedHashMap<>();
+        for (IndexFileMeta file : split.vectorIndexFiles()) {
+            definitions
+                    .computeIfAbsent(file.indexType(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(
+                            checkNotNull(file.globalIndexMeta()).getIndexedFieldIds(),
+                            k -> new ArrayList<>())
+                    .add(file);
+        }
+        if (definitions.values().stream().mapToInt(Map::size).sum() <= 1) {
+            indexSplits.add(split);
+            return;
+        }
+        // A range can contain several definitions. Keep each reader's field list homogeneous
+        // without changing the serialized scan plan or the row-id offset of any shard.
+        for (Map<List<Integer>, List<IndexFileMeta>> byFields : definitions.values()) {
+            for (List<IndexFileMeta> files : byFields.values()) {
+                indexSplits.add(
+                        new IndexVectorSearchSplit(
+                                split.rowRangeStart(),
+                                split.rowRangeEnd(),
+                                files,
+                                split.scalarIndexFiles()));
             }
         }
     }
@@ -755,6 +896,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     protected String rawSearchMetric(@Nullable GlobalIndexer globalIndexer) {
+        if (fallbackVectorMetric != null) {
+            return fallbackVectorMetric;
+        }
         String metric = null;
         if (globalIndexer != null) {
             if (!(globalIndexer instanceof VectorGlobalIndexer)) {

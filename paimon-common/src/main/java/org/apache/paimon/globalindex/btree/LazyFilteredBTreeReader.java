@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexPredicateResult;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
@@ -276,6 +277,15 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
                 from,
                 to,
                 reader -> reader.visitRange(from, to, fromInclusive, toInclusive));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexPredicateResult>> visitRangeWithCompleteness(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        // The combined BTree scan applies both bounds; do not replace it with two postings scans.
+        return visitRange(fieldRef, from, to, fromInclusive, toInclusive)
+                .thenApply(
+                        result -> result.map(value -> new GlobalIndexPredicateResult(value, true)));
     }
 
     @Override

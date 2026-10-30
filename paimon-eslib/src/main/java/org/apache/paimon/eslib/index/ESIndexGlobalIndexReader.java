@@ -1436,23 +1436,6 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private Optional<GlobalIndexResult> conservativeAllRows(String logicalField) {
-        if (physicalField(logicalField) == null) {
-            return Optional.empty();
-        }
-        try {
-            ensureLoaded();
-            RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
-            for (long id : searcher.allRowIds()) {
-                bitmap.add(id);
-            }
-            return Optional.of(GlobalIndexResult.create(bitmap));
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to read conservative ES index rows for field: " + logicalField, e);
-        }
-    }
-
     private boolean canEvaluateFilter(FieldRef fieldRef, IndexFilter filter) {
         String physicalField = physicalField(fieldRef.name());
         FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
@@ -1489,7 +1472,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         String physicalField = physicalField(fieldRef.name());
         FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
         if (!canEvaluateFilter(fieldRef, filter)) {
-            return conservativeAllRows(fieldRef.name());
+            // Unsupported is not an exact all-rows result. In particular, search pre-filters
+            // must fall back or refine instead of admitting unfiltered rows into top-k.
+            return Optional.empty();
         }
         if (filter.filterType() == IndexFilter.FilterType.EXISTS
                 && fieldRef.type() instanceof ArrayType) {
@@ -1497,7 +1482,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             try {
                 return executeFilter(presenceField, filter);
             } catch (UnsupportedOperationException | IllegalArgumentException e) {
-                return conservativeAllRows(fieldRef.name());
+                return Optional.empty();
             }
         }
         if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
@@ -1505,20 +1490,19 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             // the raw column value, so ordinary predicates (=, <>, <, >, IN, LIKE, IS NULL, ...)
             // cannot run on it directly. Route them to the keyword multi-field sub-field
             // (content.keyword) when present — it holds the exact value and serves these correctly.
-            // Without the sub-field, conservatively retain every row so the caller can evaluate
-            // the predicate. Full-text search (visitFullTextSearch) still targets the analyzed
-            // primary field.
+            // Without the sub-field, canEvaluateFilter returns false so the caller can fall back.
+            // Full-text search (visitFullTextSearch) still targets the analyzed primary field.
             String subField = indexOptions.keywordSubField(physicalField);
             try {
                 return executeFilter(subField, filter);
             } catch (UnsupportedOperationException | IllegalArgumentException e) {
-                return conservativeAllRows(fieldRef.name());
+                return Optional.empty();
             }
         }
         try {
             return executeFilter(physicalField, filter);
         } catch (UnsupportedOperationException | IllegalArgumentException e) {
-            return conservativeAllRows(fieldRef.name());
+            return Optional.empty();
         }
     }
 
@@ -1550,7 +1534,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             FieldRef fieldRef, IndexFilter matchingFilter) {
         if (!canEvaluateFilter(fieldRef, IndexFilter.exists())
                 || !canEvaluateFilter(fieldRef, matchingFilter)) {
-            return conservativeAllRows(fieldRef.name());
+            return Optional.empty();
         }
         Optional<GlobalIndexResult> existing = dispatchFilter(fieldRef, IndexFilter.exists());
         if (existing.isEmpty()) {
@@ -1641,7 +1625,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 () -> {
                     FieldIndexConfig config = logicalFieldConfig(fieldRef.name());
                     if (config == null) {
-                        return conservativeAllRows(fieldRef.name());
+                        return Optional.empty();
                     }
                     FieldIndexConfig.IndexType type = config.indexType();
                     if (type == FieldIndexConfig.IndexType.KEYWORD
@@ -1785,7 +1769,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
             FieldRef fieldRef, List<Object> literals) {
-        if (literals == null || literals.contains(null)) {
+        if (literals == null || literals.stream().anyMatch(Objects::isNull)) {
             return emptyFilterFuture();
         }
         return async(

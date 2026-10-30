@@ -58,6 +58,12 @@ public class GlobalIndexerFactoryUtils {
         return globalIndexerFactory;
     }
 
+    /** Unknown types must not opt grouped definitions into independent scalar lookups. */
+    public static boolean supportsGroupedIndexScalarQueries(String type) {
+        GlobalIndexerFactory factory = factories.get(type);
+        return factory != null && factory.supportsGroupedIndexScalarQueries();
+    }
+
     /** Keep unrecognized index types for the reader to resolve at execution time. */
     public static List<GlobalIndexIOMeta> selectFiles(
             String type,

@@ -84,6 +84,10 @@ class FilteredRowIdReader {
      */
     static boolean isExact(
             RowType rowType, Predicate filter, GlobalIndexEvaluator.Evaluation evaluation) {
+        // Same-field supported predicates do not prove that an unsupported sibling was evaluated.
+        if (!evaluation.fullyEvaluated()) {
+            return false;
+        }
         Set<Integer> filterFieldIds = collectFieldIds(rowType, filter);
         if (!evaluation.contributingFieldIds().containsAll(filterFieldIds)) {
             return false;
