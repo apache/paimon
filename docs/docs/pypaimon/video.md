@@ -24,7 +24,50 @@ under the License.
 
 # Video Frames
 
-Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). Provide your own video files and frame metadata for the examples below.
+Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). You can import a local video directly or provide frame metadata explicitly.
+
+## Import a Local Video
+
+With Python 3.10 or newer, install `pypaimon[video]`:
+
+```shell
+pip install 'pypaimon[video]'
+```
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+conn = pm.connect(options={"warehouse": "file:///tmp/video_lake"})
+frames = conn.create_table(
+    "auto_frames",
+    schema=pa.schema([
+        pa.field("frame_index", pa.int64()),
+        pa.field("timestamp", pa.float64()),
+        pa.field("episode_id", pa.int64()),
+        pa.field("video", pa.large_binary()),
+    ]),
+    options={"video-frame-field": "video"},
+)
+frames.add_video("/data/example.mp4")
+# Supply constant business fields for another video:
+frames.add_video("/data/episode-42.mp4", metadata={"episode_id": 42})
+```
+
+Omitting `frames` generates one row per decoded frame: `frame_index` starts at
+zero in presentation order; `timestamp` is the actual PTS × time base in seconds,
+relative to the first frame. This preserves variable frame timing. The encoded
+video bytes are stored unchanged in `.video`.
+
+Automatic import accepts a local path with exactly one video stream and requires
+`first_frame=0`. Keep the source file unchanged until the call returns. PyAV/FFmpeg
+must support decoding it; missing or decreasing timestamps and decode errors fail
+the import. Timing discovery decodes the video without retaining images.
+
+`metadata` fills other columns on every row; supply all required business fields.
+For multiple configured video columns, select one with `video_column`; the others
+must be nullable. To supply externally aligned state/action or custom timestamps,
+pass explicit `frames` instead of `metadata`.
 
 ## Video Frame Storage
 

@@ -30,6 +30,40 @@ from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
 
 
+def _inspect_video_frames(path):
+    """Read presentation timestamps without retaining decoded images."""
+    try:
+        import av
+    except ImportError as error:
+        raise ImportError(
+            "Automatic video import requires PyAV; install pypaimon[video]."
+        ) from error
+
+    from array import array
+
+    timestamps = array("d")
+    first_time = None
+    previous_time = None
+    with av.open(path) as container:
+        if len(container.streams.video) != 1:
+            raise ValueError("Automatic video import requires one video stream.")
+        for frame in container.decode(container.streams.video[0]):
+            if frame.is_corrupt:
+                raise ValueError("Video contains a corrupt frame.")
+            if frame.pts is None or frame.time_base is None:
+                raise ValueError("Video frame is missing a presentation timestamp.")
+            current_time = frame.pts * frame.time_base
+            if previous_time is not None and current_time < previous_time:
+                raise ValueError("Video presentation timestamps must be nondecreasing.")
+            if first_time is None:
+                first_time = current_time
+            timestamps.append(float(current_time - first_time))
+            previous_time = current_time
+    if not timestamps:
+        raise ValueError("Video contains no decodable frames.")
+    return timestamps
+
+
 class _VideoDecodePool:
     """One lazily created decode pool per dataset and worker process."""
 

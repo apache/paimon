@@ -124,17 +124,87 @@ class MultimodalTable:
     def add_video(
             self,
             video,
-            frames,
+            frames=None,
             *,
             video_column=None,
-            first_frame=0):
+            first_frame=0,
+            metadata=None):
         """Append logical frame rows backed by one complete encoded video.
 
         ``frames`` supplies every table column except the configured
         ``video-frame-field``. Frame ordinals are generated from
         ``first_frame`` and stored in the video descriptor, not in the normal
-        data file.
+        data file. Omit ``frames`` to inspect a local video and generate
+        ``frame_index`` (int64) and ``timestamp`` (float64 seconds from the
+        first frame). ``metadata`` supplies constant values for other columns.
+        Automatic discovery requires PyAV and one video stream.
         """
+        if frames is None:
+            import os
+            import stat
+
+            from pypaimon.multimodal.video import _inspect_video_frames
+
+            if isinstance(first_frame, bool) or not isinstance(first_frame, int) or first_frame != 0:
+                raise ValueError("first_frame must be 0 when frames is omitted.")
+            column = self._resolve_video_frame_column(video_column)
+            schema = _target_schema(self.raw_table)
+            generated = {"frame_index": pa.int64(), "timestamp": pa.float64()}
+            for name, dtype in generated.items():
+                if name == column or name not in schema.names or schema.field(name).type != dtype:
+                    raise ValueError(
+                        "Automatic video import requires column %r of type %s."
+                        % (name, dtype))
+            if metadata is not None and not isinstance(metadata, Mapping):
+                raise ValueError("metadata must be a mapping or None.")
+            metadata = dict(metadata or {})
+            allowed = set(schema.names) - set(generated) - set(self.raw_table.options.video_frame_fields())
+            if set(metadata) - allowed:
+                raise ValueError("metadata must contain only non-video, non-generated columns.")
+            fields = [field for field in schema if field.name not in generated and field.name != column]
+            constants = _to_arrow_table([metadata], pa.schema(fields)) if fields else None
+            for field in fields:
+                if not field.nullable and constants[field.name].null_count:
+                    raise ValueError("Missing required metadata: %s." % field.name)
+            if not isinstance(video, (str, os.PathLike)):
+                raise ValueError("Automatic video import requires a local path.")
+            video = os.fspath(video)
+            if not isinstance(video, str) or "://" in video:
+                raise ValueError("Automatic video import requires a local path.")
+            video = os.path.abspath(video)
+
+            def source_state():
+                info = os.stat(video)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("Automatic video import requires a regular local file.")
+                return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+            original = source_state()
+            timestamps = _inspect_video_frames(video)
+
+            def check_source():
+                if source_state() != original:
+                    raise ValueError("Video source changed during import.")
+
+            check_source()
+
+            def batches():
+                for start in range(0, len(timestamps), 1024):
+                    end = min(start + 1024, len(timestamps))
+                    values = {
+                        "frame_index": pa.array(range(start, end), type=pa.int64()),
+                        "timestamp": pa.array(timestamps[start:end], type=pa.float64()),
+                    }
+                    if constants is not None:
+                        repeated = constants.take(pa.array([0] * (end - start), type=pa.int32()))
+                        values.update({name: repeated[name] for name in repeated.column_names})
+                    yield _video_frame_table(video, pa.table(values), column, start, schema)
+                # add_batches exhausts this iterator before preparing/committing.
+                check_source()
+
+            return self.add_batches(batches())
+        elif metadata is not None:
+            raise ValueError("metadata is only supported when frames is omitted.")
         return self.add_videos(
             [(video, frames, first_frame)], video_column=video_column
         )
