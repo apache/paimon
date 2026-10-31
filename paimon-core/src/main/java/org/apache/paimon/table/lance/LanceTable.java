@@ -20,6 +20,7 @@ package org.apache.paimon.table.lance;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
@@ -82,7 +83,14 @@ public interface LanceTable extends Table {
         }
 
         public LanceTable build() {
-            return new LanceTableImpl(identifier, fileIO, rowType, location, options, comment);
+            // other engines write Lance datasets, so their files never use io-cache
+            return new LanceTableImpl(
+                    identifier,
+                    fileIO == null ? null : IoCacheViewableFileIO.originOnly(fileIO),
+                    rowType,
+                    location,
+                    options,
+                    comment);
         }
     }
 }

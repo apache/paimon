@@ -28,6 +28,8 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadUtils;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO;
+import org.apache.paimon.fs.iocache.IoCacheViewableFileIO.TableView;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
@@ -43,6 +45,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -214,6 +217,40 @@ class CachingFileIOTest {
     private CachingFileIO newCachingFileIO(
             FileIO delegate, LocalCacheManager cache, EnumSet<FileType> whitelist, int blockSize) {
         return new CachingFileIO(delegate, cache, whitelist);
+    }
+
+    @Test
+    void testTableViewsWrapTheViewOfTheDelegate() throws IOException {
+        IoCacheViewableFileIO delegate = mock(IoCacheViewableFileIO.class);
+        FileIO originOnly = mock(FileIO.class);
+        when(delegate.originOnly()).thenReturn(originOnly);
+        when(delegate.withTableView(any())).thenReturn(delegate);
+        CachingFileIO cachingIO =
+                new CachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META));
+        Path data = new Path("oss://bucket/t/bucket-0/data-1.orc");
+
+        FileIO view = cachingIO.originOnly();
+        assertThat(view).isInstanceOf(CachingFileIO.class).isNotSameAs(cachingIO);
+        view.exists(data);
+        verify(originOnly).exists(data);
+        verify(delegate, never()).exists(any());
+        // a delegate without anything to narrow keeps the wrapper
+        TableView tableView =
+                TableView.of(
+                        Collections.singletonList(new Path("oss://bucket/t")),
+                        Collections.singletonList("custom-"),
+                        null);
+        assertThat(cachingIO.withTableView(tableView)).isSameAs(cachingIO);
+        CachingFileIO plain =
+                new CachingFileIO(
+                        mock(FileIO.class),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META));
+        assertThat(plain.originOnly()).isSameAs(plain);
+        assertThat(plain.withTableView(tableView)).isSameAs(plain);
     }
 
     @Test
