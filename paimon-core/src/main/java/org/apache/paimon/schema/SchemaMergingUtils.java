@@ -327,7 +327,8 @@ public class SchemaMergingUtils {
                 field.name(),
                 dataType,
                 field.description(),
-                field.defaultValue());
+                field.defaultValue(),
+                field.generationExpression());
     }
 
     /**

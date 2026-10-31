@@ -44,6 +44,14 @@ public interface TableWrite extends AutoCloseable {
     /** Specified the write rowType. */
     TableWrite withWriteType(RowType writeType);
 
+    /**
+     * Declares input columns when physical generated columns are omitted. Other columns must be
+     * present. This changes the input layout, not the physical layout written to files.
+     */
+    default TableWrite withInputType(RowType inputType) {
+        throw new UnsupportedOperationException("Declaring an input type is not supported.");
+    }
+
     /** With a shared {@link MemoryPoolFactory} for the current table write. */
     TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory);
 

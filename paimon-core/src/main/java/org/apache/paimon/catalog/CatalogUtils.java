@@ -173,6 +173,9 @@ public class CatalogUtils {
         SchemaValidation.validateQueryAuthTableType(
                 tableType, options.get(CoreOptions.QUERY_AUTH_ENABLED));
         for (DataField field : schema.fields()) {
+            checkArgument(
+                    field.generationExpression() == null || tableType == TableType.TABLE,
+                    "Generated partition columns are only supported for native Paimon tables.");
             validateDefaultValue(field.type(), field.defaultValue());
         }
     }

@@ -36,6 +36,7 @@ import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.GeneratedColumnRow;
 import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.RowKindFilter;
 
@@ -69,6 +70,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private int[] deleteNotNullFieldIndex;
 
     private @Nullable DefaultValueRow defaultValueRow;
+    private @Nullable GeneratedColumnRow generatedColumnRow;
     private final @Nullable Set<String> deleteNotNullFieldNames;
 
     public TableWriteImpl(
@@ -107,6 +109,10 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                 deleteNotNullFieldNames == null ? null : new HashSet<>(deleteNotNullFieldNames);
         updateNotNullFieldIndexes();
         this.defaultValueRow = DefaultValueRow.create(rowType);
+        this.generatedColumnRow =
+                GeneratedColumnRow.hasGeneratedColumns(rowType)
+                        ? new GeneratedColumnRow(rowType, rowType)
+                        : null;
     }
 
     public FileStoreWrite<T> fileStoreWrite() {
@@ -133,10 +139,22 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public TableWriteImpl<T> withWriteType(RowType writeType) {
+        checkState(
+                generatedColumnRow == null || rowType.equals(writeType),
+                "Partial-column writes are not supported for tables with generated partition columns.");
         write.withWriteType(writeType);
         this.writeType = writeType;
         updateNotNullFieldIndexes();
         this.defaultValueRow = DefaultValueRow.create(writeType, rowType);
+        return this;
+    }
+
+    @Override
+    public TableWriteImpl<T> withInputType(RowType inputType) {
+        checkState(
+                GeneratedColumnRow.hasGeneratedColumns(rowType),
+                "An input type can only be declared for tables with generated partition columns.");
+        this.generatedColumnRow = new GeneratedColumnRow(rowType, inputType);
         return this;
     }
 
@@ -183,13 +201,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public BinaryRow getPartition(InternalRow row) {
-        keyAndBucketExtractor.setRecord(row);
+        keyAndBucketExtractor.setRecord(prepareRow(row));
         return keyAndBucketExtractor.partition();
     }
 
     @Override
     public int getBucket(InternalRow row) {
-        keyAndBucketExtractor.setRecord(row);
+        keyAndBucketExtractor.setRecord(prepareRow(row));
         return keyAndBucketExtractor.bucket();
     }
 
@@ -206,7 +224,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle)
             throws Exception {
-        if (write instanceof BundleFileStoreWriter) {
+        if (write instanceof BundleFileStoreWriter && generatedColumnRow == null) {
             ((BundleFileStoreWriter) write).writeBundle(partition, bucket, bundle);
         } else {
             for (InternalRow row : bundle) {
@@ -237,9 +255,9 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Nullable
     private SinkRecord writeAndReturn(InternalRow row, int bucket, @Nullable Integer totalBuckets)
             throws Exception {
-        InternalRow wrappedRow = wrapDefaultValue(row);
+        InternalRow wrappedRow = prepareRow(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, wrappedRow);
-        checkNullability(row, rowKind);
+        checkNullability(generatedColumnRow == null ? row : wrappedRow, rowKind);
         if (rowKindFilter != null && !rowKindFilter.test(rowKind)) {
             return null;
         }
@@ -268,6 +286,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     private InternalRow wrapDefaultValue(InternalRow row) {
         return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
+    }
+
+    private InternalRow prepareRow(InternalRow row) {
+        return generatedColumnRow == null
+                ? wrapDefaultValue(row)
+                : generatedColumnRow.replaceRow(row);
     }
 
     private SinkRecord toSinkRecord(InternalRow row) {

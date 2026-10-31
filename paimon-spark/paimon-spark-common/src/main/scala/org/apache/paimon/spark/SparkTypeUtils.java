@@ -67,10 +67,10 @@ public class SparkTypeUtils {
 
     private SparkTypeUtils() {}
 
-    /**
-     * Copy here from Spark ResolveDefaultColumnsUtils for old Spark versions.
-     */
+    /** Copy here from Spark ResolveDefaultColumnsUtils for old Spark versions. */
     public static final String CURRENT_DEFAULT_COLUMN_METADATA_KEY = "CURRENT_DEFAULT";
+
+    public static final String GENERATION_EXPRESSION_METADATA_KEY = "GENERATION_EXPRESSION";
 
     // Spark SQL functions store DEFAULT in a different metadata key than table columns.
     public static final String SQL_FUNCTION_DEFAULT_METADATA_KEY = "default";
@@ -108,13 +108,14 @@ public class SparkTypeUtils {
         if (type instanceof CharType) {
             return true;
         } else if (type instanceof RowType) {
-            return ((RowType) type).getFields().stream()
-                    .anyMatch(field -> containsCharType(field.type()));
+            return ((RowType) type)
+                    .getFields().stream().anyMatch(field -> containsCharType(field.type()));
         } else if (type instanceof ArrayType) {
             return containsCharType(((ArrayType) type).getElementType());
         } else if (type instanceof MapType) {
             MapType mapType = (MapType) type;
-            return containsCharType(mapType.getKeyType()) || containsCharType(mapType.getValueType());
+            return containsCharType(mapType.getKeyType())
+                    || containsCharType(mapType.getValueType());
         } else if (type instanceof MultisetType) {
             return containsCharType(((MultisetType) type).getElementType());
         }
@@ -309,17 +310,22 @@ public class SparkTypeUtils {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
             for (DataField field : rowType.getFields()) {
                 MetadataBuilder metadataBuilder = new MetadataBuilder();
+                if (field.generationExpression() != null) {
+                    metadataBuilder.putString(
+                            GENERATION_EXPRESSION_METADATA_KEY, field.generationExpression());
+                }
                 if (field.defaultValue() != null) {
-                    metadataBuilder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY, field.defaultValue());
-                    metadataBuilder.putString(SQL_FUNCTION_DEFAULT_METADATA_KEY, field.defaultValue());
+                    metadataBuilder.putString(
+                            CURRENT_DEFAULT_COLUMN_METADATA_KEY, field.defaultValue());
+                    metadataBuilder.putString(
+                            SQL_FUNCTION_DEFAULT_METADATA_KEY, field.defaultValue());
                 }
                 StructField structField =
                         DataTypes.createStructField(
                                 field.name(),
                                 field.type().accept(this),
                                 field.type().isNullable(),
-                                metadataBuilder.build()
-                                );
+                                metadataBuilder.build());
                 structField =
                         Optional.ofNullable(field.description())
                                 .map(structField::withComment)
@@ -396,15 +402,21 @@ public class SparkTypeUtils {
                 String comment = field.getComment().getOrElse(() -> null);
                 String defaultValue = null;
                 if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
-                    defaultValue =
-                            field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
+                    defaultValue = field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
                 } else if (field.metadata().contains(SQL_FUNCTION_DEFAULT_METADATA_KEY)) {
-                    defaultValue =
-                            field.metadata().getString(SQL_FUNCTION_DEFAULT_METADATA_KEY);
+                    defaultValue = field.metadata().getString(SQL_FUNCTION_DEFAULT_METADATA_KEY);
                 }
                 newFields.add(
                         new DataField(
-                                atomicInteger.incrementAndGet(), field.name(), fieldType, comment, defaultValue));
+                                atomicInteger.incrementAndGet(),
+                                field.name(),
+                                fieldType,
+                                comment,
+                                defaultValue,
+                                field.metadata().contains(GENERATION_EXPRESSION_METADATA_KEY)
+                                        ? field.metadata()
+                                                .getString(GENERATION_EXPRESSION_METADATA_KEY)
+                                        : null));
             }
 
             return new RowType(newFields);

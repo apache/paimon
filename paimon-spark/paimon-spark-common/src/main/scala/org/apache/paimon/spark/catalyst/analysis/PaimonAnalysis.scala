@@ -27,16 +27,18 @@ import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsComma
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.utils.GeneratedColumn
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Cast}
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, _}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
+import org.apache.spark.sql.types.DateType
 
 import scala.collection.JavaConverters._
 
@@ -119,7 +121,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation,
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
-    val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val input = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val query = generatePartitionColumns(input, table, v2WriteCommand.isByName, mergeSchemaEnabled)
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
       case Some(dynamicPartitionColumns)
@@ -149,6 +152,47 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
               v2WriteCommand.isByName,
               mergeSchemaEnabled)
         }
+    }
+  }
+
+  private def generatePartitionColumns(
+      query: LogicalPlan,
+      table: DataSourceV2Relation,
+      byName: Boolean,
+      mergeSchemaEnabled: Boolean): LogicalPlan = {
+    val rowType = table.table.asInstanceOf[SparkTable].getTable.rowType()
+    val generated = rowType.getFields.asScala.filter(_.generationExpression() != null)
+    val omitted = if (byName) {
+      generated.filterNot(f => query.output.exists(a => conf.resolver(a.name, f.name())))
+    } else if (query.output.size == table.output.size - generated.size) {
+      generated
+    } else {
+      Seq.empty
+    }
+    if (omitted.isEmpty) {
+      query
+    } else {
+      val names = omitted.map(_.name()).toSet
+      val aligned = resolveWriteOutput(
+        query,
+        table.name,
+        table.output.filterNot(a => names.contains(a.name)),
+        byName,
+        mergeSchemaEnabled)
+      val projected = table.output.map {
+        attr =>
+          omitted.find(f => conf.resolver(f.name(), attr.name)) match {
+            case Some(field) =>
+              val sourceName = GeneratedColumn.create(rowType, field).sourceName()
+              val source = aligned.output.find(a => conf.resolver(a.name, sourceName)).getOrElse {
+                throw new IllegalArgumentException(
+                  s"Missing source column '$sourceName' for generated partition '${field.name()}'.")
+              }
+              Alias(Cast(source, DateType), attr.name)(explicitMetadata = Some(attr.metadata))
+            case None => aligned.output.find(a => conf.resolver(a.name, attr.name)).get
+          }
+      }
+      Project(projected, aligned)
     }
   }
 

@@ -115,9 +115,41 @@ A DataField describes one column, including fields nested inside a row type.
 | `type` | String or JSON type object | Logical type, including nullability and nested type information. |
 | `description` | String, optional | Field comment. |
 | `defaultValue` | String, optional | Stored default value definition. Engine support determines how it is used. |
+| `generationExpression` | String, optional | Expression generating a physical partition column. Mutually exclusive with `defaultValue`. |
 
 Primitive types commonly use strings such as `BIGINT NOT NULL`. Nested types need their
 structured type representation. See [Data Types](../data-types) for the logical type reference.
+
+### Generated Partition Columns
+
+A top-level partition field may define `generationExpression`, for example:
+
+```json
+{
+  "id": 2,
+  "name": "dt",
+  "type": "DATE",
+  "generationExpression": "CAST(event_time AS DATE)"
+}
+```
+
+The first implementation supports only `CAST(timestamp_column AS DATE)`, where the source is
+`TIMESTAMP WITHOUT TIME ZONE` and is an ordinary top-level field. It uses the timestamp's calendar
+date, independently of the writer's default time zone. Generated partition columns are physical
+fields; readers use the stored values without evaluating the expression.
+
+Adapted writers generate omitted columns and validate explicitly supplied values using NULL-safe
+equality. Explicit NULL therefore fails if the expression produces a non-NULL value. A key-only
+DELETE may supply the existing partition value without the timestamp source.
+
+Definitions are supported at table creation. Changing a definition or renaming, dropping, or
+changing the type of its source is not supported. Primary-key tables require the deduplicate merge
+engine. Partial-column writes, including Data Evolution partial updates, are not supported for
+tables with generated partition columns.
+
+Use clients supporting this attribute for writes; older clients may ignore it. Its presence does
+not establish compatibility with older writers. See [Spark DDL](../../spark/sql-ddl#generated-partition-columns)
+for SQL examples.
 
 ## Update Schema
 

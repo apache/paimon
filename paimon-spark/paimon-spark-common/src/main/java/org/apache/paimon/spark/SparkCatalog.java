@@ -45,7 +45,9 @@ import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.EncodingUtils;
 import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.GeneratedColumn;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
@@ -59,12 +61,15 @@ import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.apache.spark.sql.catalyst.catalog.PaimonV1FunctionRegistry;
 import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function;
+import org.apache.spark.sql.connector.catalog.CatalogV2Util;
+import org.apache.spark.sql.connector.catalog.Column;
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.StagedTable;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.connector.catalog.TableCatalogCapability;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.FieldReference;
@@ -77,6 +82,7 @@ import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2;
 import org.apache.spark.sql.internal.SQLConf;
 import org.apache.spark.sql.types.ArrayType;
 import org.apache.spark.sql.types.BinaryType;
+import org.apache.spark.sql.types.MetadataBuilder;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -88,6 +94,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -102,6 +109,7 @@ import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.spark.SparkCatalogOptions.V1FUNCTION_ENABLED;
 import static org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_METADATA_KEY;
+import static org.apache.paimon.spark.SparkTypeUtils.GENERATION_EXPRESSION_METADATA_KEY;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfigurations;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
@@ -126,6 +134,14 @@ public class SparkCatalog extends SparkBaseCatalog
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
     public static final String FUNCTION_DEFINITION_NAME = "spark";
+
+    @Override
+    public Set<TableCatalogCapability> capabilities() {
+        return EnumSet.of(
+                TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE,
+                TableCatalogCapability.SUPPORTS_CREATE_TABLE_WITH_GENERATED_COLUMNS);
+    }
+
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
     private Catalog catalog;
@@ -375,6 +391,37 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
+    /** Spark separates generation expressions from StructField metadata in its V2 columns. */
+    @Override
+    public org.apache.spark.sql.connector.catalog.Table createTable(
+            Identifier ident,
+            Column[] columns,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        return createTable(ident, generatedColumnSchema(columns), partitions, properties);
+    }
+
+    private static StructType generatedColumnSchema(Column[] columns) {
+        StructField[] fields = CatalogV2Util.v2ColumnsToStructType(columns).fields();
+        for (int i = 0; i < columns.length; i++) {
+            if (columns[i].generationExpression() != null) {
+                fields[i] =
+                        new StructField(
+                                fields[i].name(),
+                                fields[i].dataType(),
+                                fields[i].nullable(),
+                                new MetadataBuilder()
+                                        .withMetadata(fields[i].metadata())
+                                        .putString(
+                                                GENERATION_EXPRESSION_METADATA_KEY,
+                                                columns[i].generationExpression())
+                                        .build());
+            }
+        }
+        return new StructType(fields);
+    }
+
     @Override
     public org.apache.spark.sql.connector.catalog.Table createTable(
             Identifier ident,
@@ -429,6 +476,36 @@ public class SparkCatalog extends SparkBaseCatalog
                     "Using CTAS with a partitioned engine format table is not supported. "
                             + "Set 'format-table.implementation' to 'paimon'.");
         }
+    }
+
+    @Override
+    public StagedTable stageCreate(
+            Identifier ident,
+            Column[] columns,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        return stageCreate(ident, generatedColumnSchema(columns), partitions, properties);
+    }
+
+    @Override
+    public StagedTable stageReplace(
+            Identifier ident,
+            Column[] columns,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException, NoSuchTableException {
+        return stageReplace(ident, generatedColumnSchema(columns), partitions, properties);
+    }
+
+    @Override
+    public StagedTable stageCreateOrReplace(
+            Identifier ident,
+            Column[] columns,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException {
+        return stageCreateOrReplace(ident, generatedColumnSchema(columns), partitions, properties);
     }
 
     @Override
@@ -674,13 +751,27 @@ public class SparkCatalog extends SparkBaseCatalog
                 type = toPaimonType(field.dataType()).copy(field.nullable());
             }
             String comment = field.getComment().getOrElse(() -> null);
-            if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
-                String defaultValue =
-                        field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
-                schemaBuilder.column(name, type, comment, defaultValue);
-            } else {
-                schemaBuilder.column(name, type, comment);
+            String generationExpression =
+                    field.metadata().contains(GENERATION_EXPRESSION_METADATA_KEY)
+                            ? field.metadata().getString(GENERATION_EXPRESSION_METADATA_KEY)
+                            : null;
+            if (generationExpression != null) {
+                String source = GeneratedColumn.sourceName(generationExpression);
+                String resolved =
+                        resolveColumnNames(Collections.singletonList(source), fieldNames).get(0);
+                if (!source.equals(resolved)) {
+                    generationExpression =
+                            "CAST(" + EncodingUtils.escapeIdentifier(resolved) + " AS DATE)";
+                }
             }
+            schemaBuilder.column(
+                    name,
+                    type,
+                    comment,
+                    field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)
+                            ? field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY)
+                            : null,
+                    generationExpression);
         }
         return schemaBuilder.build();
     }

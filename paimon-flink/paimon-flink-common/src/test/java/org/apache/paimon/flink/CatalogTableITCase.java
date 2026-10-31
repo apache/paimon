@@ -19,12 +19,17 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
@@ -58,6 +63,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
 public class CatalogTableITCase extends CatalogITCaseBase {
+
+    @Test
+    void testGeneratedPartitionSchemaRoundTrip() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("ts", DataTypes.TIMESTAMP(3))
+                        .generatedColumn("dt", DataTypes.DATE(), "CAST(ts AS DATE)")
+                        .partitionKeys("dt")
+                        .build();
+        flinkCatalog()
+                .catalog()
+                .createTable(
+                        Identifier.create(tEnv.getCurrentDatabase(), "generated_events"),
+                        schema,
+                        false);
+        CatalogTable source = table("generated_events");
+        ResolvedCatalogTable resolved =
+                new ResolvedCatalogTable(source, tEnv.from("generated_events").getResolvedSchema());
+        assertThat(FlinkCatalog.fromCatalogTable(resolved).fields().get(1).generationExpression())
+                .isEqualTo("CAST(ts AS DATE)");
+        sql("ALTER TABLE generated_events MODIFY dt DATE COMMENT 'generated date'");
+        assertThat(paimonTable("generated_events").rowType().getField("dt").generationExpression())
+                .isEqualTo("CAST(ts AS DATE)");
+    }
 
     @Override
     protected Map<String, String> catalogOptions() {

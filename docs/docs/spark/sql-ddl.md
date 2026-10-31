@@ -90,6 +90,36 @@ TBLPROPERTIES ('primary-key' = 'dt,hh,user_id');
 Omit `primary-key` to create an append table. For storage layout and table options, see
 [Primary Key Tables](../primary-key-table/) and [Append Tables](../append-table/).
 
+### Generated Partition Columns
+
+On Spark 3.5 with `org.apache.paimon.spark.SparkCatalog`, define a physical partition column
+with `GENERATED ALWAYS AS`:
+
+```sql
+CREATE TABLE events (
+    id BIGINT,
+    event_time TIMESTAMP_NTZ,
+    dt DATE GENERATED ALWAYS AS (CAST(event_time AS DATE))
+) USING paimon PARTITIONED BY (dt);
+
+INSERT INTO events (id, event_time)
+VALUES (1, TIMESTAMP_NTZ '2026-10-30 12:00:00');
+```
+
+The writer generates `dt` before partition routing. You can also provide `dt` explicitly, but it
+must equal the generated date, including NULL handling. Expressions are stored in the column's
+schema definition. Only a cast from a top-level `TIMESTAMP_NTZ` source to a `DATE` partition field
+is supported. Ordinary append inserts and primary-key deduplicate writes are supported; existing
+primary-key and partition constraints still apply. Partial-column writes are not supported.
+
+The Java schema builder exposes `generatedColumn(name, type, expression)`. Java writers can call
+`withInputType` with all ordinary fields to omit generated partition fields from input rows.
+Flink's existing virtual computed columns retain their original semantics; this feature does not
+add Flink SQL syntax for physical generated columns.
+
+Generated definitions and the names and types of their dependencies cannot be changed after
+creation. Use writers that understand this schema attribute; older writers may ignore it.
+
 ### Manage Format Table Partitions
 
 See [Format Table Partitions](./format-table) for partition registration, custom locations,

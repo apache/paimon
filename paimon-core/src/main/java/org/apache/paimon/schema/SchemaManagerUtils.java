@@ -282,7 +282,8 @@ final class SchemaManagerUtils {
                                             rename.newName(),
                                             field.type(),
                                             field.description(),
-                                            field.defaultValue());
+                                            field.defaultValue(),
+                                            field.generationExpression());
                             newFields.set(i, newField);
                             return;
                         }
@@ -360,7 +361,8 @@ final class SchemaManagerUtils {
                                     field.name(),
                                     newFieldType,
                                     field.description(),
-                                    field.defaultValue());
+                                    field.defaultValue(),
+                                    field.generationExpression());
                         },
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnNullability) {
@@ -391,7 +393,8 @@ final class SchemaManagerUtils {
                                             depth,
                                             update.fieldNames().length),
                                     field.description(),
-                                    field.defaultValue());
+                                    field.defaultValue(),
+                                    field.generationExpression());
                         },
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
@@ -410,7 +413,8 @@ final class SchemaManagerUtils {
                                         field.name(),
                                         field.type(),
                                         update.newDescription(),
-                                        field.defaultValue()),
+                                        field.defaultValue(),
+                                        field.generationExpression()),
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnPosition) {
                 UpdateColumnPosition update = (UpdateColumnPosition) change;
@@ -428,7 +432,8 @@ final class SchemaManagerUtils {
                                     field.name(),
                                     field.type(),
                                     field.description(),
-                                    update.newDefaultValue());
+                                    update.newDefaultValue(),
+                                    field.generationExpression());
                         },
                         lazyIdentifier);
             } else if (change instanceof SchemaChange.DropPrimaryKey) {
@@ -462,6 +467,7 @@ final class SchemaManagerUtils {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
+        SchemaValidation.validateGeneratedColumnEvolution(oldTableSchema, newTableSchema);
         SchemaValidation.validateTableSchema(newTableSchema);
         return newTableSchema;
     }
@@ -888,7 +894,8 @@ final class SchemaManagerUtils {
                                 field.name(),
                                 wrapNewRowType(field.type(), nestedFields),
                                 field.description(),
-                                field.defaultValue()));
+                                field.defaultValue(),
+                                field.generationExpression()));
                 return;
             }
 
