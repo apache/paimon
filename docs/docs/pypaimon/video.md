@@ -157,8 +157,10 @@ frames.add_video(video, episode_43_rows)
 ```
 
 PyAV indexes supported ISO BMFF videos (e.g. MP4); other decodable videos fall back
-to scanning. Index generation uses temporary disk; readers cache up to 1 MiB of
-entry pages per index and 4,096 ordinal lookups per search view.
+to scanning. Index generation uses temporary disk. `video.index.compression` defaults to `zlib`;
+set it to `none` for uncompressed pages. Copied indexes keep their encoding, and
+readers detect it automatically. Small indexes load once into compact memory;
+large indexes load pages on demand.
 
 The writer deduplicates exact payload descriptor identity inside each `.video`
 file. Its video grouping policy coordinates normal, BLOB, and vector rolling

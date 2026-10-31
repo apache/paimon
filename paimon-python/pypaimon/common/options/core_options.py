@@ -1204,6 +1204,14 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    VIDEO_INDEX_COMPRESSION: ConfigOption[str] = (
+        ConfigOptions.key("video.index.compression")
+        .string_type()
+        .default_value("zlib")
+        .with_description("Compression for newly generated video keyframe indexes: zlib or none. "
+                          "Copied indexes retain their encoding.")
+    )
+
     READ_VIDEO_MAX_OPEN_DECODERS: ConfigOption[int] = (
         ConfigOptions.key("read.video.max-open-decoders")
         .int_type()
@@ -2020,6 +2028,12 @@ class CoreOptions:
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def video_index_compression(self) -> str:
+        value = self.options.get(CoreOptions.VIDEO_INDEX_COMPRESSION)
+        if value not in ('none', 'zlib'):
+            raise ValueError("video.index.compression must be 'none' or 'zlib'.")
+        return value
 
     def read_video_max_open_decoders(self) -> int:
         return self._positive_video_option(CoreOptions.READ_VIDEO_MAX_OPEN_DECODERS)

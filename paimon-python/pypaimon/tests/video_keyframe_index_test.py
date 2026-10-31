@@ -25,7 +25,24 @@ import unittest
 import zlib
 from unittest import mock
 
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex, _IndexedKeyframes
+
+
+def encode_index(entries, count=None, ranges=(), codec=0):
+    count = len(entries) if count is None else count
+    header = VideoKeyframeIndex.HEADER.pack(1, VideoKeyframeIndex.MAGIC, len(ranges), count, codec)
+    metadata = b''.join(struct.pack('<qq', *v) for v in ranges)
+    pages = [entries[i:i + 4096] for i in range(0, len(entries), 4096)]
+    offset = len(header) + len(metadata) + len(pages) * 68
+    directory, payload = bytearray(), bytearray()
+    for values in pages:
+        raw = b''.join(struct.pack('<qqq', *v) for v in values)
+        data = zlib.compress(raw, 1) if codec else raw
+        rec = struct.pack('<QIIqqqqqq', offset, len(data), zlib.crc32(raw), *values[0], *values[-1])
+        directory.extend(rec + struct.pack('<I', zlib.crc32(rec)))
+        payload.extend(data)
+        offset += len(data)
+    return header + metadata + directory + payload
 
 
 class VideoKeyframeIndexTest(unittest.TestCase):
@@ -141,7 +158,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
             VideoKeyframeIndex(
                 [(0, 1), (1, 1)], [(0, 0, 0)]).metadata_ranges,
         )
-        self.assertEqual(21, index.HEADER.size)
+        self.assertEqual(22, index.HEADER.size)
         self.assertFalse(hasattr(restored, 'time_base'))
         self.assertFalse(hasattr(restored, 'frame_count'))
         self.assertFalse(hasattr(restored, 'stream_index'))
@@ -169,13 +186,8 @@ class VideoKeyframeIndexTest(unittest.TestCase):
 
     def test_deserialize_matches_streaming_validation(self):
         def encode(entries, count=None, page=None):
-            if page is None:
-                page = b''.join(VideoKeyframeIndex.ENTRY.pack(*entry) for entry in entries)
-                page += struct.pack('<I', zlib.crc32(page))
-            return VideoKeyframeIndex.HEADER.pack(
-                VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC,
-                0, len(entries) if count is None else count,
-            ) + page
+            data = encode_index(entries, count)
+            return data if page is None else data[:22 + 68] + page
 
         valid = [(0, -(2 ** 63), 0), (2 ** 63 - 1, 2 ** 63 - 1, 99)]
         for entries in ([(0, -10, 0)], valid):
@@ -213,23 +225,17 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                         read(data, 100)
 
     def test_deserialize_preserves_metadata_normalization(self):
-        data = VideoKeyframeIndex.HEADER.pack(
-            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 3, 1
-        ) + b''.join(VideoKeyframeIndex.METADATA_RANGE.pack(*entry)
-                     for entry in [(0, 2), (2, 3), (8, 2)])
-        page = VideoKeyframeIndex.ENTRY.pack(0, -1, 10)
-        data += page + struct.pack('<I', zlib.crc32(page))
+        data = encode_index([(0, -1, 10)], ranges=[(0, 2), (2, 3), (8, 2)])
         restored = VideoKeyframeIndex.deserialize(data, 11)
         self.assertEqual(((0, 5), (8, 2)), restored.metadata_ranges)
         self.assertEqual(((0, -1, 10),), restored.keyframes)
 
     def test_large_index_is_read_in_pages(self):
-        import bisect
         import tempfile
         count = 1_000_000
         with VideoKeyframeIndex([], ((i, i - 100, i * 2) for i in range(count))) as index:
             with tempfile.TemporaryFile() as stored:
-                index.write_to(stored)
+                index.write_to(stored, "none")
                 length = stored.tell()
                 self.assertGreater(length, 16 * 1024 * 1024)
                 reads = []
@@ -245,22 +251,21 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                     for ordinal in (count - 1, 32768, 0, 499999):
                         before = len(reads)
                         self.assertEqual((ordinal, ordinal - 100, ordinal * 2), restored.keyframes[ordinal])
-                        self.assertLessEqual(len(reads) - before, 1)
+                        self.assertLessEqual(len(reads) - before, 3)
                         before = len(reads)
                         self.assertEqual((ordinal, ordinal - 100, ordinal * 2), restored.keyframes[ordinal])
                         self.assertEqual(before, len(reads))
-                        self.assertEqual(ordinal, bisect.bisect_left(restored.ordinals, ordinal))
+                        self.assertEqual(ordinal, restored.preceding(ordinal))
                     self.assertLessEqual(max(size for _, size in reads), 3 * (4096 * 24 + 4))
                     self.assertLessEqual(sum(map(len, restored.keyframes.cache.values())), 1024 * 1024)
                 VideoKeyframeIndex.validate_stream(stored, length, count * 2)
 
     def test_binary_search_coalesces_adjacent_page_reads(self):
-        import bisect
         import tempfile
         count = 1_000_000
         with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as original:
             with tempfile.TemporaryFile() as stored:
-                original.write_to(stored)
+                original.write_to(stored, "none")
                 length = stored.tell()
                 reads = []
 
@@ -274,7 +279,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                         reads.clear()
                         with VideoKeyframeIndex.open(read_at, length, count) as index:
                             reads.clear()
-                            self.assertEqual(target, bisect.bisect_left(index.ordinals, target))
+                            self.assertEqual(target, index.preceding(target))
                             self.assertLessEqual(len(reads), 9)
                             self.assertLessEqual(max(size for _, size in reads), 3 * (4096 * 24 + 4))
                             before = len(reads)
@@ -282,28 +287,20 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                             self.assertEqual(before, len(reads))
                             self.assertLessEqual(sum(map(len, index.keyframes.cache.values())), 1024 * 1024)
 
-    def test_validated_page_does_not_reload_evicted_neighbors(self):
-        with VideoKeyframeIndex([], ((i, i, i) for i in range(16 * 4096))) as original:
-            data = original.serialize()
-        reads = []
-
-        def read_at(offset, size):
-            reads.append((offset, size))
-            return data[offset:offset + size]
-
-        with VideoKeyframeIndex.open(read_at, len(data)) as index:
-            self.assertEqual((0, 0, 0), index.keyframes[0])
-            for page in range(3, 16):
-                index.keyframes[page * 4096]
-                before = len(reads)
-                self.assertEqual((0, 0, 0), index.keyframes[0])
-                self.assertEqual(before, len(reads))
-            index.keyframes.cache.pop(1, None)
-            index.keyframes.validated.discard(1)
-            before = len(reads)
-            self.assertEqual((0, 0, 0), index.keyframes[0])
-            self.assertEqual(before, len(reads))
-            self.assertLessEqual(len(index.keyframes.validated), len(index.keyframes.cache))
+    def test_small_indexes_load_once_for_both_codecs(self):
+        for codec in ('none', 'zlib'):
+            with VideoKeyframeIndex([], ((i, i, i) for i in range(65536))) as original:
+                data = original.serialize(codec)
+            read = mock.Mock(side_effect=lambda o, n: data[o:o + n])
+            with VideoKeyframeIndex.open(read, len(data)) as index:
+                self.assertEqual(1, read.call_count)
+                self.assertEqual(65536 * 24, len(index.keyframes.eager))
+                for i in (0, 32768, 65535):
+                    self.assertEqual(i, index.preceding(i))
+                    self.assertEqual((i, i, i), index.keyframes[i])
+                self.assertEqual(1, read.call_count)
+                self.assertIsNone(index.keyframes.read_at)
+                self.assertFalse(index.keyframes.cache)
 
     def test_ordinal_probe_cache_is_bounded(self):
         with VideoKeyframeIndex([], ((i, i, i) for i in range(8192))) as original:
@@ -317,48 +314,50 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                 self.assertEqual(4999, ordinals[4999])
 
     def test_paged_corruption_and_boundary_validation(self):
-        with VideoKeyframeIndex([], ((i, i, i) for i in range(8193))) as index:
-            data = index.serialize()
-        second = VideoKeyframeIndex.HEADER.size + 4096 * 24 + 4
-        corrupt = bytearray(data)
-        corrupt[second] ^= 1
-        with self.assertRaisesRegex(ValueError, 'checksum'):
-            with VideoKeyframeIndex.open(lambda o, n: corrupt[o:o + n], len(corrupt)) as index:
-                _ = index.keyframes[4096]
-        # A valid page checksum must not hide a descending page boundary.
-        corrupt = bytearray(data)
-        page = b''.join(VideoKeyframeIndex.ENTRY.pack(i, i, i) for i in range(4096))
-        corrupt[second:second + len(page)] = page
-        struct.pack_into('<I', corrupt, second + len(page), zlib.crc32(page))
-        for invalid in (corrupt, data[:-1], data + b'x'):
-            with self.assertRaises(ValueError):
-                VideoKeyframeIndex.validate(invalid)
+        entries = [(i, i, i) for i in range(8193)]
+        for codec in (0, 1):
+            data = encode_index(entries, codec=codec)
+            corrupt = bytearray(data)
+            corrupt[-1] ^= 1
+            for invalid in (corrupt, data[:-1], data + b'x'):
+                with self.assertRaises(ValueError):
+                    VideoKeyframeIndex.validate(invalid)
+            corrupt = bytearray(data)
+            corrupt[22] ^= 1
+            with self.assertRaisesRegex(ValueError, 'directory checksum'):
+                VideoKeyframeIndex.deserialize(corrupt)
 
     def test_lazy_reads_validate_uncached_page_boundaries(self):
-        page_entries = 4096
-        stride = page_entries * 24 + 4
-        with VideoKeyframeIndex([], ((i, i, i) for i in range(16 * page_entries))) as index:
-            original = index.serialize()
+        entries = [(i, i, i) for i in range(16 * 4096)]
         for column in range(3):
-            corrupt = bytearray(original)
-            offset = VideoKeyframeIndex.HEADER.size + 12 * stride
-            page = bytearray(corrupt[offset:offset + page_entries * 24])
-            for entry in range(page_entries):
-                struct.pack_into('<q', page, entry * 24 + column * 8, 11 * page_entries + entry)
-            corrupt[offset:offset + len(page)] = page
-            struct.pack_into('<I', corrupt, offset + len(page), zlib.crc32(page))
+            damaged = list(entries)
+            for i in range(12 * 4096, 13 * 4096):
+                entry = list(damaged[i])
+                entry[column] -= 4096
+                damaged[i] = tuple(entry)
+            data = encode_index(damaged)
             for target in (11, 12):
                 for cache_state in ('cold', 'cached', 'evicted'):
                     with self.subTest(column=column, target=target, cache_state=cache_state):
-                        with VideoKeyframeIndex.open(
-                                lambda o, n: corrupt[o:o + n], len(corrupt)) as index:
+                        with mock.patch.object(_IndexedKeyframes, 'EAGER_BYTES', 0), VideoKeyframeIndex.open(
+                                lambda o, n: data[o:o + n], len(data)) as index:
                             if cache_state != 'cold':
-                                index.keyframes[(target - 1 if target == 11 else target + 1) * page_entries]
+                                index.keyframes[(target - 1 if target == 11 else target + 1) * 4096]
                             if cache_state == 'evicted':
                                 for prior in range(10):
-                                    index.keyframes[prior * page_entries]
+                                    index.keyframes[prior * 4096]
                             with self.assertRaisesRegex(ValueError, 'strictly increasing'):
-                                index.keyframes[target * page_entries]
+                                index.keyframes[target * 4096]
+
+    def test_compressed_page_rejects_overflow_truncation_and_trailing_bytes(self):
+        good = encode_index([(0, 0, 0), (1, 1, 1)], codec=1)
+        for compressed in (zlib.compress(b'\0' * 1_000_000), good[90:-1], good[90:] + b'x'):
+            record = bytearray(good[22:90])
+            struct.pack_into('<I', record, 8, len(compressed))
+            struct.pack_into('<I', record, 64, zlib.crc32(record[:64]))
+            data = good[:22] + record + compressed
+            with self.assertRaises(ValueError):
+                VideoKeyframeIndex.deserialize(data)
 
     def test_validate_rejects_ranges_outside_video_payload(self):
         metadata_outside = VideoKeyframeIndex(
@@ -375,16 +374,16 @@ class VideoKeyframeIndexTest(unittest.TestCase):
 
     def test_rejects_forged_paged_count_before_reading_entries(self):
         data = VideoKeyframeIndex.HEADER.pack(
-            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, 2 ** 63)
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, 2 ** 63, 0)
         read = mock.Mock(side_effect=lambda o, n: data[o:o + n])
         with self.assertRaisesRegex(ValueError, 'entries length'):
             VideoKeyframeIndex.open(read, len(data))
-        self.assertLessEqual(max(call.args[1] for call in read.call_args_list), 21)
+        self.assertLessEqual(max(call.args[1] for call in read.call_args_list), 22)
 
     def test_rejects_too_many_metadata_ranges_before_materialization(self):
         count = VideoKeyframeIndex.MAX_METADATA_RANGE_COUNT + 1
         data = VideoKeyframeIndex.HEADER.pack(
-            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, count, 1
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, count, 1, 0
         ) + zlib.compress(VideoKeyframeIndex.ENTRY.pack(0, 0, 0))
 
         with mock.patch.object(

@@ -66,9 +66,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class VideoFileFormatTest {
 
     private static final String KEYFRAME_INDEX_HEX =
-            "0149464b4f4544495601000000020000000000000000000000000000000100000000000000000000"
-                    + "0000000000000000000000000000000000000000000c00000000000000a08c000000000000020000"
-                    + "0000000000dfd9164b";
+            "0149464b4f4544495601000000020000000000000001000000000000000001000000000000006a0000000000000015000000dfd9164b0000000000000000000000000000000000000000000000000c00000000000000a08c0000000000000200000000000000cac9c2a078016360c00e78a0c20b7a200c26281f001394013b";
 
     @TempDir java.nio.file.Path tempPath;
 
@@ -134,6 +132,26 @@ public class VideoFileFormatTest {
     public void testCrossLanguageV1Fixture() throws IOException {
         byte[] fixture = fixture("video-v1.hex");
         checkVideoFixture(fixture, fromHex(KEYFRAME_INDEX_HEX));
+    }
+
+    @Test
+    public void testCrossLanguageUncompressedFixture() throws IOException {
+        byte[] fixture = fixture("video-uncompressed-v1.hex");
+        byte[] mapping = java.util.Arrays.copyOfRange(fixture, 7, 7 + 154);
+        checkVideoFixture(fixture, mapping);
+    }
+
+    @Test
+    public void testCompressedPageCorruption() {
+        byte[] mapping = fromHex(KEYFRAME_INDEX_HEX);
+        mapping[mapping.length - 1] ^= 1;
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+        byte[] codec = fromHex(KEYFRAME_INDEX_HEX);
+        codec[21] = 2;
+        assertThatThrownBy(() -> VideoKeyframeIndex.validate(codec, 3))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("codec");
     }
 
     private void checkVideoFixture(byte[] fixture, byte[] mapping) throws IOException {
@@ -226,12 +244,13 @@ public class VideoFileFormatTest {
     @Test
     public void testRejectForgedPagedCount() {
         byte[] mapping =
-                ByteBuffer.allocate(21)
+                ByteBuffer.allocate(22)
                         .order(ByteOrder.LITTLE_ENDIAN)
                         .put((byte) 1)
                         .putLong(0x564944454F4B4649L)
                         .putInt(0)
                         .putLong(Long.MAX_VALUE)
+                        .put((byte) 0)
                         .array();
         assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -267,27 +286,40 @@ public class VideoFileFormatTest {
                                                 restored))
                                 .toData())
                 .isEqualTo(mapping);
-        mapping[21 + 4096 * 24 + 4] ^= 1;
+        mapping[mapping.length - 1] ^= 1;
         assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, count))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("checksum");
         byte[] descending = pagedIndex(8192);
-        System.arraycopy(descending, 21, descending, 21 + 4096 * 24 + 4, 4096 * 24 + 4);
+        int directory = 22 + 68;
+        ByteBuffer.wrap(descending).order(ByteOrder.LITTLE_ENDIAN).putLong(directory + 16, 0);
+        java.util.zip.CRC32 checksum = new java.util.zip.CRC32();
+        checksum.update(descending, directory, 64);
+        ByteBuffer.wrap(descending)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(directory + 64, (int) checksum.getValue());
         assertThatThrownBy(() -> VideoKeyframeIndex.validate(descending, 8192))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ordinals");
     }
 
     private static byte[] pagedIndex(int count) throws IOException {
+        return pagedIndex(count, false);
+    }
+
+    private static byte[] pagedIndex(int count, boolean compress) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
         out.write(
-                ByteBuffer.allocate(21)
+                ByteBuffer.allocate(22)
                         .order(ByteOrder.LITTLE_ENDIAN)
                         .put((byte) 1)
                         .putLong(0x564944454F4B4649L)
                         .putInt(0)
                         .putLong(count)
+                        .put((byte) (compress ? 1 : 0))
                         .array());
+        long offset = 22 + ((count - 1L) / 4096 + 1) * 68;
         for (int start = 0; start < count; start += 4096) {
             int end = Math.min(count, start + 4096);
             ByteBuffer page =
@@ -297,16 +329,61 @@ public class VideoFileFormatTest {
             }
             java.util.zip.CRC32 crc = new java.util.zip.CRC32();
             crc.update(page.array());
-            out.write(page.array());
-            out.write(intToLittleEndian((int) crc.getValue()));
+            ByteBuffer record = ByteBuffer.allocate(68).order(ByteOrder.LITTLE_ENDIAN);
+            byte[] encoded = compress ? compressPage(page.array()) : page.array();
+            record.putLong(offset).putInt(encoded.length).putInt((int) crc.getValue());
+            record.putLong(start).putLong(start).putLong(start);
+            record.putLong(end - 1).putLong(end - 1).putLong(end - 1);
+            crc.reset();
+            crc.update(record.array(), 0, 64);
+            record.putInt((int) crc.getValue());
+            out.write(record.array());
+            data.write(encoded);
+            offset += encoded.length;
+        }
+        data.writeTo(out);
+        return out.toByteArray();
+    }
+
+    private static byte[] compressPage(byte[] data) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        java.util.zip.Deflater deflater = new java.util.zip.Deflater(1);
+        try (java.util.zip.DeflaterOutputStream stream =
+                new java.util.zip.DeflaterOutputStream(out, deflater)) {
+            stream.write(data);
+        } finally {
+            deflater.end();
         }
         return out.toByteArray();
     }
 
     @Test
+    public void testCompressedPagesAndOutputBounds() throws IOException {
+        VideoKeyframeIndex.validate(pagedIndex(8193, true), 8193);
+        byte[] valid = pagedIndex(1, true);
+        byte[] encoded = java.util.Arrays.copyOfRange(valid, 90, valid.length);
+        byte[][] invalid = {
+            compressPage(new byte[1000000]),
+            java.util.Arrays.copyOf(encoded, encoded.length - 1),
+            java.util.Arrays.copyOf(encoded, encoded.length + 1)
+        };
+        for (byte[] data : invalid) {
+            byte[] mapping = java.util.Arrays.copyOf(valid, 90 + data.length);
+            System.arraycopy(data, 0, mapping, 90, data.length);
+            ByteBuffer bytes = ByteBuffer.wrap(mapping).order(ByteOrder.LITTLE_ENDIAN);
+            bytes.putInt(30, data.length);
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            crc.update(mapping, 22, 64);
+            bytes.putInt(86, (int) crc.getValue());
+            assertThatThrownBy(() -> VideoKeyframeIndex.validate(mapping, 1))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     public void testRejectTooManyMetadataRanges() {
         byte[] mapping =
-                ByteBuffer.allocate(22)
+                ByteBuffer.allocate(23)
                         .order(ByteOrder.LITTLE_ENDIAN)
                         .put((byte) 1)
                         .putLong(0x564944454F4B4649L)
@@ -325,8 +402,7 @@ public class VideoFileFormatTest {
         byte[] video = "video".getBytes(StandardCharsets.UTF_8);
         byte[] mapping =
                 fromHex(
-                        "0149464b4f4544495601000000010000000000000000000000000000000600000000000000000000"
-                                + "00000000000000000000000000000000000000000020cac1a3");
+                        "0149464b4f4544495601000000010000000000000001000000000000000006000000000000006a000000000000000b00000020cac1a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000057779f0778016360c00e0000180001");
         java.nio.file.Path source = tempPath.resolve("out-of-range-index.mp4");
         byte[] sourceBytes = new byte[video.length + mapping.length];
         int offset = put(sourceBytes, 0, video);
@@ -354,8 +430,7 @@ public class VideoFileFormatTest {
         byte[] firstIndex = fromHex(KEYFRAME_INDEX_HEX);
         byte[] secondIndex =
                 fromHex(
-                        "0149464b4f4544495600000000020000000000000000000000000000000000000000000000000000"
-                                + "00000000000600000000000000504600000000000002000000000000005381c820");
+                        "0149464b4f45444956000000000200000000000000015a00000000000000150000005381c820000000000000000000000000000000000000000000000000060000000000000050460000000000000200000000000000505ca77d78016360c00ed8a0c2016e100613940f0009ea009f");
         java.nio.file.Path source = tempPath.resolve("inconsistent-index.mp4");
         byte[] sourceBytes = new byte[video.length + firstIndex.length + secondIndex.length];
         int offset = put(sourceBytes, 0, video);

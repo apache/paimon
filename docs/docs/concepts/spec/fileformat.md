@@ -441,7 +441,7 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-Keyframe-index v1 is little endian; byte offsets are relative to the video payload.
+Keyframe-index v1 is little endian. Metadata and packet offsets are relative to the video payload.
 
 | Field | Size |
 | --- | ---: |
@@ -449,17 +449,21 @@ Keyframe-index v1 is little endian; byte offsets are relative to the video paylo
 | Magic (`0x564944454F4B4649`) | 8 bytes |
 | Metadata-range count | 4 bytes |
 | Keyframe count | 8 bytes |
+| Page codec (`0`: uncompressed, `1`: zlib) | 1 byte |
 | Metadata `(offset, length)` pairs | 16 bytes each |
+| Page directory | 68 bytes per page |
 | Keyframe pages | Variable |
 
-Each page holds 4,096 uncompressed `(frame ordinal, PTS, packet position)` int64 triples
-and their 4-byte CRC32; the last page may be shorter. Page `p` starts at
-`21 + 16 * metadata_count + p * 98308`.
+Each page holds up to 4,096 `(frame ordinal, PTS, packet position)` int64 triples,
+optionally zlib-compressed independently. Directory records contain the page offset
+relative to the index (8 bytes), encoded length (4), uncompressed CRC32 (4), first
+and last triples (48), and CRC32 of the preceding 64 bytes (4). Pages are contiguous
+immediately after the directory; their lengths account for the entire index.
+
 Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
 The index covers the first video stream; its time base remains in the video.
-
-Readers validate each accessed page and its adjacent page boundaries; writers validate all pages.
-Metadata ranges are limited to 65,536; keyframe count and total index size have no configured limit.
+Readers check accessed pages against their directory endpoints and adjacent records;
+writers validate all pages. Metadata ranges are limited to 65,536.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 
