@@ -211,7 +211,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         }
     }
 
-    protected List<SearchResult> searchBuckets(
+    public List<SearchResult> searchBuckets(
             List<BucketVectorSearchSplit> splits, float[][] queries) {
         try {
             SearchContext context = createSearchContext();
@@ -260,6 +260,14 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         List<Candidate> candidates = new ArrayList<>(indexedCandidates);
         candidates.addAll(topK(searchResult.exactCandidates(), limit));
         return new PrimaryKeyVectorResult(plan, topK(candidates, limit), metric);
+    }
+
+    public List<SearchResult> mergeBatchGroupResults(List<List<SearchResult>> resultsByQuery) {
+        List<SearchResult> merged = new ArrayList<>(resultsByQuery.size());
+        for (List<SearchResult> queryResults : resultsByQuery) {
+            merged.add(mergeSearchResults(queryResults));
+        }
+        return Collections.unmodifiableList(merged);
     }
 
     protected SearchResult mergeSearchResults(List<SearchResult> results) {
