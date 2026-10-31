@@ -455,10 +455,9 @@ Keyframe-index v1 is little endian. Metadata and packet offsets are relative to 
 | Keyframe pages | Variable |
 
 Each page except the last holds exactly 4,096 `(frame ordinal, PTS, packet position)` int64 triples.
-Directory records contain the page offset
-relative to the index (8 bytes), encoded length (4), uncompressed CRC32 (4), first
-and last triples (48), and CRC32 of the preceding 64 bytes (4). Pages are contiguous
-immediately after the directory; their lengths account for the entire index.
+Each directory record stores the index-relative page offset (8 bytes), encoded length (4),
+uncompressed CRC32 (4), first and last triples (48), and CRC32 of the preceding 64 bytes (4).
+Pages follow the directory contiguously and fill the remainder of the index.
 
 Codec `0` stores row-major triples. Codec `1` stores three contiguous columns (ordinal, PTS,
 position): each starts with its absolute value followed by differences modulo 2^64, all as
