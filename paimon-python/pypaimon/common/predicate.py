@@ -21,6 +21,7 @@ from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from numbers import Real
 from typing import Any, ClassVar, Dict, List, Optional, Sequence, cast
 
 import pyarrow
@@ -309,6 +310,15 @@ def _null_literal(literals, arity=1) -> bool:
         literal is None for literal in literals[:arity])
 
 
+def _is_nan(value) -> bool:
+    return isinstance(value, Real) and value != value
+
+
+def _has_nan(min_v, max_v, literals, arity) -> bool:
+    # NaN stats cannot safely prune with IEEE row comparisons.
+    return _is_nan(min_v) or _is_nan(max_v) or any(_is_nan(v) for v in (literals or [])[:arity])
+
+
 class Equal(Tester):
     name = 'equal'
     literal_arity = 1
@@ -319,6 +329,8 @@ class Equal(Tester):
         return val == literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 1):
+            return True
         if _null_literal(literals):
             return False
         return min_v <= literals[0] <= max_v
@@ -355,6 +367,8 @@ class LessThan(Tester):
         return val < literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 1):
+            return True
         if _null_literal(literals):
             return False
         return literals[0] > min_v
@@ -373,6 +387,8 @@ class LessOrEqual(Tester):
         return val <= literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 1):
+            return True
         if _null_literal(literals):
             return False
         return literals[0] >= min_v
@@ -391,6 +407,8 @@ class GreaterThan(Tester):
         return val > literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 1):
+            return True
         if _null_literal(literals):
             return False
         return literals[0] < max_v
@@ -409,6 +427,8 @@ class GreaterOrEqual(Tester):
         return val >= literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 1):
+            return True
         if _null_literal(literals):
             return False
         return literals[0] <= max_v
@@ -426,8 +446,10 @@ class In(Tester):
         return val in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _is_nan(min_v) or _is_nan(max_v):
+            return True
         return any(
-            min_v <= literal <= max_v
+            _is_nan(literal) or min_v <= literal <= max_v
             for literal in literals
             if literal is not None
         )
@@ -471,6 +493,8 @@ class Between(Tester):
         return literals[0] <= val <= literals[1]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 2):
+            return True
         if _null_literal(literals, 2):
             return False
         return literals[0] <= max_v and literals[1] >= min_v
@@ -567,6 +591,8 @@ class NotBetween(Tester):
         return val < literals[0] or val > literals[1]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if _has_nan(min_v, max_v, literals, 2):
+            return True
         if _null_literal(literals, 2):
             return False
         return literals[0] > min_v or literals[1] < max_v
