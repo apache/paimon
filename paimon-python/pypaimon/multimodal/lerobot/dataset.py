@@ -2005,9 +2005,6 @@ class _PyAVVideoDecoder:
         self._source = stream
         self._keyframe_index = keyframe_index
         self._thread_count = thread_count
-        self._anchor_ordinals = (
-            keyframe_index.ordinals
-            if keyframe_index is not None else [])
         self._container = None
         self._stream = None
         self._next_index = 0
@@ -2134,8 +2131,7 @@ class _PyAVVideoDecoder:
         groups = {}
         ranges = []
         for index in indices:
-            preceding = bisect.bisect_right(
-                self._anchor_ordinals, index) - 1
+            preceding = mapping.preceding(index)
             if preceding < 0:
                 raise IndexError(
                     "Video frame index %d is out of range." % index)

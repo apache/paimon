@@ -253,6 +253,42 @@ class VideoFrameCollatorTest(unittest.TestCase):
                         **kwargs,
                     )
 
+    def test_unknown_index_falls_back_but_corruption_fails(self):
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+
+        with VideoKeyframeIndex([], [(0, 0, 0)]) as index:
+            valid = index.serialize()
+        for offset in (0, 21, len(valid) - 1):
+            with self.subTest(offset=offset):
+                mapping = bytearray(valid)
+                mapping[offset] ^= 2
+                path = os.path.join(self.temp_dir.name, "indexed.mp4")
+                with open(path, 'wb') as out:
+                    out.write(b'video' + mapping)
+                descriptor = VideoFrameDescriptor(path, 0, 5, 0, 5, len(mapping))
+                calls = []
+
+                def factory(stream):
+                    self.assertIsNone(getattr(stream, 'video_keyframe_index', None))
+                    calls.append('open')
+                    return _Decoder(stream, calls)
+
+                collator = VideoFrameCollator(
+                    self.table, video_column='video', decoder_factory=factory,
+                    decode_fn=lambda decoder, frame, row: decoder.decode(frame),
+                    collate_fn=lambda rows: rows)
+                try:
+                    if offset == len(valid) - 1:
+                        with self.assertRaisesRegex(ValueError, 'checksum|compressed page'):
+                            collator([{'video': descriptor.serialize()}])
+                        self.assertFalse(calls)
+                    else:
+                        with self.assertLogs('pypaimon.multimodal.video', level='WARNING'):
+                            result = collator([{'video': descriptor.serialize()}])
+                        self.assertEqual((b'video', 0), result[0]['frame'])
+                finally:
+                    collator.close()
+
     def test_reuses_decoder_for_rows_with_same_descriptor(self):
         descriptors = [
             self._descriptor("episode-1.mp4", b"video-one", frame)

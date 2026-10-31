@@ -1819,9 +1819,7 @@ public class BlobTableTest extends TableTestBase {
         byte[] secondBytes = "second-video".getBytes();
         byte[] keyframeIndex =
                 fromHex(
-                        "0149464b4f4544495601000000020000000000000000000000000000000100000000000000000000"
-                                + "0000000000000000000000000000000000000000000c00000000000000a08c000000000000020000"
-                                + "0000000000dfd9164b");
+                        "0149464b4f4544495601000000020000000000000000000000000000000001000000000000006a0000000000000030000000dfd9164b0000000000000000000000000000000000000000000000000c00000000000000a08c000000000000020000000000000023e343cf0000000000000000000000000000000000000000000000000c00000000000000a08c0000000000000200000000000000");
         java.nio.file.Path firstSource = tempPath.resolve("size-first-source.mp4");
         java.nio.file.Path secondSource = tempPath.resolve("size-second-source.mp4");
         java.nio.file.Files.write(firstSource, concat("first-video".getBytes(), keyframeIndex));
