@@ -45,7 +45,7 @@ class BlobFileWriter:
 
     def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None,
                  copy_buffer_size: int = BlobFormatWriter.BUFFER_SIZE,
-                 video: bool = False, uri_reader_factory=None, video_index_compression="zlib"):
+                 video: bool = False, uri_reader_factory=None):
         self.file_io = file_io
         self.file_path = file_path
         self._uri_reader_factory = uri_reader_factory
@@ -58,7 +58,6 @@ class BlobFileWriter:
             self.writer = VideoFormatWriter(
                 self.output_stream,
                 file_path=str(file_path),
-                index_compression=video_index_compression,
                 copy_buffer_size=copy_buffer_size,
             )
         else:

@@ -16,6 +16,7 @@
 # under the License.
 
 import errno
+import logging
 import shutil
 import tempfile
 import struct
@@ -28,7 +29,7 @@ from pypaimon.table.row.blob import (
     BlobRef,
     VideoFrameDescriptor,
 )
-from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex, UnsupportedVideoIndex
 from pypaimon.execution.python.write.blob_format_writer import BlobFormatWriter
 
 
@@ -52,17 +53,13 @@ class VideoFormatWriter(BlobFormatWriter):
             self,
             output_stream,
             file_path=None,
-            copy_buffer_size=BlobFormatWriter.BUFFER_SIZE,
-            index_compression="zlib"):
+            copy_buffer_size=BlobFormatWriter.BUFFER_SIZE):
         super().__init__(
             output_stream,
             blob_consumer=None,
             file_path=file_path,
             copy_buffer_size=copy_buffer_size,
         )
-        if index_compression not in ("none", "zlib"):
-            raise ValueError("Video index compression must be none or zlib.")
-        self._index_compression = index_compression
         self._physical_lengths = []
         self._keyframe_indexes = []
         self._index_spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
@@ -204,14 +201,17 @@ class VideoFormatWriter(BlobFormatWriter):
                             raise
                         return 0
                     with mapping:
-                        mapping.write_to(self._index_spool, self._index_compression)
+                        mapping.write_to(self._index_spool)
             else:
                 with tempfile.TemporaryFile() as mapping:
                     with Blob.from_descriptor(blob.uri_reader, descriptor).new_input_stream() as source:
                         shutil.copyfileobj(source, mapping, self.copy_buffer_size)
                     if mapping.tell() != descriptor.length:
                         raise ValueError("Video keyframe index length changed while reading.")
-                    VideoKeyframeIndex.validate_stream(mapping, descriptor.length, frame.payload_descriptor.length)
+                    try:
+                        VideoKeyframeIndex.validate_stream(mapping, descriptor.length, frame.payload_descriptor.length)
+                    except UnsupportedVideoIndex as error:
+                        logging.getLogger(__name__).warning("Preserving unsupported video index: %s", error)
                     mapping.seek(0)
                     shutil.copyfileobj(mapping, self._index_spool, self.copy_buffer_size)
             return self._index_spool.tell() - start

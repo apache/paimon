@@ -144,7 +144,6 @@ class BlobWriter(AppendOnlyDataWriter):
             blob_consumer=self._blob_consumer,
             copy_buffer_size=self.blob_copy_buffer_size,
             video=self.video,
-            video_index_compression=self.options.video_index_compression(),
             uri_reader_factory=self._uri_reader_factory,
         )
 

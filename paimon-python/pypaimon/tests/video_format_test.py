@@ -28,7 +28,6 @@ from unittest import mock
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.filesystem.jindo_file_system_handler import JindoInputFile
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.execution.python.read.reader.format_blob_reader import (FormatBlobReader)
@@ -164,18 +163,15 @@ class VideoFormatTest(unittest.TestCase):
             encoded = index.serialize()
         self._check_video_fixture(fixture, encoded)
 
-    def test_cross_language_uncompressed_fixture(self):
-        fixture = self._fixture_bytes(self.VIDEO_FIXTURE.with_name("video-uncompressed-v1.hex"))
-        with VideoKeyframeIndex([(0, 1)], [(0, 0, 0), (12, 36000, 2)]) as index:
-            self._check_video_fixture(fixture, index.serialize("none"))
-
-    def test_mixed_index_codecs_survive_rewrite(self):
+    def test_unsupported_indexes_survive_rewrite(self):
         target = (self.root / "mixed.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))
         mappings = []
-        for codec in ('none', 'zlib'):
+        for codec in ('version', 'codec'):
             with VideoKeyframeIndex([], [(0, 0, 0), (1, 1, 1)]) as index:
-                mappings.append(index.serialize(codec))
+                data = bytearray(index.serialize())
+                data[0 if codec == 'version' else 21] = 2
+                mappings.append(bytes(data))
             blob = self._indexed_frame(codec + '.mp4', b'video', mappings[-1])
             writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
         writer.close()
@@ -435,25 +431,6 @@ class VideoFormatTest(unittest.TestCase):
                 self.assertEqual(payload, output.getvalue())
                 self.assertEqual([0], writer._keyframe_indexes)
 
-    def test_generated_index_uses_compression_option(self):
-        self.assertEqual('zlib', CoreOptions(Options({})).video_index_compression())
-        with self.assertRaises(ValueError):
-            CoreOptions(Options({'video.index.compression': 'invalid'})).video_index_compression()
-        for codec, expected in (('none', 0), ('zlib', 1)):
-            options = CoreOptions(Options({'video.index.compression': codec}))
-            target = (self.root / (codec + '.video')).as_uri()
-            writer = VideoFormatWriter(self.file_io.new_output_stream(target),
-                                       index_compression=options.video_index_compression())
-            blob = self._source_frame(codec + '.mp4', b'video', 0)
-            with mock.patch.object(VideoKeyframeIndex, 'inspect',
-                                   return_value=VideoKeyframeIndex([], [(0, 0, 0)])):
-                writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
-            writer.close()
-            descriptor = VideoFrameDescriptor.deserialize(self._read(target)[0]).keyframe_index_descriptor
-            data = Blob.from_file(self.file_io, descriptor.uri, descriptor.offset, descriptor.length).to_data()
-            self.assertEqual(expected, VideoKeyframeIndex.HEADER.unpack_from(data)[-1])
-            VideoKeyframeIndex.validate(data, 5)
-
     def test_generated_large_index_is_kept(self):
         count = 700_000
         payload = b'x' * count
@@ -462,7 +439,7 @@ class VideoFormatTest(unittest.TestCase):
         descriptor = VideoFrameDescriptor(source.as_uri(), 0, len(payload), 0, -1, 0)
         blob = Blob.from_descriptor(self.file_io.uri_reader_factory.create(descriptor.uri), descriptor)
         target = (self.root / "large-index.video").as_uri()
-        writer = VideoFormatWriter(self.file_io.new_output_stream(target), index_compression="none")
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
         with mock.patch.object(VideoKeyframeIndex, "inspect",
                                return_value=VideoKeyframeIndex([], ((i, i, i) for i in range(count)))):
             writer.add_element(GenericRow([blob], [self.field], RowKind.INSERT))
@@ -522,7 +499,7 @@ class VideoFormatTest(unittest.TestCase):
     def test_large_indexes_survive_rewrite(self):
         count = 750_000
         with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as index:
-            mapping = index.serialize("none")
+            mapping = index.serialize()
         video = b'x' * count
         target = (self.root / "many-indexes.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))
@@ -563,11 +540,11 @@ class VideoFormatTest(unittest.TestCase):
                 GenericRow([blob], [self.field], RowKind.INSERT)
             )
 
-    def test_rejects_compressed_invalid_index_without_expanding_it(self):
+    def test_rejects_forged_count_without_expanding_it(self):
         count = 500_000
         entry = VideoKeyframeIndex.ENTRY.pack(0, 0, 0)
         mapping = VideoKeyframeIndex.HEADER.pack(
-            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, count, 1
+            VideoKeyframeIndex.VERSION, VideoKeyframeIndex.MAGIC, 0, count, 0
         ) + zlib.compress(entry * count)
         video = b"video"
         source = self.root / "compressed-invalid-index.mp4"

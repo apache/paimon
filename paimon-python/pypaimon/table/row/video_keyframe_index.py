@@ -19,7 +19,6 @@
 
 import bisect
 import io
-import shutil
 import operator
 import sqlite3
 import struct
@@ -117,8 +116,9 @@ class _PagedKeyframes(Sequence):
 
 
 class _IndexedKeyframes(_PagedKeyframes):
-    # A directory record contains offset, encoded length, CRC, and page endpoints.
+    # A directory record contains offset, length, CRC, and page endpoints.
     DIRECTORY = struct.Struct('<QIIqqqqqqI')
+    DIRECTORY_BYTES = 64 * 1024
     DIRECTORY_BLOCK = 512
     EAGER_BYTES = 2 * 1024 * 1024
 
@@ -127,10 +127,26 @@ class _IndexedKeyframes(_PagedKeyframes):
         self.directory_offset, self.length, self.codec = directory_offset, length, codec
         self.pages = (count - 1) // self.PAGE_ENTRIES + 1
         self.directory_cache = OrderedDict()
-        self.descriptors = OrderedDict()
+        self.directory = None
         self.eager = None
+        directory_size = self.pages * self.DIRECTORY.size
+        if directory_size <= self.DIRECTORY_BYTES:
+            self.directory = self.read_at(self.directory_offset, directory_size)
+            for page in range(self.pages):
+                self._descriptor(page)
 
     def _record(self, page):
+        if self.directory is not None:
+            data = self.directory
+            start = page * self.DIRECTORY.size
+        else:
+            data, start = self._directory_block(page)
+        record = self.DIRECTORY.unpack_from(data, start)
+        if zlib.crc32(data[start:start + self.DIRECTORY.size - 4]) != record[-1]:
+            raise ValueError("Invalid video keyframe index directory checksum.")
+        return self._validate_record(page, record)
+
+    def _directory_block(self, page):
         block, local = divmod(page, self.DIRECTORY_BLOCK)
         if block not in self.directory_cache:
             size = min(self.DIRECTORY_BLOCK, self.pages - block * self.DIRECTORY_BLOCK) * self.DIRECTORY.size
@@ -139,17 +155,15 @@ class _IndexedKeyframes(_PagedKeyframes):
             if len(self.directory_cache) > 2:
                 self.directory_cache.popitem(last=False)
         self.directory_cache.move_to_end(block)
-        data = self.directory_cache[block]
-        start = local * self.DIRECTORY.size
-        record = self.DIRECTORY.unpack_from(data, start)
-        if zlib.crc32(data[start:start + self.DIRECTORY.size - 4]) != record[-1]:
-            raise ValueError("Invalid video keyframe index directory checksum.")
+        return self.directory_cache[block], local * self.DIRECTORY.size
+
+    def _validate_record(self, page, record):
         offset, size = record[:2]
         first, last = record[3:6], record[6:9]
         entries = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES)
         if (size <= 0 or size > self.PAGE_BYTES + 64 or offset > self.length - size
                 or offset < self.directory_offset + self.pages * self.DIRECTORY.size
-                or (self.codec == 0 and size != entries * self.ENTRY.size)):
+                or size != entries * self.ENTRY.size):
             raise ValueError("Invalid video keyframe index page length.")
         if first[0] < 0 or (page == 0 and first[0] != 0):
             raise ValueError("Keyframe ordinals must be strictly increasing from zero.")
@@ -167,9 +181,6 @@ class _IndexedKeyframes(_PagedKeyframes):
         return record
 
     def _descriptor(self, page):
-        if page in self.descriptors:
-            self.descriptors.move_to_end(page)
-            return self.descriptors[page]
         record = self._record(page)
         for left, right in ((page - 1, page), (page, page + 1)):
             if left >= 0 and right < self.pages:
@@ -178,9 +189,6 @@ class _IndexedKeyframes(_PagedKeyframes):
                 if a[0] + a[1] != b[0]:
                     raise ValueError("Invalid video keyframe index page offsets.")
                 _validate_boundary(a[6:9], b[3:6])
-        self.descriptors[page] = record
-        if len(self.descriptors) > 512:
-            self.descriptors.popitem(last=False)
         return record
 
     def _page(self, page):
@@ -189,18 +197,11 @@ class _IndexedKeyframes(_PagedKeyframes):
                 start = page * self.PAGE_BYTES
                 return memoryview(self.eager)[start:start + self.PAGE_BYTES]
             if page not in self.cache:
-                record = self._descriptor(page)
+                record = (self.DIRECTORY.unpack_from(self.directory, page * self.DIRECTORY.size)
+                          if self.directory is not None else self._descriptor(page))
                 offset, size, crc = record[:3]
                 data = self.read_at(offset, size)
                 expected = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES) * self.ENTRY.size
-                if self.codec == 1:
-                    decoder = zlib.decompressobj()
-                    try:
-                        data = decoder.decompress(data, expected + 1)
-                    except zlib.error as error:
-                        raise ValueError("Invalid video keyframe index compressed page.") from error
-                    if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
-                        raise ValueError("Invalid video keyframe index compressed page length.")
                 if len(data) != expected or zlib.crc32(data) != crc:
                     raise ValueError("Invalid video keyframe index page checksum or length.")
                 _validate_entries(data, self.payload_length, initial=page == 0)
@@ -214,7 +215,7 @@ class _IndexedKeyframes(_PagedKeyframes):
             return self.cache[page]
 
     def load_small(self):
-        if self.count * self.ENTRY.size <= self.EAGER_BYTES:
+        if self.length <= self.EAGER_BYTES:
             data = bytearray(self.count * self.ENTRY.size)
             for page in range(self.pages):
                 start = page * self.PAGE_BYTES
@@ -223,7 +224,7 @@ class _IndexedKeyframes(_PagedKeyframes):
             self.eager = data
             self.cache.clear()
             self.directory_cache.clear()
-            self.descriptors.clear()
+            self.directory = None
             self.read_at = None
 
     def preceding(self, ordinal):
@@ -233,13 +234,18 @@ class _IndexedKeyframes(_PagedKeyframes):
             if self.eager is not None:
                 values = np.frombuffer(self.eager, dtype='<i8').reshape(-1, 3)
                 return int(values[:, 0].searchsorted(ordinal, side='right')) - 1
-            lo, hi = 0, self.pages
-            while lo < hi:
-                mid = (lo + hi) // 2
-                if self._descriptor(mid)[3] <= ordinal:
-                    lo = mid + 1
-                else:
-                    hi = mid
+            if self.directory is not None:
+                first = np.ndarray((self.pages,), dtype='<i8', buffer=self.directory,
+                                   offset=16, strides=(self.DIRECTORY.size,))
+                lo = int(first.searchsorted(ordinal, side='right'))
+            else:
+                lo, hi = 0, self.pages
+                while lo < hi:
+                    mid = (lo + hi) // 2
+                    if self._descriptor(mid)[3] <= ordinal:
+                        lo = mid + 1
+                    else:
+                        hi = mid
             if not lo:
                 return -1
             page = lo - 1
@@ -249,7 +255,7 @@ class _IndexedKeyframes(_PagedKeyframes):
     def close(self):
         super().close()
         self.directory_cache.clear()
-        self.descriptors.clear()
+        self.directory = None
         self.eager = None
         self.read_at = None
 
@@ -290,6 +296,10 @@ def _validate_entries(data, payload_length, initial=False):
         raise ValueError("Keyframe ordinals, timestamps and packet positions must be strictly increasing from zero.")
     if entries[0, 2] < 0 or (payload_length is not None and entries[-1, 2] >= payload_length):
         raise ValueError("Keyframe packet positions must be within the video payload.")
+
+
+class UnsupportedVideoIndex(ValueError):
+    """The index uses an unknown version or codec."""
 
 
 class VideoKeyframeIndex:
@@ -389,43 +399,35 @@ class VideoKeyframeIndex:
             return self.keyframes.preceding(ordinal)
         return bisect.bisect_right(self.ordinals, ordinal) - 1
 
-    def write_to(self, output, compression='zlib'):
-        if compression not in ('none', 'zlib'):
-            raise ValueError("Video index compression must be 'none' or 'zlib'.")
-        codec = int(compression == 'zlib')
+    def write_to(self, output):
         count = len(self.keyframes)
         pages = (count - 1) // _PagedKeyframes.PAGE_ENTRIES + 1
         directory = _IndexedKeyframes.DIRECTORY
         offset = self.HEADER.size + len(self.metadata_ranges) * 16 + pages * directory.size
-        # Spool variable-size pages; neither the directory nor encoded data grows in memory.
-        with tempfile.TemporaryFile() as records, tempfile.TemporaryFile() as payload:
-            for page in range(pages):
-                raw = self.keyframes._page(page)
-                data = zlib.compress(raw, 1) if codec else raw
-                record = directory.pack(offset, len(data), zlib.crc32(raw),
-                                        *self.ENTRY.unpack_from(raw),
-                                        *self.ENTRY.unpack_from(raw, len(raw) - self.ENTRY.size), 0)
-                records.write(record[:-4] + struct.pack('<I', zlib.crc32(record[:-4])))
-                payload.write(data)
-                offset += len(data)
-            output.write(self.HEADER.pack(self.VERSION, self.MAGIC, len(self.metadata_ranges), count, codec))
-            for value in self.metadata_ranges:
-                output.write(self.METADATA_RANGE.pack(*value))
-            for source in (records, payload):
-                source.seek(0)
-                shutil.copyfileobj(source, output, 64 * 1024)
+        output.write(self.HEADER.pack(self.VERSION, self.MAGIC, len(self.metadata_ranges), count, 0))
+        for value in self.metadata_ranges:
+            output.write(self.METADATA_RANGE.pack(*value))
+        for page in range(pages):
+            raw = self.keyframes._page(page)
+            record = directory.pack(offset, len(raw), zlib.crc32(raw),
+                                    *self.ENTRY.unpack_from(raw),
+                                    *self.ENTRY.unpack_from(raw, len(raw) - self.ENTRY.size), 0)
+            output.write(record[:-4] + struct.pack('<I', zlib.crc32(record[:-4])))
+            offset += len(raw)
+        for page in range(pages):
+            output.write(self.keyframes._page(page))
 
-    def serialize(self, compression='zlib'):
+    def serialize(self):
         output = io.BytesIO()
-        self.write_to(output, compression)
+        self.write_to(output)
         return output.getvalue()
 
     @classmethod
     def open(cls, read_at, length, payload_length=None):
-        if length < cls.HEADER.size:
+        if length < 9:
             raise ValueError("Invalid video keyframe index length.")
         # Small indexes use one request; larger indexes retain only a bounded prefix.
-        prefix_size = length if length <= _IndexedKeyframes.EAGER_BYTES else 64 * 1024
+        prefix_size = length if length <= _IndexedKeyframes.EAGER_BYTES else min(length, 64 * 1024)
         prefix = read_at(0, prefix_size)
         if len(prefix) != prefix_size:
             raise ValueError("Invalid video keyframe index: truncated read.")
@@ -441,9 +443,18 @@ class VideoKeyframeIndex:
                 raise ValueError("Invalid video keyframe index: truncated read.")
             return data
 
-        version, magic, metadata_count, count, codec = cls.HEADER.unpack_from(prefix)
-        if version != cls.VERSION or magic != cls.MAGIC or count == 0 or codec not in (0, 1):
-            raise ValueError("Invalid video keyframe index header or codec.")
+        version, magic = struct.unpack_from('<BQ', prefix)
+        if magic != cls.MAGIC:
+            raise ValueError("Invalid video keyframe index magic.")
+        if version != cls.VERSION:
+            raise UnsupportedVideoIndex("Unsupported video keyframe index version: %s." % version)
+        if length < cls.HEADER.size:
+            raise ValueError("Invalid video keyframe index length.")
+        _, _, metadata_count, count, codec = cls.HEADER.unpack_from(prefix)
+        if codec != 0:
+            raise UnsupportedVideoIndex("Unsupported video keyframe index codec: %s." % codec)
+        if count == 0:
+            raise ValueError("Invalid video keyframe index count.")
         if metadata_count > cls.MAX_METADATA_RANGE_COUNT:
             raise ValueError("Video keyframe index exceeds the metadata-range limit.")
         offset = cls.HEADER.size + metadata_count * cls.METADATA_RANGE.size

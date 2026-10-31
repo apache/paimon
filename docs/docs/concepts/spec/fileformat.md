@@ -449,13 +449,13 @@ Keyframe-index v1 is little endian. Metadata and packet offsets are relative to 
 | Magic (`0x564944454F4B4649`) | 8 bytes |
 | Metadata-range count | 4 bytes |
 | Keyframe count | 8 bytes |
-| Page codec (`0`: uncompressed, `1`: zlib) | 1 byte |
+| Page codec (`0`: uncompressed; other values reserved) | 1 byte |
 | Metadata `(offset, length)` pairs | 16 bytes each |
 | Page directory | 68 bytes per page |
 | Keyframe pages | Variable |
 
-Each page holds up to 4,096 `(frame ordinal, PTS, packet position)` int64 triples,
-optionally zlib-compressed independently. Directory records contain the page offset
+Each page except the last holds exactly 4,096 `(frame ordinal, PTS, packet position)` int64 triples,
+stored without compression. Directory records contain the page offset
 relative to the index (8 bytes), encoded length (4), uncompressed CRC32 (4), first
 and last triples (48), and CRC32 of the preceding 64 bytes (4). Pages are contiguous
 immediately after the directory; their lengths account for the entire index.
@@ -463,7 +463,9 @@ immediately after the directory; their lengths account for the entire index.
 Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
 The index covers the first video stream; its time base remains in the video.
 Readers check accessed pages against their directory endpoints and adjacent records;
-writers validate all pages. Metadata ranges are limited to 65,536.
+writers validate all supported pages. Unknown versions or codecs fall back to scanning
+and are preserved during rewrite; checksum or ordering errors fail. Metadata ranges are
+limited to 65,536.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 

@@ -18,18 +18,14 @@
 
 package org.apache.paimon.format.blob;
 
-import java.io.ByteArrayInputStream;
+import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.SeekableInputStream;
+
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.zip.CRC32;
-import java.util.zip.DataFormatException;
-import java.util.zip.Inflater;
 
 /** Streaming validation for paged video seek indexes. */
 final class VideoKeyframeIndex {
@@ -42,24 +38,35 @@ final class VideoKeyframeIndex {
 
     static void validate(byte[] data, long payloadLength) {
         try {
-            validate(new ByteArrayInputStream(data), data.length, payloadLength);
+            validate(new ByteArraySeekableStream(data), data.length, payloadLength);
         } catch (IOException e) {
             throw new IllegalArgumentException("Invalid video keyframe index.", e);
         }
     }
 
-    static void validate(InputStream source, long length, long payloadLength) throws IOException {
-        if (length < 22 || payloadLength <= 0) {
+    static void validate(SeekableInputStream source, long length, long payloadLength)
+            throws IOException {
+        long base = source.getPos();
+        if (length < 9 || payloadLength <= 0) {
             throw invalid("header or empty video payload");
         }
         DataInputStream in = new DataInputStream(source);
         int version = in.readUnsignedByte();
         long magic = Long.reverseBytes(in.readLong());
+        if (magic != MAGIC) {
+            throw invalid("magic");
+        }
+        if (version != 1) {
+            throw new UnsupportedIndexException("version " + version);
+        }
+        if (length < 22) {
+            throw invalid("header");
+        }
         long metadataCount = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
         long count = Long.reverseBytes(in.readLong());
         int codec = in.readUnsignedByte();
-        if (version != 1 || magic != MAGIC || codec > 1) {
-            throw invalid("version, magic or codec");
+        if (codec != 0) {
+            throw new UnsupportedIndexException("codec " + codec);
         }
         long offset = 22 + metadataCount * 16;
         if (metadataCount > MAX_METADATA_RANGE_COUNT) {
@@ -78,102 +85,76 @@ final class VideoKeyframeIndex {
             }
             previousEnd = start + size;
         }
-        Path path = Files.createTempFile("paimon-video-directory-", ".tmp");
-        try (RandomAccessFile directory = new RandomAccessFile(path.toFile(), "rw")) {
-            byte[] record = new byte[68];
-            long nextOffset = offset + pages * record.length;
-            long[] previous = null;
-            for (long page = 0; page < pages; page++) {
-                in.readFully(record);
-                ByteBuffer values = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN);
-                long start = values.getLong();
-                long size = Integer.toUnsignedLong(values.getInt());
-                values.getInt();
-                long[] first = entry(values);
-                long[] last = entry(values);
-                if (checksum(record, 64) != Integer.toUnsignedLong(values.getInt())) {
-                    throw invalid("directory checksum");
-                }
-                int entries = (int) Math.min(PAGE_ENTRIES, count - page * PAGE_ENTRIES);
-                if (start != nextOffset
-                        || size <= 0
-                        || size > PAGE_ENTRIES * ENTRY_LENGTH + 64
-                        || start > length - size
-                        || (codec == 0 && size != entries * ENTRY_LENGTH)) {
-                    throw invalid("page offsets or length");
-                }
-                validateEntry(first, previous, page == 0, payloadLength);
-                if (entries == 1) {
-                    if (!java.util.Arrays.equals(first, last)) {
-                        throw invalid("page endpoints");
-                    }
-                } else {
-                    validateEntry(last, first, false, payloadLength);
-                }
-                previous = last;
-                nextOffset = start + size;
-                directory.write(record);
+        byte[] record = new byte[68];
+        long nextOffset = offset + pages * record.length;
+        long[] previous = null;
+        for (long page = 0; page < pages; page++) {
+            in.readFully(record);
+            ByteBuffer values = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN);
+            long start = values.getLong();
+            long size = Integer.toUnsignedLong(values.getInt());
+            values.getInt();
+            long[] first = entry(values);
+            long[] last = entry(values);
+            if (checksum(record, 64) != Integer.toUnsignedLong(values.getInt())) {
+                throw invalid("directory checksum");
             }
-            if (nextOffset != length) {
-                throw invalid("entries length");
+            int entries = (int) Math.min(PAGE_ENTRIES, count - page * PAGE_ENTRIES);
+            if (start != nextOffset
+                    || size <= 0
+                    || size > PAGE_ENTRIES * ENTRY_LENGTH + 64
+                    || start > length - size
+                    || size != entries * ENTRY_LENGTH) {
+                throw invalid("page offsets or length");
             }
-            directory.seek(0);
-            byte[] decoded = new byte[PAGE_ENTRIES * ENTRY_LENGTH + 1];
-            byte[] encoded = new byte[PAGE_ENTRIES * ENTRY_LENGTH + 64];
-            for (long page = 0; page < pages; page++) {
-                directory.readFully(record);
-                ByteBuffer descriptor = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN);
-                descriptor.getLong();
-                int size = descriptor.getInt();
-                long crc = Integer.toUnsignedLong(descriptor.getInt());
-                long[] first = entry(descriptor);
-                long[] last = entry(descriptor);
-                int entries = (int) Math.min(PAGE_ENTRIES, count - page * PAGE_ENTRIES);
-                int bytes = entries * ENTRY_LENGTH;
-                in.readFully(encoded, 0, size);
-                if (codec == 0) {
-                    System.arraycopy(encoded, 0, decoded, 0, size);
-                } else {
-                    Inflater inflater = new Inflater();
-                    try {
-                        inflater.setInput(encoded, 0, size);
-                        int written = 0;
-                        while (!inflater.finished() && written <= bytes) {
-                            int n = inflater.inflate(decoded, written, bytes + 1 - written);
-                            if (n == 0) {
-                                break;
-                            }
-                            written += n;
-                        }
-                        if (written != bytes
-                                || !inflater.finished()
-                                || inflater.getRemaining() != 0) {
-                            throw invalid("compressed page length");
-                        }
-                    } catch (DataFormatException e) {
-                        throw invalid("compressed page");
-                    } finally {
-                        inflater.end();
-                    }
+            validateEntry(first, previous, page == 0, payloadLength);
+            if (entries == 1) {
+                if (!java.util.Arrays.equals(first, last)) {
+                    throw invalid("page endpoints");
                 }
-                if (checksum(decoded, bytes) != crc) {
-                    throw invalid("page checksum");
-                }
-                ByteBuffer values =
-                        ByteBuffer.wrap(decoded, 0, bytes).order(ByteOrder.LITTLE_ENDIAN);
-                previous = null;
-                for (int i = 0; i < entries; i++) {
-                    long[] value = entry(values);
-                    validateEntry(value, previous, page == 0 && i == 0, payloadLength);
-                    if ((i == 0 && !java.util.Arrays.equals(value, first))
-                            || (i == entries - 1 && !java.util.Arrays.equals(value, last))) {
-                        throw invalid("page endpoints");
-                    }
-                    previous = value;
-                }
+            } else {
+                validateEntry(last, first, false, payloadLength);
             }
-        } finally {
-            Files.deleteIfExists(path);
+            previous = last;
+            nextOffset = start + size;
+        }
+        if (nextOffset != length) {
+            throw invalid("entries length");
+        }
+        byte[] decoded = new byte[PAGE_ENTRIES * ENTRY_LENGTH];
+        for (long page = 0; page < pages; page++) {
+            source.seek(base + offset + page * record.length);
+            in.readFully(record);
+            ByteBuffer descriptor = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN);
+            long start = descriptor.getLong();
+            descriptor.getInt();
+            long crc = Integer.toUnsignedLong(descriptor.getInt());
+            long[] first = entry(descriptor);
+            long[] last = entry(descriptor);
+            int entries = (int) Math.min(PAGE_ENTRIES, count - page * PAGE_ENTRIES);
+            int bytes = entries * ENTRY_LENGTH;
+            source.seek(base + start);
+            in.readFully(decoded, 0, bytes);
+            if (checksum(decoded, bytes) != crc) {
+                throw invalid("page checksum");
+            }
+            ByteBuffer values = ByteBuffer.wrap(decoded, 0, bytes).order(ByteOrder.LITTLE_ENDIAN);
+            previous = null;
+            for (int i = 0; i < entries; i++) {
+                long[] value = entry(values);
+                validateEntry(value, previous, page == 0 && i == 0, payloadLength);
+                if ((i == 0 && !java.util.Arrays.equals(value, first))
+                        || (i == entries - 1 && !java.util.Arrays.equals(value, last))) {
+                    throw invalid("page endpoints");
+                }
+                previous = value;
+            }
+        }
+    }
+
+    static final class UnsupportedIndexException extends IllegalArgumentException {
+        UnsupportedIndexException(String reason) {
+            super("Unsupported video keyframe index " + reason + '.');
         }
     }
 

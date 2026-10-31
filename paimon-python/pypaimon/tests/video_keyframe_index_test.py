@@ -235,7 +235,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         count = 1_000_000
         with VideoKeyframeIndex([], ((i, i - 100, i * 2) for i in range(count))) as index:
             with tempfile.TemporaryFile() as stored:
-                index.write_to(stored, "none")
+                index.write_to(stored)
                 length = stored.tell()
                 self.assertGreater(length, 16 * 1024 * 1024)
                 reads = []
@@ -265,7 +265,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         count = 1_000_000
         with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as original:
             with tempfile.TemporaryFile() as stored:
-                original.write_to(stored, "none")
+                original.write_to(stored)
                 length = stored.tell()
                 reads = []
 
@@ -287,20 +287,33 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                             self.assertEqual(before, len(reads))
                             self.assertLessEqual(sum(map(len, index.keyframes.cache.values())), 1024 * 1024)
 
-    def test_small_indexes_load_once_for_both_codecs(self):
-        for codec in ('none', 'zlib'):
-            with VideoKeyframeIndex([], ((i, i, i) for i in range(65536))) as original:
-                data = original.serialize(codec)
+    def test_small_indexes_load_once(self):
+        for count in (4096, 65536):
+            with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as original:
+                data = original.serialize()
             read = mock.Mock(side_effect=lambda o, n: data[o:o + n])
             with VideoKeyframeIndex.open(read, len(data)) as index:
                 self.assertEqual(1, read.call_count)
-                self.assertEqual(65536 * 24, len(index.keyframes.eager))
-                for i in (0, 32768, 65535):
+                self.assertEqual(count * 24, len(index.keyframes.eager))
+                for i in (0, count // 2, count - 1):
                     self.assertEqual(i, index.preceding(i))
                     self.assertEqual((i, i, i), index.keyframes[i])
                 self.assertEqual(1, read.call_count)
                 self.assertIsNone(index.keyframes.read_at)
                 self.assertFalse(index.keyframes.cache)
+
+    def test_large_index_directory_is_read_once(self):
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(100_000))) as original:
+            data = original.serialize()
+        read = mock.Mock(side_effect=lambda o, n: data[o:o + n])
+        with VideoKeyframeIndex.open(read, len(data)) as index:
+            self.assertIsNotNone(index.keyframes.directory)
+            self.assertIsNone(index.keyframes.eager)
+            self.assertFalse(index.keyframes.directory_cache)
+            for i in (99_999, 50_000, 1):
+                self.assertEqual(i, index.preceding(i))
+            self.assertFalse(index.keyframes.directory_cache)
+            self.assertEqual(1, sum(call.args[0] == 0 for call in read.call_args_list))
 
     def test_ordinal_probe_cache_is_bounded(self):
         with VideoKeyframeIndex([], ((i, i, i) for i in range(8192))) as original:
@@ -315,7 +328,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
 
     def test_paged_corruption_and_boundary_validation(self):
         entries = [(i, i, i) for i in range(8193)]
-        for codec in (0, 1):
+        for codec in (0,):
             data = encode_index(entries, codec=codec)
             corrupt = bytearray(data)
             corrupt[-1] ^= 1
@@ -339,7 +352,8 @@ class VideoKeyframeIndexTest(unittest.TestCase):
             for target in (11, 12):
                 for cache_state in ('cold', 'cached', 'evicted'):
                     with self.subTest(column=column, target=target, cache_state=cache_state):
-                        with mock.patch.object(_IndexedKeyframes, 'EAGER_BYTES', 0), VideoKeyframeIndex.open(
+                        with mock.patch.object(_IndexedKeyframes, 'EAGER_BYTES', 0), \
+                                mock.patch.object(_IndexedKeyframes, 'DIRECTORY_BYTES', 0), VideoKeyframeIndex.open(
                                 lambda o, n: data[o:o + n], len(data)) as index:
                             if cache_state != 'cold':
                                 index.keyframes[(target - 1 if target == 11 else target + 1) * 4096]
@@ -348,16 +362,6 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                                     index.keyframes[prior * 4096]
                             with self.assertRaisesRegex(ValueError, 'strictly increasing'):
                                 index.keyframes[target * 4096]
-
-    def test_compressed_page_rejects_overflow_truncation_and_trailing_bytes(self):
-        good = encode_index([(0, 0, 0), (1, 1, 1)], codec=1)
-        for compressed in (zlib.compress(b'\0' * 1_000_000), good[90:-1], good[90:] + b'x'):
-            record = bytearray(good[22:90])
-            struct.pack_into('<I', record, 8, len(compressed))
-            struct.pack_into('<I', record, 64, zlib.crc32(record[:64]))
-            data = good[:22] + record + compressed
-            with self.assertRaises(ValueError):
-                VideoKeyframeIndex.deserialize(data)
 
     def test_validate_rejects_ranges_outside_video_payload(self):
         metadata_outside = VideoKeyframeIndex(
