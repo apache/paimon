@@ -93,6 +93,8 @@ public class Identifier implements Serializable {
     public Identifier(
             String database, String table, @Nullable String branch, @Nullable String systemTable) {
         this.database = database;
+        // Like a blank branch option, a blank branch is the main branch.
+        branch = isBlankBranch(branch) ? null : branch;
 
         StringBuilder builder = new StringBuilder(table);
         if (branch != null && !"main".equalsIgnoreCase(branch)) {
@@ -160,6 +162,12 @@ public class Identifier implements Serializable {
         }
 
         String[] splits = StringUtils.split(object, SYSTEM_TABLE_SPLITTER, -1, true);
+        if (splits.length > 1 && splits[1].startsWith(SYSTEM_BRANCH_PREFIX)) {
+            checkArgument(
+                    !isBlankBranch(splits[1].substring(SYSTEM_BRANCH_PREFIX.length())),
+                    "Branch name cannot be blank, but this is: %s",
+                    object);
+        }
         if (splits.length == 1) {
             table = object;
             branch = null;
@@ -194,6 +202,13 @@ public class Identifier implements Serializable {
     public String getEscapedFullName(char escapeChar) {
         return String.format(
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, object, escapeChar);
+    }
+
+    /** Whether a branch name is blank, alike on every JVM and in PyPaimon. */
+    public static boolean isBlankBranch(@Nullable String branch) {
+        // Java 8 also takes U+180E for whitespace; later JVMs and PyPaimon do not.
+        return StringUtils.isNullOrWhitespaceOnly(branch)
+                && (branch == null || branch.indexOf('\u180E') < 0);
     }
 
     public static Identifier create(String db, String object) {

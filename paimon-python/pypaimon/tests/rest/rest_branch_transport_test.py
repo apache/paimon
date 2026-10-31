@@ -184,6 +184,26 @@ def test_invalid_branch_resource_paths_send_no_requests(transport_server, operat
     assert transport_server.requests == []
 
 
+@pytest.mark.parametrize('operation', ['create_branch', 'drop_branch', 'fast_forward', 'list_branches'])
+def test_blank_encoded_branch_sends_no_request(transport_server, operation):
+    catalog = transport_catalog(transport_server)
+    transport_server.requests.clear()
+    args = () if operation == 'list_branches' else ('dev',)
+    with pytest.raises(ValueError, match='Branch name cannot be blank'):
+        getattr(catalog, operation)(Identifier('db', 'table$branch_'), *args)
+    assert transport_server.requests == []
+
+
+@pytest.mark.parametrize('operation', ['drop_branch', 'fast_forward'])
+def test_no_break_space_branch_sends_request(transport_server, operation):
+    catalog = transport_catalog(transport_server)
+    transport_server.requests.clear()
+    with python_rest_only():
+        getattr(catalog, operation)('db.table', '\u00a0')
+    paths = [request[1] for request in transport_server.requests]
+    assert len(paths) == 1 and '/branches/%C2%A0' in paths[0]
+
+
 @pytest.mark.native_plan
 def test_python_rest_branches_preserve_native_shared_data(tmp_path, native_rest_catalog):
     catalog = native_rest_catalog

@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 
 from pypaimon.consumer.consumer import Consumer
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
+from pypaimon.management.java_string import is_null_or_whitespace_only
 
 BRANCH_PREFIX = "branch-"
 
@@ -41,7 +42,7 @@ def _is_main_branch(branch: str) -> bool:
 
 def _normalize_branch(branch: Optional[str]) -> str:
     """Normalize branch name, use DEFAULT_MAIN_BRANCH if None or empty."""
-    if not branch or not branch.strip():
+    if is_null_or_whitespace_only(branch):
         return DEFAULT_MAIN_BRANCH
     return branch
 

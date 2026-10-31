@@ -18,7 +18,8 @@
 import logging
 from typing import List, Optional
 
-from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH, is_default_main
+from pypaimon.management.java_string import is_null_or_whitespace_only
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ class BranchManager:
         Returns:
             The normalized branch name
         """
-        if not branch or not branch.strip():
+        if is_null_or_whitespace_only(branch):
             return DEFAULT_MAIN_BRANCH
         # Java preserves non-blank names; trimming would alias branch directories.
         return branch
@@ -170,11 +171,11 @@ class BranchManager:
         Raises:
             ValueError: If branch name is invalid
         """
-        if BranchManager.is_main_branch(branch_name):
+        if is_default_main(branch_name):
             raise ValueError(
                 f"Branch name '{branch_name}' is the default branch and cannot be used."
             )
-        if not branch_name or not branch_name.strip():
+        if is_null_or_whitespace_only(branch_name):
             raise ValueError("Branch name is blank.")
         if branch_name.isdigit():
             raise ValueError(
@@ -197,7 +198,7 @@ class BranchManager:
             raise ValueError(
                 f"Branch name '{branch_name}' do not use in fast-forward."
             )
-        if not branch_name or not branch_name.strip():
+        if is_null_or_whitespace_only(branch_name):
             raise ValueError("Branch name is blank.")
         if branch_name == current_branch:
             raise ValueError(
