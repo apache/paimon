@@ -139,22 +139,14 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public TableWriteImpl<T> withWriteType(RowType writeType) {
-        checkState(
-                generatedColumnRow == null || rowType.equals(writeType),
-                "Partial-column writes are not supported for tables with generated partition columns.");
+        if (generatedColumnRow != null) {
+            this.generatedColumnRow = new GeneratedColumnRow(rowType, writeType);
+            return this;
+        }
         write.withWriteType(writeType);
         this.writeType = writeType;
         updateNotNullFieldIndexes();
         this.defaultValueRow = DefaultValueRow.create(writeType, rowType);
-        return this;
-    }
-
-    @Override
-    public TableWriteImpl<T> withInputType(RowType inputType) {
-        checkState(
-                GeneratedColumnRow.hasGeneratedColumns(rowType),
-                "An input type can only be declared for tables with generated partition columns.");
-        this.generatedColumnRow = new GeneratedColumnRow(rowType, inputType);
         return this;
     }
 

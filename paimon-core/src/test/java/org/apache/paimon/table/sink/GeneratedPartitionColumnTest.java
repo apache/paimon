@@ -63,7 +63,7 @@ class GeneratedPartitionColumnTest {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
-            write.withInputType(input);
+            write.withWriteType(input);
             GenericRow first = GenericRow.of(Timestamp.fromEpochMillis(-1), 1);
             assertThat(write.getPartition(first).getInt(0)).isEqualTo(-1);
             write.write(first);
@@ -88,14 +88,20 @@ class GeneratedPartitionColumnTest {
         // A reader and writer reopened from persistent schema retain the contract.
         FileStoreTable reopened =
                 FileStoreTableFactory.create(LocalFileIO.create(), table.location());
-        try (BatchTableWrite write = reopened.newBatchWriteBuilder().newWrite()) {
+        try (BatchTableWrite write =
+                reopened.newBatchWriteBuilder().newWrite().withWriteType(reopened.rowType())) {
             assertThatThrownBy(() -> write.write(GenericRow.of(3, 1, Timestamp.fromEpochMillis(0))))
                     .hasMessageContaining("does not match generation expression");
             assertThatThrownBy(
                             () -> write.write(GenericRow.of(3, null, Timestamp.fromEpochMillis(0))))
                     .hasMessageContaining("does not match generation expression");
-            assertThatThrownBy(() -> write.withWriteType(input))
-                    .hasMessageContaining("Partial-column writes");
+            assertThatThrownBy(
+                            () ->
+                                    write.withWriteType(
+                                            RowType.of(
+                                                    reopened.rowType().getField("id"),
+                                                    reopened.rowType().getField("dt"))))
+                    .hasMessageContaining("Missing input column 'ts'");
         }
     }
 

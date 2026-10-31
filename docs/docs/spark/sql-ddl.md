@@ -113,7 +113,8 @@ is supported. Ordinary append inserts and primary-key deduplicate writes are sup
 primary-key and partition constraints still apply. Partial-column writes are not supported.
 
 The Java schema builder exposes `generatedColumn(name, type, expression)`. Java writers can call
-`withInputType` with all ordinary fields to omit generated partition fields from input rows.
+`withWriteType` with all ordinary fields to omit generated partition fields from input rows. The
+writer fills in the generated fields and writes the full table schema.
 Flink's existing virtual computed columns retain their original semantics; this feature does not
 add Flink SQL syntax for physical generated columns.
 

@@ -41,16 +41,12 @@ public interface TableWrite extends AutoCloseable {
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
-    /** Specified the write rowType. */
-    TableWrite withWriteType(RowType writeType);
-
     /**
-     * Declares input columns when physical generated columns are omitted. Other columns must be
-     * present. This changes the input layout, not the physical layout written to files.
+     * Specifies the write row type. For tables with generated partition columns, this declares the
+     * input layout: only generated columns may be omitted, and the writer materializes the full
+     * table row before routing and writing.
      */
-    default TableWrite withInputType(RowType inputType) {
-        throw new UnsupportedOperationException("Declaring an input type is not supported.");
-    }
+    TableWrite withWriteType(RowType writeType);
 
     /** With a shared {@link MemoryPoolFactory} for the current table write. */
     TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory);
