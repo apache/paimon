@@ -209,6 +209,15 @@ class JdbcCatalogTest(unittest.TestCase):
         catalog = CatalogFactory.create(self.options)
         catalog.create_database("test_db", False)
         catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+        table = catalog.get_table("test_db.test_table")
+        builder = table.new_batch_write_builder()
+        writer, commit = builder.new_write(), builder.new_commit()
+        try:
+            writer.write_arrow(pa.Table.from_pydict({"f0": [1]}, schema=pa.schema([("f0", pa.int32())])))
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
 
         for identifier in (
             "test_db.test_table",
@@ -217,7 +226,12 @@ class JdbcCatalogTest(unittest.TestCase):
             Identifier("test_db", "test_table", branch="MAIN"),
         ):
             with self.subTest(identifier=identifier):
-                self.assertEqual(catalog.get_table(identifier).fields, fields)
+                table = catalog.get_table(identifier)
+                self.assertEqual(table.fields, fields)
+                self.assertEqual(table.current_branch(), "main")
+                read_builder = table.new_read_builder()
+                rows = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+                self.assertEqual(rows.column("f0").to_pylist(), [1])
 
         for identifier in (
             "test_db.test_table$branch_dev",

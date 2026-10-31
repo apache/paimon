@@ -413,13 +413,12 @@ class JdbcCatalog(Catalog):
             raise TableNotExistException(identifier)
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
-        table_identifier = identifier
-        if identifier.is_system_table():
-            table_identifier = Identifier.create(
-                identifier.get_database_name(),
-                identifier.get_table_name(),
-                branch=branch,
-            )
+        # Drop the system table and any default-main branch spelling.
+        table_identifier = Identifier.create(
+            identifier.get_database_name(),
+            identifier.get_table_name(),
+            branch=branch,
+        )
         from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=table_identifier,
