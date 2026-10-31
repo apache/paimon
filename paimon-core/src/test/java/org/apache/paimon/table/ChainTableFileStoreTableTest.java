@@ -839,6 +839,24 @@ public class ChainTableFileStoreTableTest {
                         row(2L, 1L, "CN", "CN", "20250810", "21"));
     }
 
+    @Test
+    public void testCopyWithoutQueryAuthPreservesChainBranches() throws Exception {
+        createChainTableWithQueryAuth();
+        FileStoreTable table = loadTable(queryAuthEnvironment(this::maskValueAndFilterKey));
+        FileStoreTable copied = table.copyWithoutQueryAuth();
+
+        assertThat(copied).isInstanceOf(ChainTableFileStoreTable.class);
+        assertThat(((ChainTableFileStoreTable) copied).other())
+                .isInstanceOf(ChainGroupReadTable.class);
+        assertThat(copied.coreOptions().queryAuthEnabled()).isFalse();
+        assertThat(getResult(copied, QUERIED_PARTITION))
+                .containsExactlyInAnyOrder(
+                        row(1L, 2L, "1-1", "CN", "20250810", "21"),
+                        row(2L, 1L, "2", "CN", "20250810", "21"),
+                        row(4L, 1L, "4", "CN", "20250810", "21"));
+        assertThat(table.coreOptions().queryAuthEnabled()).isTrue();
+    }
+
     /**
      * A chain partition key names the partition a row is reported under, not the branch partition
      * it is stored in: k=2 sits in the snapshot branch under hour 20, and the chain merge hands it

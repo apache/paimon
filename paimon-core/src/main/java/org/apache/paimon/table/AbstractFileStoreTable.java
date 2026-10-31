@@ -92,6 +92,7 @@ import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -340,6 +341,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return copyInternal(new Options().set(QUERY_AUTH_ENABLED, false).toMap(), true);
+    }
+
+    @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         checkImmutability(dynamicOptions);
         return copyInternal(dynamicOptions, false);
@@ -350,6 +356,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         // check option is not immutable
         dynamicOptions.forEach(
                 (k, newValue) -> {
+                    if (QUERY_AUTH_ENABLED.key().equals(k)
+                            && CoreOptions.fromMap(oldOptions).queryAuthEnabled()) {
+                        Preconditions.checkArgument(
+                                Boolean.parseBoolean(newValue),
+                                "Option '%s' is not allowed to be disabled dynamically",
+                                k);
+                    }
                     String oldValue = oldOptions.get(k);
                     if (!Objects.equals(oldValue, newValue)
                             && !SchemaManager.isUnchangedNormalizedKey(
