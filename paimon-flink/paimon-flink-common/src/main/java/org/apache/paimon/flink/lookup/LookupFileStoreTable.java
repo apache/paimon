@@ -113,6 +113,11 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return new LookupFileStoreTable(wrapped.copyWithoutQueryAuth(), lookupScanMode);
+    }
+
+    @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         return new LookupFileStoreTable(wrapped.copy(dynamicOptions), lookupScanMode);
     }

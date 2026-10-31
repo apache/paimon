@@ -129,6 +129,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.io.File;
@@ -5907,6 +5908,71 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         scan.withPartitionFilter(onMaskedP2);
         scan.withPartitionFilter(onPlainP1);
         assertThat(scan.plan().splits()).isNotEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testQueryAuthCannotBeDisabledDynamically(boolean withoutTimeTravel) throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_dynamic_options");
+        FileStoreTable table =
+                (FileStoreTable)
+                        createMaskingAuthTable(
+                                identifier, stringFields("secret", "other"), emptyMap());
+        writeStringRows(
+                table, new String[] {"secret1", "visible"}, new String[] {"secret2", "hidden"});
+        maskConstant(identifier, "secret");
+        setRowFilter(
+                identifier,
+                singletonList(
+                        new PredicateBuilder(table.rowType())
+                                .equal(1, BinaryString.fromString("visible"))));
+        assertThat(batchRead(table)).containsExactly("+I[****, visible]");
+
+        for (String value : Arrays.asList("false", "FaLsE", null, "", "invalid", " true ")) {
+            Map<String, String> options = singletonMap(QUERY_AUTH_ENABLED.key(), value);
+            assertThatThrownBy(
+                            () -> {
+                                if (withoutTimeTravel) {
+                                    table.copyWithoutTimeTravel(options);
+                                } else {
+                                    table.copy(options);
+                                }
+                            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(
+                            "Option 'query-auth.enabled' is not allowed to be disabled dynamically");
+        }
+
+        for (Map<String, String> options :
+                Arrays.asList(
+                        Collections.<String, String>emptyMap(),
+                        singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        singletonMap(QUERY_AUTH_ENABLED.key(), "TrUe"))) {
+            FileStoreTable copied =
+                    withoutTimeTravel ? table.copyWithoutTimeTravel(options) : table.copy(options);
+            assertThat(batchRead(copied)).containsExactly("+I[****, visible]");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testQueryAuthCanBeEnabledDynamically(boolean withoutTimeTravel) throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_dynamic_enable");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder().column("secret", DataTypes.STRING()).build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        for (String value : Arrays.asList("false", "true", "TrUe")) {
+            Map<String, String> options = singletonMap(QUERY_AUTH_ENABLED.key(), value);
+            FileStoreTable copied =
+                    withoutTimeTravel ? table.copyWithoutTimeTravel(options) : table.copy(options);
+            assertThat(copied.coreOptions().queryAuthEnabled())
+                    .isEqualTo(Boolean.parseBoolean(value));
+        }
+        assertThat(table.coreOptions().queryAuthEnabled()).isFalse();
     }
 
     @Test

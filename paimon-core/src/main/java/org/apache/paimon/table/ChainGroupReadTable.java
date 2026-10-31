@@ -167,6 +167,12 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyWithoutQueryAuth() {
+        return new ChainGroupReadTable(
+                wrapped.copyWithoutQueryAuth(), other().copyWithoutQueryAuth());
+    }
+
+    @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         Map<String, String> wrappedOptions =
                 prepareBranchOptions(dynamicOptions, wrapped.coreOptions().branch(), wrapped);

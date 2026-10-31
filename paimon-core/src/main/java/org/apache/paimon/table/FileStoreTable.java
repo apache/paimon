@@ -128,6 +128,9 @@ public interface FileStoreTable extends DataTable {
 
     FileStoreTable copy(TableSchema newTableSchema);
 
+    /** Internal copy for raw reads, such as index bootstrap. */
+    FileStoreTable copyWithoutQueryAuth();
+
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);
 
