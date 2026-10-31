@@ -2774,6 +2774,15 @@ public class CoreOptions implements Serializable {
                                     + "Row IDs and logical deletions are preserved, and associated "
                                     + "BLOB and VECTOR files are not rewritten by this option.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_DISCARD_CONFLICTING_TASKS =
+            key("data-evolution.compaction.discard-conflicting-tasks")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Skip complete data-evolution compaction tasks with row-range conflicts. "
+                                    + "Skipped inputs remain live for later compaction. Applies only to "
+                                    + "data-only compaction messages without row-id validation baselines.");
+
     public static final ConfigOption<Double> DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO =
             key("data-evolution.compaction.large-file-ratio")
                     .doubleType()
