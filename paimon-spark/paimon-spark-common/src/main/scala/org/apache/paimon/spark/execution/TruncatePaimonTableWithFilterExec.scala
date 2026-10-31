@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.{FileStoreTable, Table}
@@ -36,6 +37,7 @@ case class TruncatePaimonTableWithFilterExec(
   extends PaimonLeafV2CommandExec {
 
   override def run(): Seq[InternalRow] = {
+    rejectRewriteUnderQueryAuth(table, "DELETE")
     val commit = table.newBatchWriteBuilder().newCommit()
     try {
       partitionPredicate match {
