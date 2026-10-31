@@ -48,6 +48,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -133,6 +134,8 @@ public class CompactChainTableProcedure extends BaseProcedure {
             DataSourceV2Relation relation,
             String partitionStr,
             boolean overwrite) {
+        rejectRewriteUnderQueryAuth(table, "Chain table compaction");
+        rejectRewriteUnderQueryAuth(table.other(), "Chain table compaction");
         FileStoreTable snapshotTable = table.wrapped();
 
         ChainGroupReadTable.ChainTableBatchScan scan =

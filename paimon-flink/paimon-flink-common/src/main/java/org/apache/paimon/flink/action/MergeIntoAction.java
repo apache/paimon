@@ -48,6 +48,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
 /**
@@ -253,6 +254,7 @@ public class MergeIntoAction extends TableActionBase {
     }
 
     public DataStream<RowData> buildDataStream() {
+        rejectRewriteUnderQueryAuth(table, "MERGE INTO");
         // handle aliases
         handleTargetAlias();
 

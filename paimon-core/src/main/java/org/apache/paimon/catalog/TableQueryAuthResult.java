@@ -142,6 +142,23 @@ public class TableQueryAuthResult implements Serializable {
         }
     }
 
+    public static void rejectRewriteUnderQueryAuth(@Nullable Table table, String operation) {
+        if (table instanceof FileStoreTable
+                && ((FileStoreTable) table).coreOptions().queryAuthEnabled()) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            TableQueryAuthResult authResult =
+                    fileStoreTable
+                            .catalogEnvironment()
+                            .tableQueryAuth(fileStoreTable.coreOptions())
+                            .auth(null);
+            if (authResult != null && authResult.hasRules()) {
+                throw new UnsupportedOperationException(
+                        operation
+                                + " requires full-table access without row filters or column masks.");
+            }
+        }
+    }
+
     /**
      * Drops the conjuncts of {@code predicate} referencing any of {@code fields}; returns null when
      * nothing remains. Used to keep raw-statistics pushdown off masked columns.

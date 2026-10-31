@@ -66,6 +66,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -94,6 +95,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public RowLevelUpdateInfo applyRowLevelUpdate(
             List<Column> updatedColumns, @Nullable RowLevelModificationScanContext context) {
+        rejectRewriteUnderQueryAuth(table, "UPDATE");
         // Since only UPDATE_AFTER type messages can be received at present,
         // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
         // unsupported. Similarly, it is not allowed to update the primary key column when updating
@@ -140,6 +142,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public RowLevelDeleteInfo applyRowLevelDelete(
             @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
+        rejectRewriteUnderQueryAuth(table, "DELETE");
         if (isDataEvolutionTable()) {
             FileStoreTable fileStoreTable = (FileStoreTable) table;
             DataEvolutionDeleteSink.validateTable(fileStoreTable);
@@ -174,6 +177,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
 
     @Override
     public boolean applyDeleteFilters(List<ResolvedExpression> list) {
+        rejectRewriteUnderQueryAuth(table, "DELETE");
         if (!isDataEvolutionTable()) {
             validatePKUpsertDeletable(table);
         }

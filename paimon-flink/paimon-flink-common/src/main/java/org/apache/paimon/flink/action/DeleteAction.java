@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 
 /** Delete from table action for Flink, dispatching by table type. */
 public class DeleteAction extends TableActionBase {
@@ -86,6 +87,7 @@ public class DeleteAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
+        rejectRewriteUnderQueryAuth(table, "DELETE");
         handleSqls();
         if (dataEvolutionDelete != null) {
             dataEvolutionDelete.runInternal().await();

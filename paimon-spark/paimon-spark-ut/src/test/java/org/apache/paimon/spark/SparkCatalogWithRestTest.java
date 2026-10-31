@@ -60,6 +60,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -70,6 +73,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -256,6 +260,75 @@ public class SparkCatalogWithRestTest {
                                 .toString())
                 .isEqualTo("[1]");
         cleanFunction(functionName);
+    }
+
+    @ParameterizedTest
+    @MethodSource("rowLevelTableOptions")
+    public void testRowLevelOperationsRequireFullTableAccess(boolean useV2Write, String options) {
+        spark.conf().set("spark.paimon.write.use-v2-write", useV2Write);
+        spark.sql(
+                "CREATE TABLE t_rewrite (id INT, ssn STRING, note STRING, p INT) PARTITIONED BY (p)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true', "
+                        + options
+                        + ")");
+        spark.sql("INSERT INTO t_rewrite VALUES (1, 's1', 'n1', 1), (2, 's2', 'n2', 1)");
+        Identifier identifier = Identifier.create("db2", "t_rewrite");
+        Predicate rowFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        Transform mask =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        String merge =
+                "MERGE INTO t_rewrite t USING (SELECT 2 AS id) s ON t.id = s.id"
+                        + " WHEN MATCHED THEN UPDATE SET note = t.ssn";
+        String[][] statements = {
+            {"UPDATE", "UPDATE t_rewrite SET note = ssn"},
+            {"DELETE", "DELETE FROM t_rewrite WHERE id = 2"},
+            {"DELETE", "DELETE FROM t_rewrite WHERE p = 1"},
+            {"DELETE", "DELETE FROM t_rewrite"},
+            {"MERGE", merge}
+        };
+        for (boolean masking : new boolean[] {false, true}) {
+            restCatalogServer.setRowFilterAuth(
+                    identifier, masking ? null : Collections.singletonList(rowFilter));
+            restCatalogServer.setColumnMaskingAuth(
+                    identifier,
+                    masking ? Collections.singletonMap("ssn", mask) : Collections.emptyMap());
+            for (String[] statement : statements) {
+                assertThatThrownBy(() -> spark.sql(statement[1]).collectAsList())
+                        .hasStackTraceContaining("UnsupportedOperationException")
+                        .hasStackTraceContaining(statement[0])
+                        .hasStackTraceContaining("requires full-table access");
+            }
+        }
+
+        restCatalogServer.setRowFilterAuth(identifier, null);
+        restCatalogServer.setColumnMaskingAuth(identifier, Collections.emptyMap());
+        assertThat(spark.sql("SELECT * FROM t_rewrite ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[1,s1,n1,1], [2,s2,n2,1]]");
+        spark.sql("UPDATE t_rewrite SET note = ssn WHERE id = 1");
+        spark.sql(merge);
+        assertThat(spark.sql("SELECT * FROM t_rewrite ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[1,s1,s1,1], [2,s2,s2,1]]");
+        spark.sql("DELETE FROM t_rewrite WHERE id = 2");
+        assertThat(spark.sql("SELECT id FROM t_rewrite").collectAsList().toString())
+                .isEqualTo("[[1]]");
+        spark.sql("DELETE FROM t_rewrite");
+        assertThat(spark.sql("SELECT * FROM t_rewrite").collectAsList()).isEmpty();
+    }
+
+    private static Stream<Arguments> rowLevelTableOptions() {
+        return Stream.of(
+                Arguments.of(false, "'bucket'='-1'"),
+                Arguments.of(true, "'bucket'='-1'"),
+                Arguments.of(false, "'primary-key'='id,p', 'bucket'='1'"),
+                Arguments.of(
+                        false,
+                        "'bucket'='-1', 'data-evolution.enabled'='true',"
+                                + " 'row-tracking.enabled'='true', 'deletion-vectors.enabled'='true'"),
+                Arguments.of(true, "'bucket'='-1', 'deletion-vectors.enabled'='true'"));
     }
 
     @Test
