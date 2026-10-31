@@ -133,10 +133,11 @@ A top-level field, including a partition field, may define `generationExpression
 }
 ```
 
-Writers compile the SQL expression into Paimon `Transform` operations once at initialization.
-These operations define the stored value, including CAST formatting and invalid-input behavior;
-the write engine's ANSI mode or implicit CAST rules do not change that definition. Spark fills
-omitted columns through the same evaluator, including source-column defaults, before core validation.
+Writers compile expressions for omitted columns into Paimon `Transform` operations once at
+initialization. These operations define the automatically generated value, including CAST
+formatting and invalid-input behavior; the write engine's ANSI mode or implicit CAST rules do
+not change that definition. Spark fills omitted columns through the same evaluator, including
+source-column defaults, before writing.
 Expressions may reference ordinary top-level fields and compose supported scalar calls, such as
 `YEAR(event_time)`, `UPPER(name)`, `CONCAT(UPPER(name), '-', name)`, and
 `DATE_ADD(CAST(event_time AS DATE), days)`. The expression result type must match the declared
@@ -148,9 +149,13 @@ Generated columns are physical fields; readers use the stored values without eva
 expression. A cast from `TIMESTAMP WITHOUT TIME ZONE` to `DATE` uses the timestamp's calendar
 date, independently of the writer's default time zone.
 
-Adapted writers generate omitted columns and validate explicitly supplied values using NULL-safe
-equality. Explicit NULL therefore fails if the expression produces a non-NULL value. A key-only
-DELETE may supply existing generated values without their source values being populated.
+This is a write-time column-filling feature, not a strict computed-column constraint. Adapted
+writers evaluate an expression only when the input schema omits its column. If the input schema
+includes the column, its supplied value is preserved without evaluating or checking the expression,
+including an explicit NULL. Normal type, NOT NULL, primary-key, and partition constraints still
+apply. Stored values may therefore differ from the expression result; readers and optimizers must
+not assume that the expression is an invariant or infer partition filters from it. Updating a source
+column does not recompute a generated column that is already supplied in the write row.
 
 Definitions are supported at table creation. Changing a definition or renaming, dropping, or
 changing the type of any source is not supported. A generated column cannot be used as

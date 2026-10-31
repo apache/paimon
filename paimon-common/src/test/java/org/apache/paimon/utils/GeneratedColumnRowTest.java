@@ -19,9 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericArray;
-import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -34,13 +32,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests generation and NULL-safe validation before partition routing. */
+/** Tests omitted-column generation and preservation of supplied values before partition routing. */
 class GeneratedColumnRowTest {
 
     @Test
@@ -56,7 +52,7 @@ class GeneratedColumnRowTest {
                             new DataField(0, "source", sourceType),
                             new DataField(1, "text", DataTypes.STRING())
                                     .newGenerationExpression("CAST(source AS STRING)"));
-            assertThatThrownBy(() -> new GeneratedColumnRow(type, type))
+            assertThatThrownBy(() -> GeneratedColumn.create(type, type.getField("text")))
                     .hasMessageContaining("TIMESTAMP WITH LOCAL TIME ZONE");
         }
     }
@@ -88,13 +84,61 @@ class GeneratedColumnRowTest {
         GeneratedColumnRow generator = new GeneratedColumnRow(rowType, rowType);
         Timestamp timestamp = Timestamp.fromEpochMillis(0);
         assertThat(generator.replaceRow(GenericRow.of(timestamp, 0, 1)).getInt(1)).isZero();
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(timestamp, 1, 1)))
-                .hasMessageContaining("does not match generation expression");
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(timestamp, null, 1)))
-                .hasMessageContaining("does not match generation expression");
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(null, 0, 1)))
-                .hasMessageContaining("does not match generation expression");
+        assertThat(generator.replaceRow(GenericRow.of(timestamp, 1, 1)).getInt(1)).isEqualTo(1);
+        assertThat(generator.replaceRow(GenericRow.of(timestamp, null, 1)).isNullAt(1)).isTrue();
+        assertThat(generator.replaceRow(GenericRow.of(null, 0, 1)).getInt(1)).isZero();
         assertThat(generator.replaceRow(GenericRow.of(null, null, 1)).isNullAt(1)).isTrue();
+    }
+
+    @Test
+    void testGenerateOnlyOmittedColumnsWithoutEvaluatingSuppliedExpressions() {
+        RowType type =
+                RowType.of(
+                        new DataField(0, "text", DataTypes.STRING()),
+                        new DataField(1, "number", DataTypes.INT())
+                                .newGenerationExpression("CAST(text AS INT)"),
+                        new DataField(2, "label", DataTypes.STRING())
+                                .newGenerationExpression("UPPER(text)"));
+        InternalRow row =
+                new GeneratedColumnRow(type, type.project("number", "text"))
+                        .replaceRow(GenericRow.of(42, BinaryString.fromString("invalid")));
+        assertThat(row.getInt(1)).isEqualTo(42);
+        assertThat(row.getString(2).toString()).isEqualTo("INVALID");
+        assertThat(
+                        new GeneratedColumnRow(type, type)
+                                .replaceRow(
+                                        GenericRow.of(
+                                                BinaryString.fromString("invalid"), null, null))
+                                .isNullAt(1))
+                .isTrue();
+        assertThatThrownBy(
+                        () ->
+                                new GeneratedColumnRow(type, type.project("text"))
+                                        .replaceRow(
+                                                GenericRow.of(BinaryString.fromString("invalid"))))
+                .isInstanceOf(NumberFormatException.class);
+    }
+
+    @Test
+    void testComplexIdentityAndSuppliedValuesWithDifferentFieldIds() {
+        RowType sourceType =
+                RowType.of(new DataField(10, "values", DataTypes.ARRAY(DataTypes.INT())));
+        RowType targetType =
+                RowType.of(new DataField(20, "values", DataTypes.ARRAY(DataTypes.INT())));
+        RowType type =
+                RowType.of(
+                        new DataField(0, "source", sourceType),
+                        new DataField(1, "copy", targetType).newGenerationExpression("source"));
+        GenericRow source = GenericRow.of(new GenericArray(new int[] {1, 2}));
+        InternalRow generated =
+                new GeneratedColumnRow(type, type.project("source"))
+                        .replaceRow(GenericRow.of(source));
+        assertThat(generated.getRow(1, 1).getArray(0).getInt(1)).isEqualTo(2);
+        GenericRow supplied = GenericRow.of(new GenericArray(new int[] {7}));
+        InternalRow explicit =
+                new GeneratedColumnRow(type, type).replaceRow(GenericRow.of(source, supplied));
+        assertThat(explicit.getRow(1, 1).getArray(0).getInt(0)).isEqualTo(7);
+        assertThat(explicit.getRow(1, 1).getArray(0).size()).isEqualTo(1);
     }
 
     @Test
@@ -149,8 +193,8 @@ class GeneratedColumnRowTest {
                         1969,
                         1,
                         2L);
-        assertThatThrownBy(() -> new GeneratedColumnRow(type, type).replaceRow(wrong))
-                .hasMessageContaining("does not match generation expression");
+        assertThat(new GeneratedColumnRow(type, type).replaceRow(wrong).getString(3).toString())
+                .isEqualTo("wrong");
         InternalRow nulls = generator.replaceRow(GenericRow.of(null, null, null));
         assertThat(nulls.isNullAt(3)).isTrue();
         assertThat(nulls.isNullAt(4)).isTrue();
@@ -180,7 +224,7 @@ class GeneratedColumnRowTest {
                                     rowType.getField("ts"),
                                     rowType.getField("dt").newGenerationExpression(expression),
                                     rowType.getField("id")));
-            assertThatThrownBy(() -> new GeneratedColumnRow(invalid, invalid))
+            assertThatThrownBy(() -> GeneratedColumn.create(invalid, invalid.getField("dt")))
                     .isInstanceOf(IllegalArgumentException.class);
         }
         RowType zoned =
@@ -189,7 +233,7 @@ class GeneratedColumnRowTest {
                                 rowType.getField("ts").newType(DataTypes.TIMESTAMP_LTZ_MILLIS()),
                                 rowType.getField("dt"),
                                 rowType.getField("id")));
-        assertThatThrownBy(() -> new GeneratedColumnRow(zoned, zoned))
+        assertThatThrownBy(() -> GeneratedColumn.create(zoned, zoned.getField("dt")))
                 .hasMessageContaining("TIMESTAMP WITH LOCAL TIME ZONE");
     }
 
@@ -213,7 +257,7 @@ class GeneratedColumnRowTest {
     }
 
     @Test
-    void testIdentityUsesTypedEqualityForBinaryValues() {
+    void testIdentityGeneratesOmittedBinaryValuesAndPreservesSuppliedValues() {
         RowType type =
                 RowType.of(
                         new DataField(0, "bytes", DataTypes.BYTES()),
@@ -225,9 +269,13 @@ class GeneratedColumnRowTest {
                                 .replaceRow(GenericRow.of(new byte[] {1, 2}, new byte[] {1, 2}))
                                 .getBinary(1))
                 .containsExactly(1, 2);
-        assertThatThrownBy(
-                        () -> generator.replaceRow(GenericRow.of(new byte[] {1}, new byte[] {2})))
-                .hasMessageContaining("does not match generation expression");
+        assertThat(generator.replaceRow(GenericRow.of(new byte[] {1}, new byte[] {2})).getBinary(1))
+                .containsExactly(2);
+        assertThat(
+                        new GeneratedColumnRow(type, type.project("bytes"))
+                                .replaceRow(GenericRow.of(new byte[] {1, 2}))
+                                .getBinary(1))
+                .containsExactly(1, 2);
     }
 
     @Test
@@ -255,187 +303,13 @@ class GeneratedColumnRowTest {
                         rowType.getField("dt"),
                         new DataField(3, "year", DataTypes.INT())
                                 .newGenerationExpression("YEAR(dt)"));
-        assertThatThrownBy(() -> new GeneratedColumnRow(type, type))
+        assertThatThrownBy(() -> GeneratedColumn.create(type, type.getField("year")))
                 .hasMessageContaining("cannot reference generated column 'dt'");
         RowType self =
                 RowType.of(
                         new DataField(0, "copy", DataTypes.INT()).newGenerationExpression("copy"));
-        assertThatThrownBy(() -> new GeneratedColumnRow(self, self))
+        assertThatThrownBy(() -> GeneratedColumn.create(self, self.getField("copy")))
                 .hasMessageContaining("cannot reference generated column 'copy'");
-    }
-
-    @Test
-    void testExplicitFloatingValuesUseSqlEquality() {
-        RowType type =
-                RowType.of(
-                        new DataField(0, "float_value", DataTypes.FLOAT()),
-                        new DataField(1, "float_copy", DataTypes.FLOAT())
-                                .newGenerationExpression("float_value"),
-                        new DataField(2, "double_value", DataTypes.DOUBLE()),
-                        new DataField(3, "double_copy", DataTypes.DOUBLE())
-                                .newGenerationExpression("double_value"));
-        GeneratedColumnRow generator = new GeneratedColumnRow(type, type);
-        InternalRow negativeZero = generator.replaceRow(GenericRow.of(-0.0f, 0.0f, -0.0d, 0.0d));
-        assertThat(Float.floatToRawIntBits(negativeZero.getFloat(1)))
-                .isEqualTo(Float.floatToRawIntBits(-0.0f));
-        assertThat(Double.doubleToRawLongBits(negativeZero.getDouble(3)))
-                .isEqualTo(Double.doubleToRawLongBits(-0.0d));
-        InternalRow positiveZero = generator.replaceRow(GenericRow.of(0.0f, -0.0f, 0.0d, -0.0d));
-        assertThat(Float.floatToRawIntBits(positiveZero.getFloat(1)))
-                .isEqualTo(Float.floatToRawIntBits(0.0f));
-        assertThat(Double.doubleToRawLongBits(positiveZero.getDouble(3)))
-                .isEqualTo(Double.doubleToRawLongBits(0.0d));
-
-        InternalRow nan =
-                generator.replaceRow(
-                        GenericRow.of(
-                                Float.intBitsToFloat(0x7fc00001),
-                                Float.NaN,
-                                Double.longBitsToDouble(0x7ff8000000000001L),
-                                Double.NaN));
-        assertThat(nan.getFloat(1)).isNaN();
-        assertThat(nan.getDouble(3)).isNaN();
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(0.0f, 1.0f, 0.0d, 0.0d)))
-                .hasMessageContaining("float_copy");
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(0.0f, 0.0f, 0.0d, 1.0d)))
-                .hasMessageContaining("double_copy");
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(Float.NaN, 1.0f, 0.0d, 0.0d)))
-                .hasMessageContaining("float_copy");
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(0.0f, 0.0f, 1.0d, Double.NaN)))
-                .hasMessageContaining("double_copy");
-    }
-
-    @Test
-    void testExplicitArrayUsesRecursiveSqlEquality() {
-        RowType type =
-                RowType.of(
-                        new DataField(0, "samples", DataTypes.ARRAY(DataTypes.DOUBLE())),
-                        new DataField(1, "copy", DataTypes.ARRAY(DataTypes.DOUBLE()))
-                                .newGenerationExpression("samples"));
-        GeneratedColumnRow generator = new GeneratedColumnRow(type, type);
-        GenericArray source =
-                new GenericArray(
-                        new Object[] {
-                            -0.0d, Double.longBitsToDouble(0x7ff8000000000001L), null, 7.0d
-                        });
-        GenericArray supplied = new GenericArray(new Object[] {0.0d, Double.NaN, null, 7.0d});
-        InternalRow row = generator.replaceRow(GenericRow.of(source, supplied));
-        assertThat(Double.doubleToRawLongBits(row.getArray(1).getDouble(0)))
-                .isEqualTo(Double.doubleToRawLongBits(-0.0d));
-        assertThat(row.getArray(1).getDouble(1)).isNaN();
-        assertThat(row.getArray(1).isNullAt(2)).isTrue();
-        assertThat(row.getArray(1).getDouble(3)).isEqualTo(7.0d);
-        for (GenericArray wrong :
-                Arrays.asList(
-                        new GenericArray(new Object[] {0.0d, Double.NaN, null, 8.0d}),
-                        new GenericArray(new Object[] {0.0d, Double.NaN, 0.0d, 7.0d}),
-                        new GenericArray(new Object[] {0.0d, Double.NaN, null}))) {
-            assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(source, wrong)))
-                    .hasMessageContaining("does not match generation expression");
-        }
-        assertThat(generator.replaceRow(GenericRow.of(null, null)).isNullAt(1)).isTrue();
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(source, null)))
-                .hasMessageContaining("does not match generation expression");
-        assertThatThrownBy(() -> generator.replaceRow(GenericRow.of(null, supplied)))
-                .hasMessageContaining("does not match generation expression");
-    }
-
-    @Test
-    void testExplicitRowUsesRecursiveSqlEquality() {
-        RowType sourceType =
-                RowType.of(
-                        new DataField(10, "rate", DataTypes.FLOAT()),
-                        new DataField(11, "offset", DataTypes.DOUBLE()),
-                        new DataField(12, "samples", DataTypes.ARRAY(DataTypes.DOUBLE())));
-        RowType targetType =
-                RowType.of(
-                        new DataField(20, "rate", DataTypes.FLOAT()),
-                        new DataField(21, "offset", DataTypes.DOUBLE()),
-                        new DataField(22, "samples", DataTypes.ARRAY(DataTypes.DOUBLE())));
-        RowType type =
-                RowType.of(
-                        new DataField(0, "reading", sourceType),
-                        new DataField(1, "copy", targetType).newGenerationExpression("reading"));
-        GeneratedColumnRow generator = new GeneratedColumnRow(type, type);
-        GenericRow source =
-                GenericRow.of(-0.0f, Double.NaN, new GenericArray(new Object[] {-0.0d, null}));
-        GenericRow supplied =
-                GenericRow.of(
-                        0.0f,
-                        Double.longBitsToDouble(0x7ff8000000000001L),
-                        new GenericArray(new Object[] {0.0d, null}));
-        InternalRow row = generator.replaceRow(GenericRow.of(source, supplied));
-        assertThat(Float.floatToRawIntBits(row.getRow(1, 3).getFloat(0)))
-                .isEqualTo(Float.floatToRawIntBits(-0.0f));
-        assertThat(row.getRow(1, 3).getDouble(1)).isNaN();
-        assertThat(row.getRow(1, 3).getArray(2).isNullAt(1)).isTrue();
-        assertThatThrownBy(
-                        () ->
-                                generator.replaceRow(
-                                        GenericRow.of(
-                                                source,
-                                                GenericRow.of(
-                                                        0.0f,
-                                                        1.0d,
-                                                        new GenericArray(
-                                                                new Object[] {0.0d, null})))))
-                .hasMessageContaining("does not match generation expression");
-        assertThatThrownBy(
-                        () ->
-                                generator.replaceRow(
-                                        GenericRow.of(
-                                                source,
-                                                GenericRow.of(
-                                                        0.0f,
-                                                        Double.NaN,
-                                                        new GenericArray(
-                                                                new Object[] {0.0d, 1.0d})))))
-                .hasMessageContaining("does not match generation expression");
-    }
-
-    @Test
-    void testExplicitMapUsesRecursiveSqlEqualityAndIgnoresEntryOrder() {
-        RowType type =
-                RowType.of(
-                        new DataField(
-                                0, "weights", DataTypes.MAP(DataTypes.DOUBLE(), DataTypes.FLOAT())),
-                        new DataField(
-                                        1,
-                                        "copy",
-                                        DataTypes.MAP(DataTypes.DOUBLE(), DataTypes.FLOAT()))
-                                .newGenerationExpression("weights"));
-        GeneratedColumnRow generator = new GeneratedColumnRow(type, type);
-        Map<Double, Float> source = new LinkedHashMap<>();
-        source.put(-0.0d, Float.intBitsToFloat(0x7fc00001));
-        source.put(2.0d, -0.0f);
-        source.put(3.0d, null);
-        Map<Double, Float> supplied = new LinkedHashMap<>();
-        supplied.put(3.0d, null);
-        supplied.put(2.0d, 0.0f);
-        supplied.put(0.0d, Float.NaN);
-        InternalRow row =
-                generator.replaceRow(
-                        GenericRow.of(new GenericMap(source), new GenericMap(supplied)));
-        assertThat(row.getMap(1).size()).isEqualTo(3);
-        assertThat(Double.doubleToRawLongBits(row.getMap(1).keyArray().getDouble(0)))
-                .isEqualTo(Double.doubleToRawLongBits(-0.0d));
-        assertThat(row.getMap(1).valueArray().getFloat(0)).isNaN();
-        assertThat(row.getMap(1).valueArray().isNullAt(2)).isTrue();
-        Map<Double, Float> wrongValue = new LinkedHashMap<>(supplied);
-        wrongValue.put(2.0d, 1.0f);
-        Map<Double, Float> wrongKey = new LinkedHashMap<>(supplied);
-        wrongKey.remove(0.0d);
-        wrongKey.put(1.0d, Float.NaN);
-        Map<Double, Float> missingEntry = new LinkedHashMap<>(supplied);
-        missingEntry.remove(3.0d);
-        for (Map<Double, Float> wrong : Arrays.asList(wrongValue, wrongKey, missingEntry)) {
-            assertThatThrownBy(
-                            () ->
-                                    generator.replaceRow(
-                                            GenericRow.of(
-                                                    new GenericMap(source), new GenericMap(wrong))))
-                    .hasMessageContaining("does not match generation expression");
-        }
     }
 
     @Test
@@ -463,79 +337,6 @@ class GeneratedColumnRowTest {
     }
 
     @Test
-    void testExplicitVectorUsesRecursiveSqlEquality() {
-        RowType type =
-                RowType.of(
-                        new DataField(0, "embedding", DataTypes.VECTOR(3, DataTypes.DOUBLE())),
-                        new DataField(1, "copy", DataTypes.VECTOR(3, DataTypes.DOUBLE()))
-                                .newGenerationExpression("embedding"));
-        GeneratedColumnRow generator = new GeneratedColumnRow(type, type);
-        BinaryVector source =
-                BinaryVector.fromPrimitiveArray(
-                        new double[] {-0.0d, Double.longBitsToDouble(0x7ff8000000000001L), 2.0d});
-        BinaryVector supplied =
-                BinaryVector.fromPrimitiveArray(new double[] {0.0d, Double.NaN, 2.0d});
-        InternalRow row = generator.replaceRow(GenericRow.of(source, supplied));
-        assertThat(Double.doubleToRawLongBits(row.getVector(1).getDouble(0)))
-                .isEqualTo(Double.doubleToRawLongBits(-0.0d));
-        assertThat(row.getVector(1).getDouble(1)).isNaN();
-        assertThat(row.getVector(1).getDouble(2)).isEqualTo(2.0d);
-        assertThatThrownBy(
-                        () ->
-                                generator.replaceRow(
-                                        GenericRow.of(
-                                                source,
-                                                BinaryVector.fromPrimitiveArray(
-                                                        new double[] {0.0d, Double.NaN, 3.0d}))))
-                .hasMessageContaining("does not match generation expression");
-        assertThatThrownBy(
-                        () ->
-                                generator.replaceRow(
-                                        GenericRow.of(
-                                                source,
-                                                BinaryVector.fromPrimitiveArray(
-                                                        new double[] {0.0d, 1.0d, 2.0d}))))
-                .hasMessageContaining("does not match generation expression");
-        assertThat(generator.replaceRow(GenericRow.of(null, null)).isNullAt(1)).isTrue();
-    }
-
-    @Test
-    void testExplicitMultisetUsesRecursiveSqlEquality() {
-        RowType type =
-                RowType.of(
-                        new DataField(0, "measurements", DataTypes.MULTISET(DataTypes.DOUBLE())),
-                        new DataField(1, "copy", DataTypes.MULTISET(DataTypes.DOUBLE()))
-                                .newGenerationExpression("measurements"));
-        GeneratedColumnRow generator = new GeneratedColumnRow(type, type);
-        Map<Double, Integer> source = new LinkedHashMap<>();
-        source.put(-0.0d, 2);
-        source.put(Double.longBitsToDouble(0x7ff8000000000001L), 1);
-        Map<Double, Integer> supplied = new LinkedHashMap<>();
-        supplied.put(Double.NaN, 1);
-        supplied.put(0.0d, 2);
-        InternalRow row =
-                generator.replaceRow(
-                        GenericRow.of(new GenericMap(source), new GenericMap(supplied)));
-        assertThat(row.getMap(1).size()).isEqualTo(2);
-        assertThat(Double.doubleToRawLongBits(row.getMap(1).keyArray().getDouble(0)))
-                .isEqualTo(Double.doubleToRawLongBits(-0.0d));
-        assertThat(row.getMap(1).valueArray().getInt(0)).isEqualTo(2);
-        Map<Double, Integer> wrongCount = new LinkedHashMap<>(supplied);
-        wrongCount.put(0.0d, 3);
-        Map<Double, Integer> wrongElement = new LinkedHashMap<>();
-        wrongElement.put(Double.NaN, 1);
-        wrongElement.put(1.0d, 2);
-        for (Map<Double, Integer> wrong : Arrays.asList(wrongCount, wrongElement)) {
-            assertThatThrownBy(
-                            () ->
-                                    generator.replaceRow(
-                                            GenericRow.of(
-                                                    new GenericMap(source), new GenericMap(wrong))))
-                    .hasMessageContaining("does not match generation expression");
-        }
-    }
-
-    @Test
     void testTimestampNtzCastAlias() {
         RowType type =
                 RowType.of(
@@ -553,10 +354,10 @@ class GeneratedColumnRowTest {
                                 .replaceRow(GenericRow.of(0, Timestamp.fromEpochMillis(0)))
                                 .getTimestamp(1, 6))
                 .isEqualTo(Timestamp.fromEpochMillis(0));
-        assertThatThrownBy(
-                        () ->
-                                new GeneratedColumnRow(type, type)
-                                        .replaceRow(GenericRow.of(0, Timestamp.fromEpochMillis(1))))
-                .hasMessageContaining("does not match generation expression");
+        assertThat(
+                        new GeneratedColumnRow(type, type)
+                                .replaceRow(GenericRow.of(0, Timestamp.fromEpochMillis(1)))
+                                .getTimestamp(1, 6))
+                .isEqualTo(Timestamp.fromEpochMillis(1));
     }
 }

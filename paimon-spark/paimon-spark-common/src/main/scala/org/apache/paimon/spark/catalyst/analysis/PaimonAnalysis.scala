@@ -164,7 +164,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     if (generated.isEmpty) {
       return query
     }
-    generated.foreach(PaimonGeneratedColumn.validateResultType)
     val omitted = if (byName) {
       generated.filterNot(f => query.output.exists(a => conf.resolver(a.name, f.name())))
     } else if (query.output.size == table.output.size - generated.size) {
@@ -175,6 +174,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     if (omitted.isEmpty) {
       query
     } else {
+      omitted.foreach(PaimonGeneratedColumn.validateResultType)
       val names = omitted.map(_.name()).toSet
       val aligned = resolveWriteOutput(
         query,

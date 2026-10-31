@@ -44,7 +44,8 @@ public interface TableWrite extends AutoCloseable {
     /**
      * Specifies the write row type. For tables with generated columns, this declares the input
      * layout: only generated columns may be omitted, and the writer materializes the full table row
-     * before routing and writing.
+     * before routing and writing. Supplied generated values, including nulls, are preserved without
+     * evaluating or checking the generation expression.
      */
     TableWrite withWriteType(RowType writeType);
 

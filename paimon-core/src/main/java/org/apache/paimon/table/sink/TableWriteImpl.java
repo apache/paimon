@@ -306,8 +306,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private InternalRow prepareRow(InternalRow row) {
         return generatedColumnRow == null
                 ? wrapDefaultValue(row)
-                : generatedColumnRow.replaceRow(
-                        row, mapped -> RowKindGenerator.getRowKind(rowKindGenerator, mapped));
+                : generatedColumnRow.replaceRow(row);
     }
 
     private SinkRecord toSinkRecord(InternalRow row) {

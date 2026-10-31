@@ -105,29 +105,22 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
     }
   }
 
-  test("reject inconsistent generated partition values without committing rows") {
+  test("preserve supplied generated partition values and explicit nulls") {
     assume(gteqSpark3_5)
     withTable("generated_events") {
       sql("""CREATE TABLE generated_events (
             |id INT, event_time TIMESTAMP_NTZ,
             |dt DATE GENERATED ALWAYS AS (CAST(event_time AS DATE))
             |) USING paimon PARTITIONED BY (dt)""".stripMargin)
-      for (partition <- Seq("DATE '2026-10-31'", "CAST(NULL AS DATE)")) {
-        val error = intercept[Throwable] {
-          sql(s"""INSERT INTO generated_events
-                 |VALUES (1, CAST('2026-10-30 12:00:00' AS TIMESTAMP_NTZ), $partition)
-                 |""".stripMargin)
-        }
-        val messages = Iterator
-          .iterate(error)(_.getCause)
-          .takeWhile(_ != null)
-          .map(_.getMessage)
-          .mkString("\n")
-        assert(messages.contains("does not match generation expression"))
-        checkAnswer(sql("SELECT id FROM generated_events"), Seq.empty)
+      for ((partition, id) <- Seq("DATE '2026-10-31'", "CAST(NULL AS DATE)").zipWithIndex) {
+        sql(s"""INSERT INTO generated_events
+               |VALUES ($id, CAST('2026-10-30 12:00:00' AS TIMESTAMP_NTZ), $partition)
+               |""".stripMargin)
       }
       sql("INSERT INTO generated_events (id, event_time) VALUES (2, NULL)")
-      checkAnswer(sql("SELECT id, dt FROM generated_events"), Seq(Row(2, null)))
+      checkAnswer(
+        sql("SELECT id, dt FROM generated_events"),
+        Seq(Row(0, Date.valueOf("2026-10-31")), Row(1, null), Row(2, null)))
     }
   }
 
@@ -145,18 +138,12 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT id, label, event_year, dt FROM generated_events"),
         Seq(Row(1, "ABC-bc", 1969, Date.valueOf("1970-01-02"))))
-      val error = intercept[Throwable] {
-        sql("""INSERT INTO generated_events
-              |VALUES (2, 'abc', CAST('1969-12-31 12:00:00' AS TIMESTAMP_NTZ), 2,
-              |'wrong', 1969, DATE '1970-01-02')""".stripMargin)
-      }
-      assert(
-        Iterator
-          .iterate(error)(_.getCause)
-          .takeWhile(_ != null)
-          .exists(
-            e => Option(e.getMessage).exists(_.contains("does not match generation expression"))))
-      checkAnswer(sql("SELECT id FROM generated_events"), Seq(Row(1)))
+      sql("""INSERT INTO generated_events
+            |VALUES (2, 'abc', CAST('1969-12-31 12:00:00' AS TIMESTAMP_NTZ), 2,
+            |'wrong', 1969, DATE '1970-01-02')""".stripMargin)
+      checkAnswer(
+        sql("SELECT id, label FROM generated_events"),
+        Seq(Row(1, "ABC-bc"), Row(2, "wrong")))
     }
     withTable("generated_events") {
       sql("""CREATE TABLE generated_events (name STRING,
@@ -186,7 +173,7 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
     }
   }
 
-  test("use storage transforms and defaults for both generated and explicit values") {
+  test("use storage transforms and defaults for omitted generated values") {
     assume(gteqSpark3_5)
     withTable("generated_events") {
       sql("""CREATE TABLE generated_events (id INT, ts TIMESTAMP_NTZ, name STRING,
@@ -211,6 +198,20 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT id, name, label FROM generated_events"),
         Seq(Row(1, "abc", "ABC"), Row(2, "abc", "ABC")))
+    }
+  }
+
+  test("skip supplied expressions when generating other omitted columns") {
+    assume(gteqSpark3_5)
+    withTable("generated_events") {
+      sql("""CREATE TABLE generated_events (id INT, text STRING,
+            |number INT GENERATED ALWAYS AS (CAST(text AS INT)),
+            |label STRING GENERATED ALWAYS AS (UPPER(text))) USING paimon""".stripMargin)
+      sql("INSERT INTO generated_events (id, text, number) VALUES (1, 'invalid', 42)")
+      sql("INSERT INTO generated_events VALUES (2, 'invalid', NULL, NULL)")
+      checkAnswer(
+        sql("SELECT id, number, label FROM generated_events"),
+        Seq(Row(1, 42, "INVALID"), Row(2, null, null)))
     }
   }
 
@@ -269,6 +270,8 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
         }
         assert(error.getMessage.contains("TIMESTAMP precision greater than 6"))
         assert(loadTable("generated_events").snapshotManager().latestSnapshotId() == null)
+        sql(s"INSERT INTO generated_events (source, generated) SELECT $value, $value")
+        checkAnswer(sql("SELECT generated = source FROM generated_events"), Seq(Row(true)))
       }
     }
   }
@@ -293,10 +296,12 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
       }
       assert(error.getMessage.contains("BLOB results"))
       assert(loadTable("generated_events").snapshotManager().latestSnapshotId() == null)
+      sql("INSERT INTO generated_events VALUES (1, unhex('010203'), unhex('aabb'))")
+      checkAnswer(sql("SELECT hex(generated) FROM generated_events"), Seq(Row("AABB")))
     }
   }
 
-  test("validate generated values in complete row-tracking updates and reject partial DE updates") {
+  test("preserve supplied values in complete row-tracking updates and reject partial DE updates") {
     assume(gteqSpark3_5)
     for (dataEvolution <- Seq(false, true)) {
       withTable("generated_events") {
@@ -308,20 +313,25 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
         if (!dataEvolution) {
           sql("UPDATE generated_events SET name='new', label='NEW' WHERE id=1")
           checkAnswer(sql("SELECT name, label FROM generated_events"), Seq(Row("new", "NEW")))
-        }
-        val error = intercept[Throwable] {
+          sql("UPDATE generated_events SET name='changed' WHERE id=1")
+          checkAnswer(sql("SELECT name, label FROM generated_events"), Seq(Row("changed", "NEW")))
           sql("UPDATE generated_events SET id=id+1, name='bad', label='WRONG' WHERE id=1")
+          checkAnswer(
+            sql("SELECT id, name, label FROM generated_events"),
+            Seq(Row(2, "bad", "WRONG")))
+        } else {
+          val error = intercept[Throwable] {
+            sql("UPDATE generated_events SET id=id+1, name='bad', label='WRONG' WHERE id=1")
+          }
+          assert(
+            Iterator
+              .iterate(error)(_.getCause)
+              .takeWhile(_ != null)
+              .exists(e => Option(e.getMessage).exists(_.contains("Partial-column updates"))))
+          checkAnswer(
+            sql("SELECT id, name, label FROM generated_events"),
+            Seq(Row(1, "old", "OLD")))
         }
-        val messages = Iterator
-          .iterate(error)(_.getCause)
-          .takeWhile(_ != null)
-          .flatMap(e => Option(e.getMessage))
-          .mkString("\n")
-        assert(messages.contains(
-          if (dataEvolution) "Partial-column updates" else "does not match generation expression"))
-        checkAnswer(
-          sql("SELECT id, name, label FROM generated_events"),
-          Seq(if (dataEvolution) Row(1, "old", "OLD") else Row(1, "new", "NEW")))
       }
     }
   }

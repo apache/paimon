@@ -20,26 +20,16 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.MultisetType;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VectorType;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Maps input fields to a full row and generates or validates physical generated columns. */
+/** Maps input fields to a full row and generates only omitted physical columns. */
 public final class GeneratedColumnRow {
 
     private final RowType rowType;
@@ -79,18 +69,13 @@ public final class GeneratedColumnRow {
                 getters[i] =
                         InternalRowUtils.createNullCheckingFieldGetter(field.type(), mapping[i]);
             }
-            if (field.generationExpression() != null) {
+            if (mapping[i] < 0) {
                 columns.add(GeneratedColumn.create(rowType, field));
             }
         }
     }
 
     public InternalRow replaceRow(InternalRow input) {
-        return replaceRow(input, InternalRow::getRowKind);
-    }
-
-    public InternalRow replaceRow(
-            InternalRow input, Function<InternalRow, RowKind> rowKindResolver) {
         checkArgument(
                 input.getFieldCount() == inputArity,
                 "Input row has %s fields, expected %s.",
@@ -103,121 +88,10 @@ public final class GeneratedColumnRow {
                 result.setField(i, getters[i].getFieldOrNull(source));
             }
         }
-        RowKind rowKind = rowKindResolver.apply(result);
-        result.setRowKind(rowKind);
         for (GeneratedColumn column : columns) {
-            int target = column.targetIndex();
-            // Key-only deletes may carry the existing partition without its source value.
-            if (rowKind == RowKind.DELETE && mapping[target] >= 0) {
-                continue;
-            }
-            Object expected = column.evaluate(result);
-            if (mapping[target] >= 0) {
-                checkArgument(
-                        valuesEqual(result.getField(target), expected, rowType.getTypeAt(target)),
-                        "Value for generated column '%s' does not match generation expression '%s'.",
-                        rowType.getFields().get(target).name(),
-                        rowType.getFields().get(target).generationExpression());
-            }
-            result.setField(target, expected);
+            result.setField(column.targetIndex(), column.evaluate(result));
         }
         return result;
-    }
-
-    private static boolean valuesEqual(Object left, Object right, DataType type) {
-        if (left == null || right == null) {
-            return left == right;
-        }
-        switch (type.getTypeRoot()) {
-            case FLOAT:
-                float a = (Float) left;
-                float b = (Float) right;
-                return a == b || (Float.isNaN(a) && Float.isNaN(b));
-            case DOUBLE:
-                double x = (Double) left;
-                double y = (Double) right;
-                return x == y || (Double.isNaN(x) && Double.isNaN(y));
-            case ROW:
-                RowType rowType = (RowType) type;
-                for (int i = 0; i < rowType.getFieldCount(); i++) {
-                    DataType fieldType = rowType.getTypeAt(i);
-                    if (!valuesEqual(
-                            InternalRowUtils.get((InternalRow) left, i, fieldType),
-                            InternalRowUtils.get((InternalRow) right, i, fieldType),
-                            fieldType)) {
-                        return false;
-                    }
-                }
-                return true;
-            case ARRAY:
-                return arraysEqual(
-                        (InternalArray) left,
-                        (InternalArray) right,
-                        ((ArrayType) type).getElementType());
-            case VECTOR:
-                return arraysEqual(
-                        (InternalArray) left,
-                        (InternalArray) right,
-                        ((VectorType) type).getElementType());
-            case MULTISET:
-                return valuesEqual(
-                        left,
-                        right,
-                        new MapType(((MultisetType) type).getElementType(), DataTypes.INT()));
-            case MAP:
-                InternalMap leftMap = (InternalMap) left;
-                InternalMap rightMap = (InternalMap) right;
-                if (leftMap.size() != rightMap.size()) {
-                    return false;
-                }
-                MapType mapType = (MapType) type;
-                InternalArray leftKeys = leftMap.keyArray();
-                InternalArray rightKeys = rightMap.keyArray();
-                InternalArray leftValues = leftMap.valueArray();
-                InternalArray rightValues = rightMap.valueArray();
-                boolean[] matched = new boolean[rightMap.size()];
-                for (int i = 0; i < leftMap.size(); i++) {
-                    boolean found = false;
-                    for (int j = 0; j < rightMap.size(); j++) {
-                        if (!matched[j]
-                                && valuesEqual(
-                                        InternalRowUtils.get(leftKeys, i, mapType.getKeyType()),
-                                        InternalRowUtils.get(rightKeys, j, mapType.getKeyType()),
-                                        mapType.getKeyType())
-                                && valuesEqual(
-                                        InternalRowUtils.get(leftValues, i, mapType.getValueType()),
-                                        InternalRowUtils.get(
-                                                rightValues, j, mapType.getValueType()),
-                                        mapType.getValueType())) {
-                            matched[j] = true;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        return false;
-                    }
-                }
-                return true;
-            default:
-                return InternalRowUtils.equals(left, right, type);
-        }
-    }
-
-    private static boolean arraysEqual(
-            InternalArray left, InternalArray right, DataType elementType) {
-        if (left.size() != right.size()) {
-            return false;
-        }
-        for (int i = 0; i < left.size(); i++) {
-            if (!valuesEqual(
-                    InternalRowUtils.get(left, i, elementType),
-                    InternalRowUtils.get(right, i, elementType),
-                    elementType)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     public static boolean hasGeneratedColumns(RowType rowType) {

@@ -90,13 +90,15 @@ class GeneratedPartitionColumnTest {
         // A reader and writer reopened from persistent schema retain the contract.
         FileStoreTable reopened =
                 FileStoreTableFactory.create(LocalFileIO.create(), table.location());
-        try (BatchTableWrite write =
-                reopened.newBatchWriteBuilder().newWrite().withWriteType(reopened.rowType())) {
-            assertThatThrownBy(() -> write.write(GenericRow.of(3, 1, Timestamp.fromEpochMillis(0))))
-                    .hasMessageContaining("does not match generation expression");
+        BatchWriteBuilder explicit = reopened.newBatchWriteBuilder();
+        try (BatchTableWrite write = explicit.newWrite().withWriteType(reopened.rowType());
+                BatchTableCommit commit = explicit.newCommit()) {
+            GenericRow supplied = GenericRow.of(3, 1, Timestamp.fromEpochMillis(0));
+            assertThat(write.getPartition(supplied).getInt(0)).isEqualTo(1);
+            write.write(supplied);
             assertThatThrownBy(
                             () -> write.write(GenericRow.of(3, null, Timestamp.fromEpochMillis(0))))
-                    .hasMessageContaining("does not match generation expression");
+                    .hasMessageContaining("Cannot write null to non-null column(dt)");
             assertThatThrownBy(
                             () ->
                                     write.withWriteType(
@@ -104,7 +106,18 @@ class GeneratedPartitionColumnTest {
                                                     reopened.rowType().getField("id"),
                                                     reopened.rowType().getField("dt"))))
                     .hasMessageContaining("Missing input column 'ts'");
+            commit.commit(write.prepareCommit());
         }
+        rows.clear();
+        try (RecordReaderIterator<InternalRow> reader =
+                new RecordReaderIterator<>(
+                        reopened.newRead().createReader(reopened.newScan().plan()))) {
+            while (reader.hasNext()) {
+                InternalRow row = reader.next();
+                rows.add(row.getInt(0) + ":" + row.getInt(1));
+            }
+        }
+        assertThat(rows).containsExactlyInAnyOrder("1:-1", "2:0", "3:1");
     }
 
     @Test
@@ -241,7 +254,7 @@ class GeneratedPartitionColumnTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void testEffectiveRowKindControlsGeneratedValueValidation(boolean reordered) throws Exception {
+    void testEffectiveRowKindWithSuppliedGeneratedValues(boolean reordered) throws Exception {
         Schema schema =
                 schema(true)
                         .column("kind", DataTypes.STRING(), null, "'-D'")
@@ -269,19 +282,16 @@ class GeneratedPartitionColumnTest {
         BatchWriteBuilder deletes = table.newBatchWriteBuilder();
         try (BatchTableWrite write = deletes.newWrite().withWriteType(inputType);
                 BatchTableCommit commit = deletes.newCommit()) {
-            GenericRow invalidInsert =
+            GenericRow insert =
                     reordered
                             ? GenericRow.of(BinaryString.fromString("+I"), null, 3, 0)
                             : GenericRow.of(3, 0, null, BinaryString.fromString("+I"));
-            invalidInsert.setRowKind(RowKind.DELETE);
-            assertThatThrownBy(() -> write.getPartition(invalidInsert))
-                    .hasMessageContaining("does not match generation expression");
-            assertThatThrownBy(() -> write.getBucket(invalidInsert))
-                    .hasMessageContaining("does not match generation expression");
-            assertThatThrownBy(() -> write.write(invalidInsert))
-                    .hasMessageContaining("does not match generation expression");
+            insert.setRowKind(RowKind.DELETE);
+            assertThat(write.getPartition(insert).getInt(0)).isZero();
+            assertThat(write.getBucket(insert)).isZero();
+            write.write(insert);
 
-            for (int id : new int[] {1, 2}) {
+            for (int id : new int[] {1, 2, 3}) {
                 BinaryString kind = id == 1 ? null : BinaryString.fromString("-D");
                 GenericRow delete =
                         reordered

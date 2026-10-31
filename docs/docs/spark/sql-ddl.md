@@ -109,13 +109,16 @@ INSERT INTO events (id, name, event_time)
 VALUES (1, 'event', TIMESTAMP_NTZ '2026-10-30 12:00:00');
 ```
 
-The writer fills omitted generated columns before partition routing. You can also provide their
-values explicitly, but they must equal the expression results, including NULL handling.
+The writer fills omitted generated columns before partition routing. Explicitly supplied values,
+including NULL, are preserved without evaluating or checking the expression. Normal type and
+NOT NULL constraints still apply. Although Spark uses `GENERATED ALWAYS AS` syntax, Paimon
+provides automatic filling of omitted columns, not a strict computed-column constraint: stored
+values need not match the expression, and changing a source does not recompute a supplied column.
 Expressions are stored in the column's schema definition and evaluated with Paimon transforms.
-Spark uses the same evaluator for omitted columns and core validation, applying source-column
+Spark uses the same evaluator as the core writer for omitted columns, applying source-column
 defaults first. CAST formatting, conversion errors, and argument bounds follow Paimon transforms
 rather than session-dependent Spark rules. The two-argument TRIM/LTRIM/RTRIM form takes
-`(characters, string)`. Explicit floating-point values use SQL equality, including signed zeros and NaNs.
+`(characters, string)`.
 Ordinary append inserts and primary-key deduplicate writes are supported; existing
 primary-key and partition constraints still apply. Partial-column writes are not supported.
 
@@ -128,10 +131,11 @@ literals, NULL arguments, DATE literals, and nested calls are supported. Only or
 columns may be referenced. The result type must match the declared column type. Nested field
 references, generated-column dependencies, nondeterministic functions, and `TIMESTAMP_LTZ`
 inputs or cast targets are not supported. A generated column cannot be used as `rowkind.field`.
-Spark also rejects writes when a generated result contains a TIMESTAMP with precision greater
-than 6, including inside a top-level complex column, because Spark cannot preserve its nanoseconds.
-Generated BLOB results are also rejected because the Spark row representation cannot preserve
-the distinction between a BLOB descriptor and inline content through this evaluator.
+Spark also rejects automatic generation when the result contains a TIMESTAMP with precision
+greater than 6, including inside a top-level complex column, because Spark cannot preserve its
+nanoseconds. Automatic generation of BLOB results is also rejected because the Spark row
+representation cannot preserve the distinction between a BLOB descriptor and inline content
+through this evaluator.
 
 The Java schema builder exposes `generatedColumn(name, type, expression)`. Java writers can call
 `withWriteType` with all ordinary fields to omit generated fields from input rows. The
