@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -103,7 +104,9 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                         }
 
                         CdcRecordChannelComputer channelComputer =
-                                new CdcRecordChannelComputer(table.schema());
+                                new CdcRecordChannelComputer(
+                                        table.schema(),
+                                        PartitionBucketMapping.loadFromTable(table));
                         channelComputer.setup(numChannels);
                         return channelComputer;
                     } catch (RuntimeException e) {

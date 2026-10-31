@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
@@ -36,7 +37,7 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.projectAsInsert;
 /** {@link KeyAndBucketExtractor} for {@link CdcRecord}. */
 public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<CdcRecord> {
 
-    private final int numBuckets;
+    private final PartitionBucketMapping partitionBucketMapping;
 
     private final List<DataField> partitionFields;
     private final Projection partitionProjection;
@@ -54,7 +55,14 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     private Integer bucket;
 
     public CdcRecordKeyAndBucketExtractor(TableSchema schema) {
-        numBuckets = new CoreOptions(schema.options()).bucket();
+        this(
+                schema,
+                PartitionBucketMapping.defaultBuckets(new CoreOptions(schema.options()).bucket()));
+    }
+
+    public CdcRecordKeyAndBucketExtractor(
+            TableSchema schema, PartitionBucketMapping partitionBucketMapping) {
+        this.partitionBucketMapping = partitionBucketMapping;
 
         RowType partitionType = schema.logicalPartitionType();
         this.partitionFields = partitionType.getFields();
@@ -102,7 +110,9 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
             bucketKey = bucketKeyProjection.apply(projectAsInsert(record, bucketKeyFields));
         }
         if (bucket == null) {
-            bucket = bucketFunction.bucket(bucketKey, numBuckets);
+            bucket =
+                    bucketFunction.bucket(
+                            bucketKey, partitionBucketMapping.resolveNumBuckets(partition()));
         }
         return bucket;
     }

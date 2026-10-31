@@ -20,6 +20,8 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -31,7 +33,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -40,12 +44,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link GlobalFullCompactionSinkWrite}. */
 public class GlobalFullCompactionSinkWriteTest {
@@ -108,6 +115,152 @@ public class GlobalFullCompactionSinkWriteTest {
         }
     }
 
+    @Test
+    public void testFullCompactionWithPartitionBucketCounts() throws Exception {
+        FileStoreTable table =
+                createPartitionedTable(
+                        new LocalFileIO(), CoreOptions.ChangelogProducer.FULL_COMPACTION);
+        String commitUser = UUID.randomUUID().toString();
+        CoreOptions options = table.coreOptions();
+        IOManager ioManager = new IOManagerAsync();
+        GlobalFullCompactionSinkWrite write =
+                new GlobalFullCompactionSinkWrite(
+                        table,
+                        commitUser,
+                        new NoopStoreSinkWriteState(0),
+                        ioManager,
+                        false,
+                        false,
+                        1,
+                        true,
+                        new MemoryPoolFactory(
+                                new HeapMemorySegmentPool(
+                                        options.writeBufferSize(), options.pageSize())),
+                        null,
+                        PartitionBucketMapping.loadFromTable(table),
+                        FileStoreTable::newWrite);
+        try {
+            write.write(GenericRow.of(1, 1, 10L));
+            assertThatCode(() -> write.prepareCommit(false, 1)).doesNotThrowAnyException();
+        } finally {
+            write.close();
+            ioManager.close();
+        }
+    }
+
+    @Test
+    public void testLookupRestoresActiveBucketWithPartitionBucketCounts() throws Exception {
+        FileStoreTable table =
+                createPartitionedTable(new LocalFileIO(), CoreOptions.ChangelogProducer.LOOKUP);
+        String initialUser = UUID.randomUUID().toString();
+        CommitMessage activeBucket;
+        IOManager ioManager = new IOManagerAsync();
+        try {
+            try (org.apache.paimon.disk.IOManager initialIOManager =
+                            org.apache.paimon.disk.IOManager.create(tempDir.toString());
+                    TableWriteImpl<?> initialWrite =
+                            table.newWrite(initialUser).withIOManager(initialIOManager);
+                    TableCommitImpl commit = table.newCommit(initialUser)) {
+                initialWrite.writeAndReturn(
+                        GenericRow.of(1, 1, 10L), PartitionBucketMapping.loadFromTable(table));
+                List<CommitMessage> messages = initialWrite.prepareCommit(false, 0);
+                activeBucket = messages.get(0);
+                commit.commit(0, messages);
+            }
+
+            LookupSinkWrite write =
+                    new LookupSinkWrite(
+                            table,
+                            UUID.randomUUID().toString(),
+                            new ActiveBucketState(activeBucket.partition(), activeBucket.bucket()),
+                            ioManager,
+                            false,
+                            false,
+                            true,
+                            new MemoryPoolFactory(
+                                    new HeapMemorySegmentPool(
+                                            table.coreOptions().writeBufferSize(),
+                                            table.coreOptions().pageSize())),
+                            null,
+                            PartitionBucketMapping.loadFromTable(table),
+                            FileStoreTable::newWrite);
+            write.close();
+        } finally {
+            ioManager.close();
+        }
+    }
+
+    @Test
+    public void testLookupDropsRetiredBucketFromRestoredState() throws Exception {
+        FileStoreTable table =
+                createPartitionedTable(new LocalFileIO(), CoreOptions.ChangelogProducer.LOOKUP, 4);
+        BinaryRow partition = partition(1);
+        ActiveBucketState state = new ActiveBucketState(partition, 1, 3);
+        IOManager ioManager = new IOManagerAsync();
+        try {
+            LookupSinkWrite write =
+                    new LookupSinkWrite(
+                            table,
+                            UUID.randomUUID().toString(),
+                            state,
+                            ioManager,
+                            false,
+                            false,
+                            true,
+                            new MemoryPoolFactory(
+                                    new HeapMemorySegmentPool(
+                                            table.coreOptions().writeBufferSize(),
+                                            table.coreOptions().pageSize())),
+                            null,
+                            scaledDownMapping(partition),
+                            FileStoreTable::newWrite);
+            write.snapshotState();
+            assertThat(state.snapshot())
+                    .extracting(StoreSinkWriteState.StateValue::bucket)
+                    .containsExactly(1);
+            write.close();
+        } finally {
+            ioManager.close();
+        }
+    }
+
+    @Test
+    public void testFullCompactionDropsRetiredBucketFromRestoredState() throws Exception {
+        FileStoreTable table =
+                createPartitionedTable(
+                        new LocalFileIO(), CoreOptions.ChangelogProducer.FULL_COMPACTION, 4);
+        BinaryRow partition = partition(1);
+        ActiveBucketState state = new ActiveBucketState(partition, 1, 3);
+        IOManager ioManager = new IOManagerAsync();
+        try {
+            GlobalFullCompactionSinkWrite write =
+                    new GlobalFullCompactionSinkWrite(
+                            table,
+                            UUID.randomUUID().toString(),
+                            state,
+                            ioManager,
+                            false,
+                            false,
+                            1,
+                            true,
+                            new MemoryPoolFactory(
+                                    new HeapMemorySegmentPool(
+                                            table.coreOptions().writeBufferSize(),
+                                            table.coreOptions().pageSize())),
+                            null,
+                            scaledDownMapping(partition),
+                            FileStoreTable::newWrite);
+            assertThatCode(() -> write.prepareCommit(false, 1)).doesNotThrowAnyException();
+            write.snapshotState();
+            assertThat(state.snapshot())
+                    .extracting(StoreSinkWriteState.StateValue::bucket)
+                    .containsExactly(1);
+            write.close();
+        } finally {
+            ioManager.close();
+        }
+    }
+
     private static List<CommitMessage> commitMessages(List<Committable> committables) {
         return committables.stream().map(Committable::commitMessage).collect(Collectors.toList());
     }
@@ -126,6 +279,79 @@ public class GlobalFullCompactionSinkWriteTest {
                         .build();
         new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
         return FileStoreTableFactory.create(fileIO, tablePath);
+    }
+
+    private FileStoreTable createPartitionedTable(
+            LocalFileIO fileIO, CoreOptions.ChangelogProducer changelogProducer) throws Exception {
+        return createPartitionedTable(fileIO, changelogProducer, 1);
+    }
+
+    private FileStoreTable createPartitionedTable(
+            LocalFileIO fileIO, CoreOptions.ChangelogProducer changelogProducer, int buckets)
+            throws Exception {
+        Path tablePath = new Path(tempDir.toString());
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT().notNull())
+                        .column("a", DataTypes.INT().notNull())
+                        .column("b", DataTypes.BIGINT())
+                        .primaryKey("pt", "a")
+                        .partitionKeys("pt")
+                        .option(CoreOptions.BUCKET.key(), String.valueOf(buckets))
+                        .option(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED.key(), "true")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer.toString())
+                        .build();
+        new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        return FileStoreTableFactory.create(fileIO, tablePath);
+    }
+
+    private static PartitionBucketMapping scaledDownMapping(BinaryRow partition) {
+        Map<BinaryRow, Integer> bucketCounts = new HashMap<>();
+        bucketCounts.put(partition.copy(), 2);
+        return new PartitionBucketMapping(4, bucketCounts);
+    }
+
+    private static BinaryRow partition(int value) {
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, value);
+        writer.complete();
+        return partition;
+    }
+
+    private static class ActiveBucketState implements StoreSinkWriteState {
+
+        private final List<StateValue> activeBuckets;
+        private List<StateValue> snapshot;
+
+        private ActiveBucketState(BinaryRow partition, int... buckets) {
+            this.activeBuckets =
+                    java.util.Arrays.stream(buckets)
+                            .mapToObj(bucket -> new StateValue(partition, bucket, new byte[8]))
+                            .collect(Collectors.toList());
+        }
+
+        @Override
+        public List<StateValue> get(String tableName, String key) {
+            return activeBuckets;
+        }
+
+        @Override
+        public void put(String tableName, String key, List<StateValue> stateValues) {
+            snapshot = stateValues;
+        }
+
+        private List<StateValue> snapshot() {
+            return snapshot;
+        }
+
+        @Override
+        public void snapshotState() {}
+
+        @Override
+        public int getSubtaskId() {
+            return 0;
+        }
     }
 
     /** Local file system that records which snapshot files are opened for reading. */
