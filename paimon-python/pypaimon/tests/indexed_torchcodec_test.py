@@ -74,6 +74,12 @@ def require_torchcodec():
     return VideoDecoder
 
 
+def supports_file_like():
+    import torchcodec
+    from packaging.version import Version
+    return Version(torchcodec.__version__) >= Version("0.3")
+
+
 def test_mp4_timeline_matches_full_decode(mp4):
     import av
     pts, durations, scale, stream = _timeline(io.BytesIO(mp4), len(mp4))
@@ -89,9 +95,9 @@ def test_indexed_torchcodec_matches_exact_frames(mp4):
     source, calls = indexed_source(mp4)
     decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
     try:
-        assert decoder._indexed
+        assert decoder._indexed is supports_file_like()
         indices = [59, 0, 24, 24, 13, 35, 1]
-        expected = VideoDecoder(io.BytesIO(mp4), seek_mode="exact").get_frames_at(indices=indices)
+        expected = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=indices)
         actual = decoder.get_frames_at(indices=indices)
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
         np.testing.assert_allclose(actual.pts_seconds.numpy(), expected.pts_seconds.numpy())
@@ -99,8 +105,8 @@ def test_indexed_torchcodec_matches_exact_frames(mp4):
         # CFR stays indexed. TorchCodec may reject VFR timestamp seeks;
         # those must still return the exact requested frames through fallback.
         pts, unused, unused, unused = _timeline(io.BytesIO(mp4), len(mp4))
-        if len(np.unique(np.diff(pts))) == 1:
-            assert decoder._indexed
+        if supports_file_like() and len(np.unique(np.diff(pts))) == 1:
+            assert decoder._indexed is supports_file_like()
         # Exact-mode TorchCodec versions differ in their out-of-range exception.
         errors = IndexError if decoder._indexed else (IndexError, RuntimeError)
         with pytest.raises(errors, match="[Ii]nvalid frame index|out of range"):
@@ -114,13 +120,37 @@ def test_wrong_returned_pts_falls_back_to_exact(mp4):
     VideoDecoder = require_torchcodec()
     source, unused = indexed_source(mp4)
     decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
-    expected = VideoDecoder(io.BytesIO(mp4), seek_mode="exact").get_frames_at(indices=[20])
-    wrong = VideoDecoder(io.BytesIO(mp4), seek_mode="exact").get_frames_at(indices=[21])
+    expected = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[20])
+    wrong = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[21])
     try:
         with patch.object(decoder._decoder, "get_frames_played_at", return_value=wrong):
             actual = decoder.get_frames_at(indices=[20])
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
         assert not decoder._indexed
+    finally:
+        decoder.close()
+
+
+def test_bytes_only_decoder_falls_back_to_exact(mp4):
+    VideoDecoder = require_torchcodec()
+    source, unused = indexed_source(mp4)
+    inputs = []
+
+    def bytes_only(data, **kwargs):
+        inputs.append(type(data))
+        if not isinstance(data, bytes):
+            raise TypeError("file-like input unsupported")
+        return VideoDecoder(data, **kwargs)
+
+    with patch("torchcodec.decoders.VideoDecoder", side_effect=bytes_only):
+        decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
+    try:
+        assert not decoder._indexed
+        assert inputs[-1] is bytes
+        actual = decoder.get_frames_at(indices=[59, 0, 20, 20])
+        expected = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[59, 0, 20, 20])
+        np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
+        np.testing.assert_allclose(actual.pts_seconds.numpy(), expected.pts_seconds.numpy())
     finally:
         decoder.close()
 
@@ -134,7 +164,7 @@ def test_unsupported_timeline_falls_back_to_exact(mp4):
     try:
         assert not decoder._indexed
         actual = decoder[7]
-        expected = VideoDecoder(io.BytesIO(mp4), seek_mode="exact")[7]
+        expected = VideoDecoder(mp4, seek_mode="exact")[7]
         np.testing.assert_array_equal(actual.numpy(), expected.numpy())
     finally:
         decoder.close()
@@ -176,7 +206,7 @@ def test_first_decode_error_falls_back(mp4):
         with patch.object(decoder._decoder, "get_frames_played_at",
                           side_effect=IndexError("approximate timestamp")):
             actual = decoder.get_frames_at(indices=[5, 0, 5])
-        expected = VideoDecoder(io.BytesIO(mp4), seek_mode="exact").get_frames_at(indices=[5, 0, 5])
+        expected = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[5, 0, 5])
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
         assert not decoder._indexed
     finally:
@@ -190,7 +220,7 @@ def test_explicit_backend_routes_indexed_videos(mp4):
     decoder = _open_video_decoder(source, backend="torchcodec", codec_threads=1)
     try:
         assert isinstance(decoder, _IndexedTorchCodecDecoder)
-        assert decoder._indexed
+        assert decoder._indexed is supports_file_like()
     finally:
         decoder.close()
 
@@ -231,10 +261,10 @@ def test_fragmented_and_audio_first_video(fragmented, audio_first):
     source, unused = indexed_source(payload)
     decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
     try:
-        assert decoder._indexed is (not fragmented)
+        assert decoder._indexed is (supports_file_like() and not fragmented)
         positions = [29, 0, 16, 4]
         actual = decoder.get_frames_at(indices=positions)
-        expected = VideoDecoder(io.BytesIO(payload), stream_index=1 if audio_first else 0,
+        expected = VideoDecoder(payload, stream_index=1 if audio_first else 0,
                                 seek_mode="exact").get_frames_at(indices=positions)
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
         np.testing.assert_allclose(actual.pts_seconds.numpy(), expected.pts_seconds.numpy())
@@ -266,7 +296,7 @@ def test_multiple_video_tracks_preserve_exact_selection():
     try:
         assert not decoder._indexed
         actual = decoder.get_frames_at(indices=[11, 0, 5])
-        expected = VideoDecoder(io.BytesIO(payload), seek_mode="exact").get_frames_at(indices=[11, 0, 5])
+        expected = VideoDecoder(payload, seek_mode="exact").get_frames_at(indices=[11, 0, 5])
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
     finally:
         decoder.close()
