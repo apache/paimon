@@ -651,6 +651,44 @@ class FileSystemCatalogTest(unittest.TestCase):
                     self.assertEqual([p.spec for p in filtered.elements], [{'dt': null_name}])
                     catalog.drop_table(identifier)
 
+    def test_list_and_drop_nanosecond_partitions(self):
+        import pandas as pd
+
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+        for legacy in [True, False]:
+            with self.subTest(legacy=legacy):
+                identifier = "test_db.timestamp_{}".format(legacy)
+                arrow_schema = pa.schema([('dt', pa.timestamp('ns')), ('value', pa.int32())])
+                catalog.create_table(identifier, Schema.from_pyarrow_schema(
+                    arrow_schema, partition_keys=['dt'],
+                    options={"partition.legacy-name": str(legacy).lower()}), False)
+                table = catalog.get_table(identifier)
+                base = pd.Timestamp('2024-01-02 03:04:05')
+                values = [base + pd.Timedelta(n, unit='ns') for n in range(3)]
+                builder = table.new_batch_write_builder()
+                writer = builder.new_write()
+                committer = builder.new_commit()
+                try:
+                    writer.write_arrow(pa.Table.from_pydict({
+                        'dt': [values[0], values[1], values[1], values[2], values[2], values[2]],
+                        'value': list(range(6)),
+                    }, schema=arrow_schema))
+                    committer.commit(writer.prepare_commit())
+                finally:
+                    writer.close()
+                    committer.close()
+                partitions = catalog.list_partitions_paged(identifier).elements
+                self.assertEqual(len(partitions), 3)
+                self.assertEqual(len({p.spec['dt'] for p in partitions}), 3)
+                target = next(p for p in partitions if p.record_count == 2)
+                self.assertTrue(target.spec['dt'].endswith('.000000001'))
+                catalog.drop_partitions(identifier, [target.spec])
+                remaining = catalog.list_partitions_paged(identifier).elements
+                self.assertEqual(sorted(p.record_count for p in remaining), [1, 3])
+                self.assertEqual({p.spec['dt'] for p in remaining},
+                                 {p.spec['dt'] for p in partitions if p.record_count != 2})
+
     def test_list_partitions_preserves_colliding_specs(self):
         from pypaimon.api.rest_exception import NotImplementedException
         from pypaimon.catalog.rest.rest_catalog import RESTCatalog
