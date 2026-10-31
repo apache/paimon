@@ -198,25 +198,25 @@ public class DataInputDeserializer implements DataInputView, java.io.Serializabl
     @Nullable
     @Override
     public String readLine() throws IOException {
-        if (this.position < this.end) {
-            // read until a newline is found
-            StringBuilder bld = new StringBuilder();
-            char curr = (char) readUnsignedByte();
-            while (position < this.end && curr != '\n') {
-                bld.append(curr);
-                curr = (char) readUnsignedByte();
-            }
-            // trim a trailing carriage return
-            int len = bld.length();
-            if (len > 0 && bld.charAt(len - 1) == '\r') {
-                bld.setLength(len - 1);
-            }
-            String s = bld.toString();
-            bld.setLength(0);
-            return s;
-        } else {
+        if (this.position >= this.end) {
             return null;
         }
+
+        StringBuilder bld = new StringBuilder();
+        while (this.position < this.end) {
+            char curr = (char) readUnsignedByte();
+            if (curr == '\n') {
+                break;
+            }
+            if (curr == '\r') {
+                if (this.position < this.end && this.buffer[this.position] == '\n') {
+                    this.position++;
+                }
+                break;
+            }
+            bld.append(curr);
+        }
+        return bld.toString();
     }
 
     @Override
