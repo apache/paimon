@@ -51,7 +51,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -315,6 +318,69 @@ public class TableWriteTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("partition.timestamp-formatter");
         write.close();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "true, yyyy-MM-dd, $dt",
+        "true, yyyy-MM-dd,",
+        "true, , $dt",
+        "false, yyyy-MM-dd, $dt",
+        "false, yyyy-MM-dd,",
+        "false, , $dt"
+    })
+    public void testDatePartitionTimestampValidation(
+            boolean hasPrimaryKey, String formatter, String pattern) throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET_KEY, "id");
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMAT_STRICT, true);
+        if (formatter != null) {
+            conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, formatter);
+        }
+        if (pattern != null) {
+            conf.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, pattern);
+        }
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DATE(), DataTypes.INT()},
+                        new String[] {"dt", "id"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("dt"),
+                        hasPrimaryKey ? Arrays.asList("dt", "id") : Collections.emptyList(),
+                        conf);
+
+        try (TableWriteImpl<?> write = table.newWrite(commitUser)) {
+            for (String date :
+                    Arrays.asList("1969-12-31", "1970-01-01", "2024-02-29", "2026-10-29")) {
+                write.write(GenericRow.of((int) LocalDate.parse(date).toEpochDay(), 1));
+            }
+        }
+    }
+
+    @Test
+    public void testDateAndHourPartitionTimestampValidation() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET_KEY, "id");
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMAT_STRICT, true);
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyy-MM-dd HH:mm:ss");
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt $hour:00:00");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.DATE(), DataTypes.INT()},
+                        new String[] {"hour", "dt", "id"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType, Arrays.asList("hour", "dt"), Collections.emptyList(), conf);
+        int epochDay = (int) LocalDate.of(2024, 2, 29).toEpochDay();
+
+        try (TableWriteImpl<?> write = table.newWrite(commitUser)) {
+            write.write(GenericRow.of(12, epochDay, 1));
+            assertThatThrownBy(() -> write.write(GenericRow.of(25, epochDay, 1)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Partition hour=25, dt=2024-02-29");
+        }
     }
 
     @Test
