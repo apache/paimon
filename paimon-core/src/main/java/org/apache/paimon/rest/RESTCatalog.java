@@ -102,6 +102,7 @@ import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotLakeStreamTable;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
@@ -685,6 +686,16 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
         try {
+            checkNotLakeStreamTable(getTable(fromTable), fromTable, "renameTable");
+        } catch (TableNotExistException e) {
+            // mirror the NoSuchResourceException branch below so that adding this pre-check
+            // does not change the not-exists contract
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(fromTable);
+            }
+            return;
+        }
+        try {
             api.renameTable(fromTable, toTable);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -745,6 +756,16 @@ public class RESTCatalog implements Catalog {
         // client-side here: a round-tripped schema of an internal table may carry the synthetic
         // path option, and the server remains the authority for replace semantics.
         validateCatalogManagedPartitionOptions(newSchema.options());
+        try {
+            checkNotLakeStreamTable(getTable(identifier), identifier, "replaceTable");
+        } catch (TableNotExistException e) {
+            // mirror the NoSuchResourceException branch below so that adding this pre-check
+            // does not change the not-exists contract
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+            return;
+        }
         try {
             api.replaceTable(identifier, newSchema);
         } catch (NoSuchResourceException e) {
