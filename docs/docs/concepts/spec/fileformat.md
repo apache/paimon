@@ -449,16 +449,23 @@ Keyframe-index v1 is little endian. Metadata and packet offsets are relative to 
 | Magic (`0x564944454F4B4649`) | 8 bytes |
 | Metadata-range count | 4 bytes |
 | Keyframe count | 8 bytes |
-| Page codec (`0`: uncompressed; other values reserved) | 1 byte |
+| Page codec (`0`: raw; `1`: column-delta zlib) | 1 byte |
 | Metadata `(offset, length)` pairs | 16 bytes each |
 | Page directory | 68 bytes per page |
 | Keyframe pages | Variable |
 
-Each page except the last holds exactly 4,096 `(frame ordinal, PTS, packet position)` int64 triples,
-stored without compression. Directory records contain the page offset
+Each page except the last holds exactly 4,096 `(frame ordinal, PTS, packet position)` int64 triples.
+Directory records contain the page offset
 relative to the index (8 bytes), encoded length (4), uncompressed CRC32 (4), first
 and last triples (48), and CRC32 of the preceding 64 bytes (4). Pages are contiguous
 immediately after the directory; their lengths account for the entire index.
+
+Codec `0` stores row-major triples. Codec `1` stores three contiguous columns (ordinal, PTS,
+position): each starts with its absolute value followed by differences modulo 2^64, all as
+little-endian 64-bit words. Each page is independently zlib-compressed. Decoding uses cumulative
+addition modulo 2^64 and restores signed int64 row-major triples before CRC32 and ordering checks.
+The decoded size must be exactly `entry_count * 24`; trailing or concatenated zlib streams are
+invalid. Encoded pages are at most `4,096 * 24 + 64` bytes. Other codec values are reserved.
 
 Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
 The index covers the first video stream; its time base remains in the video.

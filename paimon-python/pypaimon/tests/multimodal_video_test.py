@@ -279,7 +279,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
                     collate_fn=lambda rows: rows)
                 try:
                     if offset == len(valid) - 1:
-                        with self.assertRaisesRegex(ValueError, 'checksum'):
+                        with self.assertRaisesRegex(ValueError, 'checksum|compressed page'):
                             collator([{'video': descriptor.serialize()}])
                         self.assertFalse(calls)
                     else:

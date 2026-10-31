@@ -163,7 +163,7 @@ class _IndexedKeyframes(_PagedKeyframes):
         entries = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES)
         if (size <= 0 or size > self.PAGE_BYTES + 64 or offset > self.length - size
                 or offset < self.directory_offset + self.pages * self.DIRECTORY.size
-                or size != entries * self.ENTRY.size):
+                or (self.codec == 0 and size != entries * self.ENTRY.size)):
             raise ValueError("Invalid video keyframe index page length.")
         if first[0] < 0 or (page == 0 and first[0] != 0):
             raise ValueError("Keyframe ordinals must be strictly increasing from zero.")
@@ -202,6 +202,8 @@ class _IndexedKeyframes(_PagedKeyframes):
                 offset, size, crc = record[:3]
                 data = self.read_at(offset, size)
                 expected = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES) * self.ENTRY.size
+                if self.codec == 1:
+                    data = _decode_page(data, expected)
                 if len(data) != expected or zlib.crc32(data) != crc:
                     raise ValueError("Invalid video keyframe index page checksum or length.")
                 _validate_entries(data, self.payload_length, initial=page == 0)
@@ -215,7 +217,7 @@ class _IndexedKeyframes(_PagedKeyframes):
             return self.cache[page]
 
     def load_small(self):
-        if self.length <= self.EAGER_BYTES:
+        if max(self.length, self.count * self.ENTRY.size) <= self.EAGER_BYTES:
             data = bytearray(self.count * self.ENTRY.size)
             for page in range(self.pages):
                 start = page * self.PAGE_BYTES
@@ -296,6 +298,31 @@ def _validate_entries(data, payload_length, initial=False):
         raise ValueError("Keyframe ordinals, timestamps and packet positions must be strictly increasing from zero.")
     if entries[0, 2] < 0 or (payload_length is not None and entries[-1, 2] >= payload_length):
         raise ValueError("Keyframe packet positions must be within the video payload.")
+
+
+def _encode_page(raw):
+    import numpy as np
+
+    values = np.frombuffer(raw, dtype='<u8').reshape(-1, 3)
+    deltas = np.empty((3, len(values)), dtype='<u8')
+    deltas[:, 0] = values[0]
+    # Unsigned arithmetic defines differences modulo 2**64, including negative PTS.
+    np.subtract(values[1:], values[:-1], out=deltas[:, 1:].T)
+    return zlib.compress(deltas.tobytes(), 1)
+
+
+def _decode_page(data, expected):
+    import numpy as np
+
+    inflater = zlib.decompressobj()
+    try:
+        raw = inflater.decompress(data, expected + 1)
+    except zlib.error as error:
+        raise ValueError("Invalid video keyframe index compressed page.") from error
+    if len(raw) != expected or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail:
+        raise ValueError("Invalid video keyframe index compressed page length.")
+    deltas = np.frombuffer(raw, dtype='<u8').reshape(3, -1)
+    return np.cumsum(deltas, axis=1, dtype=np.uint64).astype('<u8', copy=False).T.tobytes()
 
 
 class UnsupportedVideoIndex(ValueError):
@@ -399,34 +426,43 @@ class VideoKeyframeIndex:
             return self.keyframes.preceding(ordinal)
         return bisect.bisect_right(self.ordinals, ordinal) - 1
 
-    def write_to(self, output):
+    def write_to(self, output, compression='delta-zlib'):
+        """Write to a seekable index spool without buffering the entire index."""
+        if compression not in ('none', 'delta-zlib'):
+            raise ValueError("Video index compression must be 'none' or 'delta-zlib'.")
+        codec = int(compression == 'delta-zlib')
         count = len(self.keyframes)
         pages = (count - 1) // _PagedKeyframes.PAGE_ENTRIES + 1
         directory = _IndexedKeyframes.DIRECTORY
-        offset = self.HEADER.size + len(self.metadata_ranges) * 16 + pages * directory.size
-        output.write(self.HEADER.pack(self.VERSION, self.MAGIC, len(self.metadata_ranges), count, 0))
+        base = output.tell()
+        output.write(self.HEADER.pack(self.VERSION, self.MAGIC, len(self.metadata_ranges), count, codec))
         for value in self.metadata_ranges:
             output.write(self.METADATA_RANGE.pack(*value))
+        directory_start = output.tell()
+        output.seek(directory_start + pages * directory.size)
         for page in range(pages):
             raw = self.keyframes._page(page)
-            record = directory.pack(offset, len(raw), zlib.crc32(raw),
+            data = _encode_page(raw) if codec else raw
+            offset = output.tell() - base
+            output.write(data)
+            end = output.tell()
+            record = directory.pack(offset, len(data), zlib.crc32(raw),
                                     *self.ENTRY.unpack_from(raw),
                                     *self.ENTRY.unpack_from(raw, len(raw) - self.ENTRY.size), 0)
+            output.seek(directory_start + page * directory.size)
             output.write(record[:-4] + struct.pack('<I', zlib.crc32(record[:-4])))
-            offset += len(raw)
-        for page in range(pages):
-            output.write(self.keyframes._page(page))
+            output.seek(end)
 
-    def serialize(self):
+    def serialize(self, compression='delta-zlib'):
         output = io.BytesIO()
-        self.write_to(output)
+        self.write_to(output, compression)
         return output.getvalue()
 
     @classmethod
     def open(cls, read_at, length, payload_length=None):
         if length < 9:
             raise ValueError("Invalid video keyframe index length.")
-        # Small indexes use one request; larger indexes retain only a bounded prefix.
+        # Keep encoded bytes bounded independently of the decoded index size.
         prefix_size = length if length <= _IndexedKeyframes.EAGER_BYTES else min(length, 64 * 1024)
         prefix = read_at(0, prefix_size)
         if len(prefix) != prefix_size:
@@ -451,7 +487,7 @@ class VideoKeyframeIndex:
         if length < cls.HEADER.size:
             raise ValueError("Invalid video keyframe index length.")
         _, _, metadata_count, count, codec = cls.HEADER.unpack_from(prefix)
-        if codec != 0:
+        if codec not in (0, 1):
             raise UnsupportedVideoIndex("Unsupported video keyframe index codec: %s." % codec)
         if count == 0:
             raise ValueError("Invalid video keyframe index count.")

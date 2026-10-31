@@ -26,6 +26,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.zip.CRC32;
+import java.util.zip.DataFormatException;
+import java.util.zip.Inflater;
 
 /** Streaming validation for paged video seek indexes. */
 final class VideoKeyframeIndex {
@@ -65,7 +67,7 @@ final class VideoKeyframeIndex {
         long metadataCount = Integer.toUnsignedLong(Integer.reverseBytes(in.readInt()));
         long count = Long.reverseBytes(in.readLong());
         int codec = in.readUnsignedByte();
-        if (codec != 0) {
+        if (codec > 1) {
             throw new UnsupportedIndexException("codec " + codec);
         }
         long offset = 22 + metadataCount * 16;
@@ -104,7 +106,7 @@ final class VideoKeyframeIndex {
                     || size <= 0
                     || size > PAGE_ENTRIES * ENTRY_LENGTH + 64
                     || start > length - size
-                    || size != entries * ENTRY_LENGTH) {
+                    || (codec == 0 && size != entries * ENTRY_LENGTH)) {
                 throw invalid("page offsets or length");
             }
             validateEntry(first, previous, page == 0, payloadLength);
@@ -122,19 +124,25 @@ final class VideoKeyframeIndex {
             throw invalid("entries length");
         }
         byte[] decoded = new byte[PAGE_ENTRIES * ENTRY_LENGTH];
+        byte[] encoded = new byte[PAGE_ENTRIES * ENTRY_LENGTH + 64];
         for (long page = 0; page < pages; page++) {
             source.seek(base + offset + page * record.length);
             in.readFully(record);
             ByteBuffer descriptor = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN);
             long start = descriptor.getLong();
-            descriptor.getInt();
+            int size = descriptor.getInt();
             long crc = Integer.toUnsignedLong(descriptor.getInt());
             long[] first = entry(descriptor);
             long[] last = entry(descriptor);
             int entries = (int) Math.min(PAGE_ENTRIES, count - page * PAGE_ENTRIES);
             int bytes = entries * ENTRY_LENGTH;
             source.seek(base + start);
-            in.readFully(decoded, 0, bytes);
+            if (codec == 0) {
+                in.readFully(decoded, 0, bytes);
+            } else {
+                in.readFully(encoded, 0, size);
+                decodePage(encoded, size, decoded, entries);
+            }
             if (checksum(decoded, bytes) != crc) {
                 throw invalid("page checksum");
             }
@@ -148,6 +156,40 @@ final class VideoKeyframeIndex {
                     throw invalid("page endpoints");
                 }
                 previous = value;
+            }
+        }
+    }
+
+    private static void decodePage(byte[] encoded, int size, byte[] decoded, int entries) {
+        int bytes = entries * ENTRY_LENGTH;
+        byte[] deltas = new byte[bytes + 1];
+        Inflater inflater = new Inflater();
+        try {
+            inflater.setInput(encoded, 0, size);
+            int total = 0;
+            while (!inflater.finished() && total < deltas.length) {
+                int n = inflater.inflate(deltas, total, deltas.length - total);
+                if (n == 0) {
+                    break;
+                }
+                total += n;
+            }
+            if (total != bytes || !inflater.finished() || inflater.getRemaining() != 0) {
+                throw invalid("compressed page length");
+            }
+        } catch (DataFormatException e) {
+            throw invalid("compressed page");
+        } finally {
+            inflater.end();
+        }
+        ByteBuffer input = ByteBuffer.wrap(deltas).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer output = ByteBuffer.wrap(decoded).order(ByteOrder.LITTLE_ENDIAN);
+        for (int column = 0; column < 3; column++) {
+            long value = 0;
+            for (int i = 0; i < entries; i++) {
+                // Java long addition supplies the format's modulo-2^64 arithmetic.
+                value += input.getLong();
+                output.putLong(i * ENTRY_LENGTH + column * Long.BYTES, value);
             }
         }
     }

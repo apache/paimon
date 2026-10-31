@@ -322,6 +322,32 @@ class MultimodalTableTest(unittest.TestCase):
                     for expected, frame in zip(pixels, container.decode(video=0)):
                         np.testing.assert_array_equal(expected, frame.to_ndarray(format="rgb24"))
 
+    def test_video_index_compression_table_option(self):
+        from pypaimon.table.row.video_keyframe_index import VideoKeyframeIndex
+        path = self._auto_video_file()
+        for compression, codec in (("none", 0), ("delta-zlib", 1)):
+            table = self.conn.create_table(
+                "codec_" + str(codec),
+                schema=pa.schema([
+                    pa.field("frame_index", pa.int64()),
+                    pa.field("timestamp", pa.float64()),
+                    pa.field("video", pa.large_binary()),
+                ]),
+                options=dict(_PARQUET_OPTIONS, **{
+                    "video-frame-field": "video", "blob-as-descriptor": "true",
+                    "video.index.compression": compression,
+                }),
+            )
+            table.add_video(path)
+            descriptor = pmm.VideoFrameDescriptor.deserialize(table.scan().to_list()[0]["video"])
+            mapping = descriptor.keyframe_index_descriptor
+            with table.raw_table.file_io.new_input_stream(mapping.uri) as stream:
+                stream.seek(mapping.offset)
+                data = stream.read(mapping.length)
+            self.assertEqual(codec, data[21])
+            with VideoKeyframeIndex.deserialize(data) as index:
+                self.assertEqual(0, index.keyframes[0][0])
+
     def _raw_hevc_file(self, b_frames=3):
         av = pytest.importorskip("av")
         import numpy as np

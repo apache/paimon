@@ -37,7 +37,13 @@ def encode_index(entries, count=None, ranges=(), codec=0):
     directory, payload = bytearray(), bytearray()
     for values in pages:
         raw = b''.join(struct.pack('<qqq', *v) for v in values)
-        data = zlib.compress(raw, 1) if codec else raw
+        columns = bytearray()
+        for column in range(3):
+            previous = 0
+            for value in values:
+                columns.extend(struct.pack('<Q', (value[column] - previous) % (1 << 64)))
+                previous = value[column]
+        data = zlib.compress(bytes(columns), 1) if codec else raw
         rec = struct.pack('<QIIqqqqqq', offset, len(data), zlib.crc32(raw), *values[0], *values[-1])
         directory.extend(rec + struct.pack('<I', zlib.crc32(rec)))
         payload.extend(data)
@@ -62,6 +68,52 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         with self.assertRaises(IndexError):
             _ = restored.keyframes[-3]
         self.assertEqual(data, restored.serialize())
+
+    def test_compressed_pages_round_trip_extreme_pts_and_partial_page(self):
+        entries = [(i, -(1 << 63) + i if i < 4096 else (1 << 63) - 1, i * 17)
+                   for i in range(4097)]
+        for compression, codec in (('none', 0), ('delta-zlib', 1)):
+            with self.subTest(compression=compression), VideoKeyframeIndex([], entries) as original:
+                data = original.serialize(compression)
+                self.assertEqual(codec, data[21])
+                with VideoKeyframeIndex.deserialize(data) as restored:
+                    self.assertEqual(entries, list(restored.keyframes))
+                self.assertEqual(encode_index(entries, codec=codec), data)
+        # The first page also crosses the signed PTS boundary.
+        with VideoKeyframeIndex([], [(0, -(1 << 63), 0), (1, (1 << 63) - 1, 1)]) as original:
+            with VideoKeyframeIndex.deserialize(original.serialize()) as restored:
+                self.assertEqual(list(original.keyframes), list(restored.keyframes))
+
+    def test_compression_does_not_bypass_decoded_memory_budget(self):
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(1_000_000))) as original:
+            data = original.serialize()
+        self.assertLess(len(data), _IndexedKeyframes.EAGER_BYTES)
+        with VideoKeyframeIndex.open(lambda o, n: data[o:o + n], len(data)) as index:
+            self.assertIsNone(index.keyframes.eager)
+            for i in range(0, 1_000_000, 4096):
+                self.assertEqual((i, i, i), index.keyframes[i])
+            self.assertLessEqual(sum(map(len, index.keyframes.cache.values())), 1024 * 1024)
+
+    def test_compressed_page_stream_boundaries(self):
+        data = encode_index([(0, -1, 0), (1, 1, 1)], codec=1)
+        start = 22 + 68
+        payload = data[start:]
+        for compressed in (payload[:-1], payload + b'x', payload + zlib.compress(b''),
+                           zlib.compress(b'x' * 1_000_000), b'not-zlib'):
+            record = list(_IndexedKeyframes.DIRECTORY.unpack_from(data, 22))
+            record[1] = len(compressed)
+            packed = _IndexedKeyframes.DIRECTORY.pack(*record)
+            damaged = data[:22] + packed[:-4] + struct.pack('<I', zlib.crc32(packed[:-4])) + compressed
+            with self.subTest(length=len(compressed)), self.assertRaises(ValueError):
+                VideoKeyframeIndex.deserialize(damaged)
+
+    def test_write_index_at_nonzero_spool_position(self):
+        import io
+        with VideoKeyframeIndex([], [(0, -10, 0), (1, 10, 1)]) as index:
+            output = io.BytesIO(b'prefix')
+            output.seek(0, 2)
+            index.write_to(output)
+            self.assertEqual(b'prefix' + index.serialize(), output.getvalue())
 
     def test_real_video_above_old_keyframe_limit(self):
         import tempfile
@@ -235,7 +287,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         count = 1_000_000
         with VideoKeyframeIndex([], ((i, i - 100, i * 2) for i in range(count))) as index:
             with tempfile.TemporaryFile() as stored:
-                index.write_to(stored)
+                index.write_to(stored, "none")
                 length = stored.tell()
                 self.assertGreater(length, 16 * 1024 * 1024)
                 reads = []
@@ -265,7 +317,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         count = 1_000_000
         with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as original:
             with tempfile.TemporaryFile() as stored:
-                original.write_to(stored)
+                original.write_to(stored, "none")
                 length = stored.tell()
                 reads = []
 
@@ -328,7 +380,7 @@ class VideoKeyframeIndexTest(unittest.TestCase):
 
     def test_paged_corruption_and_boundary_validation(self):
         entries = [(i, i, i) for i in range(8193)]
-        for codec in (0,):
+        for codec in (0, 1):
             data = encode_index(entries, codec=codec)
             corrupt = bytearray(data)
             corrupt[-1] ^= 1

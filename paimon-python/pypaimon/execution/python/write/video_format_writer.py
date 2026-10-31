@@ -53,13 +53,17 @@ class VideoFormatWriter(BlobFormatWriter):
             self,
             output_stream,
             file_path=None,
-            copy_buffer_size=BlobFormatWriter.BUFFER_SIZE):
+            copy_buffer_size=BlobFormatWriter.BUFFER_SIZE,
+            index_compression="delta-zlib"):
         super().__init__(
             output_stream,
             blob_consumer=None,
             file_path=file_path,
             copy_buffer_size=copy_buffer_size,
         )
+        if index_compression not in ('none', 'delta-zlib'):
+            raise ValueError("Video index compression must be 'none' or 'delta-zlib'.")
+        self._index_compression = index_compression
         self._physical_lengths = []
         self._keyframe_indexes = []
         self._index_spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
@@ -201,7 +205,7 @@ class VideoFormatWriter(BlobFormatWriter):
                             raise
                         return 0
                     with mapping:
-                        mapping.write_to(self._index_spool)
+                        mapping.write_to(self._index_spool, self._index_compression)
             else:
                 with tempfile.TemporaryFile() as mapping:
                     with Blob.from_descriptor(blob.uri_reader, descriptor).new_input_stream() as source:

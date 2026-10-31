@@ -56,7 +56,10 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.zip.CRC32;
+import java.util.zip.Deflater;
 
 import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -132,6 +135,46 @@ public class VideoFileFormatTest {
     public void testCrossLanguageV1Fixture() throws IOException {
         byte[] fixture = fixture("video-v1.hex");
         checkVideoFixture(fixture, fromHex(KEYFRAME_INDEX_HEX));
+    }
+
+    @Test
+    public void testCompressedCrossLanguageFixtures() throws IOException {
+        byte[] mapping = fixture("video-index-delta-zlib.hex");
+        VideoKeyframeIndex.validate(mapping, 3);
+        checkVideoFixture(fixture("video-v1-delta-zlib.hex"), mapping);
+        VideoKeyframeIndex.validate(fixture("video-index-delta-zlib-boundary.hex"), 4097);
+    }
+
+    @Test
+    public void testRejectMalformedCompressedStreams() throws IOException {
+        byte[] mapping = fixture("video-index-delta-zlib.hex");
+        int directory = 38;
+        int page = directory + 68;
+        byte[] payload = Arrays.copyOfRange(mapping, page, mapping.length);
+        Deflater compressor = new Deflater();
+        byte[] expanded = new byte[1024 * 1024];
+        byte[] compressed = new byte[4096];
+        compressor.setInput(expanded);
+        compressor.finish();
+        int size = compressor.deflate(compressed);
+        compressor.end();
+        for (byte[] invalid :
+                new byte[][] {
+                    Arrays.copyOf(payload, payload.length - 1),
+                    Arrays.copyOf(payload, payload.length + 1),
+                    Arrays.copyOf(compressed, size),
+                    new byte[] {1, 2, 3}
+                }) {
+            byte[] damaged = Arrays.copyOf(mapping, page + invalid.length);
+            System.arraycopy(invalid, 0, damaged, page, invalid.length);
+            ByteBuffer buffer = ByteBuffer.wrap(damaged).order(ByteOrder.LITTLE_ENDIAN);
+            buffer.putInt(directory + 8, invalid.length);
+            CRC32 crc = new CRC32();
+            crc.update(damaged, directory, 64);
+            buffer.putInt(directory + 64, (int) crc.getValue());
+            assertThatThrownBy(() -> VideoKeyframeIndex.validate(damaged, 3))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test
