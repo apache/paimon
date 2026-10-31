@@ -246,7 +246,9 @@ def test_named_iterator_keeps_map_key_authorization_boundary(projected_table):
 
 
 @pytest.mark.parametrize('projection', [
-    {'user_id': 'id'}, {'city': 'profile.city'}, {'source': "attributes['source']"},
+    {'city': 'profile.city'}, {'source': "attributes['source']"},
+    {'user_id': 'id', 'city': 'profile.city'},
+    {'user_id': 'id', 'source': "attributes['source']"},
 ])
 def test_named_projection_keeps_non_streaming_torch_row_boundary(projected_table, projection):
     table, _ = projected_table
