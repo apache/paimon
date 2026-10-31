@@ -241,9 +241,14 @@ class VideoKeyframeIndexTest(unittest.TestCase):
 
                 with VideoKeyframeIndex.open(read_at, length, count * 2) as restored:
                     self.assertEqual(count, len(restored.keyframes))
-                    self.assertLess(sum(size for _, size in reads), 100_000)
+                    self.assertLess(sum(size for _, size in reads), 200_000)
                     for ordinal in (count - 1, 32768, 0, 499999):
+                        before = len(reads)
                         self.assertEqual((ordinal, ordinal - 100, ordinal * 2), restored.keyframes[ordinal])
+                        self.assertLessEqual(len(reads) - before, 3)
+                        before = len(reads)
+                        self.assertEqual((ordinal, ordinal - 100, ordinal * 2), restored.keyframes[ordinal])
+                        self.assertEqual(before, len(reads))
                         self.assertEqual(ordinal, bisect.bisect_left(restored.ordinals, ordinal))
                     self.assertLessEqual(max(size for _, size in reads), 4096 * 24 + 25)
                     self.assertLessEqual(sum(map(len, restored.keyframes.cache.values())), 1024 * 1024)
@@ -255,8 +260,8 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         second = VideoKeyframeIndex.HEADER.size + 4096 * 24 + 4
         corrupt = bytearray(data)
         corrupt[second] ^= 1
-        with VideoKeyframeIndex.open(lambda o, n: corrupt[o:o + n], len(corrupt)) as index:
-            with self.assertRaisesRegex(ValueError, 'checksum'):
+        with self.assertRaisesRegex(ValueError, 'checksum'):
+            with VideoKeyframeIndex.open(lambda o, n: corrupt[o:o + n], len(corrupt)) as index:
                 _ = index.keyframes[4096]
         # A valid page checksum must not hide a descending page boundary.
         corrupt = bytearray(data)
@@ -266,6 +271,32 @@ class VideoKeyframeIndexTest(unittest.TestCase):
         for invalid in (corrupt, data[:-1], data + b'x'):
             with self.assertRaises(ValueError):
                 VideoKeyframeIndex.validate(invalid)
+
+    def test_lazy_reads_validate_uncached_page_boundaries(self):
+        page_entries = 4096
+        stride = page_entries * 24 + 4
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(16 * page_entries))) as index:
+            original = index.serialize()
+        for column in range(3):
+            corrupt = bytearray(original)
+            offset = VideoKeyframeIndex.HEADER.size + 12 * stride
+            page = bytearray(corrupt[offset:offset + page_entries * 24])
+            for entry in range(page_entries):
+                struct.pack_into('<q', page, entry * 24 + column * 8, 11 * page_entries + entry)
+            corrupt[offset:offset + len(page)] = page
+            struct.pack_into('<I', corrupt, offset + len(page), zlib.crc32(page))
+            for target in (11, 12):
+                for cache_state in ('cold', 'cached', 'evicted'):
+                    with self.subTest(column=column, target=target, cache_state=cache_state):
+                        with VideoKeyframeIndex.open(
+                                lambda o, n: corrupt[o:o + n], len(corrupt)) as index:
+                            if cache_state != 'cold':
+                                index.keyframes[(target - 1 if target == 11 else target + 1) * page_entries]
+                            if cache_state == 'evicted':
+                                for prior in range(10):
+                                    index.keyframes[prior * page_entries]
+                            with self.assertRaisesRegex(ValueError, 'strictly increasing'):
+                                index.keyframes[target * page_entries]
 
     def test_validate_rejects_ranges_outside_video_payload(self):
         metadata_outside = VideoKeyframeIndex(

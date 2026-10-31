@@ -44,28 +44,33 @@ class _PagedKeyframes(Sequence):
     def __len__(self):
         return self.count
 
+    def _load_page(self, page):
+        data = self.cache.pop(page, None)
+        if data is None:
+            count = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES)
+            size = count * self.ENTRY.size
+            block = self.read_at(page * (self.PAGE_BYTES + 4), size + 4)
+            if len(block) != size + 4 or zlib.crc32(block[:size]) != struct.unpack('<I', block[size:])[0]:
+                raise ValueError("Invalid video keyframe index page checksum or length.")
+            data = block[:size]
+            _validate_entries(data, self.payload_length, initial=page == 0)
+        self.cache[page] = data
+        while len(self.cache) > max(1, self.CACHE_BYTES // self.PAGE_BYTES):
+            self.cache.popitem(last=False)
+        return data
+
     def _page(self, page):
         with self.lock:
-            data = self.cache.pop(page, None)
-            if data is None:
-                count = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES)
-                size = count * self.ENTRY.size
-                block = self.read_at(page * (self.PAGE_BYTES + 4), size + 4)
-                if len(block) != size + 4 or zlib.crc32(block[:size]) != struct.unpack('<I', block[size:])[0]:
-                    raise ValueError("Invalid video keyframe index page checksum or length.")
-                data = block[:size]
-                _validate_entries(data, self.payload_length, initial=page == 0)
-                previous = self.cache.get(page - 1)
-                following = self.cache.get(page + 1)
-                if previous is not None:
-                    _validate_boundary(self.ENTRY.unpack_from(previous, len(previous) - 24),
-                                       self.ENTRY.unpack_from(data))
-                if following is not None:
-                    _validate_boundary(self.ENTRY.unpack_from(data, len(data) - 24),
-                                       self.ENTRY.unpack_from(following))
-            self.cache[page] = data
-            while len(self.cache) > max(1, self.CACHE_BYTES // self.PAGE_BYTES):
-                self.cache.popitem(last=False)
+            data = self._load_page(page)
+            # Check both boundaries even when adjacent pages were not cached.
+            if page > 0:
+                previous = self._load_page(page - 1)
+                _validate_boundary(self.ENTRY.unpack_from(previous, len(previous) - self.ENTRY.size),
+                                   self.ENTRY.unpack_from(data))
+            if (page + 1) * self.PAGE_ENTRIES < self.count:
+                following = self._load_page(page + 1)
+                _validate_boundary(self.ENTRY.unpack_from(data, len(data) - self.ENTRY.size),
+                                   self.ENTRY.unpack_from(following))
             return data
 
     def __getitem__(self, index):
