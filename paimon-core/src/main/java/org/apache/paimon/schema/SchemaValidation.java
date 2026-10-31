@@ -199,6 +199,8 @@ public class SchemaValidation {
 
         validateMergeFunction(schema);
 
+        validateChangelogOnRead(schema, options);
+
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
             throw new UnsupportedOperationException(
@@ -885,6 +887,46 @@ public class SchemaValidation {
         }
 
         createMergeFunctionFactory(schema);
+    }
+
+    private static void validateChangelogOnRead(TableSchema schema, CoreOptions options) {
+        if (!options.changelogOnRead()) {
+            return;
+        }
+
+        checkArgument(
+                !options.queryAuthEnabled(),
+                "changelog-producer=on-read does not support query authorization.");
+
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "%s requires a table with primary keys.",
+                CHANGELOG_PRODUCER.key());
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE
+                        || options.mergeEngine() == MergeEngine.AGGREGATE,
+                "%s only supports deduplicate and aggregation merge engines.",
+                CHANGELOG_PRODUCER.key());
+        checkArgument(
+                options.bucket() > 0,
+                "%s only supports fixed bucket tables.",
+                CHANGELOG_PRODUCER.key());
+        checkArgument(
+                !options.deletionVectorsEnabled(),
+                "%s does not support deletion vectors.",
+                CHANGELOG_PRODUCER.key());
+        checkArgument(
+                !schema.crossPartitionUpdate(),
+                "%s does not support cross-partition updates.",
+                CHANGELOG_PRODUCER.key());
+        checkArgument(
+                !options.streamingReadOverwrite(),
+                "%s does not support streaming overwrite.",
+                CHANGELOG_PRODUCER.key());
+        checkArgument(
+                !options.isChainTable() && !options.dataEvolutionEnabled(),
+                "%s does not support chain tables or data evolution.",
+                CHANGELOG_PRODUCER.key());
     }
 
     private static void validateMapStorageLayout(TableSchema schema, CoreOptions options) {

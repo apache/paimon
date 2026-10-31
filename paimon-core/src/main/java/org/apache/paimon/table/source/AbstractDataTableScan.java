@@ -761,9 +761,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private ScanMode toSnapshotScanMode(CoreOptions.IncrementalBetweenScanMode scanMode) {
         switch (scanMode) {
             case AUTO:
-                return options.changelogProducer() == ChangelogProducer.NONE
-                        ? ScanMode.DELTA
-                        : ScanMode.CHANGELOG;
+                return options.producesChangelogFiles() ? ScanMode.CHANGELOG : ScanMode.DELTA;
             case DELTA:
                 return ScanMode.DELTA;
             case CHANGELOG:

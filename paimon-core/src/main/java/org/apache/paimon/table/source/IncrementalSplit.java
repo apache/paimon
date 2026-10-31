@@ -123,6 +123,10 @@ public class IncrementalSplit implements Split {
         return isStreaming;
     }
 
+    public OptionalLong earliestFileCreationEpochMillis() {
+        return afterFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).min();
+    }
+
     @Override
     public long rowCount() {
         long rowCount = 0;

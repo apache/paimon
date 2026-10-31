@@ -213,28 +213,34 @@ under the License.
             <td>Changelog file metadata stats collection. none, counts, truncate(16), full is available.</td>
         </tr>
         <tr>
+            <td><h5>changelog-on-read.lookup-state.max-size</h5></td>
+            <td style="word-wrap: break-word;">2048</td>
+            <td>Integer</td>
+            <td>Maximum number of partition-bucket lookup states cached by each reader with changelog-producer=on-read. Must be greater than 0. Least recently used states and their local lookup files are evicted when the limit is exceeded.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' compaction.</li></ul></td>
+            <td>How to produce changelog for primary-key tables. Input, lookup and full-compaction produce changelog files; on-read reconstructs changes from data files during streaming reads.<br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' compaction.</li><li>"on-read": Generate changelog during reads without writing changelog files.</li></ul></td>
         </tr>
         <tr>
             <td><h5>changelog-producer.ignore-delete</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to ignore delete records in the changelog. When set to true, DELETE (-D) records will not be written to changelog files. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+            <td>Whether to ignore delete records in the changelog. When set to true, DELETE (-D) records will not be emitted. Valid for lookup, full-compaction and on-read.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer.ignore-update-before</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to ignore update-before records in the changelog. When set to true, UPDATE_BEFORE (-U) records will not be written to changelog files. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+            <td>Whether to ignore update-before records in the changelog. When set to true, UPDATE_BEFORE (-U) records will not be emitted. Valid for lookup, full-compaction and on-read.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+            <td>Whether to suppress -U, +U changelog for equal records. Valid for lookup, full-compaction and on-read.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer.row-deduplicate-ignore-fields</h5></td>

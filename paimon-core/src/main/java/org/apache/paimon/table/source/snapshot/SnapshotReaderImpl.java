@@ -80,7 +80,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 
 /** Implementation of {@link SnapshotReader}. */
@@ -102,6 +101,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private ScanMode scanMode = ScanMode.ALL;
     private boolean hasNonPartitionFilter;
+    @Nullable private PartitionPredicate partitionFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
 
@@ -197,32 +197,31 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
         if (partitionSpec != null) {
-            Predicate partitionPredicate =
-                    createPartitionPredicate(
-                            partitionSpec,
+            return setPartitionFilter(
+                    PartitionPredicate.fromMap(
                             tableSchema.logicalPartitionType(),
-                            options.partitionDefaultName());
-            scan.withPartitionFilter(partitionPredicate);
+                            partitionSpec,
+                            options.partitionDefaultName()));
         }
         return this;
     }
 
     @Override
     public SnapshotReader withPartitionFilter(Predicate predicate) {
-        scan.withPartitionFilter(predicate);
-        return this;
+        return setPartitionFilter(
+                PartitionPredicate.fromPredicate(tableSchema.logicalPartitionType(), predicate));
     }
 
     @Override
     public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
-        scan.withPartitionFilter(partitions);
-        return this;
+        return setPartitionFilter(
+                PartitionPredicate.fromMultiple(tableSchema.logicalPartitionType(), partitions));
     }
 
     @Override
     public SnapshotReader withPartitionFilter(PartitionPredicate partitionPredicate) {
         if (partitionPredicate != null) {
-            scan.withPartitionFilter(partitionPredicate);
+            return setPartitionFilter(partitionPredicate);
         }
         return this;
     }
@@ -230,8 +229,18 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
         if (partitions != null) {
-            scan.withPartitionsFilter(partitions);
+            return setPartitionFilter(
+                    PartitionPredicate.fromMaps(
+                            tableSchema.logicalPartitionType(),
+                            partitions,
+                            options.partitionDefaultName()));
         }
+        return this;
+    }
+
+    private SnapshotReader setPartitionFilter(@Nullable PartitionPredicate partitionFilter) {
+        this.partitionFilter = partitionFilter;
+        scan.withPartitionFilter(partitionFilter);
         return this;
     }
 
@@ -255,7 +264,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         tableSchema.logicalRowType(),
                         tableSchema.partitionKeys());
         if (pushdownPair.getLeft().isPresent()) {
-            scan.withPartitionFilter(pushdownPair.getLeft().get());
+            setPartitionFilter(pushdownPair.getLeft().get());
         }
         if (!pushdownPair.getRight().isEmpty()) {
             this.hasNonPartitionFilter = true;
@@ -500,6 +509,45 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
         return toIncrementalPlan(
                 true, beforeSnapshot, beforeFiles, plan.snapshot(), plan.watermark(), afterFiles);
+    }
+
+    @Override
+    public Plan readChangelogOnRead() {
+        withMode(ScanMode.DELTA);
+        FileStoreScan.Plan deltaPlan = scan.plan();
+        Snapshot snapshot = deltaPlan.snapshot();
+        if (snapshot == null) {
+            return new PlanImpl(deltaPlan.watermark(), null, null, Collections.emptyList());
+        }
+
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> deltaFiles =
+                groupByPartFiles(deltaPlan.files(FileKind.ADD));
+        if (deltaFiles.isEmpty()) {
+            return new PlanImpl(
+                    deltaPlan.watermark(), snapshot.id(), snapshot, Collections.emptyList());
+        }
+
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> historyFiles;
+        try {
+            scan.withPartitionFilter(new ArrayList<>(deltaFiles.keySet()));
+            withMode(ScanMode.ALL);
+            historyFiles = groupByPartFiles(scan.plan().files(FileKind.ADD));
+        } finally {
+            scan.withPartitionFilter(partitionFilter);
+        }
+        historyFiles.forEach(
+                (partition, buckets) -> {
+                    Map<Integer, List<ManifestEntry>> deltas = deltaFiles.get(partition);
+                    buckets.keySet().retainAll(deltas.keySet());
+                    buckets.forEach((bucket, entries) -> entries.removeAll(deltas.get(bucket)));
+                });
+        return toIncrementalPlan(
+                true,
+                new LazyField<>(() -> null),
+                historyFiles,
+                snapshot,
+                deltaPlan.watermark(),
+                deltaFiles);
     }
 
     private Plan toIncrementalPlan(

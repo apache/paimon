@@ -31,6 +31,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
@@ -69,6 +71,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -380,6 +383,18 @@ public class OperatorSourceTest {
         writeToTable(2, 2, 2);
         List<Split> splits = table.newReadBuilder().newScan().plan().splits();
         assertThat(splits.size()).isGreaterThan(0);
+        DataSplit dataSplit = (DataSplit) splits.get(0);
+        Split incrementalSplit =
+                new IncrementalSplit(
+                        dataSplit.snapshotId(),
+                        dataSplit.partition(),
+                        dataSplit.bucket(),
+                        dataSplit.totalBuckets(),
+                        Collections.emptyList(),
+                        null,
+                        dataSplit.dataFiles(),
+                        null,
+                        true);
         MetricGroup readerOperatorMetricGroup = readOperator.getMetricGroup();
         harness.open();
         assertThat(
@@ -401,7 +416,7 @@ public class OperatorSourceTest {
                                         .getValue())
                 .isGreaterThan(299L);
 
-        harness.processElement(new StreamRecord<>(splits.get(0)));
+        harness.processElement(new StreamRecord<>(incrementalSplit));
         assertThat(
                         (Long)
                                 TestingMetricUtils.getGauge(

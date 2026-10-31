@@ -805,5 +805,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             // Plain splits come from newSnapshotReader(), which plans the wrapped table.
             return wrappedRead.createReader(split);
         }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                mainRead.close();
+            } finally {
+                fallbackRead.close();
+            }
+        }
     }
 }

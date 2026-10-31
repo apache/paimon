@@ -43,6 +43,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -236,6 +237,15 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         }
 
         throw new RuntimeException("Should not happen.");
+    }
+
+    @Override
+    public void close() throws IOException {
+        for (SplitReadProvider provider : readProviders) {
+            if (provider instanceof Closeable) {
+                ((Closeable) provider).close();
+            }
+        }
     }
 
     public static RecordReader<InternalRow> unwrap(

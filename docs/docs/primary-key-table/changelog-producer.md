@@ -39,6 +39,7 @@ only `5` requires the consumer to remember the previous value.
 | `none` (default) | Consumer state, if needed | Incremental snapshot reads | The consumer accepts upserts or can normalize them |
 | `input` | Complete changelog supplied by the source | Committed input changelog files | The upstream already supplies the required before/after records |
 | `lookup` | Lookup of existing rows during compaction | After lookup compaction is committed | The input has no before images and consumers need complete changes |
+| `on-read` | Lookup of historical rows during streaming reads | Incremental snapshot reads | Readers reconstruct complete changes without stored changelog files |
 | `full-compaction` | Difference between full-compaction results | After a full compaction is committed | Consumers can wait for periodic full compactions |
 
 The diagram follows one existing key whose value changes from `4` to `5`. `-U` is
@@ -108,6 +109,17 @@ checkpoint completion waits for compaction. Tune it with checkpoint duration and
 
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
+
+## On Read
+
+With `changelog-producer = on-read`, streaming readers reconstruct changes from new data files
+and historical records. Each reader caches partition-bucket lookup states for reuse across splits.
+
+`changelog-on-read.lookup-state.max-size` limits the number of cached states per reader. It defaults
+to `2048` and must be greater than zero. When the limit is exceeded, the least recently used state
+and its local lookup files are evicted. Reading that partition and bucket again rebuilds the state
+from the split's historical files and recreates lookup files as needed. This option limits the
+number of states, not their size in bytes.
 
 ## Full Compaction
 
