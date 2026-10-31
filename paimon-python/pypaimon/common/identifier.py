@@ -19,10 +19,17 @@ from dataclasses import dataclass
 from typing import Optional
 
 from pypaimon.common.json_util import json_field
+from pypaimon.management.java_string import is_null_or_whitespace_only
 
 SYSTEM_TABLE_SPLITTER = '$'
 SYSTEM_BRANCH_PREFIX = 'branch_'
 DEFAULT_MAIN_BRANCH = 'main'
+
+
+def is_default_main(branch: Optional[str]) -> bool:
+    """Java ``"main".equalsIgnoreCase(branch)``, which also takes the dotted and dotless i for i."""
+    return branch is not None and \
+        branch.replace('\u0130', 'i').replace('\u0131', 'i').lower() == DEFAULT_MAIN_BRANCH
 UNKNOWN_DATABASE = 'unknown'
 
 
@@ -65,8 +72,11 @@ class Identifier:
         else:
             # Encoding form: ``object`` is the bare table name; encode
             # branch / system_table into the on-wire ``object``.
+            # Like a blank branch option, a blank branch is the main branch.
+            if is_null_or_whitespace_only(branch):
+                branch = None
             builder = object
-            if branch is not None and branch.lower() != DEFAULT_MAIN_BRANCH:
+            if branch is not None and not is_default_main(branch):
                 builder = (builder + SYSTEM_TABLE_SPLITTER
                            + SYSTEM_BRANCH_PREFIX + branch)
             if system_table is not None:
@@ -143,6 +153,9 @@ class Identifier:
             return
 
         splits = self.object.split(SYSTEM_TABLE_SPLITTER)
+        if len(splits) > 1 and splits[1].startswith(SYSTEM_BRANCH_PREFIX) \
+                and is_null_or_whitespace_only(splits[1][len(SYSTEM_BRANCH_PREFIX):]):
+            raise ValueError("Branch name cannot be blank, but this is: " + self.object)
         if len(splits) == 1:
             self._table = self.object
             self._branch = None
@@ -221,7 +234,7 @@ class Identifier:
         )
         self.object = rebuilt.object
         self._table = table
-        self._branch = value
+        self._branch = rebuilt._branch
         self._system_table = system_table
 
     def __hash__(self):
