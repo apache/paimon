@@ -154,7 +154,8 @@ public class SchemaMergingUtils {
                                     baseField.name(),
                                     updatedDataType,
                                     baseField.description(),
-                                    baseField.defaultValue()));
+                                    baseField.defaultValue(),
+                                    baseField.generationExpression()));
                 } else {
                     updatedFields.add(baseField);
                 }

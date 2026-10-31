@@ -47,7 +47,7 @@ public final class GeneratedColumn {
                 GeneratedExpression.parse(
                         field.generationExpression(), rowType, Function.identity());
         checkArgument(
-                field.type().equalsIgnoreNullable(expression.outputType()),
+                field.type().copy(true).equalsIgnoreFieldId(expression.outputType().copy(true)),
                 "Generation expression type %s does not match column '%s' type %s.",
                 expression.outputType(),
                 field.name(),

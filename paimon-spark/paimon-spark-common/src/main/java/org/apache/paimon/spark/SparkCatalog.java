@@ -59,6 +59,7 @@ import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.apache.spark.sql.catalyst.catalog.PaimonV1FunctionRegistry;
 import org.apache.spark.sql.catalyst.expressions.Expression;
+import org.apache.spark.sql.catalyst.parser.ParseException;
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function;
 import org.apache.spark.sql.connector.catalog.CatalogV2Util;
 import org.apache.spark.sql.connector.catalog.Column;
@@ -755,6 +756,17 @@ public class SparkCatalog extends SparkBaseCatalog
                             ? field.metadata().getString(GENERATION_EXPRESSION_METADATA_KEY)
                             : null;
             if (generationExpression != null) {
+                try {
+                    generationExpression =
+                            SparkSession.active()
+                                    .sessionState()
+                                    .sqlParser()
+                                    .parseExpression(generationExpression)
+                                    .sql();
+                } catch (ParseException e) {
+                    throw new IllegalArgumentException(
+                            "Invalid generation expression: " + generationExpression, e);
+                }
                 generationExpression =
                         GeneratedColumn.normalizeExpression(
                                 generationExpression,

@@ -56,6 +56,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BlobDescriptorResolvingRow;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.GeneratedColumnRow;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RecordWriter;
@@ -138,6 +139,9 @@ public class DataEvolutionPartialWriteOperator
             List<String> writePaths,
             Long baseSnapshotId,
             UriReaderFactory blobDescriptorReaderFactory) {
+        Preconditions.checkArgument(
+                !GeneratedColumnRow.hasGeneratedColumns(table.rowType()),
+                "Partial-column updates are not supported for tables with generated columns.");
         this.table = table.copy(dataEvolutionWriteOptions());
         this.baseSnapshotId = baseSnapshotId;
         this.blobDescriptorReaderFactory = blobDescriptorReaderFactory;

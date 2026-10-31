@@ -50,11 +50,13 @@ import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.predicate.WeekTransform;
 import org.apache.paimon.predicate.WeekdayTransform;
 import org.apache.paimon.predicate.YearTransform;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeJsonParser;
-import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDate;
@@ -222,9 +224,13 @@ final class GeneratedExpression {
                     }
                     expect(")");
                     DataType target =
-                            DataTypeJsonParser.parseAtomicTypeSQLString(type.toString().trim());
+                            DataTypeJsonParser.parseAtomicTypeSQLString(
+                                    type.toString()
+                                            .trim()
+                                            .toUpperCase(Locale.ROOT)
+                                            .replace("TIMESTAMP_NTZ", "TIMESTAMP"));
                     checkArgument(
-                            !target.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE),
+                            timeZoneIndependent(target),
                             "Generated expressions cannot use TIMESTAMP WITH LOCAL TIME ZONE.");
                     return emit(new CastTransform((FieldRef) source, target));
                 }
@@ -259,7 +265,7 @@ final class GeneratedExpression {
                     "Generated columns cannot reference generated column '%s'.",
                     resolved);
             checkArgument(
-                    !field.type().is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE),
+                    timeZoneIndependent(field.type()),
                     "Generated expressions cannot use TIMESTAMP WITH LOCAL TIME ZONE.");
             // next() may have appended whitespace following this identifier.
             if (!resolved.equals(unquoted)) {
@@ -330,11 +336,11 @@ final class GeneratedExpression {
                 case "RPAD":
                     return new PadTransform(inputs, PadTransform.Direction.RIGHT);
                 case "TRIM":
-                    return new TrimTransform(inputs, TrimTransform.Flag.BOTH);
+                    return new TrimTransform(trimInputs(inputs), TrimTransform.Flag.BOTH);
                 case "LTRIM":
-                    return new TrimTransform(inputs, TrimTransform.Flag.LEADING);
+                    return new TrimTransform(trimInputs(inputs), TrimTransform.Flag.LEADING);
                 case "RTRIM":
-                    return new TrimTransform(inputs, TrimTransform.Flag.TRAILING);
+                    return new TrimTransform(trimInputs(inputs), TrimTransform.Flag.TRAILING);
                 case "DATE_ADD":
                     return new DateAddTransform(inputs);
                 case "DATEDIFF":
@@ -375,6 +381,34 @@ final class GeneratedExpression {
                     return new WeekTransform(field);
                 default:
                     throw new IllegalArgumentException("Unsupported generation function: " + name);
+            }
+        }
+
+        private List<Object> trimInputs(List<Object> inputs) {
+            // SQL's two-argument form is TRIM(characters, string); Transform takes the source
+            // first.
+            return inputs.size() == 2
+                    ? java.util.Arrays.asList(inputs.get(1), inputs.get(0))
+                    : inputs;
+        }
+
+        private boolean timeZoneIndependent(DataType type) {
+            switch (type.getTypeRoot()) {
+                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                    return false;
+                case ROW:
+                    return ((RowType) type)
+                            .getFields().stream()
+                                    .allMatch(field -> timeZoneIndependent(field.type()));
+                case ARRAY:
+                    return timeZoneIndependent(((ArrayType) type).getElementType());
+                case MAP:
+                    return timeZoneIndependent(((MapType) type).getKeyType())
+                            && timeZoneIndependent(((MapType) type).getValueType());
+                case MULTISET:
+                    return timeZoneIndependent(((MultisetType) type).getElementType());
+                default:
+                    return true;
             }
         }
     }

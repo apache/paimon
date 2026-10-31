@@ -36,6 +36,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -236,6 +237,85 @@ class GeneratedPartitionColumnTest {
             assertThat(defaults.getBucket(raw))
                     .isNotEqualTo(defaults.getBucket(GenericRow.of(7, 9)));
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testEffectiveRowKindControlsGeneratedValueValidation(boolean reordered) throws Exception {
+        Schema schema =
+                schema(true)
+                        .column("kind", DataTypes.STRING(), null, "'-D'")
+                        .option("rowkind.field", "kind")
+                        .build();
+        Path path = new Path(tempDir.resolve(UUID.randomUUID().toString()).toUri());
+        new FileSystemSchemaManager(LocalFileIO.create(), path).createTable(schema);
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        BatchWriteBuilder inserts = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = inserts.newWrite();
+                BatchTableCommit commit = inserts.newCommit()) {
+            for (int id : new int[] {1, 2}) {
+                write.write(
+                        GenericRow.of(
+                                id,
+                                0,
+                                Timestamp.fromEpochMillis(0),
+                                BinaryString.fromString("+I")));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        RowType inputType =
+                reordered ? table.rowType().project("kind", "ts", "id", "dt") : table.rowType();
+        BatchWriteBuilder deletes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = deletes.newWrite().withWriteType(inputType);
+                BatchTableCommit commit = deletes.newCommit()) {
+            GenericRow invalidInsert =
+                    reordered
+                            ? GenericRow.of(BinaryString.fromString("+I"), null, 3, 0)
+                            : GenericRow.of(3, 0, null, BinaryString.fromString("+I"));
+            invalidInsert.setRowKind(RowKind.DELETE);
+            assertThatThrownBy(() -> write.getPartition(invalidInsert))
+                    .hasMessageContaining("does not match generation expression");
+            assertThatThrownBy(() -> write.getBucket(invalidInsert))
+                    .hasMessageContaining("does not match generation expression");
+            assertThatThrownBy(() -> write.write(invalidInsert))
+                    .hasMessageContaining("does not match generation expression");
+
+            for (int id : new int[] {1, 2}) {
+                BinaryString kind = id == 1 ? null : BinaryString.fromString("-D");
+                GenericRow delete =
+                        reordered
+                                ? GenericRow.of(kind, null, id, 0)
+                                : GenericRow.of(id, 0, null, kind);
+                assertThat(delete.getRowKind()).isEqualTo(RowKind.INSERT);
+                assertThat(write.getPartition(delete).getInt(0)).isZero();
+                assertThat(write.getBucket(delete)).isZero();
+                write.write(delete);
+            }
+            commit.commit(write.prepareCommit());
+        }
+        try (RecordReaderIterator<InternalRow> rows =
+                new RecordReaderIterator<>(table.newRead().createReader(table.newScan().plan()))) {
+            assertThat(rows.hasNext()).isFalse();
+        }
+    }
+
+    @Test
+    void testRejectGeneratedRowKindFieldAtCreation() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("operation", DataTypes.STRING())
+                        .generatedColumn("kind", DataTypes.STRING(), "UPPER(operation)")
+                        .primaryKey("id")
+                        .option("bucket", "1")
+                        .option("rowkind.field", "kind")
+                        .build();
+        Path path = new Path(tempDir.resolve(UUID.randomUUID().toString()).toUri());
+        FileSystemSchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        assertThatThrownBy(() -> manager.createTable(schema))
+                .hasMessageContaining("cannot be used as rowkind.field");
+        assertThat(manager.latest()).isEmpty();
     }
 
     private FileStoreTable createTable(boolean primaryKey) throws Exception {

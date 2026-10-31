@@ -134,6 +134,9 @@ A top-level field, including a partition field, may define `generationExpression
 ```
 
 Writers compile the SQL expression into Paimon `Transform` operations once at initialization.
+These operations define the stored value, including CAST formatting and invalid-input behavior;
+the write engine's ANSI mode or implicit CAST rules do not change that definition. Spark fills
+omitted columns through the same evaluator, including source-column defaults, before core validation.
 Expressions may reference ordinary top-level fields and compose supported scalar calls, such as
 `YEAR(event_time)`, `UPPER(name)`, `CONCAT(UPPER(name), '-', name)`, and
 `DATE_ADD(CAST(event_time AS DATE), days)`. The expression result type must match the declared
@@ -150,7 +153,8 @@ equality. Explicit NULL therefore fails if the expression produces a non-NULL va
 DELETE may supply existing generated values without their source values being populated.
 
 Definitions are supported at table creation. Changing a definition or renaming, dropping, or
-changing the type of any source is not supported. Primary-key tables require the deduplicate merge
+changing the type of any source is not supported. A generated column cannot be used as
+`rowkind.field`. Primary-key tables require the deduplicate merge
 engine. Partial-column writes, including Data Evolution partial updates, are not supported for
 tables with generated columns.
 

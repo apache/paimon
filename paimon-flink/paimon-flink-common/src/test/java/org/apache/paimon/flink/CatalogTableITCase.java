@@ -20,10 +20,15 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.dataevolution.DataEvolutionPartialWriteOperator;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
@@ -42,6 +47,7 @@ import org.junit.jupiter.api.condition.EnabledIf;
 
 import javax.annotation.Nonnull;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -86,6 +92,54 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("ALTER TABLE generated_events MODIFY dt DATE COMMENT 'generated date'");
         assertThat(paimonTable("generated_events").rowType().getField("dt").generationExpression())
                 .isEqualTo("CAST(ts AS DATE)");
+    }
+
+    @Test
+    void testDataEvolutionPartialWriteRejectsGeneratedColumns() throws Exception {
+        for (boolean generated : new boolean[] {false, true}) {
+            Schema.Builder builder =
+                    Schema.newBuilder()
+                            .column("name", DataTypes.STRING())
+                            .option("row-tracking.enabled", "true")
+                            .option("data-evolution.enabled", "true")
+                            .option("bucket", "-1");
+            if (generated) {
+                builder.generatedColumn("label", DataTypes.STRING(), "UPPER(name)");
+            }
+            String tableName = generated ? "generated_evolution" : "plain_evolution";
+            flinkCatalog()
+                    .catalog()
+                    .createTable(
+                            Identifier.create(tEnv.getCurrentDatabase(), tableName),
+                            builder.build(),
+                            false);
+            FileStoreTable table = paimonTable(tableName);
+            RowType sourceType = SpecialFields.rowTypeWithRowId(table.rowType().project("name"));
+            UriReaderFactory uriReaders = UriReaderFactory.fromFileIO(table.fileIO());
+            if (generated) {
+                assertThatThrownBy(
+                                () ->
+                                        new DataEvolutionPartialWriteOperator(
+                                                table,
+                                                sourceType,
+                                                Collections.singletonList("name"),
+                                                0L,
+                                                uriReaders))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining(
+                                "Partial-column updates are not supported for tables with generated columns");
+            } else {
+                assertThatCode(
+                                () ->
+                                        new DataEvolutionPartialWriteOperator(
+                                                table,
+                                                sourceType,
+                                                Collections.singletonList("name"),
+                                                0L,
+                                                uriReaders))
+                        .doesNotThrowAnyException();
+            }
+        }
     }
 
     @Override

@@ -27,7 +27,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.BlobType
 import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.{GeneratedColumnRow, SerializationUtils}
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
@@ -71,6 +71,9 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
       data: DataFrame,
       writeType: RowType,
       rawBlobPlaceholderMarkerColumns: Map[String, String]): Seq[CommitMessage] = {
+    require(
+      !GeneratedColumnRow.hasGeneratedColumns(table.rowType()),
+      "Partial-column updates are not supported for tables with generated columns.")
     val sparkSession = data.sparkSession
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._

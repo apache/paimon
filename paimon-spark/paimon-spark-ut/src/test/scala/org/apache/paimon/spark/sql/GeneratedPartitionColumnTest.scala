@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.{DataTypes => PaimonTypes}
 
 import org.apache.spark.sql.Row
 
@@ -179,6 +182,146 @@ class GeneratedPartitionColumnTest extends PaimonSparkTestBase {
                  |) USING paimon""".stripMargin)
         }
         assert(error.getMessage.contains(expected))
+      }
+    }
+  }
+
+  test("use storage transforms and defaults for both generated and explicit values") {
+    assume(gteqSpark3_5)
+    withTable("generated_events") {
+      sql("""CREATE TABLE generated_events (id INT, ts TIMESTAMP_NTZ, name STRING,
+            |text STRING GENERATED ALWAYS AS (CAST(ts AS STRING)),
+            |trimmed STRING GENERATED ALWAYS AS (TRIM('x', name)),
+            |literal STRING GENERATED ALWAYS AS (CONCAT(name, 'NAME''s'))
+            |) USING paimon""".stripMargin)
+      sql("""INSERT INTO generated_events (id, ts, name)
+            |VALUES (1, CAST('1970-01-01 00:00:00' AS TIMESTAMP_NTZ), 'xabcx')""".stripMargin)
+      sql("""INSERT INTO generated_events VALUES
+            |(2, CAST('1970-01-01 00:00:00' AS TIMESTAMP_NTZ), 'xabcx',
+            |'1970-01-01 00:00:00.000000', 'abc', 'xabcxNAMEs')""".stripMargin)
+      checkAnswer(
+        sql("SELECT text, trimmed, literal FROM generated_events"),
+        Seq.fill(2)(Row("1970-01-01 00:00:00.000000", "abc", "xabcxNAMEs")))
+    }
+    withTable("generated_events") {
+      sql("""CREATE TABLE generated_events (id INT, name STRING DEFAULT 'abc',
+            |label STRING GENERATED ALWAYS AS (UPPER(name))) USING paimon""".stripMargin)
+      sql("INSERT INTO generated_events (id, name) VALUES (1, NULL)")
+      sql("INSERT INTO generated_events VALUES (2, NULL, 'ABC')")
+      checkAnswer(
+        sql("SELECT id, name, label FROM generated_events"),
+        Seq(Row(1, "abc", "ABC"), Row(2, "abc", "ABC")))
+    }
+  }
+
+  test("preserve extra columns and generation metadata when merging schemas") {
+    assume(gteqSpark3_5)
+    withTable("generated_events") {
+      sql("""CREATE TABLE generated_events (id INT, name STRING,
+            |label STRING GENERATED ALWAYS AS (UPPER(name))) USING paimon""".stripMargin)
+      sql("SELECT 1 AS id, 'ab' AS name, 99 AS extra")
+        .writeTo("generated_events")
+        .option("write.merge-schema", "true")
+        .append()
+      sql("REFRESH TABLE generated_events")
+      sql("SELECT 2 AS id, 'cd' AS name, 'CD' AS label, 100 AS extra, 7 AS other")
+        .writeTo("generated_events")
+        .option("write.merge-schema", "true")
+        .append()
+      sql("REFRESH TABLE generated_events")
+      assert(
+        loadTable("generated_events").rowType().getField("label").generationExpression() != null)
+      checkAnswer(
+        sql("SELECT id, label, extra, other FROM generated_events"),
+        Seq(Row(1, "AB", 99, null), Row(2, "CD", 100, 7)))
+    }
+  }
+
+  test("reject generated results Spark cannot represent without losing nanoseconds") {
+    assume(gteqSpark3_5)
+    val timestamp = PaimonTypes.TIMESTAMP(9)
+    for (
+      (sourceType, targetType, expression, value) <- Seq(
+        (
+          PaimonTypes.STRING(),
+          timestamp,
+          "CAST(source AS TIMESTAMP(9))",
+          "'2026-01-01 00:00:00.123456789'"),
+        (
+          PaimonTypes.ARRAY(timestamp),
+          PaimonTypes.ARRAY(timestamp),
+          "source",
+          "array(CAST('2026-01-01 00:00:00' AS TIMESTAMP_NTZ))")
+      )
+    ) {
+      withTable("generated_events") {
+        paimonCatalog.createTable(
+          Identifier.create(dbName0, "generated_events"),
+          Schema
+            .newBuilder()
+            .column("source", sourceType)
+            .generatedColumn("generated", targetType, expression)
+            .build(),
+          false
+        )
+        val error = intercept[Throwable] {
+          sql(s"INSERT INTO generated_events (source) SELECT $value")
+        }
+        assert(error.getMessage.contains("TIMESTAMP precision greater than 6"))
+        assert(loadTable("generated_events").snapshotManager().latestSnapshotId() == null)
+      }
+    }
+  }
+
+  test("reject generated BLOB results before writing through a lossy Spark representation") {
+    assume(gteqSpark3_5)
+    withTable("generated_events") {
+      paimonCatalog.createTable(
+        Identifier.create(dbName0, "generated_events"),
+        Schema
+          .newBuilder()
+          .column("id", PaimonTypes.INT())
+          .column("source", PaimonTypes.BLOB())
+          .generatedColumn("generated", PaimonTypes.BLOB(), "source")
+          .option("row-tracking.enabled", "true")
+          .option("data-evolution.enabled", "true")
+          .build(),
+        false
+      )
+      val error = intercept[Throwable] {
+        sql("INSERT INTO generated_events (id, source) SELECT 1, unhex('010203')")
+      }
+      assert(error.getMessage.contains("BLOB results"))
+      assert(loadTable("generated_events").snapshotManager().latestSnapshotId() == null)
+    }
+  }
+
+  test("validate generated values in complete row-tracking updates and reject partial DE updates") {
+    assume(gteqSpark3_5)
+    for (dataEvolution <- Seq(false, true)) {
+      withTable("generated_events") {
+        sql(s"""CREATE TABLE generated_events (id INT, name STRING,
+               |label STRING GENERATED ALWAYS AS (UPPER(name))) USING paimon
+               |TBLPROPERTIES ('row-tracking.enabled'='true',
+               |'data-evolution.enabled'='$dataEvolution')""".stripMargin)
+        sql("INSERT INTO generated_events (id, name) VALUES (1, 'old')")
+        if (!dataEvolution) {
+          sql("UPDATE generated_events SET name='new', label='NEW' WHERE id=1")
+          checkAnswer(sql("SELECT name, label FROM generated_events"), Seq(Row("new", "NEW")))
+        }
+        val error = intercept[Throwable] {
+          sql("UPDATE generated_events SET id=id+1, name='bad', label='WRONG' WHERE id=1")
+        }
+        val messages = Iterator
+          .iterate(error)(_.getCause)
+          .takeWhile(_ != null)
+          .flatMap(e => Option(e.getMessage))
+          .mkString("\n")
+        assert(messages.contains(
+          if (dataEvolution) "Partial-column updates" else "does not match generation expression"))
+        checkAnswer(
+          sql("SELECT id, name, label FROM generated_events"),
+          Seq(if (dataEvolution) Row(1, "old", "OLD") else Row(1, "new", "NEW")))
       }
     }
   }

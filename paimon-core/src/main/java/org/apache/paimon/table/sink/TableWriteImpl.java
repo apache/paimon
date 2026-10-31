@@ -33,6 +33,7 @@ import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -42,6 +43,8 @@ import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -140,7 +143,27 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public TableWriteImpl<T> withWriteType(RowType writeType) {
         if (generatedColumnRow != null) {
-            this.generatedColumnRow = new GeneratedColumnRow(rowType, writeType);
+            List<DataField> physicalFields = new ArrayList<>(rowType.getFields());
+            for (DataField special :
+                    Arrays.asList(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER)) {
+                if (writeType.containsField(special.name())) {
+                    DataField input = writeType.getField(special.name());
+                    checkState(
+                            input.id() == special.id()
+                                    && input.type().equalsIgnoreNullable(special.type()),
+                            "Invalid row-tracking field '%s'.",
+                            special.name());
+                    physicalFields.add(special.newType(input.type()));
+                }
+            }
+            RowType physicalType = new RowType(rowType.isNullable(), physicalFields);
+            GeneratedColumnRow generator = new GeneratedColumnRow(physicalType, writeType);
+            if (!physicalType.equals(this.writeType)) {
+                write.withWriteType(physicalType);
+            }
+            this.writeType = physicalType;
+            updateNotNullFieldIndexes();
+            this.generatedColumnRow = generator;
             return this;
         }
         write.withWriteType(writeType);
@@ -193,15 +216,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public BinaryRow getPartition(InternalRow row) {
-        keyAndBucketExtractor.setRecord(
-                generatedColumnRow == null ? row : generatedColumnRow.replaceRow(row));
+        keyAndBucketExtractor.setRecord(generatedColumnRow == null ? row : prepareRow(row));
         return keyAndBucketExtractor.partition();
     }
 
     @Override
     public int getBucket(InternalRow row) {
-        keyAndBucketExtractor.setRecord(
-                generatedColumnRow == null ? row : generatedColumnRow.replaceRow(row));
+        keyAndBucketExtractor.setRecord(generatedColumnRow == null ? row : prepareRow(row));
         return keyAndBucketExtractor.bucket();
     }
 
@@ -285,7 +306,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private InternalRow prepareRow(InternalRow row) {
         return generatedColumnRow == null
                 ? wrapDefaultValue(row)
-                : generatedColumnRow.replaceRow(row);
+                : generatedColumnRow.replaceRow(
+                        row, mapped -> RowKindGenerator.getRowKind(rowKindGenerator, mapped));
     }
 
     private SinkRecord toSinkRecord(InternalRow row) {

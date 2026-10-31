@@ -1670,6 +1670,10 @@ public class SchemaValidation {
                     field.defaultValue() == null,
                     "Generated column '%s' cannot have a default value.",
                     field.name());
+            checkArgument(
+                    !options.rowkindField().filter(field.name()::equals).isPresent(),
+                    "Generated column '%s' cannot be used as rowkind.field.",
+                    field.name());
             GeneratedColumn.create(rowType, field);
             checkArgument(
                     schema.primaryKeys().isEmpty()
