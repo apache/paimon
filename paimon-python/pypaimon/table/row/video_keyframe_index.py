@@ -39,6 +39,7 @@ class _PagedKeyframes(Sequence):
         self.read_at, self.count = read_at, count
         self.payload_length, self.owner = payload_length, owner
         self.cache = OrderedDict()
+        self.validated = set()
         self.lock = threading.RLock()
 
     def __len__(self):
@@ -46,6 +47,9 @@ class _PagedKeyframes(Sequence):
 
     def _page(self, page):
         with self.lock:
+            if page in self.validated:
+                self.cache.move_to_end(page)
+                return self.cache[page]
             pages = range(max(0, page - 1), min((self.count - 1) // self.PAGE_ENTRIES, page + 1) + 1)
             for p in pages:
                 if p in self.cache:
@@ -69,7 +73,8 @@ class _PagedKeyframes(Sequence):
                     _validate_entries(data, self.payload_length, initial=p == 0)
                     self.cache[p] = data
                     while len(self.cache) > max(1, self.CACHE_BYTES // self.PAGE_BYTES):
-                        self.cache.popitem(last=False)
+                        evicted, _ = self.cache.popitem(last=False)
+                        self.validated.discard(evicted)
             previous = None
             for p in pages:
                 data = self.cache[p]
@@ -78,6 +83,7 @@ class _PagedKeyframes(Sequence):
                                        self.ENTRY.unpack_from(data))
                 previous = data
                 self.cache.move_to_end(p)
+            self.validated.add(page)
             self.cache.move_to_end(page)
             return self.cache[page]
 
@@ -105,17 +111,29 @@ class _PagedKeyframes(Sequence):
         if self.owner is not None:
             self.owner.close()
         self.cache.clear()
+        self.validated.clear()
 
 
 class _Ordinals(Sequence):
+    CACHE_ENTRIES = 4096
+
     def __init__(self, keyframes):
         self.keyframes = keyframes
+        self.cache = OrderedDict()
 
     def __len__(self):
         return len(self.keyframes)
 
     def __getitem__(self, index):
-        return self.keyframes[index][0]
+        with self.keyframes.lock:
+            if index in self.cache:
+                self.cache.move_to_end(index)
+                return self.cache[index]
+            value = self.keyframes[index][0]
+            self.cache[index] = value
+            if len(self.cache) > self.CACHE_ENTRIES:
+                self.cache.popitem(last=False)
+            return value
 
 
 def _validate_boundary(previous, current):

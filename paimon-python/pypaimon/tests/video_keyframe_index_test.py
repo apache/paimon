@@ -282,6 +282,40 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                             self.assertEqual(before, len(reads))
                             self.assertLessEqual(sum(map(len, index.keyframes.cache.values())), 1024 * 1024)
 
+    def test_validated_page_does_not_reload_evicted_neighbors(self):
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(16 * 4096))) as original:
+            data = original.serialize()
+        reads = []
+
+        def read_at(offset, size):
+            reads.append((offset, size))
+            return data[offset:offset + size]
+
+        with VideoKeyframeIndex.open(read_at, len(data)) as index:
+            self.assertEqual((0, 0, 0), index.keyframes[0])
+            for page in range(3, 16):
+                index.keyframes[page * 4096]
+                before = len(reads)
+                self.assertEqual((0, 0, 0), index.keyframes[0])
+                self.assertEqual(before, len(reads))
+            index.keyframes.cache.pop(1, None)
+            index.keyframes.validated.discard(1)
+            before = len(reads)
+            self.assertEqual((0, 0, 0), index.keyframes[0])
+            self.assertEqual(before, len(reads))
+            self.assertLessEqual(len(index.keyframes.validated), len(index.keyframes.cache))
+
+    def test_ordinal_probe_cache_is_bounded(self):
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(8192))) as original:
+            data = original.serialize()
+        with VideoKeyframeIndex.deserialize(data) as index:
+            ordinals = index.ordinals
+            for i in range(5000):
+                self.assertEqual(i, ordinals[i])
+            self.assertEqual(4096, len(ordinals.cache))
+            with mock.patch.object(index.keyframes, '_page', side_effect=AssertionError):
+                self.assertEqual(4999, ordinals[4999])
+
     def test_paged_corruption_and_boundary_validation(self):
         with VideoKeyframeIndex([], ((i, i, i) for i in range(8193))) as index:
             data = index.serialize()
