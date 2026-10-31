@@ -568,18 +568,12 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
             <td>Gauge</td>
             <td>Recommended upper bound of parallelism for auto-scaling systems. Note: This is a recommendation, not a hard limit.</td>
         </tr>
-        <tr>
-            <td>unassignedSplits</td>
-            <td>Flink Source Enumerator</td>
-            <td>Gauge</td>
-            <td>Number of splits waiting in the continuous source's split assigner. Excludes splits already assigned to readers and snapshots not yet planned. In aligned mode, plans buffered before entering the split assigner are also excluded. This is not the total unread backlog of the table.</td>
-        </tr>
     </tbody>
 </table>
 
 :::info
 
-When your streaming query uses the `Monitor` / `Reader` topology (for example, with `consumer-id` and exactly-once consumption), the fetch and emit lag metrics are reported by the `Reader` operator behind `Monitor`. The enumerator metrics listed above are not available in this topology.
+Please note that if you specified `consumer-id` in your streaming query, the level of source metrics should turn into the reader operator, which is behind the `Monitor` operator.
 
 :::
 
