@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 import java.util.Map;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -107,6 +108,7 @@ public class CompactChainTableAction extends TableActionBase {
 
         ChainGroupReadTable chainTable =
                 (ChainGroupReadTable) ((FallbackReadFileStoreTable) table).other();
+        rejectRewriteUnderQueryAuth(chainTable, "Chain table compaction");
         FileStoreTable snapshotTable = chainTable.wrapped();
 
         RowType partitionType = snapshotTable.schema().logicalPartitionType();
@@ -133,6 +135,7 @@ public class CompactChainTableAction extends TableActionBase {
         }
         DataStream<RowData> source =
                 new FlinkSourceBuilder(chainTable)
+                        .withRewriteOperation("Chain table compaction")
                         .env(env)
                         .sourceBounded(true)
                         .partitionPredicate(predicate)

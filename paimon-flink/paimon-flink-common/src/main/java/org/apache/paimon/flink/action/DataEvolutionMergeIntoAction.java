@@ -87,6 +87,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
@@ -256,6 +257,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     }
 
     public Tuple2<DataStream<RowData>, RowType> buildSource() {
+        rejectRewriteUnderQueryAuth(table, "MERGE INTO");
         if (targetTableName().equals(sourceTableName())) {
             throw new RuntimeException(
                     String.format(

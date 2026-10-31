@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
 
@@ -67,6 +69,7 @@ public class SortCompactAction extends CompactAction {
 
     @Override
     public void build() throws Exception {
+        rejectRewriteUnderQueryAuth(table, "Sort compaction");
         if (bucketsSpecified()) {
             throw new IllegalArgumentException(
                     "Specifying buckets is not supported for sort compact.");
@@ -91,6 +94,7 @@ public class SortCompactAction extends CompactAction {
         Map<String, String> tableConfig = fileStoreTable.options();
         FlinkSourceBuilder sourceBuilder =
                 new FlinkSourceBuilder(fileStoreTable)
+                        .withRewriteOperation("Sort compaction")
                         .sourceName(
                                 ObjectIdentifier.of(
                                                 catalogName,

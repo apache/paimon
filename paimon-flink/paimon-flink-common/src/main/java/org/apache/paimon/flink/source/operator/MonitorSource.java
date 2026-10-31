@@ -69,6 +69,9 @@ import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuthRules;
+
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
  *
@@ -103,6 +106,8 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
     private final boolean emitSnapshotWatermark;
     private final boolean isBounded;
     private final int maxSnapshotCount;
+    @Nullable private String rewriteOperation;
+    @Nullable private Table rewriteTable;
 
     public MonitorSource(
             ReadBuilder readBuilder,
@@ -237,6 +242,10 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             boolean isEmpty;
             try {
                 List<Split> splits = isBounded ? batchScan.plan().splits() : scan.plan().splits();
+                if (rewriteOperation != null) {
+                    rejectRewriteUnderQueryAuth(rewriteTable, rewriteOperation);
+                    rejectRewriteUnderQueryAuthRules(splits, rewriteOperation);
+                }
                 isEmpty = splits.isEmpty();
                 splits.forEach(readerOutput::collect);
                 if (!isBounded && maxSnapshotCount > 0 && !isEmpty) {
@@ -357,6 +366,40 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             @Nullable Table table,
             RowType readType,
             boolean blobAsDescriptor) {
+        return buildSource(
+                env,
+                name,
+                typeInfo,
+                readBuilder,
+                monitorInterval,
+                emitSnapshotWatermark,
+                shuffleBucketWithPartition,
+                unordered,
+                nestedProjectedRowData,
+                isBounded,
+                limit,
+                table,
+                readType,
+                blobAsDescriptor,
+                null);
+    }
+
+    public static DataStream<RowData> buildSource(
+            StreamExecutionEnvironment env,
+            String name,
+            TypeInformation<RowData> typeInfo,
+            ReadBuilder readBuilder,
+            long monitorInterval,
+            boolean emitSnapshotWatermark,
+            boolean shuffleBucketWithPartition,
+            boolean unordered,
+            NestedProjectedRowData nestedProjectedRowData,
+            boolean isBounded,
+            @Nullable Long limit,
+            @Nullable Table table,
+            RowType readType,
+            boolean blobAsDescriptor,
+            @Nullable String rewriteOperation) {
         int maxSnapshotCount =
                 table == null
                         ? -1
@@ -375,6 +418,8 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                         emitSnapshotWatermark,
                         isBounded,
                         maxSnapshotCount);
+        monitorSource.rewriteOperation = rewriteOperation;
+        monitorSource.rewriteTable = table;
         Source<Split, SimpleSourceSplit, NoOpEnumState> source = monitorSource;
         if (table != null) {
             source = new PaimonDataStreamSource<>(monitorSource, table);

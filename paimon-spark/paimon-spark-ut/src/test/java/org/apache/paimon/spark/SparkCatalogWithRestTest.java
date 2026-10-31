@@ -47,6 +47,7 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -60,6 +61,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -70,8 +74,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for spark read from Rest catalog. */
@@ -256,6 +262,146 @@ public class SparkCatalogWithRestTest {
                                 .toString())
                 .isEqualTo("[1]");
         cleanFunction(functionName);
+    }
+
+    @ParameterizedTest
+    @MethodSource("rowLevelTableOptions")
+    public void testRowLevelOperationsRequireFullTableAccess(boolean useV2Write, String options) {
+        spark.conf().set("spark.paimon.write.use-v2-write", useV2Write);
+        spark.sql(
+                "CREATE TABLE t_rewrite (id INT, ssn STRING, note STRING, p INT) PARTITIONED BY (p)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true', "
+                        + options
+                        + ")");
+        spark.sql("INSERT INTO t_rewrite VALUES (1, 's1', 'n1', 1), (2, 's2', 'n2', 1)");
+        Identifier identifier = Identifier.create("db2", "t_rewrite");
+        Predicate rowFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        Transform mask =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        String merge =
+                "MERGE INTO t_rewrite t USING (SELECT 2 AS id) s ON t.id = s.id"
+                        + " WHEN MATCHED THEN UPDATE SET note = t.ssn";
+        String[][] statements = {
+            {"UPDATE", "UPDATE t_rewrite SET note = ssn"},
+            {"DELETE", "DELETE FROM t_rewrite WHERE id = 2"},
+            {"DELETE", "DELETE FROM t_rewrite WHERE p = 1"},
+            {"DELETE", "DELETE FROM t_rewrite"},
+            {"MERGE", merge}
+        };
+        for (boolean masking : new boolean[] {false, true}) {
+            restCatalogServer.setRowFilterAuth(
+                    identifier, masking ? null : Collections.singletonList(rowFilter));
+            restCatalogServer.setColumnMaskingAuth(
+                    identifier,
+                    masking ? Collections.singletonMap("ssn", mask) : Collections.emptyMap());
+            for (String[] statement : statements) {
+                assertThatThrownBy(() -> spark.sql(statement[1]).collectAsList())
+                        .hasStackTraceContaining("UnsupportedOperationException")
+                        .hasStackTraceContaining(statement[0])
+                        .hasStackTraceContaining("requires full-table access");
+            }
+        }
+
+        restCatalogServer.setRowFilterAuth(identifier, null);
+        restCatalogServer.setColumnMaskingAuth(identifier, Collections.emptyMap());
+        assertThat(spark.sql("SELECT * FROM t_rewrite ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[1,s1,n1,1], [2,s2,n2,1]]");
+        spark.sql("UPDATE t_rewrite SET note = ssn WHERE id = 1");
+        spark.sql(merge);
+        assertThat(spark.sql("SELECT * FROM t_rewrite ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[1,s1,s1,1], [2,s2,s2,1]]");
+        spark.sql("DELETE FROM t_rewrite WHERE id = 2");
+        assertThat(spark.sql("SELECT id FROM t_rewrite").collectAsList().toString())
+                .isEqualTo("[[1]]");
+        spark.sql("DELETE FROM t_rewrite");
+        assertThat(spark.sql("SELECT * FROM t_rewrite").collectAsList()).isEmpty();
+    }
+
+    @Test
+    public void testTruncateRequiresFullTableAccess() {
+        spark.sql(
+                "CREATE TABLE t_truncate (id INT, value STRING, p INT) PARTITIONED BY (p)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_truncate VALUES (1, 'one', 1), (2, 'two', 1), (3, 'three', 2)");
+        Identifier identifier = Identifier.create("db2", "t_truncate");
+        restCatalogServer.setRowFilterAuth(
+                identifier,
+                Collections.singletonList(
+                        LeafPredicate.of(
+                                new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                                Equal.INSTANCE,
+                                Collections.singletonList(1))));
+        assertThatThrownBy(() -> spark.sql("TRUNCATE TABLE t_truncate").collectAsList())
+                .hasStackTraceContaining("TRUNCATE requires full-table access");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql("TRUNCATE TABLE t_truncate PARTITION (p = 1)")
+                                        .collectAsList())
+                .hasStackTraceContaining("TRUNCATE requires full-table access");
+        assertThat(spark.sql("SELECT * FROM t_truncate").collectAsList().toString())
+                .isEqualTo("[[1,one,1]]");
+
+        restCatalogServer.setRowFilterAuth(identifier, null);
+        spark.sql("TRUNCATE TABLE t_truncate PARTITION (p = 1)");
+        assertThat(spark.sql("SELECT * FROM t_truncate").collectAsList().toString())
+                .isEqualTo("[[3,three,2]]");
+        spark.sql("TRUNCATE TABLE t_truncate");
+        assertThat(spark.sql("SELECT * FROM t_truncate").collectAsList()).isEmpty();
+    }
+
+    private static Stream<Arguments> rowLevelTableOptions() {
+        return Stream.of(
+                Arguments.of(false, "'bucket'='-1'"),
+                Arguments.of(true, "'bucket'='-1'"),
+                Arguments.of(false, "'primary-key'='id,p', 'bucket'='1'"),
+                Arguments.of(
+                        false,
+                        "'bucket'='-1', 'data-evolution.enabled'='true',"
+                                + " 'row-tracking.enabled'='true', 'deletion-vectors.enabled'='true'"),
+                Arguments.of(true, "'bucket'='-1', 'deletion-vectors.enabled'='true'"));
+    }
+
+    @Test
+    public void testChainCompactionRequiresFullTableAccess() throws Exception {
+        spark.sql(
+                "CREATE TABLE t_chain (id INT, note STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " TBLPROPERTIES ('primary-key'='dt,id', 'bucket-key'='id', 'bucket'='1',"
+                        + " 'sequence.field'='id', 'chain-table.enabled'='true', 'query-auth.enabled'='true',"
+                        + " 'partition.timestamp-pattern'='$dt', 'partition.timestamp-formatter'='yyyyMMdd')");
+        for (String branch : Arrays.asList("snapshot", "delta")) {
+            spark.sql("CALL sys.create_branch('db2.t_chain', '" + branch + "')");
+        }
+        for (String suffix : Arrays.asList("", "$branch_snapshot", "$branch_delta")) {
+            spark.sql(
+                    "ALTER TABLE `t_chain"
+                            + suffix
+                            + "` SET TBLPROPERTIES ("
+                            + "'scan.fallback-snapshot-branch'='snapshot', 'scan.fallback-delta-branch'='delta')");
+        }
+        spark.sql(
+                "INSERT INTO `t_chain$branch_snapshot` VALUES (1, 'one', '20261001'), (2, 'two', '20261001')");
+        spark.sql("INSERT INTO `t_chain$branch_delta` VALUES (3, 'three', '20261002')");
+        Table table = getPaimonCatalog().getTable(new Identifier("db2", "t_chain", "snapshot"));
+        long snapshotId = table.latestSnapshot().get().id();
+        String compact =
+                "CALL sys.compact_chain_table(table => 'db2.t_chain', partition => 'dt=\"20261002\"')";
+        Identifier identifier = Identifier.create("db2", "t_chain");
+        restCatalogServer.setColumnMaskingAuth(
+                identifier,
+                Collections.singletonMap(
+                        "note",
+                        new ConcatTransform(
+                                Collections.singletonList(BinaryString.fromString("****")))));
+        assertThatThrownBy(() -> spark.sql(compact).collectAsList())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Chain table compaction requires full-table access");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(snapshotId);
+        restCatalogServer.setColumnMaskingAuth(identifier, Collections.emptyMap());
+        assertThatCode(() -> spark.sql(compact).collectAsList()).doesNotThrowAnyException();
     }
 
     @Test

@@ -25,6 +25,8 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
+
 /** Table sink to create sink. */
 public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
         implements SupportsTruncate {
@@ -36,6 +38,7 @@ public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
 
     @Override
     public void executeTruncation() {
+        rejectRewriteUnderQueryAuth(table, "TRUNCATE");
         try (BatchTableCommit batchTableCommit = table.newBatchWriteBuilder().newCommit()) {
             batchTableCommit.truncateTable();
         } catch (Exception e) {

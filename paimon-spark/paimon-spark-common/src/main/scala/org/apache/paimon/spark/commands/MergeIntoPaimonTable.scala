@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.Snapshot
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.{PaimonRelation, PaimonUpdateAction}
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
@@ -84,6 +85,7 @@ case class MergeIntoPaimonTable(
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    rejectRewriteUnderQueryAuth(table, "MERGE INTO")
     // Avoid that more than one source rows match the same target row.
     checkMatchRationality(sparkSession)
     // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
