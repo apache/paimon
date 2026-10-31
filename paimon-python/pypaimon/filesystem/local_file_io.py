@@ -33,6 +33,77 @@ from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import PyarrowFieldParser
 
 
+def _fsync_file_obj(file_obj) -> None:
+    """Flush and fsync an open file object so its data reaches durable storage.
+
+    Raises OSError if the data cannot be synced; callers must not publish the
+    path as durable when this fails.
+    """
+    file_obj.flush()
+    os.fsync(file_obj.fileno())
+
+
+def _fsync_directory(dir_path: Path) -> None:
+    """Best-effort fsync of a directory so renames are ordered on disk.
+
+    Some platforms reject directory fsync; failures are ignored there. File data
+    durability still depends on a successful prior file fsync.
+    """
+    try:
+        fd = os.open(str(dir_path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+class _FsyncOnCloseFile:
+    """Binary file wrapper: close() fsyncs file data before releasing the fd.
+
+    If file fsync fails, the underlying file is still closed and the error is
+    re-raised so callers do not treat the write as durable. Parent-directory
+    fsync runs only after a successful file fsync.
+    """
+
+    def __init__(self, file_obj, parent_dir: Optional[Path] = None):
+        self._file = file_obj
+        self._parent_dir = parent_dir
+        self._closed = False
+
+    def __getattr__(self, name):
+        return getattr(self._file, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def close(self):
+        if self._closed:
+            return
+        sync_error = None
+        try:
+            if not self._file.closed:
+                try:
+                    _fsync_file_obj(self._file)
+                except OSError as err:
+                    sync_error = err
+        finally:
+            if not self._file.closed:
+                self._file.close()
+            self._closed = True
+        if sync_error is not None:
+            raise sync_error
+        if self._parent_dir is not None:
+            _fsync_directory(self._parent_dir)
+
+
 def _file_uri_path(parsed, windows=None) -> str:
     """Decode a file URI path, preserving Windows drives and UNC hosts."""
     if windows is None:
@@ -111,8 +182,10 @@ class LocalFileIO(FileIO):
         parent = file_path.parent
         if parent and not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
+            _fsync_directory(parent)
         
-        return open(file_path, 'wb')
+        stream = open(file_path, 'wb')
+        return _FsyncOnCloseFile(stream, parent if parent else None)
     
     def get_file_status(self, path: str):
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -263,7 +336,14 @@ class LocalFileIO(FileIO):
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+                try:
+                    _fsync_file_obj(f)
+                except OSError:
+                    # Do not rename: publishing would claim a durable snapshot/schema.
+                    return False
             success = self.rename(str(temp_path), path)
+            if success and parent:
+                _fsync_directory(parent)
         finally:
             if not success and temp_path.exists():
                 self.delete_quietly(str(temp_path))
@@ -311,7 +391,7 @@ class LocalFileIO(FileIO):
             if parent and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
             
-            with open(file_path, 'wb') as f:
+            with self.new_output_stream(path) as f:
                 if compression.lower() == 'zstd':
                     kwargs['compression_level'] = zstd_level
                 pq.write_table(data, f, compression=compression, **kwargs)
@@ -331,7 +411,7 @@ class LocalFileIO(FileIO):
             
             data = self._cast_time_columns_for_orc(data)
             
-            with open(file_path, 'wb') as f:
+            with self.new_output_stream(path) as f:
                 # ORC compression= was added in PyArrow 7.0; PyArrow 6 lacks it.
                 from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
                 if _pyarrow_lt_7():
@@ -385,7 +465,7 @@ class LocalFileIO(FileIO):
         if parent and not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
         
-        with open(file_path, 'wb') as output_stream:
+        with self.new_output_stream(path) as output_stream:
             if codec == 'zstandard':
                 kwargs['codec_compression_level'] = zstd_level
             fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
@@ -394,7 +474,7 @@ class LocalFileIO(FileIO):
         try:
             import mosaic
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'wb') as f:
+            with self.new_output_stream(path) as f:
                 mosaic.write_table(data, f, options=kwargs.get("options"))
         except Exception as e:
             self.delete_quietly(path)
