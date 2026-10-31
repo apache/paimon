@@ -320,7 +320,20 @@ class _IndexedTorchCodecDecoder:
             # Query inside the frame's presentation interval, avoiding floating
             # point boundary rounding. Never return a neighbouring frame.
             seconds = expected + self._durations[positions] / (2 * self._scale)
-            result = self._decoder.get_frames_played_at(seconds=seconds.tolist())
+            # TorchCodec's approximate batch API may turn timestamps into
+            # ordinals using the nominal header frame rate. Remuxed videos can
+            # have a different sample-table cadence. The scalar timestamp API
+            # seeks by PTS instead; sort/deduplicate requests, then restore order.
+            import torch
+            from torchcodec import FrameBatch
+            frames = {position: self._decoder.get_frame_played_at(float(second))
+                      for position, second in sorted(set(zip(positions, seconds)))}
+            ordered = [frames[position] for position in positions]
+            result = FrameBatch(
+                data=torch.stack([frame.data for frame in ordered]),
+                pts_seconds=torch.tensor([frame.pts_seconds for frame in ordered], dtype=torch.float64),
+                duration_seconds=torch.tensor(
+                    [frame.duration_seconds for frame in ordered], dtype=torch.float64))
             actual = result.pts_seconds.cpu().numpy()
             if actual.shape != expected.shape or not np.allclose(
                     actual, expected, rtol=0, atol=self._pts_tolerance):

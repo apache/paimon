@@ -121,9 +121,9 @@ def test_wrong_returned_pts_falls_back_to_exact(mp4):
     source, unused = indexed_source(mp4)
     decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
     expected = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[20])
-    wrong = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[21])
+    wrong = VideoDecoder(mp4, seek_mode="exact").get_frame_at(21)
     try:
-        with patch.object(decoder._decoder, "get_frames_played_at", return_value=wrong):
+        with patch.object(decoder._decoder, "get_frame_played_at", return_value=wrong):
             actual = decoder.get_frames_at(indices=[20])
         np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
         assert not decoder._indexed
@@ -203,7 +203,7 @@ def test_first_decode_error_falls_back(mp4):
     source, unused = indexed_source(mp4)
     decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
     try:
-        with patch.object(decoder._decoder, "get_frames_played_at",
+        with patch.object(decoder._decoder, "get_frame_played_at",
                           side_effect=IndexError("approximate timestamp")):
             actual = decoder.get_frames_at(indices=[5, 0, 5])
         expected = VideoDecoder(mp4, seek_mode="exact").get_frames_at(indices=[5, 0, 5])
@@ -418,3 +418,52 @@ def test_replica_decoders_share_and_release_timeline(tmp_path, variable):
         finally:
             collator.close()
         assert reference() is None
+
+
+def test_nominal_frame_rate_differs_from_presentation_timestamps():
+    av = pytest.importorskip("av")
+    VideoDecoder = require_torchcodec()
+    output = io.BytesIO()
+    with av.open(output, "w", format="mp4") as container:
+        stream = container.add_stream("libx265", rate=60, options={"x265-params": "log-level=error:pools=1"})
+        stream.width, stream.height = 64, 48
+        stream.pix_fmt = "yuv420p"
+        stream.codec_context.gop_size = 12
+        stream.codec_context.max_b_frames = 0
+        for i in range(60):
+            pixels = np.full((48, 64, 3), i * 4, dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
+            frame.pts, frame.time_base = i, Fraction(1, 60)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    # Preserve codec headers advertising 60 fps, but remux using capture
+    # timestamps near 20 fps with variable intervals, as in bag imports.
+    remuxed = io.BytesIO()
+    with av.open(io.BytesIO(output.getvalue())) as source:
+        with av.open(remuxed, "w", format="mp4") as target:
+            stream = target.add_stream_from_template(source.streams.video[0])
+            stream.time_base = Fraction(1, 1000000)
+            for i, packet in enumerate(p for p in source.demux(video=0) if p.size):
+                packet.pts = packet.dts = i * 50000 + (i % 2) * 10000
+                packet.duration = 50000
+                packet.time_base = Fraction(1, 1000000)
+                packet.stream = stream
+                target.mux(packet)
+    payload = remuxed.getvalue()
+    exact = VideoDecoder(payload, seek_mode="exact")
+    assert exact.metadata.average_fps_from_header != pytest.approx(20, abs=1)
+    pts, unused, scale, unused = _timeline(io.BytesIO(payload), len(payload))
+    np.testing.assert_allclose(pts / scale, np.arange(60) * 0.05 + np.arange(60) % 2 * 0.01)
+    source, unused = indexed_source(payload)
+    decoder = _IndexedTorchCodecDecoder(source, source.video_keyframe_index)
+    try:
+        for positions in ([30, 31, 32], [59, 0, 30, 30, 1]):
+            actual = decoder.get_frames_at(indices=positions)
+            expected = exact.get_frames_at(indices=positions)
+            np.testing.assert_array_equal(actual.data.numpy(), expected.data.numpy())
+            np.testing.assert_allclose(actual.pts_seconds.numpy(), expected.pts_seconds.numpy())
+            assert decoder._indexed is supports_file_like()
+    finally:
+        decoder.close()
