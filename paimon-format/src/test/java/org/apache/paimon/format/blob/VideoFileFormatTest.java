@@ -20,6 +20,7 @@ package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -540,6 +541,57 @@ public class VideoFileFormatTest {
             }
             try (SeekableInputStream in = fileIO.newInputStream(file)) {
                 new VideoFileMeta(in, fileIO.getFileSize(file), null);
+            }
+        }
+    }
+
+    @Test
+    public void testIndexSpoolWriteFailureDoesNotWriteNull() throws Exception {
+        byte[] mapping = fromHex(KEYFRAME_INDEX_HEX);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        bytes.write(new byte[] {1, 2, 3});
+        bytes.write(mapping);
+        java.nio.file.Path source = tempPath.resolve("spool-source.mp4");
+        Files.write(source, bytes.toByteArray());
+        Blob frame =
+                Blob.fromDescriptor(
+                        org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                        new VideoFrameDescriptor(
+                                source.toUri().toString(), 0, 3, 0, 3, mapping.length));
+        for (boolean fallback : new boolean[] {false, true}) {
+            try (PositionOutputStream out = fileIO.newOutputStream(file, true);
+                    RandomAccessFile spool =
+                            new RandomAccessFile(tempPath.resolve("index.tmp").toFile(), "rw") {
+                                @Override
+                                public void write(byte[] b, int offset, int length)
+                                        throws IOException {
+                                    throw new IOException("No space left on device");
+                                }
+                            }) {
+                VideoFormatWriter writer =
+                        new VideoFormatWriter(
+                                out,
+                                rowType,
+                                false,
+                                fallback,
+                                BlobFetchMetricReporter.NOOP,
+                                BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+                writer.setFile(file);
+                java.lang.reflect.Field field =
+                        VideoFormatWriter.class.getDeclaredField("indexSpool");
+                field.setAccessible(true);
+                field.set(writer, spool);
+                try {
+                    assertThatThrownBy(() -> writer.addElement(GenericRow.of(frame)))
+                            .isInstanceOf(IOException.class)
+                            .hasMessage("No space left on device");
+                    assertThat(out.getPos()).isZero();
+                    assertThat(writer.physicalVideoCount()).isZero();
+                    assertThat(writer.runCount()).isZero();
+                    assertThat(spool.length()).isZero();
+                } finally {
+                    writer.close();
+                }
             }
         }
     }

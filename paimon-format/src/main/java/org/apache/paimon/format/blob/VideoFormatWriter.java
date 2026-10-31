@@ -289,26 +289,48 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             long start = spool.getFilePointer();
             boolean complete = false;
             try {
-                try (InputStream in = index.newInputStream()) {
-                    byte[] buffer = new byte[64 * 1024];
-                    long remaining = expectedLength;
-                    while (remaining > 0) {
-                        int n = in.read(buffer, 0, (int) Math.min(remaining, buffer.length));
-                        if (n <= 0) {
-                            throw new java.io.EOFException(
-                                    "Video keyframe index length changed while reading.");
-                        }
-                        spool.write(buffer, 0, n);
-                        remaining -= n;
-                    }
-                    if (in.read() != -1) {
-                        throw new IOException("Video keyframe index has trailing data.");
-                    }
+                InputStream source;
+                try {
+                    source = index.newInputStream();
                 } catch (IOException | RuntimeException e) {
                     if (handleFetchFailure(e, index)) {
                         return false;
                     }
                     throw e;
+                }
+                try (InputStream in = source) {
+                    byte[] buffer = new byte[64 * 1024];
+                    long remaining = expectedLength;
+                    while (true) {
+                        int n;
+                        try {
+                            n =
+                                    in.read(
+                                            buffer,
+                                            0,
+                                            remaining == 0
+                                                    ? 1
+                                                    : (int) Math.min(remaining, buffer.length));
+                            if (remaining == 0) {
+                                if (n != -1) {
+                                    throw new IOException(
+                                            "Video keyframe index has trailing data.");
+                                }
+                                break;
+                            }
+                            if (n <= 0) {
+                                throw new java.io.EOFException(
+                                        "Video keyframe index length changed while reading.");
+                            }
+                        } catch (IOException | RuntimeException e) {
+                            if (handleFetchFailure(e, index)) {
+                                return false;
+                            }
+                            throw e;
+                        }
+                        spool.write(buffer, 0, n);
+                        remaining -= n;
+                    }
                 }
                 spool.seek(start);
                 VideoKeyframeIndex.validate(
