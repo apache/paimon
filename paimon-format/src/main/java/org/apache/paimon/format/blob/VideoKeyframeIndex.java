@@ -71,12 +71,14 @@ final class VideoKeyframeIndex {
             }
             previousEnd = start + size;
         }
-        EntryValidator validator = new EntryValidator(payloadLength);
         long pages = (count - 1) / PAGE_ENTRIES + 1;
         if (count > (length - offset) / ENTRY_LENGTH
                 || pages * 4 != length - offset - count * ENTRY_LENGTH) {
             throw invalid("entries length");
         }
+        long ordinal = -1;
+        long pts = 0;
+        long position = -1;
         byte[] page = new byte[PAGE_ENTRIES * ENTRY_LENGTH];
         for (long done = 0; done < count; ) {
             int entries = (int) Math.min(PAGE_ENTRIES, count - done);
@@ -90,36 +92,21 @@ final class VideoKeyframeIndex {
             }
             ByteBuffer values = ByteBuffer.wrap(page, 0, bytes).order(ByteOrder.LITTLE_ENDIAN);
             for (int i = 0; i < entries; i++) {
-                validator.accept(values);
+                long nextOrdinal = values.getLong();
+                long nextPts = values.getLong();
+                long nextPosition = values.getLong();
+                if ((ordinal == -1 && nextOrdinal != 0)
+                        || nextOrdinal <= ordinal
+                        || (ordinal != -1 && nextPts <= pts)
+                        || nextPosition <= position
+                        || nextPosition >= payloadLength) {
+                    throw invalid("ordinals, timestamps or packet positions outside video payload");
+                }
+                ordinal = nextOrdinal;
+                pts = nextPts;
+                position = nextPosition;
             }
             done += entries;
-        }
-    }
-
-    private static final class EntryValidator {
-        private final long payloadLength;
-        private long ordinal = -1;
-        private long pts;
-        private long position = -1;
-
-        private EntryValidator(long payloadLength) {
-            this.payloadLength = payloadLength;
-        }
-
-        private void accept(ByteBuffer values) {
-            long nextOrdinal = values.getLong();
-            long nextPts = values.getLong();
-            long nextPosition = values.getLong();
-            if ((ordinal == -1 && nextOrdinal != 0)
-                    || nextOrdinal <= ordinal
-                    || (ordinal != -1 && nextPts <= pts)
-                    || nextPosition <= position
-                    || nextPosition >= payloadLength) {
-                throw invalid("ordinals, timestamps or packet positions outside video payload");
-            }
-            ordinal = nextOrdinal;
-            pts = nextPts;
-            position = nextPosition;
         }
     }
 
