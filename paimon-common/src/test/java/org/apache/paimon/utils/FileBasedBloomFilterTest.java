@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
@@ -119,17 +120,21 @@ public class FileBasedBloomFilterTest {
                 new org.apache.paimon.fs.Path(writeFile(segment.getArray()).getAbsolutePath());
         FileIO fileIO = LocalFileIO.create();
 
-        CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0.1);
-        FileBasedBloomFilter filter =
-                new FileBasedBloomFilter(
-                        fileIO.newInputStream(filePath), filePath, cacheManager, 100, 0, 1000);
+        try (SeekableInputStream input = fileIO.newInputStream(filePath);
+                CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1), 0.1)) {
+            FileBasedBloomFilter filter =
+                    new FileBasedBloomFilter(input, filePath, cacheManager, 100, 0, 1000);
 
-        Arrays.stream(inputs)
-                .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
-        filter.close();
-        Assertions.assertThat(cacheManager.dataCache().asMap()).isEmpty();
-        Assertions.assertThat(cacheManager.indexCache().asMap()).isEmpty();
-        Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
+            Arrays.stream(inputs)
+                    .forEach(
+                            i ->
+                                    Assertions.assertThat(filter.testHash(Integer.hashCode(i)))
+                                            .isTrue());
+            filter.close();
+            Assertions.assertThat(cacheManager.dataCache().asMap()).isEmpty();
+            Assertions.assertThat(cacheManager.indexCache().asMap()).isEmpty();
+            Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
+        }
     }
 
     @Test
