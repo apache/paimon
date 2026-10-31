@@ -65,6 +65,7 @@ class FileStoreWrite:
         self._ever_written = False
         self._prepared_writer_lifecycle = None
         self.max_seq_numbers: dict = {}
+        self._previous_total_buckets: dict = {}
         self.restore_snapshot_id = None
         self.write_cols = None
         self.blob_consumer = None
@@ -196,6 +197,21 @@ class FileStoreWrite:
             )
         self._runtime_total_buckets[partition] = total_buckets
 
+    def _check_bucket_count(self, partition):
+        previous = self._previous_total_buckets.get(partition)
+        if previous is None:
+            return
+        part_info = "table"
+        if self.table.partition_keys:
+            values = self.table.path_factory()._canonical_partition(partition)
+            part_info = "partition {" + ", ".join(
+                "{}={}".format(key, value) for key, value in zip(self.table.partition_keys, values)) + "}"
+        expected = self._runtime_total_buckets.get(partition, self.options.bucket())
+        raise RuntimeError(
+            "Try to write {} with a new bucket num {}, but the previous bucket num is {}. "
+            "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.".format(
+                part_info, expected, previous))
+
     def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
         row_limit = options.target_file_row_num()
         max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
@@ -215,6 +231,11 @@ class FileStoreWrite:
                     "target-file-row-num is set on this table but pypaimon supports row-count "
                     "based file rolling only for data-evolution append and postpone tables; "
                     "unset it or write with Java/Flink/Spark.")
+
+        # As in Java, every writer of a restored bucket checks the bucket count.
+        if bucket >= 0 and self.table.bucket_mode() != BucketMode.BUCKET_UNAWARE:
+            self._seq_number_stats(partition)
+            self._check_bucket_count(partition)
 
         def max_seq_number():
             default = -1 if self.table.is_primary_key_table else 1
@@ -467,6 +488,7 @@ class FileStoreWrite:
         # bucket opened after this checkpoint must restore from the latest
         # snapshot rather than reuse another bucket's earlier partition scan.
         self.max_seq_numbers.clear()
+        self._previous_total_buckets.clear()
 
     def close(self):
         """Close all data writers and clean up resources."""
@@ -515,6 +537,9 @@ class FileStoreWrite:
         return self.table._copy_with_snapshot(self.table.snapshot_manager().get_latest_snapshot())
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
+        # Overwrite ignores previous files, like Java's ignorePreviousFiles.
+        if self.restore_snapshot_id == 0:
+            return {}
         read_builder = self._sequence_read_table().new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
@@ -533,11 +558,17 @@ class FileStoreWrite:
         scanner.skip_level0 = False
 
         max_seq_numbers = {}
+        previous = None
+        expected = self._runtime_total_buckets.get(partition, self.options.bucket())
         for entry in scanner.plan_files():
+            # Check the whole partition, skipping postpone and dynamic files, like Java.
+            if previous is None and 0 < entry.total_buckets != expected:
+                previous = entry.total_buckets
             current_seq_num = entry.file.max_sequence_number
             existing_max = max_seq_numbers.get(entry.bucket, -1)
             if current_seq_num > existing_max:
                 max_seq_numbers[entry.bucket] = current_seq_num
+        self._previous_total_buckets[partition] = previous
         return max_seq_numbers
 
 
