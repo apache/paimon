@@ -203,6 +203,18 @@ class RayReadByRowIdTest(unittest.TestCase):
             read_by_row_id(target, src, self.catalog_options, projection=["age"],
                            dynamic_options={"deletion-vectors.enabled": "true"})
 
+    def test_rejects_disabling_query_auth_dynamically(self):
+        target = self._create({**self.de_options, "query-auth.enabled": "true"})
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
+        for value in ("false", False, None, "invalid"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                        ValueError, "^Option 'query-auth.enabled' is not allowed to be disabled dynamically$"):
+                    read_by_row_id(target, src, self.catalog_options, projection=["age"],
+                                   dynamic_options={"query-auth.enabled": value})
+
     def test_time_travel_via_dynamic_options(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(

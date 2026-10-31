@@ -475,10 +475,10 @@ def test_unsupported_literal_qualifies_before_core_execution(rest_catalog):
 @pytest.mark.parametrize('native', [False, True])
 def test_query_auth_rejects_hybrid_before_native_table_access(rest_catalog, native):
     catalog, _ = rest_catalog
-    table = _table(catalog)
-    table = table.copy({'query-auth.enabled': 'true', 'read.native.enabled': str(native).lower()})
+    raw_table = _table(catalog)
+    table = raw_table.copy({'query-auth.enabled': 'true', 'read.native.enabled': str(native).lower()})
     with patch('pypaimon.execution.native.read.native_hybrid_search._native_table',
                side_effect=AssertionError('Native table access before authorization')):
         with pytest.raises(Exception, match='query-auth'):
             _builder(table).execute_local()
-    assert indexes._ids(table.copy({'query-auth.enabled': 'false'})) == list(range(8))
+    assert indexes._ids(raw_table) == list(range(8))

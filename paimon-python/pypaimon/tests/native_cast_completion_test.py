@@ -213,8 +213,7 @@ def test_not_null_mask_adapts_only_output_schema(rest_catalog, table_mode, mask)
     if mask == 'null':
         # Captured rules must still determine output nullability on the existing
         # fallback reader; no additional Python CAST implementation is needed.
-        fallback = table.copy({'query-auth.enabled': 'false', 'read.native.enabled': 'false',
-                               'scan.native-plan.enabled': 'false'})
+        fallback = table.copy({'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         captured = fallback.new_read_builder().with_projection(['masked', 'id'])
         with captured.new_read().to_arrow_batch_reader(splits) as batches:
             batch = batches.read_next_batch()

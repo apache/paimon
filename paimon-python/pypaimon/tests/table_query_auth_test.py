@@ -21,9 +21,12 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from types import SimpleNamespace
 
+from pypaimon import Schema
+from pypaimon.api.api_response import AuthTableQueryResponse
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.catalog.table_query_auth import (
     TableQueryAuthResult,
@@ -35,6 +38,10 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.table_scan import TableScan
+from pypaimon.tests import native_plan_rest_test
+
+
+rest_catalog = native_plan_rest_test.rest_catalog
 
 
 class _FakeField:
@@ -480,6 +487,58 @@ class TestCoreOptionsQueryAuth(unittest.TestCase):
     def test_disabled_when_false(self):
         opts = CoreOptions(Options({"query-auth.enabled": False}))
         self.assertFalse(opts.query_auth_enabled)
+
+
+@pytest.mark.parametrize("copy_method", ["copy", "copy_without_time_travel"])
+@pytest.mark.parametrize("enabled", ["true", True, "on"])
+def test_query_auth_cannot_be_disabled_dynamically(rest_catalog, copy_method, enabled):
+    catalog, server = rest_catalog
+    schema = pa.schema([("dept", pa.string()), ("secret", pa.string())])
+    catalog.create_table("default.auth", Schema.from_pyarrow_schema(
+        schema, options={"query-auth.enabled": enabled}), False)
+    table = catalog.get_table("default.auth")
+    builder = table.new_batch_write_builder()
+    writer = builder.new_write()
+    commit = builder.new_commit()
+    try:
+        writer.write_arrow(pa.Table.from_pydict({
+            "dept": ["eng", "other"], "secret": ["secret1", "secret2"],
+        }, schema=schema))
+        commit.commit(writer.prepare_commit())
+    finally:
+        writer.close()
+        commit.close()
+    server.table_query_auth_store[table.identifier.get_full_name()] = AuthTableQueryResponse(
+        filter=[_simple_filter_json()], column_masking={"secret": '{"name":"NULL"}'})
+
+    copy = getattr(table, copy_method)
+    for value in ("false", "FaLsE", False, None, "", "invalid", "0", 0, "off", "no"):
+        with pytest.raises(ValueError) as error:
+            copy({"query-auth.enabled": value})
+        assert str(error.value) == "Option 'query-auth.enabled' is not allowed to be disabled dynamically"
+
+    for options in [{}] + [{"query-auth.enabled": value} for value in ("true", "TrUe", True, " on ", 1)]:
+        copied = copy(options)
+        read = copied.new_read_builder()
+        result = read.new_read().to_arrow(read.new_scan().plan().splits())
+        assert result.to_pydict() == {"dept": ["eng"], "secret": [None]}
+        with pytest.raises(ValueError, match="Search is not supported on a query-auth table"):
+            copied.new_vector_search_builder().new_vector_search_scan()
+    assert table.table_schema.options["query-auth.enabled"] == enabled
+
+
+@pytest.mark.parametrize("copy_method", ["copy", "copy_without_time_travel"])
+@pytest.mark.parametrize("options", [{}, {"query-auth.enabled": "false"}])
+def test_query_auth_can_be_enabled_dynamically(rest_catalog, copy_method, options):
+    catalog, _ = rest_catalog
+    catalog.create_table("default.plain", Schema.from_pyarrow_schema(
+        pa.schema([("secret", pa.string())]), options=options), False)
+    table = catalog.get_table("default.plain")
+    for value, enabled in (("false", False), (False, False), (None, False),
+                           ("true", True), ("TrUe", True), (True, True), ("on", True)):
+        copied = getattr(table, copy_method)({"query-auth.enabled": value})
+        assert copied.options.query_auth_enabled == enabled
+    assert not table.options.query_auth_enabled
 
 
 if __name__ == "__main__":
