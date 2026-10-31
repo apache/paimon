@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.compact.MultiAwareBucketTableScan;
 import org.apache.paimon.flink.compact.MultiTableScanBase;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.DelayedAvailability;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.source.DataSplit;
@@ -41,6 +42,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
@@ -72,6 +74,8 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
 
     private class Reader extends AbstractNonCoordinatedSourceReader<Tuple2<Split, String>> {
         private transient MultiTableScanBase<Tuple2<Split, String>> tableScan;
+        private final DelayedAvailability availability =
+                new DelayedAvailability("combined-aware-compact-source-timer");
 
         @Override
         public void start() {
@@ -87,6 +91,11 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
         }
 
         @Override
+        public CompletableFuture<Void> isAvailable() {
+            return availability.future();
+        }
+
+        @Override
         public InputStatus pollNext(ReaderOutput<Tuple2<Split, String>> readerOutput)
                 throws Exception {
             MultiTableScanBase.ScanResult scanResult = tableScan.scanTable(readerOutput);
@@ -94,13 +103,15 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
                 return InputStatus.END_OF_INPUT;
             }
             if (scanResult == IS_EMPTY) {
-                Thread.sleep(monitorInterval);
+                availability.delay(monitorInterval);
+                return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
         }
 
         @Override
         public void close() throws Exception {
+            availability.close();
             super.close();
             if (tableScan != null) {
                 tableScan.close();
