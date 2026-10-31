@@ -245,14 +245,42 @@ class VideoKeyframeIndexTest(unittest.TestCase):
                     for ordinal in (count - 1, 32768, 0, 499999):
                         before = len(reads)
                         self.assertEqual((ordinal, ordinal - 100, ordinal * 2), restored.keyframes[ordinal])
-                        self.assertLessEqual(len(reads) - before, 3)
+                        self.assertLessEqual(len(reads) - before, 1)
                         before = len(reads)
                         self.assertEqual((ordinal, ordinal - 100, ordinal * 2), restored.keyframes[ordinal])
                         self.assertEqual(before, len(reads))
                         self.assertEqual(ordinal, bisect.bisect_left(restored.ordinals, ordinal))
-                    self.assertLessEqual(max(size for _, size in reads), 4096 * 24 + 25)
+                    self.assertLessEqual(max(size for _, size in reads), 3 * (4096 * 24 + 4))
                     self.assertLessEqual(sum(map(len, restored.keyframes.cache.values())), 1024 * 1024)
                 VideoKeyframeIndex.validate_stream(stored, length, count * 2)
+
+    def test_binary_search_coalesces_adjacent_page_reads(self):
+        import bisect
+        import tempfile
+        count = 1_000_000
+        with VideoKeyframeIndex([], ((i, i, i) for i in range(count))) as original:
+            with tempfile.TemporaryFile() as stored:
+                original.write_to(stored)
+                length = stored.tell()
+                reads = []
+
+                def read_at(offset, size):
+                    reads.append((offset, size))
+                    stored.seek(offset)
+                    return stored.read(size)
+
+                for target in (count - 1, 123456, 500000):
+                    with self.subTest(target=target):
+                        reads.clear()
+                        with VideoKeyframeIndex.open(read_at, length, count) as index:
+                            reads.clear()
+                            self.assertEqual(target, bisect.bisect_left(index.ordinals, target))
+                            self.assertLessEqual(len(reads), 9)
+                            self.assertLessEqual(max(size for _, size in reads), 3 * (4096 * 24 + 4))
+                            before = len(reads)
+                            self.assertEqual((target, target, target), index.keyframes[target])
+                            self.assertEqual(before, len(reads))
+                            self.assertLessEqual(sum(map(len, index.keyframes.cache.values())), 1024 * 1024)
 
     def test_paged_corruption_and_boundary_validation(self):
         with VideoKeyframeIndex([], ((i, i, i) for i in range(8193))) as index:

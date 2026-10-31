@@ -44,34 +44,42 @@ class _PagedKeyframes(Sequence):
     def __len__(self):
         return self.count
 
-    def _load_page(self, page):
-        data = self.cache.pop(page, None)
-        if data is None:
-            count = min(self.PAGE_ENTRIES, self.count - page * self.PAGE_ENTRIES)
-            size = count * self.ENTRY.size
-            block = self.read_at(page * (self.PAGE_BYTES + 4), size + 4)
-            if len(block) != size + 4 or zlib.crc32(block[:size]) != struct.unpack('<I', block[size:])[0]:
-                raise ValueError("Invalid video keyframe index page checksum or length.")
-            data = block[:size]
-            _validate_entries(data, self.payload_length, initial=page == 0)
-        self.cache[page] = data
-        while len(self.cache) > max(1, self.CACHE_BYTES // self.PAGE_BYTES):
-            self.cache.popitem(last=False)
-        return data
-
     def _page(self, page):
         with self.lock:
-            data = self._load_page(page)
-            # Check both boundaries even when adjacent pages were not cached.
-            if page > 0:
-                previous = self._load_page(page - 1)
-                _validate_boundary(self.ENTRY.unpack_from(previous, len(previous) - self.ENTRY.size),
-                                   self.ENTRY.unpack_from(data))
-            if (page + 1) * self.PAGE_ENTRIES < self.count:
-                following = self._load_page(page + 1)
-                _validate_boundary(self.ENTRY.unpack_from(data, len(data) - self.ENTRY.size),
-                                   self.ENTRY.unpack_from(following))
-            return data
+            pages = range(max(0, page - 1), min((self.count - 1) // self.PAGE_ENTRIES, page + 1) + 1)
+            for p in pages:
+                if p in self.cache:
+                    self.cache.move_to_end(p)
+            missing = [p for p in pages if p not in self.cache]
+            if missing:
+                first, last = missing[0], missing[-1]
+                stride = self.PAGE_BYTES + 4
+                last_size = min(self.PAGE_ENTRIES, self.count - last * self.PAGE_ENTRIES) * self.ENTRY.size
+                size = (last - first) * stride + last_size + 4
+                # Fetch missing neighbors together instead of serial range requests.
+                block = self.read_at(first * stride, size)
+                if len(block) != size:
+                    raise ValueError("Invalid video keyframe index page length.")
+                for p in range(first, last + 1):
+                    start = (p - first) * stride
+                    size = min(self.PAGE_ENTRIES, self.count - p * self.PAGE_ENTRIES) * self.ENTRY.size
+                    data = block[start:start + size]
+                    if zlib.crc32(data) != struct.unpack_from('<I', block, start + size)[0]:
+                        raise ValueError("Invalid video keyframe index page checksum.")
+                    _validate_entries(data, self.payload_length, initial=p == 0)
+                    self.cache[p] = data
+                    while len(self.cache) > max(1, self.CACHE_BYTES // self.PAGE_BYTES):
+                        self.cache.popitem(last=False)
+            previous = None
+            for p in pages:
+                data = self.cache[p]
+                if previous is not None:
+                    _validate_boundary(self.ENTRY.unpack_from(previous, len(previous) - self.ENTRY.size),
+                                       self.ENTRY.unpack_from(data))
+                previous = data
+                self.cache.move_to_end(p)
+            self.cache.move_to_end(page)
+            return self.cache[page]
 
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -248,7 +256,8 @@ class VideoKeyframeIndex:
                 return b''
             if offset + size <= len(prefix):
                 return prefix[offset:offset + size]
-            data = read_at(offset, size)
+            cached = prefix[offset:min(offset + size, len(prefix))]
+            data = cached + read_at(offset + len(cached), size - len(cached))
             if len(data) != size:
                 raise ValueError("Invalid video keyframe index: truncated read.")
             return data
