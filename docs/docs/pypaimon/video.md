@@ -115,9 +115,9 @@ video = pm.BlobDescriptor(
 frames.add_video(video, episode_43_rows)
 ```
 
-PyAV builds seek indexes for supported ISO BMFF videos (such as MP4); other
-decodable videos use scan fallback. Index generation uses temporary disk; reads
-load pages on demand with a 1 MiB entry-page cache per index.
+PyAV indexes supported ISO BMFF videos (e.g. MP4); other decodable videos fall back
+to scanning. Index generation uses temporary disk; readers cache up to 1 MiB of
+entry pages per index.
 
 The writer deduplicates exact payload descriptor identity inside each `.video`
 file. Its video grouping policy coordinates normal, BLOB, and vector rolling

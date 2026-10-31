@@ -441,8 +441,7 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-Keyframe-index version `1` uses this layout. Numeric fields are little endian;
-byte offsets are relative to the embedded video payload.
+Keyframe-index v1 is little endian; byte offsets are relative to the video payload.
 
 | Field | Size |
 | --- | ---: |
@@ -453,9 +452,9 @@ byte offsets are relative to the embedded video payload.
 | Metadata `(offset, length)` pairs | 16 bytes each |
 | Keyframe pages | Variable |
 
-Each page contains up to 4,096 uncompressed `(frame ordinal, PTS, packet position)`
-entries (three int64 values), followed by a 4-byte CRC32 of its entries. Only the
-last page may be partial. Page `p` starts at `21 + 16 * metadata_count + p * 98308`.
+Each page holds 4,096 uncompressed `(frame ordinal, PTS, packet position)` int64 triples
+and their 4-byte CRC32; the last page may be shorter. Page `p` starts at
+`21 + 16 * metadata_count + p * 98308`.
 Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
 The index covers the first video stream; its time base remains in the video.
 
