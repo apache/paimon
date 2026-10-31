@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.BucketFunctionType
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.options.CatalogOptions.TABLE_TYPE
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.functions.BucketFunction
@@ -186,6 +187,7 @@ abstract class PaimonSparkTableBase(val table: Table)
   }
 
   def truncateTable: Boolean = {
+    rejectRewriteUnderQueryAuth(table, "TRUNCATE")
     val commit = table.newBatchWriteBuilder().newCommit()
     try {
       commit.truncateTable()

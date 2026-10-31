@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -43,6 +44,7 @@ case class UpdatePaimonDataEvolutionTableCommand(
   with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    rejectRewriteUnderQueryAuth(v2Table.getTable, "UPDATE")
     val maxAttempts = math.max(1, OptionUtils.dataEvolutionUpdateConflictRetryMaxAttempts())
     val retryWaitMs = math.max(0L, OptionUtils.dataEvolutionUpdateConflictRetryWaitMs())
     val canRetry = deterministicUpdate

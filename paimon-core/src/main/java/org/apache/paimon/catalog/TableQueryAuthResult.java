@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.PredicateRemapper;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.Splits;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -140,6 +142,38 @@ public class TableQueryAuthResult implements Serializable {
             throw new UnsupportedOperationException(
                     "Search is not supported on a query-auth table: the index ranks raw values, "
                             + "which a column mask invalidates.");
+        }
+    }
+
+    public static void rejectRewriteUnderQueryAuth(@Nullable Table table, String operation) {
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            if (fileStoreTable.coreOptions().queryAuthEnabled()) {
+                TableQueryAuthResult authResult =
+                        fileStoreTable
+                                .catalogEnvironment()
+                                .tableQueryAuth(fileStoreTable.coreOptions())
+                                .auth(null);
+                rejectRewriteUnderQueryAuthRules(authResult, operation);
+            }
+            if (fileStoreTable instanceof FallbackReadFileStoreTable) {
+                rejectRewriteUnderQueryAuth(
+                        ((FallbackReadFileStoreTable) fileStoreTable).other(), operation);
+            }
+        }
+    }
+
+    public static void rejectRewriteUnderQueryAuthRules(List<Split> splits, String operation) {
+        for (Split split : splits) {
+            rejectRewriteUnderQueryAuthRules(Splits.authResult(split), operation);
+        }
+    }
+
+    private static void rejectRewriteUnderQueryAuthRules(
+            @Nullable TableQueryAuthResult authResult, String operation) {
+        if (authResult != null && authResult.hasRules()) {
+            throw new UnsupportedOperationException(
+                    operation + " requires full-table access without row filters or column masks.");
         }
     }
 

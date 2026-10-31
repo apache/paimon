@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.Snapshot
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
@@ -307,6 +308,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   lazy val tableSchema: StructType = targetSparkTable.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    rejectRewriteUnderQueryAuth(table, "MERGE INTO")
     // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
     SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, targetRelation, sparkSession)
     invokeMergeInto(sparkSession)

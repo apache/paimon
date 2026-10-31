@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth
 import org.apache.paimon.spark.read.ObjectTableScanBuilder
 import org.apache.paimon.spark.rowops.{PaimonSparkCopyOnWriteOperation, PaimonSparkDeltaOperation}
 import org.apache.paimon.table.`object`.ObjectTable
@@ -64,6 +65,7 @@ class SparkTableWithRowLevelOps(tableArg: Table)
 
   override def newRowLevelOperationBuilder(
       info: RowLevelOperationInfo): RowLevelOperationBuilder = {
+    rejectRewriteUnderQueryAuth(table, info.command().toString)
     table match {
       case t: FileStoreTable =>
         if (SparkTable.supportsV2DeltaOps(this)) { () => new PaimonSparkDeltaOperation(t, info) }

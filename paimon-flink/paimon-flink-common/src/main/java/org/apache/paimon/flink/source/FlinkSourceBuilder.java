@@ -67,6 +67,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
+import static org.apache.paimon.catalog.TableQueryAuthResult.rejectRewriteUnderQueryAuth;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -98,6 +99,7 @@ public class FlinkSourceBuilder {
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
     private boolean skipPreloadTargetSnapshot;
+    @Nullable private String rewriteOperation;
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
@@ -200,6 +202,11 @@ public class FlinkSourceBuilder {
         return this;
     }
 
+    public FlinkSourceBuilder withRewriteOperation(String operation) {
+        this.rewriteOperation = operation;
+        return this;
+    }
+
     private ReadBuilder createReadBuilder(@Nullable org.apache.paimon.types.RowType readType) {
         ReadBuilder readBuilder = table.newReadBuilder();
         if (readType != null) {
@@ -238,16 +245,17 @@ public class FlinkSourceBuilder {
             }
             Options options = Options.fromMap(table.options());
             return new StaticFileStoreSource(
-                    createReadBuilder(projectedRowType()),
-                    limit,
-                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                    dynamicPartitionFilteringInfo,
-                    outerProject(),
-                    SplitWeightUtils.splitWeightFunc(options),
-                    null,
-                    options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
-                    skipPreloadTargetSnapshot);
+                            createReadBuilder(projectedRowType()),
+                            limit,
+                            options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                            options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                            dynamicPartitionFilteringInfo,
+                            outerProject(),
+                            SplitWeightUtils.splitWeightFunc(options),
+                            null,
+                            options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
+                            skipPreloadTargetSnapshot)
+                    .withRewriteOperation(rewriteOperation, table);
         }
 
         TableScanUtils.streamingReadingValidate(table);
@@ -283,6 +291,9 @@ public class FlinkSourceBuilder {
 
     private @Nullable DataStream<RowData> buildPostponeMergeSource() {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
+        if (rewriteOperation != null) {
+            rejectRewriteUnderQueryAuth(table, rewriteOperation);
+        }
         if (fileStoreTable.coreOptions().startupMode() == CoreOptions.StartupMode.COMPACTED_FULL) {
             return null;
         }
@@ -316,7 +327,8 @@ public class FlinkSourceBuilder {
                 produceTypeInfo(),
                 outerProject(),
                 limit,
-                conf.get(CoreOptions.BLOB_AS_DESCRIPTOR));
+                conf.get(CoreOptions.BLOB_AS_DESCRIPTOR),
+                rewriteOperation);
     }
 
     private int basePostponeMergeParallelism() {
@@ -580,7 +592,8 @@ public class FlinkSourceBuilder {
                         limit,
                         table,
                         readBuilder.readType(),
-                        conf.get(CoreOptions.BLOB_AS_DESCRIPTOR));
+                        conf.get(CoreOptions.BLOB_AS_DESCRIPTOR),
+                        rewriteOperation);
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

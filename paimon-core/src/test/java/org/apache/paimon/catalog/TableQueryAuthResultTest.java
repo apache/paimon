@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.Equal;
@@ -29,6 +30,11 @@ import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.UpperTransform;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -42,9 +48,36 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Tests that malformed query-authorization definitions cannot be silently ignored. */
 public class TableQueryAuthResultTest {
+
+    @Test
+    void testRewriteChecksFallbackRules() {
+        FileStoreTable wrapped = mock(FileStoreTable.class);
+        FileStoreTable fallback = mock(FileStoreTable.class);
+        CoreOptions unrestricted = CoreOptions.fromMap(Collections.emptyMap());
+        CoreOptions restricted =
+                CoreOptions.fromMap(
+                        Collections.singletonMap(CoreOptions.QUERY_AUTH_ENABLED.key(), "true"));
+        when(wrapped.coreOptions()).thenReturn(unrestricted);
+        when(fallback.coreOptions()).thenReturn(restricted);
+        CatalogEnvironment environment = mock(CatalogEnvironment.class);
+        when(fallback.catalogEnvironment()).thenReturn(environment);
+        TableQueryAuth queryAuth =
+                select -> new TableQueryAuthResult(Collections.singletonList(filterJson()), null);
+        when(environment.tableQueryAuth(restricted)).thenReturn(queryAuth);
+
+        Table fallbackTable = new FallbackReadFileStoreTable(wrapped, fallback, true);
+        assertThatThrownBy(
+                        () ->
+                                TableQueryAuthResult.rejectRewriteUnderQueryAuth(
+                                        fallbackTable, "UPDATE"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("UPDATE requires full-table access");
+    }
 
     @Test
     void testInvalidRowFilterFailsClosed() {
