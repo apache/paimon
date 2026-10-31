@@ -441,12 +441,13 @@ public class BlockPrefetcherTest {
     private void writeRows(FileFormat format, RowType rowType, Path path, List<InternalRow> rows)
             throws IOException {
         LocalFileIO fileIO = new LocalFileIO();
-        PositionOutputStream out = fileIO.newOutputStream(path, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-        for (InternalRow row : rows) {
-            writer.addElement(row);
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+            for (InternalRow row : rows) {
+                writer.addElement(row);
+            }
+            writer.close();
         }
-        writer.close();
     }
 
     private List<InternalRow> readAllRows(FileFormat format, RowType rowType, Path path)
