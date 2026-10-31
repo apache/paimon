@@ -45,7 +45,8 @@ class ObjectTable(Table):
         options: Optional[Dict[str, str]] = None,
         comment: Optional[str] = None,
     ):
-        self.file_io = file_io
+        # Other writers manage the objects, so they may change under the same name.
+        self.file_io = file_io.origin_only()
         self.identifier = identifier
         self._table_schema = table_schema
         self._location = location.rstrip("/")

@@ -25,6 +25,7 @@ from typing import Optional
 
 from pypaimon.common.options.config import CatalogOptions, FuseOptions, OssOptions
 from pypaimon.common.options.options_utils import OptionsUtils
+from pypaimon.filesystem.io_cache_routing import single_endpoint_options
 
 
 def _native_blob_view_supported(table, read_names) -> bool:
@@ -199,11 +200,18 @@ class _NativeRestTableCache:
         def create():
             token = token_loader() if token_loader else None
             if token is None:
+                # A REST table can reach this path before its data token is available (for
+                # example a copied branch or a token refresh race).  The native core sends
+                # every OSS request to one endpoint, so routing keys in the catalog must not
+                # leave its legacy fs.oss.endpoint pointed at a cache target.
                 return Table.from_rest_response(
-                    response, database=database, table=table, rest_options=options)
+                    response, database=database, table=table,
+                    rest_options=single_endpoint_options(options))
+            # The native core cannot use io-cache targets per request, and fs.oss.endpoint may name the cache.
             return Table.from_rest_response_with_token(
                 response, database=database, table=table, rest_options=options,
-                data_token=dict(token.token), expires_at_millis=token.expire_at_millis)
+                data_token=single_endpoint_options(token.token, options),
+                expires_at_millis=token.expire_at_millis)
 
         key = (response, database, table, tuple(sorted(options.items())))
         return self.get_or_create(key, create)
@@ -304,16 +312,21 @@ def _load_native_table(table):
             token_loader=lambda: _rest_data_token(table))
     elif file_io_options is not None:
         from pypaimon_rust.datafusion import Table
+        # As with a token: the core cannot use io-cache targets per request, so it gets the origin's options.
         rt = Table.from_resolved_schema(
             table.table_path, _resolved_schema_json(table),
             database=table.identifier.get_database_name(),
             table=table.identifier.get_table_name(),
-            branch=table.current_branch(), options=file_io_options)
+            branch=table.current_branch(), options=single_endpoint_options(file_io_options))
     else:
         from pypaimon_rust.datafusion import PaimonCatalog
         # The Python loader has already resolved /config, including typed
         # FUSE options. Match RESTCatalogLoader.load() and reuse that context.
-        catalog = PaimonCatalog(_catalog_options(table), config_required=False)
+        # This catalog is also a single-endpoint client.  Keep its metadata/catalog
+        # configuration, but make its storage endpoint the origin when catalog-only
+        # io-cache routing is enabled.
+        catalog = PaimonCatalog(
+            single_endpoint_options(_catalog_options(table)), config_required=False)
         # REST may keep branch schemas in the catalog only. Load the base
         # environment, then attach the schema/branch already resolved here.
         rt = catalog.get_table((
