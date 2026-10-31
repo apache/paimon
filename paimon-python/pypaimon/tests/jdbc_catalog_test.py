@@ -33,8 +33,10 @@ from pypaimon.catalog.catalog_exception import (
 )
 from pypaimon.catalog.jdbc_catalog import JdbcCatalog, _convert_qmark_placeholders
 from pypaimon.catalog.rest.property_change import PropertyChange
+from pypaimon.common.identifier import Identifier
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.table.system.options_table import OptionsTable
 
 
 class JdbcCatalogTest(unittest.TestCase):
@@ -170,6 +172,110 @@ class JdbcCatalogTest(unittest.TestCase):
         self.assertEqual(reloaded.list_tables("test_db"), [])
         with self.assertRaises(TableNotExistException):
             reloaded.get_table("test_db.renamed_table")
+
+    def test_get_system_table(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table(
+            "test_db.test_table", Schema(fields=fields, options={"bucket": "1"}), False
+        )
+
+        for suffix in ("$options", "$OPTIONS", "$branch_main$options"):
+            name = "test_db.test_table" + suffix
+            for identifier in (name, Identifier.from_string(name)):
+                with self.subTest(identifier=identifier):
+                    table = catalog.get_table(identifier)
+                    self.assertIsInstance(table, OptionsTable)
+                    self.assertEqual(table.base_table.identifier, Identifier("test_db", "test_table"))
+                    read_builder = table.new_read_builder()
+                    rows = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+                    self.assertIn({"key": "bucket", "value": "1"}, rows.to_pylist())
+
+    def test_get_system_table_not_exist(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+
+        for name in ("test_db.test_table$nosuch", "test_db.missing$options"):
+            with self.subTest(name=name):
+                with self.assertRaises(TableNotExistException) as context:
+                    catalog.get_table(name)
+                self.assertEqual(str(context.exception), "Table {} does not exist".format(name))
+
+    def test_get_table_branch(self):
+        def write(table, data):
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(data)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+        def read(table):
+            builder = table.new_read_builder()
+            return builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
+
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+        table = catalog.get_table("test_db.test_table")
+        write(table, pa.table({"f0": pa.array([1], pa.int32())}))
+        table.branch_manager().create_branch("dev")
+        branch = catalog.get_table("test_db.test_table$branch_dev")
+        self.assertEqual(branch.current_branch(), "dev")
+        write(branch, pa.table({"f0": pa.array([2], pa.int32())}))
+        self.assertEqual(read(catalog.get_table("test_db.test_table$branch_dev")), [{"f0": 2}])
+
+        branch.schema_manager.commit_changes([
+            SchemaChange.add_column("f1", AtomicType("STRING")),
+            SchemaChange.set_option("branch-option", "dev"),
+        ])
+        branch = catalog.get_table("test_db.test_table$branch_dev")
+        self.assertEqual(branch.field_names, ["f0", "f1"])
+        write(branch, pa.table({"f0": pa.array([3], pa.int32()), "f1": ["dev"]}))
+        self.assertEqual(
+            sorted(read(branch), key=lambda row: row["f0"]),
+            [{"f0": 2, "f1": None}, {"f0": 3, "f1": "dev"}],
+        )
+        options = catalog.get_table("test_db.test_table$branch_dev$options")
+        self.assertIsInstance(options, OptionsTable)
+        self.assertEqual(options.base_table.current_branch(), "dev")
+        self.assertIn({"key": "branch-option", "value": "dev"}, read(options))
+
+        for identifier in (
+            "test_db.test_table",
+            "test_db.test_table$branch_main",
+            Identifier("test_db", "test_table", branch="main"),
+            Identifier("test_db", "test_table", branch="MAIN"),
+        ):
+            with self.subTest(identifier=identifier):
+                table = catalog.get_table(identifier)
+                self.assertEqual(table.fields, fields)
+                self.assertEqual(table.current_branch(), "main")
+                self.assertEqual(read(table), [{"f0": 1}])
+                self.assertNotIn("branch-option", table.table_schema.options)
+
+        for identifier in (
+            "test_db.test_table$branch_missing",
+            "test_db.test_table$branch_missing$options",
+            "test_db.test_table$branch_dev$nosuch",
+            "test_db.missing$branch_dev",
+            "test_db.test_table$branch_MAIN",
+        ):
+            with self.subTest(identifier=identifier):
+                with self.assertRaises(TableNotExistException):
+                    catalog.get_table(identifier)
+
+        # A branch named MAIN is not main and keeps its identity.
+        table.branch_manager().create_branch("MAIN")
+        upper = catalog.get_table("test_db.test_table$branch_MAIN")
+        self.assertEqual(upper.current_branch(), "MAIN")
+        self.assertEqual(catalog.get_table(upper.identifier).current_branch(), "MAIN")
 
     def test_create_table_rolls_back_metadata_on_failure(self):
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
