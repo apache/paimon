@@ -58,6 +58,7 @@ import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.GeneratedColumn;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -171,6 +172,8 @@ public class SchemaValidation {
      */
     public static void validateTableSchema(TableSchema schema, Set<String> dynamicOptionKeys) {
         CoreOptions options = new CoreOptions(schema.options());
+
+        validateGeneratedColumns(schema, options);
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
@@ -1616,6 +1619,84 @@ public class SchemaValidation {
                         FieldAggregatorFactory.class,
                         aggFuncName);
             }
+        }
+    }
+
+    /** Rejects changes which invalidate stored generated values or their dependencies. */
+    public static void validateGeneratedColumnEvolution(TableSchema previous, TableSchema next) {
+        for (DataField field : previous.fields()) {
+            if (field.generationExpression() == null) {
+                continue;
+            }
+            DataField target = next.idToFieldMap().get(field.id());
+            checkArgument(
+                    target != null
+                            && field.name().equals(target.name())
+                            && field.type().equals(target.type())
+                            && field.generationExpression().equals(target.generationExpression()),
+                    "Cannot change generated column '%s'.",
+                    field.name());
+            GeneratedColumn expression = GeneratedColumn.create(previous.logicalRowType(), field);
+            for (String sourceName : expression.sourceNames()) {
+                DataField source = previous.logicalRowType().getField(sourceName);
+                DataField newSource = next.idToFieldMap().get(source.id());
+                checkArgument(
+                        newSource != null
+                                && source.name().equals(newSource.name())
+                                && source.type().equals(newSource.type()),
+                        "Cannot rename, drop or change the type of column '%s' referenced by generated column '%s'.",
+                        source.name(),
+                        field.name());
+            }
+        }
+        for (DataField field : next.fields()) {
+            if (field.generationExpression() != null) {
+                DataField old = previous.idToFieldMap().get(field.id());
+                checkArgument(
+                        old != null && old.generationExpression() != null,
+                        "Generated columns can only be defined when creating a table.");
+            }
+        }
+    }
+
+    private static void validateGeneratedColumns(TableSchema schema, CoreOptions options) {
+        RowType rowType = schema.logicalRowType();
+        for (DataField field : schema.fields()) {
+            validateNoNestedGeneratedColumns(field.type());
+            if (field.generationExpression() == null) {
+                continue;
+            }
+            checkArgument(
+                    field.defaultValue() == null,
+                    "Generated column '%s' cannot have a default value.",
+                    field.name());
+            checkArgument(
+                    !options.rowkindField().filter(field.name()::equals).isPresent(),
+                    "Generated column '%s' cannot be used as rowkind.field.",
+                    field.name());
+            GeneratedColumn.create(rowType, field);
+            checkArgument(
+                    schema.primaryKeys().isEmpty()
+                            || options.mergeEngine() == CoreOptions.MergeEngine.DEDUPLICATE,
+                    "Generated columns only support the deduplicate merge engine.");
+        }
+    }
+
+    private static void validateNoNestedGeneratedColumns(DataType type) {
+        if (type instanceof RowType) {
+            for (DataField nested : ((RowType) type).getFields()) {
+                checkArgument(
+                        nested.generationExpression() == null,
+                        "Generated columns must be top-level columns.");
+                validateNoNestedGeneratedColumns(nested.type());
+            }
+        } else if (type instanceof ArrayType) {
+            validateNoNestedGeneratedColumns(((ArrayType) type).getElementType());
+        } else if (type instanceof MultisetType) {
+            validateNoNestedGeneratedColumns(((MultisetType) type).getElementType());
+        } else if (type instanceof MapType) {
+            validateNoNestedGeneratedColumns(((MapType) type).getKeyType());
+            validateNoNestedGeneratedColumns(((MapType) type).getValueType());
         }
     }
 

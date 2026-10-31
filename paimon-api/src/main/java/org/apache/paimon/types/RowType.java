@@ -644,9 +644,23 @@ public final class RowType extends DataType {
                 DataType type,
                 @Nullable String description,
                 @Nullable String defaultValue) {
+            return field(name, type, description, defaultValue, null);
+        }
+
+        public Builder field(
+                String name,
+                DataType type,
+                @Nullable String description,
+                @Nullable String defaultValue,
+                @Nullable String generationExpression) {
             fields.add(
                     new DataField(
-                            fieldId.incrementAndGet(), name, type, description, defaultValue));
+                            fieldId.incrementAndGet(),
+                            name,
+                            type,
+                            description,
+                            defaultValue,
+                            generationExpression));
             return this;
         }
 

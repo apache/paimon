@@ -154,7 +154,8 @@ public class SchemaMergingUtils {
                                     baseField.name(),
                                     updatedDataType,
                                     baseField.description(),
-                                    baseField.defaultValue()));
+                                    baseField.defaultValue(),
+                                    baseField.generationExpression()));
                 } else {
                     updatedFields.add(baseField);
                 }
@@ -327,7 +328,8 @@ public class SchemaMergingUtils {
                 field.name(),
                 dataType,
                 field.description(),
-                field.defaultValue());
+                field.defaultValue(),
+                field.generationExpression());
     }
 
     /**

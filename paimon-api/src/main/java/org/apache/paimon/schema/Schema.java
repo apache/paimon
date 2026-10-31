@@ -185,7 +185,8 @@ public class Schema {
                                 field.name(),
                                 field.type().copy(primaryKeyNullable),
                                 field.description(),
-                                field.defaultValue()));
+                                field.defaultValue(),
+                                field.generationExpression()));
             } else {
                 newFields.add(field);
             }
@@ -332,12 +333,36 @@ public class Schema {
                 DataType dataType,
                 @Nullable String description,
                 @Nullable String defaultValue) {
+            return column(columnName, dataType, description, defaultValue, null);
+        }
+
+        /** Declares a physical generated top-level column. */
+        public Builder generatedColumn(
+                String columnName, DataType dataType, String generationExpression) {
+            Preconditions.checkNotNull(
+                    generationExpression, "Generation expression must not be null.");
+            return column(columnName, dataType, null, null, generationExpression);
+        }
+
+        public Builder column(
+                String columnName,
+                DataType dataType,
+                @Nullable String description,
+                @Nullable String defaultValue,
+                @Nullable String generationExpression) {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
 
             int id = highestFieldId.incrementAndGet();
             DataType reassignDataType = ReassignFieldId.reassign(dataType, highestFieldId);
-            columns.add(new DataField(id, columnName, reassignDataType, description, defaultValue));
+            columns.add(
+                    new DataField(
+                            id,
+                            columnName,
+                            reassignDataType,
+                            description,
+                            defaultValue,
+                            generationExpression));
             return this;
         }
 

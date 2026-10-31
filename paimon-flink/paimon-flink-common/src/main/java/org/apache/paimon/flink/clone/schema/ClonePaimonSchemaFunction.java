@@ -102,7 +102,13 @@ public class ClonePaimonSchemaFunction
                 .rowType()
                 .getFields()
                 .forEach(
-                        f -> builder.column(f.name(), f.type(), f.description(), f.defaultValue()));
+                        f ->
+                                builder.column(
+                                        f.name(),
+                                        f.type(),
+                                        f.description(),
+                                        f.defaultValue(),
+                                        f.generationExpression()));
         builder.partitionKeys(sourceTable.partitionKeys());
         builder.primaryKey(sourceTable.primaryKeys());
         Map<String, String> tableOptions = new HashMap<>(sourceTable.options());

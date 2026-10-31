@@ -1095,8 +1095,19 @@ public class FlinkCatalog extends AbstractCatalog {
 
     public static Schema fromCatalogTable(CatalogBaseTable catalogTable) {
         @SuppressWarnings("unchecked")
-        ResolvedSchema schema =
-                ((ResolvedCatalogBaseTable<CatalogBaseTable>) catalogTable).getResolvedSchema();
+        ResolvedCatalogBaseTable<CatalogBaseTable> resolvedTable =
+                (ResolvedCatalogBaseTable<CatalogBaseTable>) catalogTable;
+        ResolvedSchema schema = resolvedTable.getResolvedSchema();
+        Map<String, String> generationExpressions =
+                resolvedTable.getOrigin() instanceof DataCatalogTable
+                        ? ((DataCatalogTable) resolvedTable.getOrigin())
+                                .table().rowType().getFields().stream()
+                                        .filter(f -> f.generationExpression() != null)
+                                        .collect(
+                                                Collectors.toMap(
+                                                        f -> f.name(),
+                                                        f -> f.generationExpression()))
+                        : Collections.emptyMap();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
@@ -1137,7 +1148,9 @@ public class FlinkCatalog extends AbstractCatalog {
                                                 options,
                                                 blobFileFields,
                                                 blobInlineFields),
-                                        columnComments.get(field.getName())));
+                                        columnComments.get(field.getName()),
+                                        null,
+                                        generationExpressions.get(field.getName())));
 
         return schemaBuilder.build();
     }

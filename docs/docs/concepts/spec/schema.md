@@ -115,9 +115,57 @@ A DataField describes one column, including fields nested inside a row type.
 | `type` | String or JSON type object | Logical type, including nullability and nested type information. |
 | `description` | String, optional | Field comment. |
 | `defaultValue` | String, optional | Stored default value definition. Engine support determines how it is used. |
+| `generationExpression` | String, optional | SQL scalar expression generating a physical top-level column. Mutually exclusive with `defaultValue`. |
 
 Primitive types commonly use strings such as `BIGINT NOT NULL`. Nested types need their
 structured type representation. See [Data Types](../data-types) for the logical type reference.
+
+### Generated Columns
+
+A top-level field, including a partition field, may define `generationExpression`, for example:
+
+```json
+{
+  "id": 2,
+  "name": "dt",
+  "type": "DATE",
+  "generationExpression": "CAST(event_time AS DATE)"
+}
+```
+
+Writers compile expressions for omitted columns into Paimon `Transform` operations once at
+initialization. These operations define the automatically generated value, including CAST
+formatting and invalid-input behavior; the write engine's ANSI mode or implicit CAST rules do
+not change that definition. Spark fills omitted columns through the same evaluator, including
+source-column defaults, before writing.
+Expressions may reference ordinary top-level fields and compose supported scalar calls, such as
+`YEAR(event_time)`, `UPPER(name)`, `CONCAT(UPPER(name), '-', name)`, and
+`DATE_ADD(CAST(event_time AS DATE), days)`. The expression result type must match the declared
+column type. Nested field references, references to other generated columns, arbitrary SQL,
+UDFs, and nondeterministic functions are not supported. `TIMESTAMP WITH LOCAL TIME ZONE` inputs
+and cast targets are rejected because their results can depend on a writer's default time zone.
+
+Generated columns are physical fields; readers use the stored values without evaluating the
+expression. A cast from `TIMESTAMP WITHOUT TIME ZONE` to `DATE` uses the timestamp's calendar
+date, independently of the writer's default time zone.
+
+This is a write-time column-filling feature, not a strict computed-column constraint. Adapted
+writers evaluate an expression only when the input schema omits its column. If the input schema
+includes the column, its supplied value is preserved without evaluating or checking the expression,
+including an explicit NULL. Normal type, NOT NULL, primary-key, and partition constraints still
+apply. Stored values may therefore differ from the expression result; readers and optimizers must
+not assume that the expression is an invariant or infer partition filters from it. Updating a source
+column does not recompute a generated column that is already supplied in the write row.
+
+Definitions are supported at table creation. Changing a definition or renaming, dropping, or
+changing the type of any source is not supported. A generated column cannot be used as
+`rowkind.field`. Primary-key tables require the deduplicate merge
+engine. Partial-column writes, including Data Evolution partial updates, are not supported for
+tables with generated columns.
+
+Use clients supporting this attribute for writes; older clients may ignore it. Its presence does
+not establish compatibility with older writers. See [Spark DDL](../../spark/sql-ddl#generated-columns)
+for SQL examples.
 
 ## Update Schema
 

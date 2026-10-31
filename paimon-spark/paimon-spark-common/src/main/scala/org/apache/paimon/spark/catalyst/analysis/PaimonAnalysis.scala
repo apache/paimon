@@ -27,10 +27,11 @@ import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsComma
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.utils.GeneratedColumn
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute}
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, _}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
@@ -119,7 +120,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation,
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
-    val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val input = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val query = generateColumns(input, table, v2WriteCommand.isByName, mergeSchemaEnabled)
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
       case Some(dynamicPartitionColumns)
@@ -149,6 +151,57 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
               v2WriteCommand.isByName,
               mergeSchemaEnabled)
         }
+    }
+  }
+
+  private def generateColumns(
+      query: LogicalPlan,
+      table: DataSourceV2Relation,
+      byName: Boolean,
+      mergeSchemaEnabled: Boolean): LogicalPlan = {
+    val rowType = table.table.asInstanceOf[SparkTable].getTable.rowType()
+    val generated = rowType.getFields.asScala.filter(_.generationExpression() != null)
+    if (generated.isEmpty) {
+      return query
+    }
+    val omitted = if (byName) {
+      generated.filterNot(f => query.output.exists(a => conf.resolver(a.name, f.name())))
+    } else if (query.output.size == table.output.size - generated.size) {
+      generated
+    } else {
+      Seq.empty
+    }
+    if (omitted.isEmpty) {
+      query
+    } else {
+      omitted.foreach(PaimonGeneratedColumn.validateResultType)
+      val names = omitted.map(_.name()).toSet
+      val aligned = resolveWriteOutput(
+        query,
+        table.name,
+        table.output.filterNot(a => names.contains(a.name)),
+        byName,
+        mergeSchemaEnabled)
+      val projected = table.output.map {
+        attr =>
+          omitted.find(f => conf.resolver(f.name(), attr.name)) match {
+            case Some(field) =>
+              val sources = GeneratedColumn
+                .create(rowType, field)
+                .sourceNames()
+                .asScala
+                .map(rowType.getField)
+              val inputs = sources.map {
+                source => aligned.output.find(a => conf.resolver(a.name, source.name())).get
+              }
+              val expression = PaimonGeneratedColumn(inputs.toSeq, sources.toSeq, field)
+              Alias(expression, attr.name)(explicitMetadata = Some(attr.metadata))
+            case None => aligned.output.find(a => conf.resolver(a.name, attr.name)).get
+          }
+      }
+      val extras =
+        aligned.output.filterNot(a => table.output.exists(t => conf.resolver(t.name, a.name)))
+      Project(projected ++ extras, aligned)
     }
   }
 

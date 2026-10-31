@@ -271,6 +271,10 @@ public class FileSystemSchemaManager implements SchemaManager {
 
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
+        Optional<TableSchema> previous = latest();
+        if (previous.isPresent()) {
+            SchemaValidation.validateGeneratedColumnEvolution(previous.get(), newSchema);
+        }
         SchemaValidation.validateTableSchema(newSchema);
         SchemaValidation.validateHistoricalIcebergTypes(
                 this::listAll, new CoreOptions(newSchema.options()));
