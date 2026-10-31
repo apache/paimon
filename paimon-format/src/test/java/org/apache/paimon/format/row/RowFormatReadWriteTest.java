@@ -940,16 +940,17 @@ public class RowFormatReadWriteTest {
         FileFormat format = FileFormat.fromIdentifier("row", new Options());
 
         LocalFileIO fileIO = new LocalFileIO();
-        PositionOutputStream out = fileIO.newOutputStream(path, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-        writer.addElement(
-                GenericRow.of(
-                        1,
-                        org.apache.paimon.data.Blob.fromData(new byte[] {10, 20, 30}),
-                        org.apache.paimon.data.BinaryVector.fromPrimitiveArray(
-                                new float[] {1.0f, 2.0f, 3.0f, 4.0f})));
-        writer.addElement(GenericRow.of(2, null, null));
-        writer.close();
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+            writer.addElement(
+                    GenericRow.of(
+                            1,
+                            org.apache.paimon.data.Blob.fromData(new byte[] {10, 20, 30}),
+                            org.apache.paimon.data.BinaryVector.fromPrimitiveArray(
+                                    new float[] {1.0f, 2.0f, 3.0f, 4.0f})));
+            writer.addElement(GenericRow.of(2, null, null));
+            writer.close();
+        }
 
         FormatReaderFactory readerFactory =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
@@ -1369,12 +1370,13 @@ public class RowFormatReadWriteTest {
     private void writeRows(FileFormat format, RowType rowType, Path path, List<InternalRow> rows)
             throws IOException {
         LocalFileIO fileIO = new LocalFileIO();
-        PositionOutputStream out = fileIO.newOutputStream(path, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-        for (InternalRow row : rows) {
-            writer.addElement(row);
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+            for (InternalRow row : rows) {
+                writer.addElement(row);
+            }
+            writer.close();
         }
-        writer.close();
     }
 
     private List<InternalRow> readAllRows(FileFormat format, RowType rowType, Path path)
