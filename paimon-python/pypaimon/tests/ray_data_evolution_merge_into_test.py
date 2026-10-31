@@ -17,6 +17,7 @@
 ################################################################################
 
 import datetime
+import json
 import os
 import shutil
 import tempfile
@@ -27,9 +28,12 @@ from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pytest
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.catalog_exception import TableNoPermissionException
+from pypaimon.tests import native_authorized_update_test as auth_test
 from pypaimon.write.backend_dispatch import python_commit
 from pypaimon.ray import (
     WhenMatched, WhenNotMatched, merge_into, read_paimon,
@@ -46,6 +50,7 @@ _SKIP_CONDITION = not _HAS_DATAFUSION
 _SKIP_REASON = "pypaimon[datafusion] is required for condition expressions"
 
 _TEST_NUM_PARTITIONS = 2
+rest_catalog = auth_test.rest_catalog
 
 
 class RayDataEvolutionMergeIntoTest(unittest.TestCase):
@@ -4413,6 +4418,93 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(result['num_matched'], 0)
         out = self._read_sorted(tbl_name)
         self.assertEqual(out['name'], ['a'])
+
+
+@pytest.mark.parametrize('seed', [False, True])
+@pytest.mark.parametrize('policy', ['denied', 'filter', 'mask'])
+def test_insert_only_merge_authorizes_target_before_source(rest_catalog, seed, policy):
+    from pypaimon.ray import data_evolution_merge_into as m
+
+    catalog, server = rest_catalog
+    table = auth_test._table(catalog, seed=seed)
+    source = pa.Table.from_pylist(auth_test._ROWS[1:], schema=auth_test._SCHEMA)
+    assignment = Mock(side_effect=AssertionError('Insert before target authorization'))
+    before = auth_test._files(table)
+    with auth_test._restricted(server, table, policy) as authorize, patch.object(
+            m, '_normalize_source', side_effect=AssertionError('Source read before target authorization')
+    ) as read_source, patch.object(
+            server, '_table_snapshot_handle', side_effect=AssertionError('Unauthorized snapshot read')
+    ) as snapshot:
+        with pytest.raises(TableNoPermissionException) as error:
+            merge_into(
+                target='default.t', source=source, catalog_options=catalog.context.options.to_map(),
+                on=['name' if policy == 'mask' else 'id'],
+                when_not_matched=[WhenNotMatched({'id': source_col('id'), 'value': assignment,
+                                                  'name': source_col('name')})],
+            )
+        assert error.value.identifier == table.identifier
+        authorize.assert_called_once()
+        assert json.loads(authorize.call_args[0][1]).get('select') is None
+        read_source.assert_not_called()
+        snapshot.assert_not_called()
+    assignment.assert_not_called()
+    assert auth_test._files(table) == before
+
+
+@pytest.mark.parametrize('policy', ['filter', 'mask'])
+def test_merge_authorizes_named_source_separately(rest_catalog, policy):
+    from pypaimon.ray import data_evolution_merge_into as m
+
+    catalog, server = rest_catalog
+    table = auth_test._table(catalog)
+    catalog.create_table('default.source', Schema.from_pyarrow_schema(
+        auth_test._SCHEMA, options=table.table_schema.options), False)
+    source = catalog.get_table('default.source')
+    auth_test._append(source, auth_test._ROWS[1:])
+    before = auth_test._files(table)
+    with auth_test._restricted(server, source, policy) as authorize, patch.object(
+            m, '_normalize_source', side_effect=AssertionError('Source read before source authorization')
+    ) as read_source, patch.object(
+            server, '_table_snapshot_handle', side_effect=AssertionError('Unauthorized snapshot read')
+    ) as snapshot:
+        with pytest.raises(TableNoPermissionException) as error:
+            merge_into(
+                target='default.t', source='default.source', catalog_options=catalog.context.options.to_map(),
+                on=['id'], when_not_matched=[WhenNotMatched('*')],
+            )
+        assert error.value.identifier == source.identifier
+        assert [call[0][2] for call in authorize.call_args_list] == [table.identifier, source.identifier]
+        assert all(json.loads(call[0][1]).get('select') is None for call in authorize.call_args_list)
+        read_source.assert_not_called()
+        snapshot.assert_not_called()
+    assert auth_test._files(table) == before
+
+
+@pytest.mark.parametrize('seed', [False, True])
+def test_merge_with_full_source_and_target_grants(rest_catalog, seed):
+    catalog, server = rest_catalog
+    table = auth_test._table(catalog, seed=seed)
+    catalog.create_table('default.source', Schema.from_pyarrow_schema(
+        auth_test._SCHEMA, options=table.table_schema.options), False)
+    source = catalog.get_table('default.source')
+    rows = [dict(id=2, value=22, name='B'), dict(id=4, value=40, name='d')]
+    auth_test._append(source, rows)
+    ray.init(ignore_reinit_error=True, num_cpus=4)
+    try:
+        with patch.object(server, '_table_query_auth_handle', wraps=server._table_query_auth_handle) as authorize:
+            result = merge_into(
+                target='default.t', source='default.source', catalog_options=catalog.context.options.to_map(),
+                on=['id'], when_matched=[WhenMatched.update('*')], when_not_matched=[WhenNotMatched('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+            assert [call[0][2] for call in authorize.call_args_list[:2]] == [table.identifier, source.identifier]
+            assert all(json.loads(call[0][1]).get('select') is None for call in authorize.call_args_list[:2])
+    finally:
+        ray.shutdown()
+    assert result['num_matched'] == (1 if seed else 0)
+    assert result['num_inserted'] == (1 if seed else 2)
+    expected = [auth_test._ROWS[0], rows[0], auth_test._ROWS[2], rows[1]] if seed else rows
+    assert auth_test._rows(table) == expected
 
 
 class TargetProjectionTest(unittest.TestCase):
