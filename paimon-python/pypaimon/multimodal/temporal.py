@@ -17,12 +17,14 @@
 """Temporal alignment for multimodal table scans."""
 
 from bisect import bisect_left, bisect_right
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from datetime import timedelta
 from fractions import Fraction
-from functools import lru_cache
+from functools import lru_cache, partial
 import json
 import math
 from numbers import Integral, Real
+from threading import Event
 
 import numpy as np
 import pyarrow as pa
@@ -193,24 +195,29 @@ class TemporalAlignment:
         result.schema = result._output_schema()
         return result
 
-    def to_arrow_batch_reader(self, *, batch_size=1024):
-        """Index right-side timestamps, then stream aligned rows in batches."""
+    def to_arrow_batch_reader(self, *, batch_size=1024, parallelism=1):
+        """Stream aligned batches; ``parallelism`` limits concurrent sources (default 1)."""
         if (isinstance(batch_size, bool)
                 or not isinstance(batch_size, int)
                 or batch_size <= 0):
             raise ValueError("batch_size must be a positive integer.")
 
+        if (isinstance(parallelism, bool)
+                or not isinstance(parallelism, int) or parallelism <= 0):
+            raise ValueError("parallelism must be a positive integer.")
+
         anchor_metadata = _metadata_batches(
             self._anchor, self._on, self._by, batch_size)
         row_group_cache = _ParquetRowGroupCacheRequest(
             _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE)
-        anchor_fetcher = _RowIdFetcher(self._anchor, row_group_cache)
-        source_fetchers = []
-        for source in self._sources:
+
+        def prepare_source(source):
             source.plan()
-            source_fetchers.append(
-                _RowIdFetcher(
-                    source.query, row_group_cache, source._fetch_names))
+            return _RowIdFetcher(source.query, row_group_cache, source._fetch_names)
+
+        tasks = [partial(_RowIdFetcher, self._anchor, row_group_cache)]
+        tasks.extend(partial(prepare_source, source) for source in self._sources)
+        anchor_fetcher, *source_fetchers = _run_source_tasks(tasks, parallelism)
         schema = self._output_schema(anchor_fetcher.schema, source_fetchers)
         self.schema = schema
 
@@ -218,7 +225,7 @@ class TemporalAlignment:
             try:
                 for metadata in anchor_metadata:
                     yield from self._build_batches(
-                        metadata, anchor_fetcher, source_fetchers, schema)
+                        metadata, anchor_fetcher, source_fetchers, schema, parallelism)
             finally:
                 anchor_metadata.close()
 
@@ -308,7 +315,7 @@ class TemporalAlignment:
         return pa.schema(fields, metadata=anchor_schema.metadata)
 
     def _build_batch(
-            self, anchor_rows, anchor_fetcher, source_fetchers, schema):
+            self, anchor_rows, anchor_fetcher, source_fetchers, schema, parallelism=1):
         native_keys = None
         if isinstance(anchor_rows, pa.Table):
             time_type = self._anchor_table_schema.field(self._on).type
@@ -318,12 +325,14 @@ class TemporalAlignment:
                 anchor_rows = _metadata_rows(anchor_rows, self._on, time_type)
         else:
             anchor_ids = [row[_ROW_ID] for row in anchor_rows]
-        anchor = anchor_fetcher.fetch(anchor_ids)
+        tasks = [partial(anchor_fetcher.fetch, anchor_ids)]
+        tasks.extend(partial(source.build_arrays, anchor_rows, fetcher, native_keys)
+                     for source, fetcher in zip(self._sources, source_fetchers))
+        anchor, *source_arrays = _run_source_tasks(tasks, parallelism)
         anchor.validate()
         arrays = [anchor[name] for name in self._anchor_schema.names]
-
-        for source, fetcher in zip(self._sources, source_fetchers):
-            arrays.extend(source.build_arrays(anchor_rows, fetcher, native_keys))
+        for columns in source_arrays:
+            arrays.extend(columns)
 
         if arrays:
             table = pa.Table.from_arrays(
@@ -334,20 +343,52 @@ class TemporalAlignment:
         return batch.replace_schema_metadata(schema.metadata)
 
     def _build_batches(
-            self, anchor_rows, anchor_fetcher, source_fetchers, schema):
+            self, anchor_rows, anchor_fetcher, source_fetchers, schema, parallelism=1):
         try:
             yield self._build_batch(
-                anchor_rows, anchor_fetcher, source_fetchers, schema)
+                anchor_rows, anchor_fetcher, source_fetchers, schema, parallelism)
         except pa.ArrowInvalid as error:
             if len(anchor_rows) < 2 or "offset" not in str(error).lower():
                 raise
             middle = len(anchor_rows) // 2
             yield from self._build_batches(
                 anchor_rows[:middle], anchor_fetcher,
-                source_fetchers, schema)
+                source_fetchers, schema, parallelism)
             yield from self._build_batches(
                 anchor_rows[middle:], anchor_fetcher,
-                source_fetchers, schema)
+                source_fetchers, schema, parallelism)
+
+
+def _run_source_tasks(tasks, parallelism):
+    if parallelism == 1 or len(tasks) < 2:
+        return [task() for task in tasks]
+    failed = Event()
+
+    def run(task):
+        # A worker may dequeue another task before the caller observes failure.
+        if failed.is_set():
+            return None
+        try:
+            return task()
+        except BaseException:
+            failed.set()
+            raise
+
+    with ThreadPoolExecutor(max_workers=min(parallelism, len(tasks))) as executor:
+        futures = []
+        try:
+            for task in tasks:
+                futures.append(executor.submit(run, task))
+            done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+            for future in done:
+                if future.exception() is not None:
+                    future.result()
+            return [future.result() for future in futures]
+        except BaseException:
+            failed.set()
+            for future in futures:
+                future.cancel()
+            raise
 
 
 class _AsOfJoinRight:

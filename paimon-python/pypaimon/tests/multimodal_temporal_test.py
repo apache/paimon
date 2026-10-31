@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import tracemalloc
 import unittest
 from datetime import datetime, timedelta
@@ -84,6 +85,171 @@ class MultimodalTemporalTest(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _parallel_alignment(self):
+        tables = []
+        for name in ("a", "b", "c", "d"):
+            table = self._table("parallel_" + name, {
+                "episode_id": pa.int32(), "event_time": pa.int64(), name: pa.int64()})
+            table.add([{"episode_id": 1, "event_time": i, name: i} for i in range(3)])
+            tables.append(table)
+        aligned = pmm.join_asof(
+            tables[0].scan(), tables[1].scan(),
+            on="event_time", by="episode_id")
+        return aligned.join_asof(tables[2].scan()).join_asof(tables[3].scan())
+
+    def test_parallel_sources_preserve_results_and_bound_reads(self):
+        aligned = self._parallel_alignment()
+        reader = aligned.to_arrow_batch_reader(parallelism=1)
+        try:
+            expected = reader.read_all()
+        finally:
+            reader.close()
+        barrier = threading.Barrier(2)
+        lock = threading.Lock()
+        active = [0, 0]
+        original = temporal._RowIdFetcher.fetch
+
+        def fetch(fetcher, row_ids):
+            with lock:
+                active[0] += 1
+                active[1] = max(active)
+            try:
+                barrier.wait(timeout=10)
+                return original(fetcher, row_ids)
+            finally:
+                with lock:
+                    active[0] -= 1
+
+        with mock.patch.object(temporal._RowIdFetcher, "fetch", fetch):
+            reader = aligned.to_arrow_batch_reader(batch_size=2, parallelism=2)
+            try:
+                actual = reader.read_all()
+            finally:
+                reader.close()
+        self.assertEqual(expected, actual)
+        self.assertEqual([0, 2], active)
+
+    def test_parallel_sources_plan_independently(self):
+        aligned = self._parallel_alignment()
+        barrier = threading.Barrier(3)
+        original = temporal._AsOfJoinRight.plan
+
+        def plan(source):
+            barrier.wait(timeout=10)
+            return original(source)
+
+        with mock.patch.object(temporal._AsOfJoinRight, "plan", plan):
+            reader = aligned.to_arrow_batch_reader(parallelism=4)
+            try:
+                self.assertEqual(3, len(reader.read_all()))
+            finally:
+                reader.close()
+
+    def test_parallel_payload_failure_joins_workers_and_closes_input(self):
+        aligned = self._parallel_alignment()
+        barrier = threading.Barrier(4)
+        lock = threading.Lock()
+        finished = []
+        closed = []
+        original_fetch = temporal._RowIdFetcher.fetch
+        original_metadata = temporal._metadata_batches
+
+        def metadata(*args):
+            try:
+                yield from original_metadata(*args)
+            finally:
+                closed.append(True)
+
+        def fetch(fetcher, row_ids):
+            try:
+                barrier.wait(timeout=10)
+                if "b" in fetcher.schema.names:
+                    raise RuntimeError("payload failed")
+                return original_fetch(fetcher, row_ids)
+            finally:
+                with lock:
+                    finished.append(True)
+
+        with mock.patch.object(temporal, "_metadata_batches", metadata), \
+                mock.patch.object(temporal._RowIdFetcher, "fetch", fetch):
+            reader = aligned.to_arrow_batch_reader(parallelism=4)
+            try:
+                with self.assertRaisesRegex(Exception, "payload failed"):
+                    reader.read_all()
+                self.assertEqual(4, len(finished))
+                self.assertEqual([True], closed)
+            finally:
+                reader.close()
+
+    def test_parallel_planning_failure_joins_other_sources(self):
+        aligned = self._parallel_alignment()
+        barrier = threading.Barrier(3)
+        finished = []
+        original = temporal._AsOfJoinRight.plan
+
+        def plan(source):
+            try:
+                barrier.wait(timeout=10)
+                if "b" in source.payload_schema.names:
+                    raise RuntimeError("planning failed")
+                return original(source)
+            finally:
+                finished.append(source.label)
+
+        with mock.patch.object(temporal._AsOfJoinRight, "plan", plan):
+            with self.assertRaisesRegex(RuntimeError, "planning failed"):
+                aligned.to_arrow_batch_reader(parallelism=4)
+            self.assertEqual(3, len(finished))
+
+    def test_source_failure_skips_queued_work_before_slow_source_finishes(self):
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+        slow_finished = threading.Event()
+        queued_started = threading.Event()
+        original_wait = temporal.wait
+        failure = RuntimeError("source failed")
+
+        def slow():
+            slow_started.set()
+            try:
+                if not release_slow.wait(timeout=10):
+                    raise AssertionError("Slow source was not released")
+            finally:
+                slow_finished.set()
+
+        def fail():
+            if not slow_started.wait(timeout=10):
+                raise AssertionError("Slow source did not start")
+            raise failure
+
+        def observe(futures, **kwargs):
+            try:
+                # Let the worker dequeue the third wrapper before cancellation.
+                self.assertIsNone(futures[2].result(timeout=10))
+                self.assertFalse(queued_started.is_set())
+                self.assertFalse(slow_finished.is_set())
+                done, pending = original_wait(futures, **kwargs)
+                self.assertIn(futures[1], done)
+                self.assertIn(futures[0], pending)
+                return done, pending
+            finally:
+                release_slow.set()
+
+        with mock.patch.object(temporal, "wait", side_effect=observe) as waiting:
+            with self.assertRaises(RuntimeError) as error:
+                temporal._run_source_tasks([slow, fail, queued_started.set], 2)
+            self.assertIs(failure, error.exception)
+            waiting.assert_called_once()
+        self.assertTrue(slow_finished.is_set())
+        self.assertFalse(queued_started.is_set())
+
+    def test_temporal_parallelism_validation(self):
+        aligned = self._parallel_alignment()
+        for value in (True, 0, -1, 1.5, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "parallelism"):
+                    aligned.to_arrow_batch_reader(parallelism=value)
 
     def test_metadata_batches_coalesce_without_reading_ahead(self):
         metadata = pa.table({"episode_id": [1] * 11,
