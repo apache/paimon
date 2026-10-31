@@ -107,7 +107,7 @@ public class UriReaderFactoryTest {
     public void testReadFileUriWithUnescapedCharacters() throws Exception {
         java.nio.file.Path file = tempPath.resolve("\u4ed5\u5e9c\u516c\u9986 (2).jpg");
         Files.write(file, new byte[] {1, 2});
-        String fileUri = "file://" + file.toAbsolutePath();
+        String fileUri = new Path(file.toUri()).toString();
 
         UriReader reader = factory.create(fileUri);
 
