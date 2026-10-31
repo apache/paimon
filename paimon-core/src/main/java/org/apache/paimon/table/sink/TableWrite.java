@@ -42,9 +42,9 @@ public interface TableWrite extends AutoCloseable {
     TableWrite withIOManager(IOManager ioManager);
 
     /**
-     * Specifies the write row type. For tables with generated partition columns, this declares the
-     * input layout: only generated columns may be omitted, and the writer materializes the full
-     * table row before routing and writing.
+     * Specifies the write row type. For tables with generated columns, this declares the input
+     * layout: only generated columns may be omitted, and the writer materializes the full table row
+     * before routing and writing.
      */
     TableWrite withWriteType(RowType writeType);
 

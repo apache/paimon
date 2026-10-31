@@ -175,7 +175,7 @@ public class CatalogUtils {
         for (DataField field : schema.fields()) {
             checkArgument(
                     field.generationExpression() == null || tableType == TableType.TABLE,
-                    "Generated partition columns are only supported for native Paimon tables.");
+                    "Generated columns are only supported for native Paimon tables.");
             validateDefaultValue(field.type(), field.defaultValue());
         }
     }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -50,7 +51,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Storage and schema contracts for generated partition columns. */
+/** Storage and schema contracts for generated columns. */
 class GeneratedPartitionColumnTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -116,15 +117,15 @@ class GeneratedPartitionColumnTest {
         assertThat(changed.logicalRowType().getField("dt").generationExpression())
                 .isEqualTo("CAST(ts AS DATE)");
         assertThatThrownBy(() -> manager.commitChanges(SchemaChange.renameColumn("ts", "time")))
-                .hasMessageContaining("referenced by generated partition column");
+                .hasMessageContaining("referenced by generated column");
         assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("ts")))
-                .hasMessageContaining("referenced by generated partition column");
+                .hasMessageContaining("referenced by generated column");
         assertThatThrownBy(
                         () ->
                                 manager.commitChanges(
                                         SchemaChange.updateColumnType(
                                                 "ts", DataTypes.TIMESTAMP(6))))
-                .hasMessageContaining("referenced by generated partition column");
+                .hasMessageContaining("referenced by generated column");
         assertThatThrownBy(
                         () ->
                                 manager.commitChanges(
@@ -138,10 +139,9 @@ class GeneratedPartitionColumnTest {
         Schema plain =
                 Schema.newBuilder()
                         .column("ts", DataTypes.TIMESTAMP(3))
-                        .generatedColumn("dt", DataTypes.DATE(), "CAST(ts AS DATE)")
+                        .generatedColumn("dt", DataTypes.INT(), "CAST(ts AS DATE)")
                         .build();
-        assertThatThrownBy(() -> validate(plain))
-                .hasMessageContaining("must be a partition column");
+        assertThatThrownBy(() -> validate(plain)).hasMessageContaining("does not match");
         Schema defaults =
                 Schema.newBuilder()
                         .column("ts", DataTypes.TIMESTAMP(3))
@@ -163,8 +163,79 @@ class GeneratedPartitionColumnTest {
                                         new DataField(0, "dt", DataTypes.DATE())
                                                 .newGenerationExpression("CAST(ts AS DATE)")))
                         .build();
-        assertThatThrownBy(() -> validate(nested))
-                .hasMessageContaining("top-level partition columns");
+        assertThatThrownBy(() -> validate(nested)).hasMessageContaining("top-level columns");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"append", "primary-key", "data-evolution"})
+    void testNonPartitionTransformsAndAllDependencies(String mode) throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("ts", DataTypes.TIMESTAMP(3))
+                        .column("name", DataTypes.STRING())
+                        .column("days", DataTypes.INT())
+                        .generatedColumn("dt", DataTypes.DATE(), "DATE_ADD(CAST(ts AS DATE), days)")
+                        .generatedColumn(
+                                "label", DataTypes.STRING(), "CONCAT(UPPER(name), '_', name)")
+                        .generatedColumn("year", DataTypes.INT(), "YEAR(ts)")
+                        .partitionKeys("dt");
+        if (mode.equals("primary-key")) {
+            builder.primaryKey("id", "dt").option("bucket", "1");
+        } else if (mode.equals("data-evolution")) {
+            builder.option("row-tracking.enabled", "true").option("data-evolution.enabled", "true");
+        }
+        Path path = new Path(tempDir.resolve(UUID.randomUUID().toString()).toUri());
+        FileSystemSchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(builder.build());
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        BatchWriteBuilder writes = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        writes.newWrite()
+                                .withWriteType(
+                                        table.rowType().project("name", "days", "ts", "id"));
+                BatchTableCommit commit = writes.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("ab"), 2, Timestamp.fromEpochMillis(-1), 1));
+            commit.commit(write.prepareCommit());
+        }
+        try (RecordReaderIterator<InternalRow> rows =
+                new RecordReaderIterator<>(table.newRead().createReader(table.newScan().plan()))) {
+            InternalRow row = rows.next();
+            assertThat(row.getInt(4)).isEqualTo(1);
+            assertThat(row.getString(5).toString()).isEqualTo("AB_ab");
+            assertThat(row.getInt(6)).isEqualTo(1969);
+            assertThat(rows.hasNext()).isFalse();
+        }
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.renameColumn("days", "offset")))
+                .hasMessageContaining("referenced by generated column");
+    }
+
+    @Test
+    void testRoutingWithoutGeneratedColumnsPreservesRawValues() throws Exception {
+        List<FileStoreTable> tables = new ArrayList<>();
+        for (boolean defaults : new boolean[] {false, true}) {
+            Schema.Builder builder =
+                    Schema.newBuilder()
+                            .column("pt", DataTypes.INT(), null, defaults ? "7" : null)
+                            .column("id", DataTypes.INT(), null, defaults ? "9" : null)
+                            .partitionKeys("pt")
+                            .primaryKey("pt", "id")
+                            .option("bucket", "1031")
+                            .option("bucket-key", "id");
+            Path path = new Path(tempDir.resolve(UUID.randomUUID().toString()).toUri());
+            new FileSystemSchemaManager(LocalFileIO.create(), path).createTable(builder.build());
+            tables.add(FileStoreTableFactory.create(LocalFileIO.create(), path));
+        }
+        GenericRow raw = GenericRow.of(null, null);
+        try (BatchTableWrite plain = tables.get(0).newBatchWriteBuilder().newWrite();
+                BatchTableWrite defaults = tables.get(1).newBatchWriteBuilder().newWrite()) {
+            assertThat(defaults.getPartition(raw).isNullAt(0)).isTrue();
+            assertThat(defaults.getBucket(raw)).isEqualTo(plain.getBucket(raw));
+            assertThat(defaults.getBucket(raw))
+                    .isNotEqualTo(defaults.getBucket(GenericRow.of(7, 9)));
+        }
     }
 
     private FileStoreTable createTable(boolean primaryKey) throws Exception {

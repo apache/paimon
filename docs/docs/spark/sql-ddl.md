@@ -90,30 +90,43 @@ TBLPROPERTIES ('primary-key' = 'dt,hh,user_id');
 Omit `primary-key` to create an append table. For storage layout and table options, see
 [Primary Key Tables](../primary-key-table/) and [Append Tables](../append-table/).
 
-### Generated Partition Columns
+### Generated Columns
 
-On Spark 3.5 with `org.apache.paimon.spark.SparkCatalog`, define a physical partition column
+On Spark 3.5 with `org.apache.paimon.spark.SparkCatalog`, define physical top-level columns
 with `GENERATED ALWAYS AS`:
 
 ```sql
 CREATE TABLE events (
     id BIGINT,
+    name STRING,
     event_time TIMESTAMP_NTZ,
-    dt DATE GENERATED ALWAYS AS (CAST(event_time AS DATE))
+    dt DATE GENERATED ALWAYS AS (CAST(event_time AS DATE)),
+    event_year INT GENERATED ALWAYS AS (YEAR(event_time)),
+    label STRING GENERATED ALWAYS AS (UPPER(name))
 ) USING paimon PARTITIONED BY (dt);
 
-INSERT INTO events (id, event_time)
-VALUES (1, TIMESTAMP_NTZ '2026-10-30 12:00:00');
+INSERT INTO events (id, name, event_time)
+VALUES (1, 'event', TIMESTAMP_NTZ '2026-10-30 12:00:00');
 ```
 
-The writer generates `dt` before partition routing. You can also provide `dt` explicitly, but it
-must equal the generated date, including NULL handling. Expressions are stored in the column's
-schema definition. Only a cast from a top-level `TIMESTAMP_NTZ` source to a `DATE` partition field
-is supported. Ordinary append inserts and primary-key deduplicate writes are supported; existing
+The writer fills omitted generated columns before partition routing. You can also provide their
+values explicitly, but they must equal the expression results, including NULL handling.
+Expressions are stored in the column's schema definition and evaluated with Paimon transforms.
+Ordinary append inserts and primary-key deduplicate writes are supported; existing
 primary-key and partition constraints still apply. Partial-column writes are not supported.
 
+Supported calls include `CAST`, `YEAR`, `MONTH`, `DAY`/`DAYOFMONTH`, `HOUR`, `MINUTE`, `SECOND`,
+`QUARTER`, `DAYOFWEEK`, `DAYOFYEAR`, `WEEKDAY`, `WEEKOFYEAR`, `DATE_ADD`, `DATEDIFF`/`DATE_DIFF`,
+`TRUNC`, `UPPER`, `LOWER`, `CONCAT`, `CONCAT_WS`, `SUBSTRING`/`SUBSTR`, `LENGTH`/`CHAR_LENGTH`,
+`BIT_LENGTH`, `TRANSLATE`, `OVERLAY`, `LPAD`, `RPAD`, `TRIM`, `LTRIM`, and `RTRIM`.
+Calls use comma-separated arguments; CAST uses `CAST(expression AS type)`. String and integer
+literals, NULL arguments, DATE literals, and nested calls are supported. Only ordinary top-level
+columns may be referenced. The result type must match the declared column type. Nested field
+references, generated-column dependencies, nondeterministic functions, and `TIMESTAMP_LTZ`
+inputs or cast targets are not supported.
+
 The Java schema builder exposes `generatedColumn(name, type, expression)`. Java writers can call
-`withWriteType` with all ordinary fields to omit generated partition fields from input rows. The
+`withWriteType` with all ordinary fields to omit generated fields from input rows. The
 writer fills in the generated fields and writes the full table schema.
 Flink's existing virtual computed columns retain their original semantics; this feature does not
 add Flink SQL syntax for physical generated columns.

@@ -43,9 +43,8 @@ public interface BatchTableWrite extends TableWrite {
     List<CommitMessage> prepareCommit() throws Exception;
 
     /**
-     * Specifies the write row type. Tables with generated partition columns support omitting those
-     * columns. Other projections require a table without a primary key and with row tracking
-     * enabled.
+     * Specifies the write row type. Tables with generated columns support omitting those columns.
+     * Other projections require a table without a primary key and with row tracking enabled.
      */
     BatchTableWrite withWriteType(RowType writeType);
 }

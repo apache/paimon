@@ -115,14 +115,14 @@ A DataField describes one column, including fields nested inside a row type.
 | `type` | String or JSON type object | Logical type, including nullability and nested type information. |
 | `description` | String, optional | Field comment. |
 | `defaultValue` | String, optional | Stored default value definition. Engine support determines how it is used. |
-| `generationExpression` | String, optional | Expression generating a physical partition column. Mutually exclusive with `defaultValue`. |
+| `generationExpression` | String, optional | SQL scalar expression generating a physical top-level column. Mutually exclusive with `defaultValue`. |
 
 Primitive types commonly use strings such as `BIGINT NOT NULL`. Nested types need their
 structured type representation. See [Data Types](../data-types) for the logical type reference.
 
-### Generated Partition Columns
+### Generated Columns
 
-A top-level partition field may define `generationExpression`, for example:
+A top-level field, including a partition field, may define `generationExpression`, for example:
 
 ```json
 {
@@ -133,22 +133,29 @@ A top-level partition field may define `generationExpression`, for example:
 }
 ```
 
-The first implementation supports only `CAST(timestamp_column AS DATE)`, where the source is
-`TIMESTAMP WITHOUT TIME ZONE` and is an ordinary top-level field. It uses the timestamp's calendar
-date, independently of the writer's default time zone. Generated partition columns are physical
-fields; readers use the stored values without evaluating the expression.
+Writers compile the SQL expression into Paimon `Transform` operations once at initialization.
+Expressions may reference ordinary top-level fields and compose supported scalar calls, such as
+`YEAR(event_time)`, `UPPER(name)`, `CONCAT(UPPER(name), '-', name)`, and
+`DATE_ADD(CAST(event_time AS DATE), days)`. The expression result type must match the declared
+column type. Nested field references, references to other generated columns, arbitrary SQL,
+UDFs, and nondeterministic functions are not supported. `TIMESTAMP WITH LOCAL TIME ZONE` inputs
+and cast targets are rejected because their results can depend on a writer's default time zone.
+
+Generated columns are physical fields; readers use the stored values without evaluating the
+expression. A cast from `TIMESTAMP WITHOUT TIME ZONE` to `DATE` uses the timestamp's calendar
+date, independently of the writer's default time zone.
 
 Adapted writers generate omitted columns and validate explicitly supplied values using NULL-safe
 equality. Explicit NULL therefore fails if the expression produces a non-NULL value. A key-only
-DELETE may supply the existing partition value without the timestamp source.
+DELETE may supply existing generated values without their source values being populated.
 
 Definitions are supported at table creation. Changing a definition or renaming, dropping, or
-changing the type of its source is not supported. Primary-key tables require the deduplicate merge
+changing the type of any source is not supported. Primary-key tables require the deduplicate merge
 engine. Partial-column writes, including Data Evolution partial updates, are not supported for
-tables with generated partition columns.
+tables with generated columns.
 
 Use clients supporting this attribute for writes; older clients may ignore it. Its presence does
-not establish compatibility with older writers. See [Spark DDL](../../spark/sql-ddl#generated-partition-columns)
+not establish compatibility with older writers. See [Spark DDL](../../spark/sql-ddl#generated-columns)
 for SQL examples.
 
 ## Update Schema

@@ -193,13 +193,15 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public BinaryRow getPartition(InternalRow row) {
-        keyAndBucketExtractor.setRecord(prepareRow(row));
+        keyAndBucketExtractor.setRecord(
+                generatedColumnRow == null ? row : generatedColumnRow.replaceRow(row));
         return keyAndBucketExtractor.partition();
     }
 
     @Override
     public int getBucket(InternalRow row) {
-        keyAndBucketExtractor.setRecord(prepareRow(row));
+        keyAndBucketExtractor.setRecord(
+                generatedColumnRow == null ? row : generatedColumnRow.replaceRow(row));
         return keyAndBucketExtractor.bucket();
     }
 

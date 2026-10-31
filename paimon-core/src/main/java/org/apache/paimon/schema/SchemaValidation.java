@@ -1622,7 +1622,7 @@ public class SchemaValidation {
         }
     }
 
-    /** Rejects changes which invalidate stored generated partition values or their dependencies. */
+    /** Rejects changes which invalidate stored generated values or their dependencies. */
     public static void validateGeneratedColumnEvolution(TableSchema previous, TableSchema next) {
         for (DataField field : previous.fields()) {
             if (field.generationExpression() == null) {
@@ -1634,25 +1634,27 @@ public class SchemaValidation {
                             && field.name().equals(target.name())
                             && field.type().equals(target.type())
                             && field.generationExpression().equals(target.generationExpression()),
-                    "Cannot change generated partition column '%s'.",
+                    "Cannot change generated column '%s'.",
                     field.name());
             GeneratedColumn expression = GeneratedColumn.create(previous.logicalRowType(), field);
-            DataField source = previous.logicalRowType().getField(expression.sourceName());
-            DataField newSource = next.idToFieldMap().get(source.id());
-            checkArgument(
-                    newSource != null
-                            && source.name().equals(newSource.name())
-                            && source.type().equals(newSource.type()),
-                    "Cannot rename, drop or change the type of column '%s' referenced by generated partition column '%s'.",
-                    source.name(),
-                    field.name());
+            for (String sourceName : expression.sourceNames()) {
+                DataField source = previous.logicalRowType().getField(sourceName);
+                DataField newSource = next.idToFieldMap().get(source.id());
+                checkArgument(
+                        newSource != null
+                                && source.name().equals(newSource.name())
+                                && source.type().equals(newSource.type()),
+                        "Cannot rename, drop or change the type of column '%s' referenced by generated column '%s'.",
+                        source.name(),
+                        field.name());
+            }
         }
         for (DataField field : next.fields()) {
             if (field.generationExpression() != null) {
                 DataField old = previous.idToFieldMap().get(field.id());
                 checkArgument(
                         old != null && old.generationExpression() != null,
-                        "Generated partition columns can only be defined when creating a table.");
+                        "Generated columns can only be defined when creating a table.");
             }
         }
     }
@@ -1665,10 +1667,6 @@ public class SchemaValidation {
                 continue;
             }
             checkArgument(
-                    schema.partitionKeys().contains(field.name()),
-                    "Generated column '%s' must be a partition column.",
-                    field.name());
-            checkArgument(
                     field.defaultValue() == null,
                     "Generated column '%s' cannot have a default value.",
                     field.name());
@@ -1676,7 +1674,7 @@ public class SchemaValidation {
             checkArgument(
                     schema.primaryKeys().isEmpty()
                             || options.mergeEngine() == CoreOptions.MergeEngine.DEDUPLICATE,
-                    "Generated partition columns only support the deduplicate merge engine.");
+                    "Generated columns only support the deduplicate merge engine.");
         }
     }
 
@@ -1685,7 +1683,7 @@ public class SchemaValidation {
             for (DataField nested : ((RowType) type).getFields()) {
                 checkArgument(
                         nested.generationExpression() == null,
-                        "Generated columns must be top-level partition columns.");
+                        "Generated columns must be top-level columns.");
                 validateNoNestedGeneratedColumns(nested.type());
             }
         } else if (type instanceof ArrayType) {

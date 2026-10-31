@@ -27,7 +27,6 @@ import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -96,11 +95,12 @@ public final class GeneratedColumnRow {
             if (input.getRowKind() == RowKind.DELETE && mapping[target] >= 0) {
                 continue;
             }
-            Integer expected = column.evaluate(result);
+            Object expected = column.evaluate(result);
             if (mapping[target] >= 0) {
                 checkArgument(
-                        Objects.equals(result.getField(target), expected),
-                        "Value for generated partition column '%s' does not match generation expression '%s'.",
+                        InternalRowUtils.equals(
+                                result.getField(target), expected, rowType.getTypeAt(target)),
+                        "Value for generated column '%s' does not match generation expression '%s'.",
                         rowType.getFields().get(target).name(),
                         rowType.getFields().get(target).generationExpression());
             }

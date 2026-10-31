@@ -27,18 +27,16 @@ import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsComma
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.utils.GeneratedColumn
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
-import org.apache.spark.sql.catalyst.analysis.ResolvedTable
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Cast}
+import org.apache.spark.sql.catalyst.analysis.{ResolvedTable, UnresolvedAttribute}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute}
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, _}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
-import org.apache.spark.sql.types.DateType
 
 import scala.collection.JavaConverters._
 
@@ -122,7 +120,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
     val input = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
-    val query = generatePartitionColumns(input, table, v2WriteCommand.isByName, mergeSchemaEnabled)
+    val query = generateColumns(input, table, v2WriteCommand.isByName, mergeSchemaEnabled)
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
       case Some(dynamicPartitionColumns)
@@ -155,7 +153,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     }
   }
 
-  private def generatePartitionColumns(
+  private def generateColumns(
       query: LogicalPlan,
       table: DataSourceV2Relation,
       byName: Boolean,
@@ -183,16 +181,24 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         attr =>
           omitted.find(f => conf.resolver(f.name(), attr.name)) match {
             case Some(field) =>
-              val sourceName = GeneratedColumn.create(rowType, field).sourceName()
-              val source = aligned.output.find(a => conf.resolver(a.name, sourceName)).getOrElse {
-                throw new IllegalArgumentException(
-                  s"Missing source column '$sourceName' for generated partition '${field.name()}'.")
-              }
-              Alias(Cast(source, DateType), attr.name)(explicitMetadata = Some(attr.metadata))
+              val expression = session.sessionState.sqlParser
+                .parseExpression(field.generationExpression())
+                .transform {
+                  case reference: UnresolvedAttribute =>
+                    aligned.output
+                      .find(a => conf.resolver(a.name, reference.nameParts.head))
+                      .getOrElse {
+                        throw new IllegalArgumentException(
+                          s"Missing source column '${reference.name}' for generated column '${field.name()}'.")
+                      }
+                }
+              Alias(expression, attr.name)(explicitMetadata = Some(attr.metadata))
             case None => aligned.output.find(a => conf.resolver(a.name, attr.name)).get
           }
       }
-      Project(projected, aligned)
+      val generated = session.sessionState.analyzer.execute(Project(projected, aligned))
+      session.sessionState.analyzer.checkAnalysis(generated)
+      generated
     }
   }
 

@@ -336,7 +336,7 @@ public class Schema {
             return column(columnName, dataType, description, defaultValue, null);
         }
 
-        /** Declares a physical generated column. Only partition columns are currently supported. */
+        /** Declares a physical generated top-level column. */
         public Builder generatedColumn(
                 String columnName, DataType dataType, String generationExpression) {
             Preconditions.checkNotNull(

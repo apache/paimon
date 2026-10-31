@@ -45,7 +45,6 @@ import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.VectorType;
-import org.apache.paimon.utils.EncodingUtils;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.GeneratedColumn;
 import org.apache.paimon.utils.StringUtils;
@@ -756,13 +755,15 @@ public class SparkCatalog extends SparkBaseCatalog
                             ? field.metadata().getString(GENERATION_EXPRESSION_METADATA_KEY)
                             : null;
             if (generationExpression != null) {
-                String source = GeneratedColumn.sourceName(generationExpression);
-                String resolved =
-                        resolveColumnNames(Collections.singletonList(source), fieldNames).get(0);
-                if (!source.equals(resolved)) {
-                    generationExpression =
-                            "CAST(" + EncodingUtils.escapeIdentifier(resolved) + " AS DATE)";
-                }
+                generationExpression =
+                        GeneratedColumn.normalizeExpression(
+                                generationExpression,
+                                SparkTypeUtils.toPaimonRowType(schema),
+                                source ->
+                                        resolveColumnNames(
+                                                        Collections.singletonList(source),
+                                                        fieldNames)
+                                                .get(0));
             }
             schemaBuilder.column(
                     name,
