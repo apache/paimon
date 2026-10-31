@@ -607,6 +607,150 @@ class FileSystemCatalogTest(unittest.TestCase):
             table_write.close()
             table_commit.close()
 
+    def test_list_partitions_null_values(self):
+        from datetime import date
+
+        from pypaimon.common.options.core_options import CoreOptions
+
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+        cases = [
+            (pa.date32(), date(2026, 8, 26), "2026-08-26"),
+            (pa.string(), "None", "None"),
+        ]
+        for default_name in [None, "custom_null"]:
+            for data_type, value, text in cases:
+                with self.subTest(default_name=default_name, data_type=data_type):
+                    identifier = "test_db.null_parts_{}_{}".format(
+                        default_name or "default", "date" if pa.types.is_date32(data_type) else "string")
+                    pa_schema = pa.schema([('dt', data_type), ('value', pa.int32())])
+                    options = {"partition.legacy-name": "false"}
+                    if default_name is not None:
+                        options["partition.default-name"] = default_name
+                    schema = Schema.from_pyarrow_schema(
+                        pa_schema, partition_keys=['dt'], options=options)
+                    catalog.create_table(identifier, schema, False)
+                    table = catalog.get_table(identifier)
+                    builder = table.new_batch_write_builder()
+                    writer = builder.new_write()
+                    committer = builder.new_commit()
+                    try:
+                        writer.write_arrow(pa.Table.from_pydict(
+                            {'dt': [None, value], 'value': [1, 2]}, schema=pa_schema))
+                        committer.commit(writer.prepare_commit())
+                    finally:
+                        writer.close()
+                        committer.close()
+                    null_name = default_name or CoreOptions.PARTITION_DEFAULT_NAME.default_value()
+                    partitions = catalog.list_partitions_paged(identifier).elements
+                    self.assertEqual(
+                        {p.spec['dt']: p.record_count for p in partitions},
+                        {null_name: 1, text: 1})
+                    filtered = catalog.list_partitions_paged(
+                        identifier, partition_name_pattern='dt=' + null_name)
+                    self.assertEqual([p.spec for p in filtered.elements], [{'dt': null_name}])
+                    catalog.drop_table(identifier)
+
+    def test_list_and_drop_nanosecond_partitions(self):
+        import pandas as pd
+
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+        for legacy in [True, False]:
+            with self.subTest(legacy=legacy):
+                identifier = "test_db.timestamp_{}".format(legacy)
+                arrow_schema = pa.schema([('dt', pa.timestamp('ns')), ('value', pa.int32())])
+                catalog.create_table(identifier, Schema.from_pyarrow_schema(
+                    arrow_schema, partition_keys=['dt'],
+                    options={"partition.legacy-name": str(legacy).lower()}), False)
+                table = catalog.get_table(identifier)
+                base = pd.Timestamp('2024-01-02 03:04:05')
+                values = [base + pd.Timedelta(n, unit='ns') for n in range(3)]
+                builder = table.new_batch_write_builder()
+                writer = builder.new_write()
+                committer = builder.new_commit()
+                try:
+                    writer.write_arrow(pa.Table.from_pydict({
+                        'dt': [values[0], values[1], values[1], values[2], values[2], values[2]],
+                        'value': list(range(6)),
+                    }, schema=arrow_schema))
+                    committer.commit(writer.prepare_commit())
+                finally:
+                    writer.close()
+                    committer.close()
+                partitions = catalog.list_partitions_paged(identifier).elements
+                self.assertEqual(len(partitions), 3)
+                self.assertEqual(len({p.spec['dt'] for p in partitions}), 3)
+                target = next(p for p in partitions if p.record_count == 2)
+                self.assertTrue(target.spec['dt'].endswith('.000000001'))
+                catalog.drop_partitions(identifier, [target.spec])
+                remaining = catalog.list_partitions_paged(identifier).elements
+                self.assertEqual(sorted(p.record_count for p in remaining), [1, 3])
+                self.assertEqual({p.spec['dt'] for p in remaining},
+                                 {p.spec['dt'] for p in partitions if p.record_count != 2})
+
+    def test_list_partitions_preserves_colliding_specs(self):
+        from pypaimon.api.rest_exception import NotImplementedException
+        from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+        from pypaimon.common.options.core_options import CoreOptions
+
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+        for default_name in [CoreOptions.PARTITION_DEFAULT_NAME.default_value(), "custom_null"]:
+            with self.subTest(default_name=default_name):
+                identifier = "test_db.collisions_" + default_name
+                pa_schema = pa.schema([('dt', pa.string()), ('value', pa.int32())])
+                schema = Schema.from_pyarrow_schema(
+                    pa_schema, partition_keys=['dt'], options={
+                        "partition.default-name": default_name,
+                        "partition.legacy-name": "false"})
+                catalog.create_table(identifier, schema, False)
+                table = catalog.get_table(identifier)
+                for _ in range(2):
+                    builder = table.new_batch_write_builder()
+                    writer = builder.new_write()
+                    committer = builder.new_commit()
+                    try:
+                        writer.write_arrow(pa.Table.from_pydict({
+                            'dt': [None, " ", " ", default_name, default_name, default_name],
+                            'value': list(range(6))}, schema=pa_schema))
+                        committer.commit(writer.prepare_commit())
+                    finally:
+                        writer.close()
+                        committer.close()
+
+                rest_catalog = object.__new__(RESTCatalog)
+                rest_catalog.rest_api = MagicMock()
+                rest_catalog.rest_api.list_partitions_paged.side_effect = NotImplementedException(
+                    "partition listing not implemented")
+                rest_catalog.get_table = MagicMock(return_value=table)
+                for reader in [catalog, rest_catalog]:
+                    partitions = reader.list_partitions_paged(identifier).elements
+                    self.assertEqual(len(partitions), 3)
+                    self.assertEqual(sorted(p.record_count for p in partitions), [2, 4, 6])
+                    self.assertTrue(all(p.spec == {'dt': default_name} for p in partitions))
+                    self.assertTrue(all(p.file_count == 2 for p in partitions))
+                    from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+                    from pypaimon.manifest.manifest_list_manager import ManifestListManager
+
+                    manifests = ManifestListManager(table).read_all(
+                        table.snapshot_manager().get_latest_snapshot())
+                    entries = ManifestFileManager(table).read_entries_parallel(manifests, drop_stats=True)
+                    reordered = list(reversed(entries))
+                    counts = []
+                    token = None
+                    with patch.object(ManifestFileManager, 'read_entries_parallel',
+                                      side_effect=[entries, reordered, reordered]):
+                        while True:
+                            page = reader.list_partitions_paged(
+                                identifier, max_results=1, page_token=token,
+                                partition_name_pattern='dt=' + default_name)
+                            counts.extend(p.record_count for p in page.elements)
+                            token = page.next_page_token
+                            if token is None:
+                                break
+                    self.assertEqual(counts, [p.record_count for p in partitions])
+
     def test_list_partitions_paged_pagination(self):
         """Test list_partitions_paged pagination with max_results and page_token."""
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
