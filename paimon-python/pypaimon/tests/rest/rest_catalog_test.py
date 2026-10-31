@@ -339,6 +339,22 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIn("no_such_table_for_snapshot", str(context.exception))
         self.assertIn("does not exist", str(context.exception))
 
+    def test_get_table_rejects_blank_branch(self):
+        from unittest import mock
+
+        identifier = Identifier.create("default", "blank_branch")
+        self.rest_catalog.create_table(
+            identifier, Schema.from_pyarrow_schema(pa.schema([('col1', pa.int32())])), False)
+        rest_api = self.rest_catalog.rest_api
+        with mock.patch.object(rest_api, "get_table", wraps=rest_api.get_table) as get_table:
+            for name in ("blank_branch$branch_", "blank_branch$branch_ ", "blank_branch$branch_$options"):
+                with self.subTest(name=name):
+                    with self.assertRaisesRegex(ValueError, "Branch name cannot be blank"):
+                        self.rest_catalog.get_table(Identifier("default", name))
+            get_table.assert_not_called()
+            self.assertIsNotNone(self.rest_catalog.get_table(identifier))
+            get_table.assert_called()
+
     def test_get_table_by_id(self):
         from pypaimon.catalog.catalog_exception import (TableIdNoPermissionException,
                                                         TableIdNotExistException)

@@ -246,6 +246,32 @@ class FileSystemBranchManagerTest {
     }
 
     @Test
+    void testU180EBranchIsNotBlankOnAnyJvm() {
+        // Java 8 takes U+180E for whitespace, later JVMs and PyPaimon do not.
+        String branchName = "\u180E";
+        assertThat(BranchManager.normalizeBranch(branchName)).isEqualTo(branchName);
+        branchManager.createBranch(branchName);
+        assertThat(branchManager.branchExists(branchName)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MAIN", "Main", "ma\u0131n", "ma\u0130n"})
+    void testRejectsDefaultBranchVariants(String branchName) {
+        String message = "Branch name 'main' is the default branch and cannot be used.";
+        assertThatThrownBy(() -> branchManager.createBranch(branchName))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+        assertThatThrownBy(() -> branchManager.createBranch(branchName, "missing_tag"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+
+        branchManager.createBranch("valid_branch");
+        assertThatThrownBy(() -> branchManager.renameBranch("valid_branch", branchName))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(message);
+    }
+
+    @Test
     void testRenameBranchToSameName() {
         // Create a branch
         branchManager.createBranch("same_name");

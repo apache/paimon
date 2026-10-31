@@ -289,6 +289,26 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    public void testAlterTableRejectsBlankBranch() throws Exception {
+        catalog.createDatabase("test_db", true);
+        Identifier identifier = Identifier.create("test_db", "blank_branch_table");
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("a", DataTypes.INT()).build(), false);
+        List<SchemaChange> changes = Arrays.asList(SchemaChange.addColumn("b", DataTypes.INT()));
+
+        for (String branch : Arrays.asList("", " ")) {
+            Identifier blankBranch =
+                    Identifier.create("test_db", "blank_branch_table$branch_" + branch);
+            for (boolean ignoreIfNotExists : Arrays.asList(false, true)) {
+                assertThatThrownBy(
+                                () -> catalog.alterTable(blankBranch, changes, ignoreIfNotExists))
+                        .isInstanceOf(IllegalArgumentException.class);
+            }
+        }
+        assertThat(catalog.getTable(identifier).rowType().getFieldNames()).containsExactly("a");
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDropTableWithInvalidOptions(boolean cacheEnabled) throws Exception {

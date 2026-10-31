@@ -120,6 +120,15 @@ class ConsumerManagerTest(unittest.TestCase):
         data = json.loads(content)
         self.assertEqual(data["nextSnapshot"], 42)
 
+    def test_consumer_manager_no_break_space_branch(self):
+        """A no-break space branch is not blank, as in Java."""
+        manager = ConsumerManager(self.file_io, self.table_path, branch="\u00a0")
+        manager.reset_consumer("my-consumer", Consumer(next_snapshot=42))
+
+        self.assertTrue(os.path.exists(os.path.join(
+            self.table_path, "branch", "branch-\u00a0", "consumer", "consumer-my-consumer")))
+        self.assertFalse(os.path.exists(os.path.join(self.table_path, "consumer")))
+
     def test_consumer_manager_get_consumer(self):
         """consumer() should read consumer state from file."""
         manager = ConsumerManager(self.file_io, self.table_path)

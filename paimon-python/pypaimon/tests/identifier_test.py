@@ -27,6 +27,49 @@ from pypaimon.common.identifier import Identifier
 class IdentifierTest(unittest.TestCase):
     """Tests for Identifier.from_string()."""
 
+    def test_reject_blank_encoded_branch(self):
+        for name in ("t$branch_", "t$branch_ ", "t$branch_\u3000", "t$branch_$options"):
+            with self.subTest(name=name):
+                identifier = Identifier("db", name)
+                with self.assertRaisesRegex(ValueError, "Branch name cannot be blank"):
+                    identifier.get_branch_name()
+                with self.assertRaises(ValueError):
+                    identifier.get_table_name()
+
+    def test_blank_branch_is_main_branch(self):
+        for branch in ("", " ", "\t", "\u3000"):
+            with self.subTest(branch=repr(branch)):
+                identifier = Identifier("db", "t", branch=branch)
+                self.assertEqual(identifier, Identifier("db", "t"))
+                self.assertIsNone(identifier.get_branch_name())
+                self.assertEqual(
+                    Identifier("db", "t", branch=branch, system_table="options").get_object_name(),
+                    "t$options")
+
+    def test_non_whitespace_branch_is_not_blank(self):
+        # Java Character.isWhitespace does not take these for whitespace, nor U+180E after Java 8.
+        for branch in ("\u00a0", "\u2007", "\u202f", "\x85", "\u180e"):
+            with self.subTest(branch=repr(branch)):
+                identifier = Identifier("db", "t", branch=branch)
+                self.assertEqual(identifier.get_object_name(), "t$branch_" + branch)
+                self.assertEqual(identifier.get_branch_name(), branch)
+                self.assertEqual(Identifier("db", "t$branch_" + branch).get_branch_name(), branch)
+
+    def test_default_main_variants_encode_as_main(self):
+        # Like Java equalsIgnoreCase, so both languages encode the same name.
+        for branch in ("main", "MAIN", "ma\u0130n", "ma\u0131n"):
+            with self.subTest(branch=branch):
+                self.assertEqual(Identifier("db", "t", branch=branch).get_object_name(), "t")
+
+    def test_branch_setter_drops_blank_branch(self):
+        identifier = Identifier("db", "t", branch="b1", system_table="options")
+        identifier.branch = " "
+        self.assertEqual(identifier.get_object_name(), "t$options")
+        self.assertIsNone(identifier.branch)
+        identifier.branch = "\u00a0"
+        self.assertEqual(identifier.get_object_name(), "t$branch_\u00a0$options")
+        self.assertEqual(identifier.branch, "\u00a0")
+
     def test_simple_identifier(self):
         """Simple database.table parsing."""
         identifier = Identifier.from_string("mydb.mytable")

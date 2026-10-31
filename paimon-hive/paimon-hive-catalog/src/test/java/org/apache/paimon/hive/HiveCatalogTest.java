@@ -657,6 +657,42 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testPartitionOperationsRejectBlankBranch() throws Exception {
+        String databaseName = "test_blank_branch_partitions";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .build(),
+                true);
+        catalog.createPartitions(identifier, partitionSpecs("20250101"));
+
+        for (String branch : Arrays.asList("", " ")) {
+            Identifier blankBranch = Identifier.create(databaseName, "table$branch_" + branch);
+            assertThatThrownBy(
+                            () -> catalog.createPartitions(blankBranch, partitionSpecs("20250102")))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(
+                            () -> catalog.dropPartitions(blankBranch, partitionSpecs("20250101")))
+                    .isInstanceOf(IllegalArgumentException.class);
+            PartitionStatistics stats =
+                    new PartitionStatistics(
+                            Collections.singletonMap("dt", "20250101"), 1, 1, 1, 1, 1);
+            assertThatThrownBy(
+                            () ->
+                                    catalog.alterPartitions(
+                                            blankBranch, Collections.singletonList(stats)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertHmsDts(databaseName, "table", "20250101");
+    }
+
+    @Test
     public void testDropPartitionsOnChainTableDoesNotSkipHmsByFallback() throws Exception {
         String databaseName = "test_chain_drop_partition";
         String tableName = "chain_table";
