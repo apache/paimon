@@ -31,6 +31,15 @@ from pypaimon.common.options import Options
 _LOG = logging.getLogger(__name__)
 
 
+def _is_local_path(path):
+    from urllib.parse import urlparse
+
+    uri = urlparse(path)
+    # urlparse treats a Windows drive letter as a URI scheme.
+    return not uri.scheme or uri.scheme == "file" or (
+        os.name == "nt" and len(uri.scheme) == 1 and not uri.netloc)
+
+
 def normalize_naive_datetimes(value):
     """Recursively attach UTC to naive datetimes, including ones nested inside
     ROW (dict) and ARRAY/MAP (list/tuple) values.
@@ -670,9 +679,7 @@ class FileIO(ABC):
         uri = urlparse(path)
         scheme = uri.scheme
 
-        # urlparse treats a Windows drive letter as a URI scheme.
-        if not scheme or scheme == "file" or (
-                _os.name == "nt" and len(scheme) == 1 and not uri.netloc):
+        if _is_local_path(path):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 

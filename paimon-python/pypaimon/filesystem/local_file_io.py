@@ -69,7 +69,8 @@ class LocalFileIO(FileIO):
     def create():
         return LocalFileIO()
     
-    def _to_file(self, path: str) -> Path:
+    @staticmethod
+    def _to_file(path: str) -> Path:
         parsed = urlparse(path)
         
         if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:

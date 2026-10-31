@@ -24,7 +24,48 @@ under the License.
 
 # Video Frames
 
-Store complete encoded videos and read their logical frame rows for training. First create a multimodal `conn` as shown in [Multimodal Tables](./multimodal-tables#connect). Provide your own video files and frame metadata for the examples below.
+Store encoded videos in `.video` and read individual frames for training.
+
+## Import a Video
+
+With Python 3.10 or newer, install `pypaimon[video]`:
+
+```shell
+pip install 'pypaimon[video]'
+```
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+conn = pm.connect(options={"warehouse": "file:///tmp/video_lake"})
+frames = conn.create_table(
+    "auto_frames",
+    schema=pa.schema([
+        pa.field("frame_index", pa.int64()),
+        pa.field("timestamp", pa.float64()),
+        pa.field("episode_id", pa.int64()),
+        pa.field("video", pa.large_binary()),
+    ]),
+    options={"video-frame-field": "video"},
+)
+frames.add_video("/data/example.mp4")
+frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
+# Raw HEVC: explicitly supply a fixed frame rate.
+frames.add_video("oss://source-bucket/episode-42.h265", source_fps=30)
+```
+
+Generates zero-based `frame_index` and `timestamp` in seconds from the first
+frame. `metadata` supplies per-video constants. Containerized videos retain
+original bytes and variable frame timing; require one decodable video stream
+with strictly increasing PTS.
+
+Raw HEVC is remuxed to MP4 without re-encoding. `source_fps` generates fixed-rate
+timestamps, not original capture times. Temporary raw/MP4 files are cleaned up
+after import, including failures. Omit `source_fps` for containerized videos.
+
+Configure remote credentials on the connection and keep the source unchanged
+during import. To supply frame metadata yourself, pass `frames` as shown below.
 
 ## Video Frame Storage
 
