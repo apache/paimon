@@ -205,19 +205,47 @@ class JdbcCatalogTest(unittest.TestCase):
                 self.assertEqual(str(context.exception), "Table {} does not exist".format(name))
 
     def test_get_table_branch(self):
+        def write(table, data):
+            builder = table.new_batch_write_builder()
+            writer, commit = builder.new_write(), builder.new_commit()
+            try:
+                writer.write_arrow(data)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+        def read(table):
+            builder = table.new_read_builder()
+            return builder.new_read().to_arrow(builder.new_scan().plan().splits()).to_pylist()
+
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
         catalog = CatalogFactory.create(self.options)
         catalog.create_database("test_db", False)
         catalog.create_table("test_db.test_table", Schema(fields=fields), False)
         table = catalog.get_table("test_db.test_table")
-        builder = table.new_batch_write_builder()
-        writer, commit = builder.new_write(), builder.new_commit()
-        try:
-            writer.write_arrow(pa.Table.from_pydict({"f0": [1]}, schema=pa.schema([("f0", pa.int32())])))
-            commit.commit(writer.prepare_commit())
-        finally:
-            writer.close()
-            commit.close()
+        write(table, pa.table({"f0": pa.array([1], pa.int32())}))
+        table.branch_manager().create_branch("dev")
+        branch = catalog.get_table("test_db.test_table$branch_dev")
+        self.assertEqual(branch.current_branch(), "dev")
+        write(branch, pa.table({"f0": pa.array([2], pa.int32())}))
+        self.assertEqual(read(catalog.get_table("test_db.test_table$branch_dev")), [{"f0": 2}])
+
+        branch.schema_manager.commit_changes([
+            SchemaChange.add_column("f1", AtomicType("STRING")),
+            SchemaChange.set_option("branch-option", "dev"),
+        ])
+        branch = catalog.get_table("test_db.test_table$branch_dev")
+        self.assertEqual(branch.field_names, ["f0", "f1"])
+        write(branch, pa.table({"f0": pa.array([3], pa.int32()), "f1": ["dev"]}))
+        self.assertEqual(
+            sorted(read(branch), key=lambda row: row["f0"]),
+            [{"f0": 2, "f1": None}, {"f0": 3, "f1": "dev"}],
+        )
+        options = catalog.get_table("test_db.test_table$branch_dev$options")
+        self.assertIsInstance(options, OptionsTable)
+        self.assertEqual(options.base_table.current_branch(), "dev")
+        self.assertIn({"key": "branch-option", "value": "dev"}, read(options))
 
         for identifier in (
             "test_db.test_table",
@@ -229,23 +257,25 @@ class JdbcCatalogTest(unittest.TestCase):
                 table = catalog.get_table(identifier)
                 self.assertEqual(table.fields, fields)
                 self.assertEqual(table.current_branch(), "main")
-                read_builder = table.new_read_builder()
-                rows = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
-                self.assertEqual(rows.column("f0").to_pylist(), [1])
+                self.assertEqual(read(table), [{"f0": 1}])
+                self.assertNotIn("branch-option", table.table_schema.options)
 
         for identifier in (
-            "test_db.test_table$branch_dev",
-            "test_db.test_table$branch_dev$options",
+            "test_db.test_table$branch_missing",
+            "test_db.test_table$branch_missing$options",
             "test_db.test_table$branch_dev$nosuch",
             "test_db.missing$branch_dev",
             "test_db.test_table$branch_MAIN",
-            "test_db.test_table$branch_",
         ):
             with self.subTest(identifier=identifier):
-                with self.assertRaisesRegex(
-                    NotImplementedError, "^JdbcCatalog currently does not support table branches$"
-                ):
+                with self.assertRaises(TableNotExistException):
                     catalog.get_table(identifier)
+
+        # A branch named MAIN is not main and keeps its identity.
+        table.branch_manager().create_branch("MAIN")
+        upper = catalog.get_table("test_db.test_table$branch_MAIN")
+        self.assertEqual(upper.current_branch(), "MAIN")
+        self.assertEqual(catalog.get_table(upper.identifier).current_branch(), "MAIN")
 
     def test_create_table_rolls_back_metadata_on_failure(self):
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]

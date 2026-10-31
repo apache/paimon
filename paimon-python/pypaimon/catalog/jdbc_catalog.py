@@ -39,7 +39,8 @@ from pypaimon.catalog.catalog_exception import (
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.common.file_io import FileIO
-from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH, Identifier
+from pypaimon.common.identifier import (DEFAULT_MAIN_BRANCH, SYSTEM_BRANCH_PREFIX,
+                                        SYSTEM_TABLE_SPLITTER, Identifier)
 from pypaimon.common.options.config import CatalogOptions, JdbcCatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.schema import Schema
@@ -405,20 +406,17 @@ class JdbcCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         branch = encoded_branch_name(identifier)
-        if branch is not None and branch != DEFAULT_MAIN_BRANCH:
-            raise NotImplementedError("JdbcCatalog currently does not support table branches")
         if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         if not self._table_exists(identifier):
             raise TableNotExistException(identifier)
         table_path = self.get_table_path(identifier)
-        table_schema = self.get_table_schema(identifier)
-        # Drop the system table and any default-main branch spelling.
-        table_identifier = Identifier.create(
-            identifier.get_database_name(),
-            identifier.get_table_name(),
-            branch=branch,
-        )
+        # Drop the system table and any default-main spelling; keep a branch as encoded, e.g. MAIN.
+        table_object = identifier.get_table_name()
+        if branch is not None and branch != DEFAULT_MAIN_BRANCH:
+            table_object += SYSTEM_TABLE_SPLITTER + SYSTEM_BRANCH_PREFIX + branch
+        table_identifier = Identifier(identifier.get_database_name(), table_object)
+        table_schema = self.get_table_schema(table_identifier)
         from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=table_identifier,
@@ -570,7 +568,11 @@ class JdbcCatalog(Catalog):
                 self._insert_table_properties(identifier, self._collect_table_properties(table_schema))
 
     def get_table_schema(self, identifier: Identifier) -> TableSchema:
-        table_schema = SchemaManager(self.file_io, self.get_table_path(identifier)).latest()
+        table_schema = SchemaManager(
+            self.file_io,
+            self.get_table_path(identifier),
+            branch=identifier.get_branch_name_or_default(),
+        ).latest()
         if table_schema is None:
             raise TableNotExistException(identifier)
         return table_schema
