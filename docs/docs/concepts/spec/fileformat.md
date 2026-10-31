@@ -413,7 +413,7 @@ trailers, or per-entry CRC. On-disk order:
 +----------------------------+
 | ...                        |
 +----------------------------+
-| Keyframe Index 1           |  Video metadata ranges and compressed keyframe entries
+| Keyframe Index 1           |  Video metadata ranges and keyframe entries
 +----------------------------+
 | Keyframe Index 2           |
 +----------------------------+
@@ -441,12 +441,25 @@ Run arrays have equal lengths. Non-negative references select a video; `-1` mean
 means a data-evolution placeholder. Row `r` in a run starting at `s` maps to frame
 `run_first_frame + r - s`; gaps start new runs.
 
-A keyframe-index block contains a 17-byte header (version `1`: uint8; magic `0x564944454F4B4649`:
-uint64; metadata-range and keyframe counts: uint32 each), metadata `(offset, length)` pairs
-(int64 each), and zlib-compressed `(frame ordinal, PTS, packet position)` entries (int64 each).
-Numeric fields are little endian; offsets are payload-relative. Limits: 65,536 metadata ranges
-and 65,536 keyframes, 16 MiB per block, 64 MiB per file. The index covers the first video
-stream; its time base stays in the video.
+Keyframe-index v1 is little endian; byte offsets are relative to the video payload.
+
+| Field | Size |
+| --- | ---: |
+| Version (`1`) | 1 byte |
+| Magic (`0x564944454F4B4649`) | 8 bytes |
+| Metadata-range count | 4 bytes |
+| Keyframe count | 8 bytes |
+| Metadata `(offset, length)` pairs | 16 bytes each |
+| Keyframe pages | Variable |
+
+Each page holds 4,096 uncompressed `(frame ordinal, PTS, packet position)` int64 triples
+and their 4-byte CRC32; the last page may be shorter. Page `p` starts at
+`21 + 16 * metadata_count + p * 98308`.
+Ordinals, PTS values and packet positions strictly increase; the first ordinal is zero.
+The index covers the first video stream; its time base remains in the video.
+
+Readers validate each accessed page and its adjacent page boundaries; writers validate all pages.
+Metadata ranges are limited to 65,536; keyframe count and total index size have no configured limit.
 
 An Arrow/data-file cell stores a separately versioned, little-endian `VideoFrameDescriptor`:
 
