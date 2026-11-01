@@ -22,13 +22,10 @@ from unittest.mock import Mock, patch
 import pytest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.execution.native.index_options import native_scalar_index_read_supported
 from pypaimon.execution.native.read.builder import _native_read_builder
-from pypaimon.execution.native.read.plan import native_plan
-from pypaimon.execution.native.read.native_search_plan import _index_search_options
-from pypaimon.execution.native.table import _resolved_schema_json
+from pypaimon.execution.native.read.plan import native_plan, native_stream_scan
+from pypaimon.execution.native.table import _resolved_schema_json, _options_to_native
 from pypaimon.execution.native.write.native_commit import create_native_write_table
-from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
 from pypaimon.schema.data_types import AtomicType, DataField, VectorType
 
 
@@ -51,146 +48,78 @@ def _table(tmp_path, primary_key, extra=None):
 
 
 @pytest.mark.parametrize('primary_key', [False, True])
-@pytest.mark.parametrize('suffix', ['index-column', 'index-columns'])
-def test_native_read_and_write_schemas_share_resolved_index_contract(tmp_path, primary_key, suffix):
-    table = _table(tmp_path, primary_key, {
-        'global-index.btree.' + suffix: 'amount',
-        'fields.amount.index-options': '{"fallback-scan-max-size":"1 kb"}',
-        'global-index.ivf-pq.' + suffix: 'embedding',
-        'ivf-pq.dimension': '2',
-        'ivf-pq.refine_factor': '3',
-        'fields.embedding.index-options': '{"nlist":64,"metric":"COSINE"}',
-        'global-index.full-text.' + suffix: 'body',
-        'fields.body.index-options': '{"tokenizer":"raw","lower-case":false}',
-    })
+@pytest.mark.parametrize('declaration', ['legacy', 'index-column', 'index-columns'])
+def test_native_schemas_preserve_index_configuration_verbatim(tmp_path, primary_key, declaration):
+    values = {'ivf-pq.dimension': '2', 'opaque.native.option': 'preserved',
+              'btree-index.block-size': '4 kb',
+              'fields.amount.index-options': '{"block-size":"8 kb"}',
+              'fields.other.index-options': '{"block-size":"16 kb"}',
+              'fields.embedding.index-options': '{"nlist":64,"metric":"COSINE"}',
+              'fields.embedding.pk-vector.index.options': '{"nlist":32}',
+              'fields.body.index-options': '{"stop-words":["paimon","lake"],"lower-case":false}'}
+    if declaration == 'legacy':
+        values.update({'pk-vector.index.columns': 'embedding',
+                       'fields.embedding.pk-vector.index.type': 'IVF-PQ',
+                       'pk-btree.index.columns': 'amount,other', 'pk-full-text.index.columns': 'body'})
+    else:
+        values.update({'global-index.ivf-pq.' + declaration: 'embedding',
+                       'global-index.btree.' + declaration: 'amount,other',
+                       'global-index.full-text.' + declaration: 'body'})
+    table = _table(tmp_path, primary_key, values)
     original = dict(table.table_schema.options)
-    read_options = json.loads(_resolved_schema_json(table))['options']
+    read = json.loads(_resolved_schema_json(table))['options']
     module = ModuleType('pypaimon_rust.datafusion')
     module.Table = Mock()
     with patch.dict('sys.modules', {'pypaimon_rust.datafusion': module}):
         assert create_native_write_table(table) is module.Table.from_resolved_schema.return_value
-    write_options = json.loads(module.Table.from_resolved_schema.call_args[0][1])['options']
-    for options in (read_options, write_options):
-        assert not any(key.startswith('global-index.') and key.endswith(('.index-column', '.index-columns'))
-                       for key in options)
-        if primary_key:
-            assert options['pk-btree.index.columns'] == 'amount'
-            assert options['pk-vector.index.columns'] == 'embedding'
-            assert options['fields.embedding.pk-vector.index.type'] == 'ivf-pq'
-            assert options['fields.embedding.pk-vector.distance.metric'] == 'cosine'
-            assert options['ivf-pq.dimension'] == '2'
-            assert options['ivf-pq.refine_factor'] == '3'
-            assert options['full-text.tokenizer'] == 'raw'
-            assert options['full-text.lower-case'] == 'false'
-            definitions = PrimaryKeyIndexDefinitions.create(table.table_schema.copy(new_options=options)).definitions
-            by_type = {definition.index_type: definition for definition in definitions}
-            assert by_type['btree'].options.to_map()['btree-index.fallback-scan-max-size'] == '1 kb'
-            assert by_type['ivf-pq'].options.to_map()['ivf-pq.nlist'] == '64'
-            assert by_type['ivf-pq'].options.to_map()['ivf-pq.dimension'] == '2'
-            assert by_type['ivf-pq'].options.to_map()['ivf-pq.metric'] == 'cosine'
-            assert by_type['full-text'].options.to_map()['full-text.lower-case'] == 'false'
-        else:
-            assert not any(key.startswith('pk-') for key in options)
-            assert 'fields.embedding.index-type' not in options
-            assert options['fields.embedding.nlist'] == '64'
-            assert options['fields.embedding.metric'] == 'cosine'
-            assert options['btree-index.fallback-scan-max-size'] == '1 kb'
+    write = json.loads(module.Table.from_resolved_schema.call_args[0][1])['options']
+    for actual in (read, write):
+        for key, value in values.items():
+            assert actual[key] == value
     assert table.table_schema.options == original
-
-
-def test_native_primary_key_fields_keep_independent_overrides(tmp_path):
-    table = _table(tmp_path, True, {
-        'global-index.btree.index-columns': 'amount,other',
-        'btree-index.block-size': '4 kb',
-        'fields.amount.index-options': '{"block-size":"8 kb"}',
-        'fields.other.index-options': '{"block-size":"16 kb"}',
-    })
-    options = json.loads(_resolved_schema_json(table))['options']
-    assert 'btree-index.block-size' not in options
-    assert json.loads(options['fields.amount.pk-btree.index.options'])['btree-index.block-size'] == '8 kb'
-    assert json.loads(options['fields.other.pk-btree.index.options'])['btree-index.block-size'] == '16 kb'
-
-
-@pytest.mark.parametrize('field_options', [
-    {},
-    {'fields.embedding.pk-vector.index.options': '{"nlist":64}'},
-    {'fields.embedding.index-options': '{"nlist":64}'},
-])
-def test_native_legacy_primary_key_keeps_flat_vector_read_parameters(tmp_path, field_options):
-    options = {'pk-vector.index.columns': 'embedding',
-               'fields.embedding.pk-vector.index.type': 'ivf-pq',
-               'fields.embedding.pk-vector.distance.metric': 'COSINE',
-               'ivf-pq.dimension': '2', 'ivf-pq.refine_factor': '3'}
-    options.update(field_options)
-    table = _table(tmp_path, True, options)
-    wire = json.loads(_resolved_schema_json(table))['options']
-    assert wire['pk-vector.index.columns'] == 'embedding'
-    assert wire['fields.embedding.pk-vector.index.type'] == 'ivf-pq'
-    assert wire['fields.embedding.pk-vector.distance.metric'] == 'cosine'
-    assert wire['ivf-pq.dimension'] == '2'
-    assert wire['ivf-pq.refine_factor'] == '3'
-    assert wire['ivf-pq.metric'] == 'cosine'
-    if field_options:
-        assert wire['ivf-pq.nlist'] == '64'
-
-
-def test_native_data_evolution_does_not_invent_a_vector_metric(tmp_path):
-    table = _table(tmp_path, False, {
-        'global-index.ivf-pq.index-columns': 'embedding',
-        'fields.embedding.index-options': '{"nlist":64}',
-    })
-    options = json.loads(_resolved_schema_json(table))['options']
-    assert options['fields.embedding.nlist'] == '64'
-    assert 'fields.embedding.index-type' not in options
-    assert 'fields.embedding.metric' not in options
-    assert 'ivf-pq.metric' not in options
 
 
 @pytest.mark.parametrize('primary_key', [False, True])
 @pytest.mark.parametrize('key', ['index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'])
-def test_native_schema_drops_removed_type_aliases(tmp_path, primary_key, key):
-    table = _table(tmp_path, primary_key, {
-        'global-index.ivf-pq.index-columns': 'embedding', key: 'diskann',
-        'fields.embedding.index-options': '{"nlist":64}',
-    })
-    original = dict(table.table_schema.options)
-    options = json.loads(_resolved_schema_json(table))['options']
-    assert key not in options
-    assert 'fields.embedding.index-type' not in options
-    if primary_key:
-        assert options['fields.embedding.pk-vector.index.type'] == 'ivf-pq'
-        assert key not in json.loads(options['fields.embedding.pk-vector.index.options'])
-    assert table.table_schema.options == original
+def test_native_schema_keeps_uninterpreted_options(tmp_path, primary_key, key):
+    values = {'global-index.ivf-pq.index-columns': 'embedding', key: 'diskann',
+              'fields.embedding.index-options': '{"index-type":"other","nlist":64}'}
+    table = _table(tmp_path, primary_key, values)
+    actual = json.loads(_resolved_schema_json(table))['options']
+    for name, value in values.items():
+        assert actual[name] == value
+    assert 'ivf-pq.nlist' not in actual
+    assert 'fields.embedding.metric' not in actual
 
 
-@pytest.mark.parametrize('primary_key', [False, True])
-@pytest.mark.parametrize('suffix', ['index-options', 'pk-vector.index.options'])
-def test_field_json_cannot_restore_removed_native_type_hint(tmp_path, primary_key, suffix):
-    table = _table(tmp_path, primary_key, {
-        'global-index.ivf-pq.index-columns': 'embedding',
-        'fields.embedding.' + suffix: '{"index-type":"diskann","nlist":64}',
-    })
-    options = json.loads(_resolved_schema_json(table))['options']
-    assert 'fields.embedding.index-type' not in options
-    if primary_key:
-        assert 'fields.embedding.index-type' not in json.loads(options['fields.embedding.pk-vector.index.options'])
-        assert options['fields.embedding.pk-vector.index.type'] == 'ivf-pq'
+@pytest.mark.parametrize('field_options', ['{"nlist":64}', '[1,2]'])
+def test_native_defers_field_option_parsing_to_rust(tmp_path, field_options):
+    table = _table(tmp_path, False, {'fields.embedding.index-options': field_options})
+    actual = json.loads(_resolved_schema_json(table))['options']
+    assert actual['fields.embedding.index-options'] == field_options
 
 
-def test_native_qualifies_distinct_scalar_field_options_before_reading(tmp_path):
+@pytest.mark.parametrize('streaming', [False, True])
+def test_distinct_scalar_field_options_reach_native_scan(tmp_path, streaming):
     table = _table(tmp_path, False, {
         'global-index.btree.index-columns': 'amount,other',
         'fields.amount.index-options': '{"fallback-scan-max-size":"1 kb"}',
         'fields.other.index-options': '{"fallback-scan-max-size":"2 kb"}',
     })
-    assert not native_scalar_index_read_supported(table)
     predicate = table.new_read_builder().new_predicate_builder().equal('amount', 1)
-    with patch('pypaimon.execution.native.table._native_table') as bridge, \
-            patch('pypaimon.execution.native.read.plan.runtime.native_runtime_available', return_value=True):
-        with pytest.raises(NotImplementedError, match='field index options'):
-            native_plan(table, predicate=predicate)
-        assert _index_search_options(table, 'body', 'full-text', scalar_filter=predicate) is None
-    bridge.assert_not_called()
+    from pypaimon.execution.native.read import plan
+    with patch.object(plan.runtime, 'native_runtime_available', return_value=True), \
+            patch.object(plan.native_builder, '_native_read_builder') as bridge, \
+            patch.object(plan.native_builder, '_configure_native_read_builder',
+                         side_effect=lambda builder, *args, **kwargs: builder), \
+            patch.object(plan, '_from_native_plan') as convert:
+        if streaming:
+            assert native_stream_scan(table, predicate=predicate) is bridge.return_value.new_stream_scan.return_value
+        else:
+            assert native_plan(table, predicate=predicate) is convert.return_value
+        bridge.assert_called_once_with(table)
+    options = json.loads(_resolved_schema_json(table))['options']
+    assert options['fields.amount.index-options'] != options['fields.other.index-options']
 
 
 @pytest.mark.parametrize('global_index', [True, False])
@@ -199,8 +128,16 @@ def test_index_field_options_do_not_disable_native_physical_reads(tmp_path, glob
         'global-index.enabled': str(global_index).lower(),
         'fields.embedding.index-options': '{"nlist":64}',
     })
-    if not global_index:
-        assert native_scalar_index_read_supported(table)
     with patch('pypaimon.execution.native.table._native_table') as bridge:
         assert _native_read_builder(table) is bridge.return_value.new_read_builder.return_value
     bridge.assert_called_once_with(table)
+
+
+def test_native_options_only_encode_values_and_leave_input_untouched():
+    original = {'boolean': True, 'number': 4, 'list': ['paimon', 'lake'],
+                'object': {'value': False}, 'text': ' COSINE ', 'unset': None}
+    actual = _options_to_native(original)
+    assert actual == {'boolean': 'true', 'number': '4', 'list': '["paimon", "lake"]',
+                      'object': '{"value": false}', 'text': ' COSINE '}
+    assert original['unset'] is None
+    assert original['list'] == ['paimon', 'lake']

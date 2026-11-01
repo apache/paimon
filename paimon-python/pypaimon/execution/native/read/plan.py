@@ -26,7 +26,6 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.execution.native import runtime
 from pypaimon.execution.native import table as native_table
-from pypaimon.execution.native.index_options import native_scalar_index_read_supported
 from pypaimon.execution.native.read import builder as native_builder
 from pypaimon.read.plan import Plan
 from pypaimon.read.query_auth_split import QueryAuthSplit
@@ -70,8 +69,6 @@ def native_plan(
     if not runtime.native_runtime_available():
         raise RuntimeError(
             "scan.native-plan.enabled needs the pypaimon-rust extension")
-    if predicate is not None and not native_scalar_index_read_supported(table):
-        raise NotImplementedError('Native scalar reads cannot represent these field index options')
     builder = native_builder._configure_native_read_builder(
         native_builder._native_read_builder(table), predicate, limit, projection)
     if partition_predicate is not None:
@@ -131,8 +128,6 @@ def native_plan(
 
 def native_stream_scan(table, predicate=None, read_type=None, bucket_filter=None, consumer_id=None):
     """Create Rust's stateful StreamTableScan with the canonical reader type."""
-    if predicate is not None and not native_scalar_index_read_supported(table):
-        raise NotImplementedError('Native scalar reads cannot represent these field index options')
     builder = native_builder._configure_native_read_builder(
         native_builder._native_read_builder(table), predicate, None, None, read_type=read_type)
     scan = builder.new_stream_scan()

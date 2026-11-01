@@ -47,9 +47,7 @@ def test_unused_context_attributes_preserve_native_vector_execution(option, batc
         values.update({'global-index.ivf-flat.index-columns': 'embedding',
                        'fields.embedding.index-options': '{"nlist":64}'})
     environment = SimpleNamespace(catalog_loader=loader)
-    table = SimpleNamespace(
-        options=CoreOptions(Options(values)), catalog_environment=environment,
-        copy=lambda options: SimpleNamespace(options=CoreOptions(Options(options)), catalog_environment=environment))
+    table = SimpleNamespace(options=CoreOptions(Options(values)), catalog_environment=environment)
     builder = SimpleNamespace(
         _table=table, _vector_column=SimpleNamespace(name='embedding'), _limit=2,
         _options={'ivf-flat.metric': 'l2'}, _filter=Predicate('equal', 0, 'id', [7]),
@@ -74,15 +72,9 @@ def test_unused_context_attributes_preserve_native_vector_execution(option, batc
     assert resolved_table.catalog_environment is environment
     core.with_vector_column.assert_called_once_with('embedding')
     core.with_limit.assert_called_once_with(2)
-    expected_options = {'ivf-flat.metric': 'l2'}
-    if declaration is not None:
-        core.with_vector_index_type.assert_called_once_with('embedding', 'ivf-flat')
-        assert resolved_table.options.options.to_map()['ivf-flat.nlist'] == '64'
-        expected_options.update({'ivf-flat.distance.metric': 'l2',
-                                 'fields.embedding.metric': 'l2', 'fields.embedding.distance.metric': 'l2'})
-    else:
-        core.with_vector_index_type.assert_not_called()
-    core.with_options.assert_called_once_with(expected_options)
+    assert resolved_table is table
+    assert resolved_table.options.options.to_map() == values
+    core.with_options.assert_called_once_with({'ivf-flat.metric': 'l2'})
     core.with_filter.assert_called_once_with({'method': 'equal', 'field': 'id', 'literals': [7]})
     core.with_partition_filter.assert_called_once_with({'method': 'equal', 'field': 'pt', 'literals': [1]})
     unused.assert_not_called()
