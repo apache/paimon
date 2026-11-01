@@ -510,6 +510,7 @@ public abstract class AbstractPagedInputView implements DataInputView {
                     try {
                         advance();
                     } catch (EOFException eofex) {
+                        this.positionInSegment += toSkip;
                         return skipped;
                     }
                     remaining = this.limitInSegment - this.positionInSegment;
