@@ -136,7 +136,9 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
         this.table = table;
         this.vectorField = vectorField;
-        this.indexType = table.coreOptions().primaryKeyVectorIndexType(vectorField.name());
+        this.indexType =
+                VectorIndexOptions.indexType(
+                        table.coreOptions().toConfiguration(), vectorField.name());
         this.indexOptions =
                 VectorIndexOptions.resolve(
                         table.coreOptions().toConfiguration(), indexType, vectorField.name());

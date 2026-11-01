@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -809,12 +810,12 @@ final class SchemaManagerUtils {
         }
         String fieldName = fieldNames[0];
         CoreOptions options = new CoreOptions(schema.options());
-        if (options.primaryKeyVectorIndexColumns().contains(fieldName)
-                || options.primaryKeyBTreeIndexColumns().contains(fieldName)
-                || options.primaryKeyBitmapIndexColumns().contains(fieldName)
-                || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
-                || options.primaryKeyFMIndexColumns().contains(fieldName)
-                || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
+        if (VectorIndexOptions.columns(options.toConfiguration()).contains(fieldName)
+                || options.btreeIndexColumns().contains(fieldName)
+                || options.bitmapIndexColumns().contains(fieldName)
+                || options.multiValueIndexColumns().contains(fieldName)
+                || options.fmIndexColumns().contains(fieldName)
+                || options.fullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Cannot %s primary-key index column: [%s]", operation, fieldName));

@@ -150,7 +150,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
         if (table.schema().primaryKeys().isEmpty() || table.coreOptions().dataEvolutionEnabled()) {
             return Optional.empty();
         }
-        if (table.coreOptions().primaryKeyFullTextIndexColumns().isEmpty()) {
+        if (table.coreOptions().fullTextIndexColumns().isEmpty()) {
             return Optional.empty();
         }
         for (PrimaryKeyIndexDefinition definition :

@@ -640,7 +640,7 @@ public class SchemaManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         Schema schema =
                 new Schema(

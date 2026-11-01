@@ -35,6 +35,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 class VectorIndexOptionsTest {
 
     @ParameterizedTest
+    @ValueSource(strings = {"index-column", "index-columns"})
+    void testLegacyRegistrationIsOnlyACompatibilityFallback(String suffix) {
+        Options input = new Options();
+        input.setString("pk-vector.index.columns", " old, other_old ");
+        input.setString("fields.old.pk-vector.index.type", "ivf-pq");
+        input.setString("fields.other_old.pk-vector.index.type", "diskann");
+        assertThat(VectorIndexOptions.columns(input)).containsExactly("old", "other_old");
+        assertThat(VectorIndexOptions.indexType(input, "old")).isEqualTo("ivf-pq");
+        assertThat(new CoreOptions(input).vectorIndexColumns("ivf-pq")).containsExactly("old");
+        assertThat(new CoreOptions(input).vectorIndexColumns("diskann"))
+                .containsExactly("other_old");
+        assertThat(new CoreOptions(input).vectorIndexColumns("ivf-flat")).isEmpty();
+        assertThat(VectorIndexOptions.columnsOptionKey(input)).isEqualTo("pk-vector.index.columns");
+
+        input.setString("global-index.ivf-pq." + suffix, " embedding, other ");
+        input.setString("global-index.diskann." + suffix, "video");
+        assertThat(VectorIndexOptions.columns(input))
+                .containsExactly("video", "embedding", "other");
+        assertThat(VectorIndexOptions.indexType(input, "embedding")).isEqualTo("ivf-pq");
+        assertThat(VectorIndexOptions.indexType(input, "video")).isEqualTo("diskann");
+        assertThat(new CoreOptions(input).vectorIndexColumns("ivf-pq"))
+                .containsExactly("embedding", "other");
+        assertThat(new CoreOptions(input).vectorIndexColumns("diskann")).containsExactly("video");
+        assertThat(VectorIndexOptions.columnsOptionKey(input))
+                .isEqualTo("global-index.diskann." + suffix + ", global-index.ivf-pq." + suffix);
+    }
+
+    @ParameterizedTest
     @ValueSource(
             strings = {
                 "index_type",
@@ -45,7 +73,6 @@ class VectorIndexOptionsTest {
     void testRemovedTypeAliasesAreIgnored(String key) {
         Options input = Options.fromMap(Collections.singletonMap(key, "ivf-pq"));
         assertThat(VectorIndexOptions.indexType(input, "embedding")).isNull();
-        assertThat(new CoreOptions(input).vectorIndexType("embedding")).isNull();
         assertThat(VectorIndexOptions.resolve(input, null, "embedding", false).toMap())
                 .isEqualTo(input.toMap());
         input.setString("fields.embedding.pk-vector.index.type", "diskann");
@@ -62,7 +89,6 @@ class VectorIndexOptionsTest {
         values.put("fields.embedding.index-options", "{\"nlist\":64,\"metric\":\"COSINE\"}");
         Options input = new Options(values);
         assertThat(VectorIndexOptions.indexType(input, "embedding")).isEqualTo("ivf-pq");
-        assertThat(new CoreOptions(input).vectorIndexType("embedding")).isEqualTo("ivf-pq");
         Options resolved = VectorIndexOptions.resolve(input, null, "embedding", false);
         assertMetric(resolved, "cosine");
         assertThat(resolved.get("ivf-pq.dimension")).isEqualTo("768");
@@ -123,7 +149,7 @@ class VectorIndexOptionsTest {
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(VectorIndexOptions.resolve(resolved, "ivf-pq", "embedding").toMap())
                 .isEqualTo(resolved.toMap());
-        assertThat(new CoreOptions(values).primaryKeyVectorIndexOptions("embedding").toMap())
+        assertThat(VectorIndexOptions.resolve(new Options(values), null, "embedding").toMap())
                 .isEqualTo(resolved.toMap());
     }
 

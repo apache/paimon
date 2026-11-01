@@ -67,11 +67,12 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .option(
                                 CoreOptions.DELETION_VECTORS_ENABLED.key(),
                                 Boolean.toString(deletionVectorsEnabled))
-                        .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
                         .option(
-                                "fields.embedding.pk-vector.index.type",
-                                TestVectorGlobalIndexerFactory.IDENTIFIER)
-                        .option("fields.embedding.pk-vector.distance.metric", "l2")
+                                "global-index."
+                                        + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                        + ".index-columns",
+                                "embedding")
+                        .option("fields.embedding.index-options", "{\"metric\":\"l2\"}")
                         .option("test.vector.dimension", "2")
                         .option("test.vector.metric", "l2");
         if (reverseScore) {
@@ -218,11 +219,12 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
                         .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
-                        .option(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding")
                         .option(
-                                "fields.embedding.pk-vector.index.type",
-                                TestVectorGlobalIndexerFactory.IDENTIFIER)
-                        .option("fields.embedding.pk-vector.distance.metric", "l2")
+                                "global-index."
+                                        + TestVectorGlobalIndexerFactory.IDENTIFIER
+                                        + ".index-columns",
+                                "embedding")
+                        .option("fields.embedding.index-options", "{\"metric\":\"l2\"}")
                         .option("test.vector.dimension", "2")
                         .option("test.vector.metric", "l2")
                         .build();

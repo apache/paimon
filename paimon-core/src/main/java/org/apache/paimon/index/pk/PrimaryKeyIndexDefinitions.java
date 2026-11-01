@@ -46,13 +46,14 @@ public class PrimaryKeyIndexDefinitions {
 
     public static PrimaryKeyIndexDefinitions create(TableSchema schema) {
         CoreOptions options = new CoreOptions(schema.options());
-        List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
-        List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
-        List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
-        List<String> multiValueColumns = options.primaryKeyMultiValueIndexColumns();
-        List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
-        List<String> fmColumns = options.primaryKeyFMIndexColumns();
-        validateNoDuplicates(vectorColumns, options.globalIndexColumnsOptionKey("vector"));
+        List<String> vectorColumns = VectorIndexOptions.columns(options.toConfiguration());
+        List<String> btreeColumns = options.btreeIndexColumns();
+        List<String> bitmapColumns = options.bitmapIndexColumns();
+        List<String> multiValueColumns = options.multiValueIndexColumns();
+        List<String> fullTextColumns = options.fullTextIndexColumns();
+        List<String> fmColumns = options.fmIndexColumns();
+        validateNoDuplicates(
+                vectorColumns, VectorIndexOptions.columnsOptionKey(options.toConfiguration()));
         validateNoDuplicates(btreeColumns, options.globalIndexColumnsOptionKey("btree"));
         validateNoDuplicates(bitmapColumns, options.globalIndexColumnsOptionKey("bitmap"));
         validateNoDuplicates(multiValueColumns, options.globalIndexColumnsOptionKey("multivalue"));
@@ -75,7 +76,7 @@ public class PrimaryKeyIndexDefinitions {
                                 column,
                                 field.id(),
                                 BTreeGlobalIndexerFactory.IDENTIFIER,
-                                options.primaryKeyBTreeIndexOptions(column),
+                                options.btreeIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.BTREE));
             } else if (bitmapColumns.contains(column)) {
                 definitions.add(
@@ -83,7 +84,7 @@ public class PrimaryKeyIndexDefinitions {
                                 column,
                                 field.id(),
                                 BitmapGlobalIndexerFactory.IDENTIFIER,
-                                options.primaryKeyBitmapIndexOptions(column),
+                                options.bitmapIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.BITMAP));
             } else if (multiValueColumns.contains(column)) {
                 definitions.add(
@@ -91,17 +92,18 @@ public class PrimaryKeyIndexDefinitions {
                                 column,
                                 field.id(),
                                 MultiValueGlobalIndexerFactory.IDENTIFIER,
-                                options.primaryKeyMultiValueIndexOptions(column),
+                                options.multiValueIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.MULTI_VALUE));
             } else if (vectorColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
                                 column,
                                 field.id(),
-                                options.primaryKeyVectorIndexType(column),
+                                VectorIndexOptions.indexType(options.toConfiguration(), column),
                                 VectorIndexOptions.resolve(
                                         options.toConfiguration(),
-                                        options.primaryKeyVectorIndexType(column),
+                                        VectorIndexOptions.indexType(
+                                                options.toConfiguration(), column),
                                         column),
                                 PrimaryKeyIndexDefinition.Family.VECTOR));
             } else if (fullTextColumns.contains(column)) {
@@ -110,7 +112,7 @@ public class PrimaryKeyIndexDefinitions {
                                 column,
                                 field.id(),
                                 "full-text",
-                                options.primaryKeyFullTextIndexOptions(column),
+                                options.fullTextIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.FULL_TEXT));
             } else if (fmColumns.contains(column)) {
                 definitions.add(
@@ -118,7 +120,7 @@ public class PrimaryKeyIndexDefinitions {
                                 column,
                                 field.id(),
                                 FMGlobalIndexerFactory.IDENTIFIER,
-                                options.primaryKeyFMIndexOptions(column),
+                                options.fmIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.FM));
             }
         }

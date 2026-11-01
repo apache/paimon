@@ -1038,13 +1038,6 @@ class CoreOptions:
         )
     )
 
-    PK_VECTOR_INDEX_COLUMNS: ConfigOption[str] = (
-        ConfigOptions.key("pk-vector.index.columns")
-        .string_type()
-        .no_default_value()
-        .with_description("Comma-separated VECTOR columns indexed by primary-key vector indexes.")
-    )
-
     PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
         ConfigOptions.key("pk-btree.index.columns")
         .string_type()
@@ -1859,21 +1852,18 @@ class CoreOptions:
     def global_index_build_parallelism(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM)
 
-    def primary_key_btree_index_columns(self) -> List[str]:
+    def btree_index_columns(self) -> List[str]:
         return self.global_index_columns("btree")
 
-    def primary_key_bitmap_index_columns(self) -> List[str]:
+    def bitmap_index_columns(self) -> List[str]:
         return self.global_index_columns("bitmap")
 
-    def primary_key_vector_index_columns(self) -> List[str]:
-        types = self._vector_index_types()
-        if types:
-            return [column for index_type in types
-                    for column in self.global_index_columns(index_type)]
-        return self._index_columns(self.options.get(CoreOptions.PK_VECTOR_INDEX_COLUMNS))
-
-    def primary_key_full_text_index_columns(self) -> List[str]:
+    def full_text_index_columns(self) -> List[str]:
         return self.global_index_columns("full-text")
+
+    def vector_index_columns(self, index_type: str) -> List[str]:
+        from pypaimon.common.options.vector_index_options import VectorIndexOptions
+        return VectorIndexOptions.columns(self.options, index_type)
 
     def global_index_types(self) -> List[str]:
         prefix = "global-index."
@@ -1886,10 +1876,6 @@ class CoreOptions:
     def _is_vector_index_type(index_type: str) -> bool:
         return index_type not in ("btree", "bitmap", "multivalue", "fm", "full-text")
 
-    def _vector_index_types(self) -> List[str]:
-        return [index_type for index_type in self.global_index_types()
-                if self._is_vector_index_type(index_type)]
-
     def global_index_columns(self, index_type: str) -> List[str]:
         values = self.options.to_map()
         columns = values.get("global-index.%s.index-columns" % index_type)
@@ -1897,10 +1883,7 @@ class CoreOptions:
             columns = values.get("global-index.%s.index-column" % index_type)
         if columns is None:
             columns = values.get("pk-%s.index.columns" % index_type)
-        if columns is not None:
-            return self._index_columns(columns)
-        return [column for column in self._index_columns(values.get("pk-vector.index.columns"))
-                if values.get("fields.%s.pk-vector.index.type" % column) == index_type]
+        return self._index_columns(columns)
 
     @staticmethod
     def _index_columns(columns) -> List[str]:
@@ -1944,36 +1927,17 @@ class CoreOptions:
                         values[field_prefix + short_key] = str(value)
         return Options(values)
 
-    def primary_key_vector_index_type(self, column: str):
-        return self.vector_index_type(column)
-
-    def vector_index_type(self, column: str):
-        from pypaimon.common.options.vector_index_options import VectorIndexOptions
-        return VectorIndexOptions.index_type(self.options, column)
-
-    def primary_key_vector_index_options(self, column: str) -> Options:
-        from pypaimon.common.options.vector_index_options import VectorIndexOptions
-        index_type = self.primary_key_vector_index_type(column)
-        if index_type is None or not str(index_type).strip():
-            raise ValueError("fields.%s.pk-vector.index.type must be configured before "
-                             "resolving index options." % column)
-        return VectorIndexOptions.resolve(self.options, str(index_type), column)
-
-    def primary_key_vector_distance_metric(self, column: str) -> str:
-        from pypaimon.common.options.vector_index_options import VectorIndexOptions
-        return VectorIndexOptions.metric(self.options, self.primary_key_vector_index_type(column), column)
-
-    def primary_key_full_text_index_options(self, column: str) -> Options:
+    def full_text_index_options(self, column: str) -> Options:
         return Options({key: value for key, value in self.global_index_options(
             "full-text", column).to_map().items() if key.startswith("full-text.")})
 
-    def primary_key_btree_index_options(self, column: str) -> Options:
-        return self._primary_key_sorted_index_options(column, "btree")
+    def btree_index_options(self, column: str) -> Options:
+        return self._sorted_index_options(column, "btree")
 
-    def primary_key_bitmap_index_options(self, column: str) -> Options:
-        return self._primary_key_sorted_index_options(column, "bitmap")
+    def bitmap_index_options(self, column: str) -> Options:
+        return self._sorted_index_options(column, "bitmap")
 
-    def _primary_key_sorted_index_options(self, column: str, index_type: str) -> Options:
+    def _sorted_index_options(self, column: str, index_type: str) -> Options:
         resolved = self.global_index_options(index_type, column).to_map()
         resolved.pop("sorted-index.records-per-file", None)
         resolved.pop("sorted-index.records-per-range", None)

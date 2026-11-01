@@ -70,7 +70,7 @@ def _resolve(schema):
                     if kind not in families]
     if primary_key and not any(kind not in families for kind in declarations):
         definitions += [(VectorIndexOptions.index_type(core.options, column), [column])
-                        for column in core.primary_key_vector_index_columns()]
+                        for column in VectorIndexOptions.columns(core.options)]
     known_columns = set()
     native_columns = {}
     profiles = {}

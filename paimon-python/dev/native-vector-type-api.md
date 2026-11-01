@@ -66,6 +66,12 @@ Python resolves the implementation once through `VectorIndexOptions`, using
 legacy PK key `fields.<column>.pk-vector.index.type`. It strips the four removed
 aliases before transferring schema or query options to older SDKs.
 
+Callers use the shared vector columns/type/parameter resolver. The legacy PK
+column registry and field type pairing are private compatibility inputs;
+`CoreOptions.vectorIndexColumns(type)` (Python: `vector_index_columns`) delegates
+to the type-scoped resolver. Other index accessors also use names without a
+`primaryKey` prefix. No public method compatibility wrappers are retained.
+
 When an implementation is configured and this method is unavailable, Python
 raises `AttributeError` before planning, reading, executing, or capturing hybrid
 routes. It does not fall back to Python execution. SDK configuration and execution

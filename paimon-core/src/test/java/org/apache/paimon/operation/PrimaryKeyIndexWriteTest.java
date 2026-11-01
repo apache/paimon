@@ -121,7 +121,7 @@ class PrimaryKeyIndexWriteTest {
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId,score");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment,state");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "hnsw");
 
         List<DataField> fields =

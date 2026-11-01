@@ -302,7 +302,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
 
     def test_pk_vector_refine_factor_overflow_is_rejected_before_search(self):
         table = SimpleNamespace(options=SimpleNamespace(
-            primary_key_vector_index_type=lambda column: "ivf-pq",
+            options=Options({"global-index.ivf-pq.index-columns": "embedding"}),
             vector_index_search_mode=lambda: GlobalIndexSearchMode.FAST))
         reader = PrimaryKeyVectorRead(
             table, 2147483647, DataField(1, "embedding", AtomicType("VECTOR(1)")),
@@ -323,7 +323,7 @@ class PrimaryKeyIndexDefinitionsTest(unittest.TestCase):
                 (GlobalIndexSearchMode.FULL, 1),
                 (GlobalIndexSearchMode.DETAIL, 1)):
             table = SimpleNamespace(options=SimpleNamespace(
-                primary_key_vector_index_type=lambda column: "ivf-pq",
+                options=Options({"global-index.ivf-pq.index-columns": "embedding"}),
                 vector_index_search_mode=lambda mode=mode: mode))
             reader = PrimaryKeyVectorRead(table, 1, field, [0.0])
             with self.subTest(mode=mode), mock.patch.object(

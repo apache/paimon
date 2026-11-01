@@ -370,7 +370,7 @@ class PrimaryKeySortedIndexMaintenanceTest {
         options.put(CoreOptions.COMPACTION_FORCE_REWRITE_ALL_FILES.key(), "true");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("pk-vector.index.columns", "embedding");
         options.put("fields.embedding.pk-vector.index.type", "test-vector-ann");
         options.put("fields.embedding.pk-vector.distance.metric", "l2");
         options.put("fields.embedding.pk-vector.index.options", "{\"metric\":\"L2\"}");

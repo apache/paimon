@@ -61,7 +61,7 @@ class GlobalIndexTest(unittest.TestCase):
                           'fields.embedding.pk-vector.index.type': 'ivf-pq',
                           'fields.embedding.pk-vector.distance.metric': metric.lower().replace('-', '_'),
                           'fields.embedding.pk-vector.index.options': '{"metric":"%s"}' % metric}
-                first = CoreOptions(Options(values)).primary_key_vector_index_options('embedding')
+                first = VectorIndexOptions.resolve(Options(values), None, 'embedding')
                 second = VectorIndexOptions.resolve(first, 'ivf-pq', 'embedding')
                 self.assertEqual(first.to_map(), second.to_map())
                 self.assertEqual('{"metric":"%s"}' % metric,
@@ -74,7 +74,10 @@ class GlobalIndexTest(unittest.TestCase):
             with self.subTest(index_type=index_type):
                 values = {"pk-%s.index.columns" % legacy: "old",
                           "fields.old.pk-vector.index.type": "ivf-pq"}
-                self.assertEqual(["old"], CoreOptions(Options(values)).global_index_columns(index_type))
+                core = CoreOptions(Options(values))
+                columns = (VectorIndexOptions.columns(core.options) if CoreOptions._is_vector_index_type(index_type)
+                           else core.global_index_columns(index_type))
+                self.assertEqual(["old"], columns)
                 values["global-index.%s.index-column" % index_type] = "single"
                 self.assertEqual(["single"], CoreOptions(Options(values)).global_index_columns(index_type))
                 values["global-index.%s.index-columns" % index_type] = " first, second "
@@ -106,13 +109,13 @@ class GlobalIndexTest(unittest.TestCase):
                   "fields.embedding.nlist": "48",
                   "fields.embedding.distance.metric": "cosine"}
         core = CoreOptions(Options(values))
-        self.assertEqual(["embedding"], core.primary_key_vector_index_columns())
-        self.assertEqual("ivf-pq", core.primary_key_vector_index_type("embedding"))
-        self.assertEqual("cosine", core.primary_key_vector_distance_metric("embedding"))
+        self.assertEqual(["embedding"], VectorIndexOptions.columns(core.options))
+        self.assertEqual("ivf-pq", VectorIndexOptions.index_type(core.options, "embedding"))
+        self.assertEqual("cosine", VectorIndexOptions.metric(core.options, None, "embedding"))
         values["fields.embedding.index-options"] = '{"nlist":64,"distance.metric":"inner_product"}'
         core = CoreOptions(Options(values))
-        self.assertEqual("inner_product", core.primary_key_vector_distance_metric("embedding"))
-        resolved = core.primary_key_vector_index_options("embedding").to_map()
+        self.assertEqual("inner_product", VectorIndexOptions.metric(core.options, None, "embedding"))
+        resolved = VectorIndexOptions.resolve(core.options, None, "embedding").to_map()
         self.assertEqual("768", resolved["ivf-pq.dimension"])
         self.assertEqual("64", resolved["fields.embedding.nlist"])
         self.assertEqual("inner_product", resolved["ivf-pq.distance.metric"])
@@ -130,8 +133,8 @@ class GlobalIndexTest(unittest.TestCase):
             "pk-bitmap.index.columns": "category",
         }))
 
-        self.assertEqual(["name", "id"], options.primary_key_btree_index_columns())
-        self.assertEqual(["category"], options.primary_key_bitmap_index_columns())
+        self.assertEqual(["name", "id"], options.btree_index_columns())
+        self.assertEqual(["category"], options.bitmap_index_columns())
 
     def test_global_index_meta_preserves_primary_key_source_meta(self):
         source_meta = b"\x00\x00\x00\x01source-file"

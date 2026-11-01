@@ -91,7 +91,11 @@ class GlobalIndexOptionsTest {
         values.put("pk-" + legacyFamily + ".index.columns", " old_column ");
         values.put("fields.old_column.pk-vector.index.type", "ivf-pq");
         CoreOptions options = new CoreOptions(values);
-        assertThat(options.globalIndexColumns(type)).containsExactly("old_column");
+        assertThat(
+                        CoreOptions.isVectorIndexType(type)
+                                ? VectorIndexOptions.columns(options.toConfiguration())
+                                : options.globalIndexColumns(type))
+                .containsExactly("old_column");
 
         values.put("global-index." + type + ".index-column", "singular_column");
         options = new CoreOptions(values);
@@ -102,8 +106,10 @@ class GlobalIndexOptionsTest {
         options = new CoreOptions(values);
         assertThat(options.globalIndexColumns(type)).containsExactly("first", "second");
         if ("ivf-pq".equals(type)) {
-            assertThat(options.primaryKeyVectorIndexColumns()).containsExactly("first", "second");
-            assertThat(options.primaryKeyVectorIndexType("first")).isEqualTo("ivf-pq");
+            assertThat(VectorIndexOptions.columns(options.toConfiguration()))
+                    .containsExactly("first", "second");
+            assertThat(VectorIndexOptions.indexType(options.toConfiguration(), "first"))
+                    .isEqualTo("ivf-pq");
         }
     }
 
@@ -113,7 +119,7 @@ class GlobalIndexOptionsTest {
                 new CoreOptions(
                         Collections.singletonMap("global-index.btree.index-column", "amount"));
         assertThat(options.globalIndexTypes()).containsExactly("btree");
-        assertThat(options.primaryKeyBTreeIndexColumns()).containsExactly("amount");
+        assertThat(options.btreeIndexColumns()).containsExactly("amount");
     }
 
     @ParameterizedTest
@@ -224,16 +230,20 @@ class GlobalIndexOptionsTest {
         values.put("fields.embedding.nlist", "48");
         values.put("fields.embedding.distance.metric", "cosine");
         CoreOptions options = new CoreOptions(values);
-        assertThat(options.primaryKeyVectorDistanceMetric("embedding")).isEqualTo("cosine");
-        assertThat(options.primaryKeyVectorIndexOptions("embedding").get("ivf-pq.dimension"))
+        assertThat(VectorIndexOptions.metric(options.toConfiguration(), null, "embedding"))
+                .isEqualTo("cosine");
+        assertThat(
+                        VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding")
+                                .get("ivf-pq.dimension"))
                 .isEqualTo("768");
 
         values.put(
                 "fields.embedding.index-options",
                 "{\"nlist\":64,\"distance.metric\":\"inner_product\"}");
         options = new CoreOptions(values);
-        assertThat(options.primaryKeyVectorDistanceMetric("embedding")).isEqualTo("inner_product");
-        Options resolved = options.primaryKeyVectorIndexOptions("embedding");
+        assertThat(VectorIndexOptions.metric(options.toConfiguration(), null, "embedding"))
+                .isEqualTo("inner_product");
+        Options resolved = VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding");
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(resolved.get("fields.embedding.nlist")).isEqualTo("64");
         assertThat(resolved.get("ivf-pq.metric")).isEqualTo("inner_product");

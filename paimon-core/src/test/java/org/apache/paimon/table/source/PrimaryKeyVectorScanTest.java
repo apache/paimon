@@ -73,7 +73,7 @@ class PrimaryKeyVectorScanTest {
     void testPostponeTableOnlyScansRealBuckets() {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, BucketMode.POSTPONE_BUCKET);
-        options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
+        options.setString("pk-vector.index.columns", "embedding");
         options.setString("fields.embedding.pk-vector.index.type", "ivf-pq");
 
         FileStoreTable table = mock(FileStoreTable.class);
@@ -252,7 +252,7 @@ class PrimaryKeyVectorScanTest {
 
     private static CoreOptions coreOptions() {
         Options options = new Options();
-        options.set(CoreOptions.PK_VECTOR_INDEX_COLUMNS, "embedding");
+        options.setString("pk-vector.index.columns", "embedding");
         options.setString("fields.embedding.pk-vector.index.type", "ivf-pq");
         return new CoreOptions(options);
     }

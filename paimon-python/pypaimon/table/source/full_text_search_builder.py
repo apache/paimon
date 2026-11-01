@@ -184,7 +184,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         core = CoreOptions(Options(dict(self._table.table_schema.options)))
         if (not getattr(self._table.table_schema, 'primary_keys', None)
                 or core.data_evolution_enabled()
-                or not core.primary_key_full_text_index_columns()):
+                or not core.full_text_index_columns()):
             return None
         for definition in PrimaryKeyIndexDefinitions.create(
                 self._table.table_schema).definitions:

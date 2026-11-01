@@ -3254,18 +3254,6 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys("global-index.fm.index-column", "pk-fm.index.columns")
                     .withDescription("Comma-separated character columns to index with FM indexes.");
 
-    // Retain these option keys for applications using the primary-key index API.
-    public static final ConfigOption<String> PK_VECTOR_INDEX_COLUMNS =
-            key("pk-vector.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated VECTOR columns indexed by primary-key vector indexes. "
-                                    + "Each column owns one index and must define "
-                                    + "fields.<column>.pk-vector.index.type. Index options and distance "
-                                    + "metric are also field-scoped. The first release supports exactly "
-                                    + "one column.");
-
     public static final ConfigOption<String> PK_BTREE_INDEX_COLUMNS =
             key("pk-btree.index.columns")
                     .stringType()
@@ -5091,46 +5079,36 @@ public class CoreOptions implements Serializable {
         return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
     }
 
-    public boolean primaryKeyVectorIndexEnabled() {
-        return !primaryKeyVectorIndexColumns().isEmpty();
+    public boolean fullTextIndexEnabled() {
+        return !fullTextIndexColumns().isEmpty();
     }
 
-    public boolean primaryKeyFullTextIndexEnabled() {
-        return !primaryKeyFullTextIndexColumns().isEmpty();
+    public boolean fmIndexEnabled() {
+        return !fmIndexColumns().isEmpty();
     }
 
-    public boolean primaryKeyFMIndexEnabled() {
-        return !primaryKeyFMIndexColumns().isEmpty();
-    }
-
-    public List<String> primaryKeyVectorIndexColumns() {
-        List<String> types = vectorIndexTypes();
-        if (!types.isEmpty()) {
-            return types.stream()
-                    .flatMap(type -> globalIndexColumns(type).stream())
-                    .collect(Collectors.toList());
-        }
-        return indexColumns(options.get(PK_VECTOR_INDEX_COLUMNS));
-    }
-
-    public List<String> primaryKeyBTreeIndexColumns() {
+    public List<String> btreeIndexColumns() {
         return globalIndexColumns("btree");
     }
 
-    public List<String> primaryKeyBitmapIndexColumns() {
+    public List<String> bitmapIndexColumns() {
         return globalIndexColumns("bitmap");
     }
 
-    public List<String> primaryKeyMultiValueIndexColumns() {
+    public List<String> multiValueIndexColumns() {
         return globalIndexColumns("multivalue");
     }
 
-    public List<String> primaryKeyFullTextIndexColumns() {
+    public List<String> fullTextIndexColumns() {
         return globalIndexColumns("full-text");
     }
 
-    public List<String> primaryKeyFMIndexColumns() {
+    public List<String> fmIndexColumns() {
         return globalIndexColumns("fm");
+    }
+
+    public List<String> vectorIndexColumns(String type) {
+        return VectorIndexOptions.columns(options, type);
     }
 
     /** Index implementation identifiers declared with {@code global-index.<type>.index-columns}. */
@@ -5153,12 +5131,6 @@ public class CoreOptions implements Serializable {
         return !Arrays.asList("btree", "bitmap", "multivalue", "full-text", "fm").contains(type);
     }
 
-    private List<String> vectorIndexTypes() {
-        return globalIndexTypes().stream()
-                .filter(CoreOptions::isVectorIndexType)
-                .collect(Collectors.toList());
-    }
-
     public List<String> globalIndexColumns(String type) {
         String columns = options.get("global-index." + type + ".index-columns");
         if (columns == null) {
@@ -5167,15 +5139,7 @@ public class CoreOptions implements Serializable {
         if (columns == null) {
             columns = options.get("pk-" + type + ".index.columns");
         }
-        if (columns != null) {
-            return indexColumns(columns);
-        }
-        return indexColumns(options.get(PK_VECTOR_INDEX_COLUMNS)).stream()
-                .filter(
-                        column ->
-                                type.equals(
-                                        options.get("fields." + column + ".pk-vector.index.type")))
-                .collect(Collectors.toList());
+        return indexColumns(columns);
     }
 
     private static List<String> indexColumns(@Nullable String columns) {
@@ -5187,18 +5151,6 @@ public class CoreOptions implements Serializable {
     }
 
     public String globalIndexColumnsOptionKey(String type) {
-        if ("vector".equals(type) && !vectorIndexTypes().isEmpty()) {
-            return vectorIndexTypes().stream()
-                    .map(
-                            t ->
-                                    "global-index."
-                                            + t
-                                            + (options.get("global-index." + t + ".index-columns")
-                                                            != null
-                                                    ? ".index-columns"
-                                                    : ".index-column"))
-                    .collect(Collectors.joining(", "));
-        }
         for (String suffix : Arrays.asList(".index-columns", ".index-column")) {
             String key = "global-index." + type + suffix;
             if (options.get(key) != null) {
@@ -5306,68 +5258,33 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    public Options primaryKeyBTreeIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "btree");
+    public Options btreeIndexOptions(String column) {
+        return sortedIndexOptions(column, "btree");
     }
 
-    public Options primaryKeyBitmapIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "bitmap");
+    public Options bitmapIndexOptions(String column) {
+        return sortedIndexOptions(column, "bitmap");
     }
 
-    public Options primaryKeyMultiValueIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "multivalue");
+    public Options multiValueIndexOptions(String column) {
+        return sortedIndexOptions(column, "multivalue");
     }
 
-    public Options primaryKeyFMIndexOptions(String column) {
-        return primaryKeySortedIndexOptions(column, "fm");
+    public Options fmIndexOptions(String column) {
+        return sortedIndexOptions(column, "fm");
     }
 
-    public Options primaryKeyFullTextIndexOptions(String column) {
+    public Options fullTextIndexOptions(String column) {
         Map<String, String> resolved = globalIndexOptions("full-text", column).toMap();
         resolved.keySet().removeIf(key -> !key.startsWith("full-text."));
         return new Options(resolved);
     }
 
-    private Options primaryKeySortedIndexOptions(String column, String type) {
+    private Options sortedIndexOptions(String column, String type) {
         Options resolved = globalIndexOptions(type, column);
         resolved.remove("sorted-index.records-per-file");
         resolved.remove("sorted-index.records-per-range");
         return resolved;
-    }
-
-    public String primaryKeyVectorIndexColumn() {
-        List<String> columns = primaryKeyVectorIndexColumns();
-        checkArgument(
-                columns.size() == 1,
-                "%s must contain exactly one column in the first release, but is %s.",
-                globalIndexColumnsOptionKey("vector"),
-                columns);
-        return columns.get(0);
-    }
-
-    @Nullable
-    public String primaryKeyVectorIndexType(String column) {
-        return vectorIndexType(column);
-    }
-
-    @Nullable
-    public String vectorIndexType(String column) {
-        return VectorIndexOptions.indexType(options, column);
-    }
-
-    /** Compatibility delegate to the vector resolver shared by both table modes. */
-    public Options primaryKeyVectorIndexOptions(String column) {
-        String type = primaryKeyVectorIndexType(column);
-        checkArgument(
-                type != null && !type.trim().isEmpty(),
-                "fields.%s.pk-vector.index.type must be configured before resolving index options.",
-                column);
-        return VectorIndexOptions.resolve(options, type, column);
-    }
-
-    /** Compatibility delegate to the vector resolver shared by both table modes. */
-    public String primaryKeyVectorDistanceMetric(String column) {
-        return VectorIndexOptions.metric(options, primaryKeyVectorIndexType(column), column);
     }
 
     /** Specifies the merge engine for table with primary key. */

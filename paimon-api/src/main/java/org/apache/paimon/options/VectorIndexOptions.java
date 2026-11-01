@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
@@ -30,19 +31,70 @@ import java.util.stream.Collectors;
 /** Vector parameter resolution shared by primary-key and Data Evolution indexes. */
 public final class VectorIndexOptions {
 
+    private static final String LEGACY_INDEX_COLUMNS = "pk-vector.index.columns";
+
     private VectorIndexOptions() {}
+
+    public static List<String> columns(Options options) {
+        CoreOptions core = new CoreOptions(options);
+        List<String> types = indexTypes(core);
+        if (!types.isEmpty()) {
+            return types.stream()
+                    .flatMap(type -> columns(options, type).stream())
+                    .collect(Collectors.toList());
+        }
+        return legacyColumns(options);
+    }
+
+    public static List<String> columns(Options options, String type) {
+        List<String> declared = new CoreOptions(options).globalIndexColumns(type);
+        return declared.isEmpty()
+                ? legacyColumns(options).stream()
+                        .filter(column -> type.equals(legacyIndexType(options, column)))
+                        .collect(Collectors.toList())
+                : declared;
+    }
+
+    private static List<String> legacyColumns(Options options) {
+        String columns = options.get(LEGACY_INDEX_COLUMNS);
+        return columns == null
+                ? Collections.emptyList()
+                : Arrays.stream(columns.split(",", -1))
+                        .map(String::trim)
+                        .collect(Collectors.toList());
+    }
+
+    public static String columnsOptionKey(Options options) {
+        CoreOptions core = new CoreOptions(options);
+        List<String> types = indexTypes(core);
+        return types.isEmpty()
+                ? LEGACY_INDEX_COLUMNS
+                : types.stream()
+                        .map(core::globalIndexColumnsOptionKey)
+                        .collect(Collectors.joining(", "));
+    }
+
+    private static List<String> indexTypes(CoreOptions core) {
+        return core.globalIndexTypes().stream()
+                .filter(CoreOptions::isVectorIndexType)
+                .collect(Collectors.toList());
+    }
 
     @Nullable
     public static String indexType(Options options, String column) {
         CoreOptions core = new CoreOptions(options);
         List<String> declared =
-                core.globalIndexTypes().stream()
-                        .filter(CoreOptions::isVectorIndexType)
+                indexTypes(core).stream()
                         .filter(type -> core.globalIndexColumns(type).contains(column))
                         .collect(Collectors.toList());
         if (!declared.isEmpty()) {
             return declared.size() == 1 ? declared.get(0) : null;
         }
+        return legacyIndexType(options, column);
+    }
+
+    @Nullable
+    private static String legacyIndexType(Options options, String column) {
         String type = options.get("fields." + column + ".pk-vector.index.type");
         return type == null ? null : type.toLowerCase(Locale.ROOT).trim();
     }

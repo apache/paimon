@@ -27,6 +27,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -83,7 +84,7 @@ public class PrimaryKeyVectorScan implements VectorScan {
     @Override
     public Plan scan() {
         checkArgument(
-                table.coreOptions().primaryKeyVectorIndexEnabled(),
+                !VectorIndexOptions.columns(table.coreOptions().toConfiguration()).isEmpty(),
                 "Primary-key vector search requires a configured primary-key vector index.");
         checkArgument(
                 filter == null

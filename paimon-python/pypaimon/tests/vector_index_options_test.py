@@ -30,6 +30,29 @@ def _assert_metric(options, expected):
         assert options.to_map()[key] == expected
 
 
+@pytest.mark.parametrize('suffix', ['index-column', 'index-columns'])
+def test_legacy_registration_is_only_a_compatibility_fallback(suffix):
+    values = {'pk-vector.index.columns': ' old, other_old ',
+              'fields.old.pk-vector.index.type': 'ivf-pq',
+              'fields.other_old.pk-vector.index.type': 'diskann'}
+    options = Options(values)
+    assert VectorIndexOptions.columns(options) == ['old', 'other_old']
+    assert VectorIndexOptions.index_type(options, 'old') == 'ivf-pq'
+    assert CoreOptions(options).vector_index_columns('ivf-pq') == ['old']
+    assert CoreOptions(options).vector_index_columns('diskann') == ['other_old']
+    assert CoreOptions(options).vector_index_columns('ivf-flat') == []
+    assert VectorIndexOptions.columns_option_key(options) == 'pk-vector.index.columns'
+    values.update({'global-index.ivf-pq.' + suffix: ' embedding, other ',
+                   'global-index.diskann.' + suffix: 'video'})
+    assert VectorIndexOptions.columns(options) == ['video', 'embedding', 'other']
+    assert VectorIndexOptions.index_type(options, 'embedding') == 'ivf-pq'
+    assert VectorIndexOptions.index_type(options, 'video') == 'diskann'
+    assert CoreOptions(options).vector_index_columns('ivf-pq') == ['embedding', 'other']
+    assert CoreOptions(options).vector_index_columns('diskann') == ['video']
+    assert VectorIndexOptions.columns_option_key(options) == (
+        'global-index.diskann.%s, global-index.ivf-pq.%s' % (suffix, suffix))
+
+
 @pytest.mark.parametrize('key', ['index_type', 'index-type', 'vector.index-type', 'fields.embedding.index-type'])
 def test_generic_merge_does_not_infer_historical_vector_types(key):
     values = {key: 'ivf-pq', 'fields.embedding.index-options': '{"nlist":64}'}
@@ -40,7 +63,6 @@ def test_generic_merge_does_not_infer_historical_vector_types(key):
 def test_removed_type_aliases_are_ignored(key):
     options = Options({key: 'ivf-pq'})
     assert VectorIndexOptions.index_type(options, 'embedding') is None
-    assert CoreOptions(options).vector_index_type('embedding') is None
     assert VectorIndexOptions.resolve(options, None, 'embedding').to_map() == options.to_map()
     options.to_map()['fields.embedding.pk-vector.index.type'] = 'diskann'
     assert VectorIndexOptions.index_type(options, 'embedding') == 'diskann'
@@ -53,7 +75,6 @@ def test_legacy_primary_key_type_resolves_field_parameters():
               'fields.embedding.index-options': '{"nlist":64,"metric":"COSINE"}'}
     options = Options(values)
     assert VectorIndexOptions.index_type(options, 'embedding') == 'ivf-pq'
-    assert CoreOptions(options).vector_index_type('embedding') == 'ivf-pq'
     resolved = VectorIndexOptions.resolve(options, None, 'embedding', default_metric=False)
     _assert_metric(resolved, 'cosine')
     assert resolved.to_map()['ivf-pq.dimension'] == '768'
@@ -101,7 +122,7 @@ def test_field_json_aliases_remain_idempotent(suffix, key):
     _assert_metric(resolved, 'cosine')
     assert resolved.to_map()['ivf-pq.nlist'] == '64'
     assert VectorIndexOptions.resolve(resolved, 'ivf-pq', 'embedding').to_map() == resolved.to_map()
-    assert CoreOptions(Options(values)).primary_key_vector_index_options('embedding').to_map() == resolved.to_map()
+    assert VectorIndexOptions.resolve(Options(values), None, 'embedding').to_map() == resolved.to_map()
 
 
 def test_reader_keeps_unspecified_metric_and_writer_uses_default():

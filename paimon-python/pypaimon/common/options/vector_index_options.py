@@ -23,12 +23,47 @@ from pypaimon.common.options.options import Options
 
 class VectorIndexOptions:
     @staticmethod
+    def columns(options, index_type=None):
+        core = CoreOptions(options)
+        if index_type is not None:
+            declared = core.global_index_columns(index_type)
+            return declared if declared else [column for column in VectorIndexOptions._legacy_columns(options)
+                                              if VectorIndexOptions._legacy_index_type(options, column) == index_type]
+        types = VectorIndexOptions._index_types(core)
+        if types:
+            return [column for kind in types for column in VectorIndexOptions.columns(options, kind)]
+        return VectorIndexOptions._legacy_columns(options)
+
+    @staticmethod
+    def _legacy_columns(options):
+        columns = options.to_map().get('pk-vector.index.columns')
+        return [] if columns is None else [column.strip() for column in str(columns).split(',')]
+
+    @staticmethod
+    def columns_option_key(options):
+        types = VectorIndexOptions._index_types(CoreOptions(options))
+        if not types:
+            return 'pk-vector.index.columns'
+        values = options.to_map()
+        return ', '.join('global-index.%s.%s' % (
+            kind, 'index-columns' if 'global-index.%s.index-columns' % kind in values else 'index-column')
+            for kind in types)
+
+    @staticmethod
+    def _index_types(core):
+        return [kind for kind in core.global_index_types() if CoreOptions._is_vector_index_type(kind)]
+
+    @staticmethod
     def index_type(options, column):
         core = CoreOptions(options)
-        declared = [kind for kind in core.global_index_types()
-                    if CoreOptions._is_vector_index_type(kind) and column in core.global_index_columns(kind)]
+        declared = [kind for kind in VectorIndexOptions._index_types(core)
+                    if column in core.global_index_columns(kind)]
         if declared:
             return declared[0] if len(declared) == 1 else None
+        return VectorIndexOptions._legacy_index_type(options, column)
+
+    @staticmethod
+    def _legacy_index_type(options, column):
         value = options.to_map().get('fields.%s.pk-vector.index.type' % column)
         return None if value is None else str(value).lower().strip()
 
