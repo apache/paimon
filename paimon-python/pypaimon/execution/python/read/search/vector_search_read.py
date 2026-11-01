@@ -659,7 +659,7 @@ class AbstractVectorSearchReadImpl:
     def _resolved_index_options(self, index_type):
         values = dict(_table_options_map(self._table))
         values.update(self._options)
-        return VectorIndexOptions.resolve(Options(values), index_type, self._vector_column.name).to_map()
+        return VectorIndexOptions.resolve(Options(values), index_type, self._vector_column.name).options.to_map()
 
     def _configured_refine_factor(self, index_type):
         value = _configured_refine_factor(
@@ -991,9 +991,10 @@ def _table_options_map(table):
 
 
 def _configured_vector_metric(options, vector_column, index_type=None):
-    selected_type = index_type or VectorIndexOptions.index_type(Options(options), vector_column.name) or "vector"
-    metric = VectorIndexOptions.resolve(Options(options), selected_type, vector_column.name,
-                                        default_metric=False).to_map().get(selected_type + ".metric")
+    resolved = VectorIndexOptions.resolve(Options(options), index_type, vector_column.name, default_metric=False)
+    if resolved.index_type is None:
+        resolved = VectorIndexOptions.resolve(Options(options), "vector", vector_column.name, default_metric=False)
+    metric = resolved.options.to_map().get(resolved.index_type + ".metric")
     if metric is not None:
         return metric
     for key in ("test.vector.metric", "lumina.distance.metric"):

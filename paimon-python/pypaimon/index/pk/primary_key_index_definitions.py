@@ -59,10 +59,10 @@ class PrimaryKeyIndexDefinitions:
                     core.bitmap_index_options(field.name),
                     PrimaryKeyIndexFamily.BITMAP))
             elif field.name in vector:
+                resolved = VectorIndexOptions.resolve(core.options, None, field.name)
                 definitions.append(PrimaryKeyIndexDefinition(
                     field.name, field.id,
-                    VectorIndexOptions.index_type(core.options, field.name),
-                    VectorIndexOptions.resolve(core.options, None, field.name),
+                    resolved.index_type, resolved.options,
                     PrimaryKeyIndexFamily.VECTOR))
             elif field.name in full_text:
                 definitions.append(PrimaryKeyIndexDefinition(

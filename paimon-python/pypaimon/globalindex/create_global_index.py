@@ -111,7 +111,7 @@ class GlobalIndexBuilder:
                 "Python global index build currently supports one column, got %s."
                 % self._index_columns
             )
-        self._options = (VectorIndexOptions.resolve(self._options, self._index_type, self._index_columns[0])
+        self._options = (VectorIndexOptions.resolve(self._options, self._index_type, self._index_columns[0]).options
                          if CoreOptions._is_vector_index_type(self._index_type) else
                          self._core_options.global_index_options(self._index_type, self._index_columns[0]))
         self._core_options = CoreOptions(self._options)

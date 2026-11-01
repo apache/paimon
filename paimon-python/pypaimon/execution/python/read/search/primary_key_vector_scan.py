@@ -83,8 +83,9 @@ class PrimaryKeyVectorScan(VectorSearchScan):
 
         index_type = self._index_type
         if index_type is None:
-            index_type = VectorIndexOptions.index_type(
-                Options(dict(scan_table.table_schema.options)), self._vector_column.name)
+            index_type = VectorIndexOptions.resolve(
+                Options(dict(scan_table.table_schema.options)), None,
+                self._vector_column.name, default_metric=False).index_type
         entries = IndexFileHandler(table=scan_table).scan(
             snapshot,
             lambda entry: _matches(entry, self._vector_column.id, index_type,

@@ -47,6 +47,9 @@ class PrimaryKeyIndexDefinitionsTest {
         if (!sharedOptions) {
             options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         }
+        options.put(
+                "fields.embedding." + (sharedOptions ? "index-options" : "pk-vector.index.options"),
+                "{\"nlist\":64,\"metric\":\"cosine\"}");
         options.put(columnsKey("btree", sharedOptions), "name");
         options.put(columnsKey("bitmap", sharedOptions), "status");
         options.put(columnsKey("multivalue", sharedOptions), "tags");
@@ -70,6 +73,8 @@ class PrimaryKeyIndexDefinitionsTest {
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::indexType)
                 .containsExactly("btree", "bitmap", "ivf-pq", "multivalue");
+        assertThat(definitions.get(2).options().get("ivf-pq.nlist")).isEqualTo("64");
+        assertThat(definitions.get(2).options().get("ivf-pq.metric")).isEqualTo("cosine");
     }
 
     @ParameterizedTest

@@ -42,7 +42,8 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
         self._index_metric = None
-        index_type = VectorIndexOptions.index_type(self._table.options.options, self._vector_column.name)
+        index_type = VectorIndexOptions.resolve(
+            self._table.options.options, None, self._vector_column.name, default_metric=False).index_type
         indexed_limit = self._indexed_search_limit(index_type)
         if indexed_limit > 2147483647:
             raise ValueError(
@@ -170,7 +171,8 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
 
     def _raw_candidates(self, plan):
         metric = self._search_metric(
-            VectorIndexOptions.index_type(self._table.options.options, self._vector_column.name))
+            VectorIndexOptions.resolve(
+                self._table.options.options, None, self._vector_column.name, default_metric=False).index_type)
         read_table = self._table.copy_without_time_travel({
             'read.native.enabled': 'false', 'scan.native-plan.enabled': 'false'})
         read_builder = read_table.new_read_builder().with_projection(

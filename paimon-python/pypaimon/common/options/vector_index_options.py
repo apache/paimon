@@ -17,11 +17,19 @@
 
 """Vector parameter resolution shared by primary-key and Data Evolution indexes."""
 
+from dataclasses import dataclass
+from typing import Optional
+
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 
 
+@dataclass(frozen=True)
 class VectorIndexOptions:
+    index_type: Optional[str]
+    options: Options
+    metric: str
+
     @staticmethod
     def columns(options, index_type=None):
         core = CoreOptions(options)
@@ -52,15 +60,6 @@ class VectorIndexOptions:
         return [kind for kind in core.global_index_types() if CoreOptions._is_vector_index_type(kind)]
 
     @staticmethod
-    def index_type(options, column):
-        core = CoreOptions(options)
-        declared = [kind for kind in VectorIndexOptions._index_types(core)
-                    if column in core.global_index_columns(kind)]
-        if declared:
-            return declared[0] if len(declared) == 1 else None
-        return VectorIndexOptions._legacy_index_type(options, column)
-
-    @staticmethod
     def _legacy_index_type(options, column):
         value = options.to_map().get('fields.%s.pk-vector.index.type' % column)
         return None if value is None else str(value).lower().strip()
@@ -69,9 +68,15 @@ class VectorIndexOptions:
     def resolve(options, index_type, column, *, default_metric=True):
         values = dict(options.to_map())
         if index_type is None:
-            index_type = VectorIndexOptions.index_type(options, column)
+            core = CoreOptions(options)
+            declared = [kind for kind in VectorIndexOptions._index_types(core)
+                        if column in core.global_index_columns(kind)]
+            index_type = ((declared[0] if len(declared) == 1 else None) if declared
+                          else VectorIndexOptions._legacy_index_type(options, column))
             if index_type is None:
-                return Options(values)
+                return VectorIndexOptions(
+                    None, Options(values),
+                    _normalize_metric(values.get('fields.%s.pk-vector.distance.metric' % column)))
         prefix = index_type + '.'
         field_prefix = 'fields.%s.' % column
         aliases = (field_prefix + 'distance.metric', field_prefix + 'metric',
@@ -90,15 +95,7 @@ class VectorIndexOptions:
             normalized = _normalize_metric(metric)
             for key in aliases:
                 resolved[key] = normalized
-        return Options(resolved)
-
-    @staticmethod
-    def metric(options, index_type, column):
-        if index_type is None:
-            index_type = VectorIndexOptions.index_type(options, column)
-        if index_type is None:
-            return _normalize_metric(options.to_map().get('fields.%s.pk-vector.distance.metric' % column))
-        return VectorIndexOptions.resolve(options, index_type, column).to_map()[index_type + '.metric']
+        return VectorIndexOptions(index_type, Options(resolved), _normalize_metric(metric))
 
 
 def _normalize_metric(metric):

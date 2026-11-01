@@ -371,10 +371,11 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                                 handler,
                                                 readerFactoryBuilder,
                                                 field,
-                                                VectorIndexOptions.metric(
-                                                        definition.options(),
-                                                        definition.indexType(),
-                                                        definition.column()),
+                                                VectorIndexOptions.resolve(
+                                                                definition.options(),
+                                                                definition.indexType(),
+                                                                definition.column())
+                                                        .metric(),
                                                 definition.indexType())
                                         .withIndexOptions(definition.options());
                         break;

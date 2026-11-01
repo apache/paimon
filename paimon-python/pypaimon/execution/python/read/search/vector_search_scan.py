@@ -245,4 +245,4 @@ def _configured_vector_index_type(table, vector_column, options):
     table_options = getattr(getattr(table, "options", None), "options", None)
     values = dict(table_options.to_map()) if table_options is not None else {}
     values.update(options)
-    return VectorIndexOptions.index_type(Options(values), vector_column.name)
+    return VectorIndexOptions.resolve(Options(values), None, vector_column.name, default_metric=False).index_type

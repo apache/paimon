@@ -294,8 +294,9 @@ public class DataEvolutionVectorScan implements VectorScan {
 
     @Nullable
     private String configuredVectorIndexType() {
-        return VectorIndexOptions.indexType(
-                new Options(table.options(), options), vectorColumn.name());
+        return VectorIndexOptions.resolve(
+                        new Options(table.options(), options), null, vectorColumn.name(), false)
+                .type();
     }
 
     private static boolean containsField(GlobalIndexMeta meta, int fieldId) {

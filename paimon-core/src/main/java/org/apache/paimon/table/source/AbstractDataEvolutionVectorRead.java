@@ -783,15 +783,15 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         String fieldPrefix = "fields." + vectorColumn.name() + ".";
         if (options.containsKey(fieldPrefix + "index-options")) {
             CoreOptions configured = new CoreOptions(new Options(table.options(), options));
-            String type =
-                    VectorIndexOptions.indexType(configured.toConfiguration(), vectorColumn.name());
-            if (type == null) {
-                type = "vector";
-            }
-            String configuredMetric =
+            VectorIndexOptions resolved =
                     VectorIndexOptions.resolve(
-                                    configured.toConfiguration(), type, vectorColumn.name(), false)
-                            .get(type + ".metric");
+                            configured.toConfiguration(), null, vectorColumn.name(), false);
+            if (resolved.type() == null) {
+                resolved =
+                        VectorIndexOptions.resolve(
+                                configured.toConfiguration(), "vector", vectorColumn.name(), false);
+            }
+            String configuredMetric = resolved.options().get(resolved.type() + ".metric");
             if (configuredMetric != null) {
                 return configuredMetric;
             }
@@ -842,14 +842,14 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     protected int configuredRefineFactor(String indexType) {
-        Options resolved =
+        VectorIndexOptions resolved =
                 VectorIndexOptions.resolve(
                         new Options(
                                 table == null ? Collections.emptyMap() : table.options(), options),
                         indexType,
                         vectorColumn.name());
         return VectorSearchRefineOptions.resolve(
-                options, resolved.toMap(), vectorColumn.name(), indexType);
+                options, resolved.options().toMap(), vectorColumn.name(), resolved.type());
     }
 
     private static IndexFileMeta firstVectorIndexFile(List<IndexVectorSearchSplit> splits) {

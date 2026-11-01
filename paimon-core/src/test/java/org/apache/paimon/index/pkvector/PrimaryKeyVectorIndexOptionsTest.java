@@ -64,7 +64,10 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.index.columns", "embedding");
         options.put("pk-vector.index.type", "ivf-pq");
 
-        assertThat(VectorIndexOptions.indexType(new Options(options), "embedding")).isNull();
+        assertThat(
+                        VectorIndexOptions.resolve(new Options(options), null, "embedding", false)
+                                .type())
+                .isNull();
     }
 
     @Test
@@ -76,6 +79,7 @@ class PrimaryKeyVectorIndexOptionsTest {
 
         assertThat(
                         VectorIndexOptions.resolve(new Options(options), null, "embedding")
+                                .options()
                                 .get("ivf-pq.nlist"))
                 .isNull();
     }
@@ -86,7 +90,7 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.index.columns", "embedding");
         options.put("pk-vector.distance.metric", "l2");
 
-        assertThat(VectorIndexOptions.metric(new Options(options), null, "embedding"))
+        assertThat(VectorIndexOptions.resolve(new Options(options), null, "embedding").metric())
                 .isEqualTo("inner_product");
     }
 
@@ -97,7 +101,7 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.distance.metric", "l2");
         options.put("fields.embedding.pk-vector.distance.metric", "cosine");
 
-        assertThat(VectorIndexOptions.metric(new Options(options), null, "embedding"))
+        assertThat(VectorIndexOptions.resolve(new Options(options), null, "embedding").metric())
                 .isEqualTo("cosine");
     }
 
@@ -109,7 +113,8 @@ class PrimaryKeyVectorIndexOptionsTest {
         options.put("pk-vector.index.options", "{\"nlist\":64}");
         options.put("fields.embedding.pk-vector.index.options", "{\"nlist\":128}");
 
-        Options resolved = VectorIndexOptions.resolve(new Options(options), null, "embedding");
+        Options resolved =
+                VectorIndexOptions.resolve(new Options(options), null, "embedding").options();
 
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("128");
     }
@@ -121,7 +126,8 @@ class PrimaryKeyVectorIndexOptionsTest {
                         "{\"nlist\":64,\"ivf-pq.pq.m\":\"8\"," + "\"fields.embedding.hnsw.m\":16}");
 
         Options resolved =
-                VectorIndexOptions.resolve(coreOptions.toConfiguration(), null, "embedding");
+                VectorIndexOptions.resolve(coreOptions.toConfiguration(), null, "embedding")
+                        .options();
 
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(resolved.get("ivf-pq.pq.m")).isEqualTo("8");
@@ -134,7 +140,10 @@ class PrimaryKeyVectorIndexOptionsTest {
         assertThatThrownBy(
                         () ->
                                 VectorIndexOptions.resolve(
-                                        coreOptions("[1,2]").toConfiguration(), null, "embedding"))
+                                                coreOptions("[1,2]").toConfiguration(),
+                                                null,
+                                                "embedding")
+                                        .options())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("pk-vector.index.options")
                 .hasMessageContaining("JSON object");

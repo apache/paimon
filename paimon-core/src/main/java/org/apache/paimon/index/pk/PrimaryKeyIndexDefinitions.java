@@ -95,16 +95,14 @@ public class PrimaryKeyIndexDefinitions {
                                 options.multiValueIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.MULTI_VALUE));
             } else if (vectorColumns.contains(column)) {
+                VectorIndexOptions resolved =
+                        VectorIndexOptions.resolve(options.toConfiguration(), null, column);
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
                                 column,
                                 field.id(),
-                                VectorIndexOptions.indexType(options.toConfiguration(), column),
-                                VectorIndexOptions.resolve(
-                                        options.toConfiguration(),
-                                        VectorIndexOptions.indexType(
-                                                options.toConfiguration(), column),
-                                        column),
+                                resolved.type(),
+                                resolved.options(),
                                 PrimaryKeyIndexDefinition.Family.VECTOR));
             } else if (fullTextColumns.contains(column)) {
                 definitions.add(

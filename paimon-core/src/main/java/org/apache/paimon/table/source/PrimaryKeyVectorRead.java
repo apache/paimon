@@ -74,7 +74,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-import static org.apache.paimon.globalindex.VectorSearchMetric.normalize;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Executes bucket-local primary-key vector search and merges physical candidates globally. */
@@ -206,22 +205,16 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             }
         }
         Options tableOptions = table.coreOptions().toConfiguration();
-        if (indexType == null) {
-            indexType = VectorIndexOptions.indexType(tableOptions, vectorField.name());
-        }
-        Options indexOptions =
+        VectorIndexOptions resolved =
                 VectorIndexOptions.resolve(tableOptions, indexType, vectorField.name());
-        String metric =
-                normalize(VectorIndexOptions.metric(indexOptions, indexType, vectorField.name()));
         int refineFactor =
                 VectorSearchRefineOptions.resolve(
-                        searchOptions, indexOptions.toMap(), vectorField.name(), indexType);
+                        searchOptions,
+                        resolved.options().toMap(),
+                        vectorField.name(),
+                        resolved.type());
         return new SearchParameters(
-                indexType,
-                indexOptions,
-                metric,
-                refineFactor,
-                VectorSearchRefineOptions.searchLimit(limit, refineFactor));
+                resolved, refineFactor, VectorSearchRefineOptions.searchLimit(limit, refineFactor));
     }
 
     protected SearchResult searchBuckets(
@@ -293,13 +286,14 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         List<Candidate> indexedCandidates =
                 topK(searchResult.indexedCandidates(), parameters.indexedLimit);
         if (parameters.refineFactor > 0 && !indexedCandidates.isEmpty()) {
-            indexedCandidates = rerank(plan, indexedCandidates, parameters.metric);
+            indexedCandidates = rerank(plan, indexedCandidates, parameters.vectorOptions.metric());
         } else {
             indexedCandidates = topK(indexedCandidates, limit);
         }
         List<Candidate> candidates = new ArrayList<>(indexedCandidates);
         candidates.addAll(topK(searchResult.exactCandidates(), limit));
-        return new PrimaryKeyVectorResult(plan, topK(candidates, limit), parameters.metric);
+        return new PrimaryKeyVectorResult(
+                plan, topK(candidates, limit), parameters.vectorOptions.metric());
     }
 
     protected SearchResult mergeSearchResults(
@@ -331,7 +325,10 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         .collect(Collectors.toList());
         PkVectorBucketIndexState state =
                 PkVectorBucketIndexState.fromActiveDataFiles(
-                        vectorField.id(), parameters.indexType, activeFiles, split.payloadFiles());
+                        vectorField.id(),
+                        parameters.vectorOptions.type(),
+                        activeFiles,
+                        split.payloadFiles());
         Map<String, DeletionVector> deletionVectors = deletionVectors(dataSplit, context.fileIO);
         PkVectorDataFileReader.Factory readerFactory =
                 new PkVectorDataFileReader.Factory(
@@ -346,15 +343,15 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         context.indexFileHandler.pkVectorAnnSegment(
                                 dataSplit.partition(), dataSplit.bucket()),
                         vectorField,
-                        parameters.indexOptions,
-                        parameters.metric,
+                        parameters.vectorOptions.options(),
+                        parameters.vectorOptions.metric(),
                         context.executor);
         PrimaryKeyVectorBucketSearch bucketSearch =
                 new PrimaryKeyVectorBucketSearch(
                         readerFactory,
                         annSearcher,
                         searchOptions,
-                        parameters.metric,
+                        parameters.vectorOptions.metric(),
                         table.coreOptions().vectorIndexSearchMode());
         return bucketSearch
                 .searchBatchAsync(
@@ -731,21 +728,13 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        @Nullable private final String indexType;
-        private final Options indexOptions;
-        private final String metric;
+        private final VectorIndexOptions vectorOptions;
         private final int refineFactor;
         private final int indexedLimit;
 
         private SearchParameters(
-                @Nullable String indexType,
-                Options indexOptions,
-                String metric,
-                int refineFactor,
-                int indexedLimit) {
-            this.indexType = indexType;
-            this.indexOptions = indexOptions;
-            this.metric = metric;
+                VectorIndexOptions vectorOptions, int refineFactor, int indexedLimit) {
+            this.vectorOptions = vectorOptions;
             this.refineFactor = refineFactor;
             this.indexedLimit = indexedLimit;
         }

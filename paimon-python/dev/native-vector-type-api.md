@@ -72,6 +72,14 @@ column registry and field type pairing are private compatibility inputs;
 to the type-scoped resolver. Other index accessors also use names without a
 `primaryKey` prefix. No public method compatibility wrappers are retained.
 
+`VectorIndexOptions.resolve(...)` returns the selected implementation together
+with its merged options (Java: `type()` and `options()`; Python: `index_type`
+and `options`). There is no separate `indexType`/`index_type` lookup method.
+Writers and raw-query fallback use this result; readers pass the implementation
+from persisted index metadata when available. `metric()` (Python: `metric`)
+provides the normalized metric default without inserting it into query options
+when `defaultMetric`/`default_metric` is false.
+
 When an implementation is configured and this method is unavailable, Python
 raises `AttributeError` before planning, reading, executing, or capturing hybrid
 routes. It does not fall back to Python execution. SDK configuration and execution

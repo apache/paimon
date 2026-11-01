@@ -61,8 +61,8 @@ class GlobalIndexTest(unittest.TestCase):
                           'fields.embedding.pk-vector.index.type': 'ivf-pq',
                           'fields.embedding.pk-vector.distance.metric': metric.lower().replace('-', '_'),
                           'fields.embedding.pk-vector.index.options': '{"metric":"%s"}' % metric}
-                first = VectorIndexOptions.resolve(Options(values), None, 'embedding')
-                second = VectorIndexOptions.resolve(first, 'ivf-pq', 'embedding')
+                first = VectorIndexOptions.resolve(Options(values), None, 'embedding').options
+                second = VectorIndexOptions.resolve(first, 'ivf-pq', 'embedding').options
                 self.assertEqual(first.to_map(), second.to_map())
                 self.assertEqual('{"metric":"%s"}' % metric,
                                  values['fields.embedding.pk-vector.index.options'])
@@ -110,12 +110,13 @@ class GlobalIndexTest(unittest.TestCase):
                   "fields.embedding.distance.metric": "cosine"}
         core = CoreOptions(Options(values))
         self.assertEqual(["embedding"], VectorIndexOptions.columns(core.options))
-        self.assertEqual("ivf-pq", VectorIndexOptions.index_type(core.options, "embedding"))
-        self.assertEqual("cosine", VectorIndexOptions.metric(core.options, None, "embedding"))
+        self.assertEqual("ivf-pq", VectorIndexOptions.resolve(
+            core.options, None, "embedding", default_metric=False).index_type)
+        self.assertEqual("cosine", VectorIndexOptions.resolve(core.options, None, "embedding").metric)
         values["fields.embedding.index-options"] = '{"nlist":64,"distance.metric":"inner_product"}'
         core = CoreOptions(Options(values))
-        self.assertEqual("inner_product", VectorIndexOptions.metric(core.options, None, "embedding"))
-        resolved = VectorIndexOptions.resolve(core.options, None, "embedding").to_map()
+        self.assertEqual("inner_product", VectorIndexOptions.resolve(core.options, None, "embedding").metric)
+        resolved = VectorIndexOptions.resolve(core.options, None, "embedding").options.to_map()
         self.assertEqual("768", resolved["ivf-pq.dimension"])
         self.assertEqual("64", resolved["fields.embedding.nlist"])
         self.assertEqual("inner_product", resolved["ivf-pq.distance.metric"])

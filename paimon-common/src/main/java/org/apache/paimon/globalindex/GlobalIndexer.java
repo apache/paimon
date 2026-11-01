@@ -58,7 +58,7 @@ public interface GlobalIndexer {
             String column = indexFields.get(0).name();
             resolved =
                     CoreOptions.isVectorIndexType(type)
-                            ? VectorIndexOptions.resolve(options, type, column)
+                            ? VectorIndexOptions.resolve(options, type, column).options()
                             : new CoreOptions(options).globalIndexOptions(type, column);
         }
         return GlobalIndexerFactoryUtils.load(type).create(indexFields, resolved);

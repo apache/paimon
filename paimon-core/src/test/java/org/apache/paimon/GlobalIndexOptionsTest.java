@@ -108,7 +108,10 @@ class GlobalIndexOptionsTest {
         if ("ivf-pq".equals(type)) {
             assertThat(VectorIndexOptions.columns(options.toConfiguration()))
                     .containsExactly("first", "second");
-            assertThat(VectorIndexOptions.indexType(options.toConfiguration(), "first"))
+            assertThat(
+                            VectorIndexOptions.resolve(
+                                            options.toConfiguration(), null, "first", false)
+                                    .type())
                     .isEqualTo("ivf-pq");
         }
     }
@@ -165,6 +168,7 @@ class GlobalIndexOptionsTest {
         assertThat(
                         VectorIndexOptions.resolve(
                                         definition.options(), definition.indexType(), "embedding")
+                                .options()
                                 .toMap())
                 .isEqualTo(definition.options().toMap());
         assertThat(
@@ -216,6 +220,7 @@ class GlobalIndexOptionsTest {
         assertThat(
                         VectorIndexOptions.resolve(
                                         options.toConfiguration(), "ivf-pq", "embedding", false)
+                                .options()
                                 .get("ivf-pq.metric"))
                 .isNull();
     }
@@ -230,10 +235,13 @@ class GlobalIndexOptionsTest {
         values.put("fields.embedding.nlist", "48");
         values.put("fields.embedding.distance.metric", "cosine");
         CoreOptions options = new CoreOptions(values);
-        assertThat(VectorIndexOptions.metric(options.toConfiguration(), null, "embedding"))
+        assertThat(
+                        VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding")
+                                .metric())
                 .isEqualTo("cosine");
         assertThat(
                         VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding")
+                                .options()
                                 .get("ivf-pq.dimension"))
                 .isEqualTo("768");
 
@@ -241,9 +249,12 @@ class GlobalIndexOptionsTest {
                 "fields.embedding.index-options",
                 "{\"nlist\":64,\"distance.metric\":\"inner_product\"}");
         options = new CoreOptions(values);
-        assertThat(VectorIndexOptions.metric(options.toConfiguration(), null, "embedding"))
+        assertThat(
+                        VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding")
+                                .metric())
                 .isEqualTo("inner_product");
-        Options resolved = VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding");
+        Options resolved =
+                VectorIndexOptions.resolve(options.toConfiguration(), null, "embedding").options();
         assertThat(resolved.get("ivf-pq.nlist")).isEqualTo("64");
         assertThat(resolved.get("fields.embedding.nlist")).isEqualTo("64");
         assertThat(resolved.get("ivf-pq.metric")).isEqualTo("inner_product");

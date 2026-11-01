@@ -41,6 +41,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,74 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
     @Override
     protected Schema schemaDefault() {
         return vectorSchema("deduplicate", true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"legacy", "index-column", "index-columns"})
+    void testTypedConfigurationReachesWritesAndRawFallback(String declaration) throws Exception {
+        Schema base = schemaDefault();
+        Map<String, String> options = new HashMap<>(base.options());
+        options.put("vector-index.search-mode", "full");
+        String type = TestVectorGlobalIndexerFactory.IDENTIFIER;
+        options.remove("global-index." + type + ".index-columns");
+        options.remove("fields.embedding.index-options");
+        if (declaration.equals("legacy")) {
+            options.put("pk-vector.index.columns", "embedding");
+            options.put("fields.embedding.pk-vector.index.type", type);
+            options.put("fields.embedding.pk-vector.index.options", "{\"metric\":\"l2\"}");
+        } else {
+            options.put("global-index." + type + "." + declaration, "embedding");
+            options.put("fields.embedding.index-options", "{\"metric\":\"l2\"}");
+        }
+        catalog.createTable(
+                identifier(),
+                new Schema(
+                        base.fields(),
+                        base.partitionKeys(),
+                        base.primaryKeys(),
+                        options,
+                        base.comment()),
+                false);
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {3, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {1, 0})),
+                GenericRow.of(3, BinaryVector.fromPrimitiveArray(new float[] {2, 0})));
+
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1);
+        PrimaryKeyVectorScan.Plan indexed =
+                (PrimaryKeyVectorScan.Plan) builder.newVectorScan().scan();
+        List<Split> dataSplits = new ArrayList<>();
+        for (VectorSearchSplit split : indexed.splits()) {
+            BucketVectorSearchSplit bucket = (BucketVectorSearchSplit) split;
+            assertThat(bucket.payloadFiles()).isNotEmpty();
+            assertThat(bucket.payloadFiles()).allMatch(payload -> payload.indexType().equals(type));
+            dataSplits.add(bucket.dataSplit());
+        }
+        assertThat(readIds(table, builder.newVectorRead().read(indexed))).containsExactly(2);
+
+        PrimaryKeyVectorScan.Plan raw =
+                PrimaryKeyVectorScan.plan(
+                        indexed.snapshotId(), dataSplits, Collections.emptyList());
+        GlobalIndexResult rawResult = builder.newVectorRead().read(raw);
+        assertThat(readIds(table, rawResult)).containsExactly(2);
+        assertThat(((PrimaryKeyVectorResult) rawResult).splits().get(0).scores())
+                .containsExactly(0.5F);
+        List<GlobalIndexResult> batch =
+                table.newBatchVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVectors(new float[][] {{0, 0}, {4, 0}})
+                        .withLimit(1)
+                        .newBatchVectorRead()
+                        .readBatch(raw);
+        assertThat(readIds(table, batch.get(0))).containsExactly(2);
+        assertThat(readIds(table, batch.get(1))).containsExactly(1);
     }
 
     private Schema vectorSchema(String mergeEngine, boolean deletionVectorsEnabled) {

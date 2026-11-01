@@ -40,7 +40,7 @@ def configure_vector_index_type(native, options, column):
     """Use the required native API and propagate missing-method errors."""
     if column is None:
         return
-    index_type = VectorIndexOptions.index_type(Options(options), column)
+    index_type = VectorIndexOptions.resolve(Options(options), None, column, default_metric=False).index_type
     if index_type is not None:
         native.with_vector_index_type(column, index_type)
 
@@ -68,9 +68,12 @@ def _resolve(schema):
     definitions = [(family, core.global_index_columns(family)) for family in families]
     definitions += [(kind, core.global_index_columns(kind)) for kind in declarations
                     if kind not in families]
+    vector_options = {}
     if primary_key and not any(kind not in families for kind in declarations):
-        definitions += [(VectorIndexOptions.index_type(core.options, column), [column])
-                        for column in VectorIndexOptions.columns(core.options)]
+        for column in VectorIndexOptions.columns(core.options):
+            resolved = VectorIndexOptions.resolve(core.options, None, column, default_metric=False)
+            vector_options[(resolved.index_type, column)] = resolved
+            definitions.append((resolved.index_type, [column]))
     known_columns = set()
     native_columns = {}
     profiles = {}
@@ -86,8 +89,13 @@ def _resolve(schema):
             result['pk-%s.index.columns' % family] = ','.join(native_columns[family])
         for column in columns:
             known_columns.add(column)
-            resolved = (VectorIndexOptions.resolve(core.options, kind, column, default_metric=False).to_map()
-                        if vector else core.global_index_options(kind, column).to_map())
+            if vector:
+                parsed = vector_options.get((kind, column))
+                if parsed is None:
+                    parsed = VectorIndexOptions.resolve(core.options, kind, column, default_metric=False)
+                resolved = parsed.options.to_map()
+            else:
+                resolved = core.global_index_options(kind, column).to_map()
             resolved = native_search_options(resolved)
             profile = {key: value for key, value in resolved.items()
                        if key.startswith(prefix) and value is not None}
@@ -95,8 +103,7 @@ def _resolve(schema):
             if primary_key:
                 if vector:
                     result[field_prefix + 'pk-vector.index.type'] = kind
-                    result[field_prefix + 'pk-vector.distance.metric'] = VectorIndexOptions.metric(
-                        core.options, kind, column)
+                    result[field_prefix + 'pk-vector.distance.metric'] = parsed.metric
                     profile.update({key: value for key, value in resolved.items()
                                     if key.startswith(field_prefix) and not key.startswith(field_prefix + 'pk-')
                                     and key != field_prefix + 'index-options' and value is not None})

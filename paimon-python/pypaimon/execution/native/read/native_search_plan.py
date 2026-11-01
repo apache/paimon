@@ -48,19 +48,17 @@ def _index_search_options(table, column, index_type=None, overrides=None, scalar
     if column is None:
         return values
     core = CoreOptions(Options(values))
-    if index_type is None:
-        index_type = VectorIndexOptions.index_type(Options(values), column)
-        if index_type is None:
-            # The Python reader can resolve field options once persisted index metadata is known.
-            if any(values.get(key) is not None for key in (
-                    'fields.%s.index-options' % column, 'fields.%s.pk-vector.index.options' % column)):
-                return None
-            return values
+    if index_type is not None and not CoreOptions._is_vector_index_type(index_type):
+        return native_search_options(core.global_index_options(index_type, column).to_map())
     # Keep an unspecified metric absent so readers can use persisted index metadata.
-    resolved = (VectorIndexOptions.resolve(Options(values), index_type, column, default_metric=False).to_map()
-                if CoreOptions._is_vector_index_type(index_type) else
-                core.global_index_options(index_type, column).to_map())
-    return native_search_options(resolved)
+    resolved = VectorIndexOptions.resolve(Options(values), index_type, column, default_metric=False)
+    if resolved.index_type is None:
+        # The Python reader can resolve field options once persisted index metadata is known.
+        if any(values.get(key) is not None for key in (
+                'fields.%s.index-options' % column, 'fields.%s.pk-vector.index.options' % column)):
+            return None
+        return values
+    return native_search_options(resolved.options.to_map())
 
 
 def _vector_query_options(options, column, resolved_options):
@@ -68,9 +66,9 @@ def _vector_query_options(options, column, resolved_options):
     values = native_search_options(options)
     if column is None:
         return values
-    index_type = VectorIndexOptions.index_type(Options(resolved_options), column)
+    index_type = VectorIndexOptions.resolve(Options(resolved_options), None, column, default_metric=False).index_type
     return native_search_options(VectorIndexOptions.resolve(
-        Options(values), index_type, column, default_metric=False).to_map())
+        Options(values), index_type, column, default_metric=False).options.to_map())
 
 
 def _range(value):

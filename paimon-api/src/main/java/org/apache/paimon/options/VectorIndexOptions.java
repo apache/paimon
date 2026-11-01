@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -29,11 +30,34 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 
 /** Vector parameter resolution shared by primary-key and Data Evolution indexes. */
-public final class VectorIndexOptions {
+public final class VectorIndexOptions implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private static final String LEGACY_INDEX_COLUMNS = "pk-vector.index.columns";
 
-    private VectorIndexOptions() {}
+    @Nullable private final String type;
+    private final Options options;
+    private final String metric;
+
+    private VectorIndexOptions(@Nullable String type, Options options, String metric) {
+        this.type = type;
+        this.options = options;
+        this.metric = metric;
+    }
+
+    @Nullable
+    public String type() {
+        return type;
+    }
+
+    public Options options() {
+        return options;
+    }
+
+    public String metric() {
+        return metric;
+    }
 
     public static List<String> columns(Options options) {
         CoreOptions core = new CoreOptions(options);
@@ -81,35 +105,37 @@ public final class VectorIndexOptions {
     }
 
     @Nullable
-    public static String indexType(Options options, String column) {
-        CoreOptions core = new CoreOptions(options);
-        List<String> declared =
-                indexTypes(core).stream()
-                        .filter(type -> core.globalIndexColumns(type).contains(column))
-                        .collect(Collectors.toList());
-        if (!declared.isEmpty()) {
-            return declared.size() == 1 ? declared.get(0) : null;
-        }
-        return legacyIndexType(options, column);
-    }
-
-    @Nullable
     private static String legacyIndexType(Options options, String column) {
         String type = options.get("fields." + column + ".pk-vector.index.type");
         return type == null ? null : type.toLowerCase(Locale.ROOT).trim();
     }
 
-    public static Options resolve(Options options, @Nullable String type, String column) {
+    public static VectorIndexOptions resolve(
+            Options options, @Nullable String type, String column) {
         return resolve(options, type, column, true);
     }
 
     /** Retains an unspecified metric when readers must obtain it from persisted index metadata. */
-    public static Options resolve(
+    public static VectorIndexOptions resolve(
             Options options, @Nullable String type, String column, boolean defaultMetric) {
         if (type == null) {
-            type = indexType(options, column);
+            CoreOptions core = new CoreOptions(options);
+            List<String> declared =
+                    indexTypes(core).stream()
+                            .filter(
+                                    candidate ->
+                                            core.globalIndexColumns(candidate).contains(column))
+                            .collect(Collectors.toList());
+            type =
+                    declared.isEmpty()
+                            ? legacyIndexType(options, column)
+                            : (declared.size() == 1 ? declared.get(0) : null);
             if (type == null) {
-                return new Options(options.toMap(), options);
+                return new VectorIndexOptions(
+                        null,
+                        new Options(options.toMap(), options),
+                        normalizeMetric(
+                                options.get("fields." + column + ".pk-vector.distance.metric")));
             }
         }
         String prefix = type + ".";
@@ -150,16 +176,7 @@ public final class VectorIndexOptions {
             String normalized = normalizeMetric(metric);
             aliases.forEach(key -> resolved.setString(key, normalized));
         }
-        return resolved;
-    }
-
-    public static String metric(Options options, @Nullable String type, String column) {
-        if (type == null) {
-            type = indexType(options, column);
-        }
-        return type == null
-                ? normalizeMetric(options.get("fields." + column + ".pk-vector.distance.metric"))
-                : resolve(options, type, column).get(type + ".metric");
+        return new VectorIndexOptions(type, resolved, normalizeMetric(metric));
     }
 
     private static String normalizeMetric(@Nullable String metric) {
