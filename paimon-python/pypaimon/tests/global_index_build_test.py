@@ -283,7 +283,7 @@ class GlobalIndexBuildTest(
                 for key, value in dict(values, **user).items():
                     self.assertEqual(value, actual[key])
 
-    def test_native_build_preserves_captured_view_and_applies_overrides(self):
+    def test_native_build_preserves_captured_view_and_option_sources(self):
         from pypaimon.execution.native.write import native_index_build
         from pypaimon.execution.native.table import _resolved_schema_json
         from unittest.mock import Mock
@@ -309,12 +309,48 @@ class GlobalIndexBuildTest(
                 self.assertTrue(hasattr(captured, '_read_snapshot'))
                 self.assertIsNone(captured._read_snapshot)
                 schema = json.loads(_resolved_schema_json(captured))
-                for actual in (schema['options'], native.with_options.call_args[0][0]):
-                    if metric is None:
-                        self.assertNotIn('ivf-pq.metric', actual)
-                    else:
-                        self.assertEqual(metric, actual['ivf-pq.metric'])
+                actual = native.with_options.call_args[0][0]
+                if metric is None:
+                    self.assertNotIn('ivf-pq.metric', schema['options'])
+                    self.assertNotIn('ivf-pq.metric', actual)
+                else:
+                    self.assertEqual('l2', schema['options']['ivf-pq.metric'])
+                    self.assertEqual({'ivf-pq.metric': metric}, actual)
                 self.assertEqual('l2', table.table_schema.options['ivf-pq.metric'])
+
+    def test_native_build_preserves_dimension_override_source(self):
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        table = self._create_table(pa_schema=schema, options=dict(self.table_options, **{
+            'write.native.enabled': 'true', 'ivf-flat.dimension': '4'}))
+        self._native_build_options(GlobalIndexBuilder(
+            table, 'embedding', 'ivf-flat', options={'ivf-flat.index.dimension': '2'}))
+        self.assertEqual('4', self._captured_native_table.table_schema.options['ivf-flat.dimension'])
+        self.assertNotIn('ivf-flat.index.dimension', self._captured_native_table.table_schema.options)
+
+    def test_native_build_preserves_typed_parallelism(self):
+        key = 'global-index.build.parallelism'
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        for source in ('table', 'build'):
+            for value, expected in ((2.0, '2'), (True, '1'), (None, None)):
+                with self.subTest(source=source, value=value):
+                    values = dict(self.table_options, **{'write.native.enabled': 'true', key: '3'})
+                    if source == 'table':
+                        values[key] = value
+                    table = self._create_table(pa_schema=schema, options=values)
+                    actual = self._native_build_options(GlobalIndexBuilder(
+                        table, 'embedding', 'ivf-flat', options={key: value} if source == 'build' else {}))
+                    self.assertEqual(expected, actual.get(key))
+
+    def test_native_build_parallelism_override_ignores_invalid_typed_default(self):
+        key = 'global-index.build.parallelism'
+        schema = pa.schema([('id', pa.int32()), ('embedding', pa.list_(pa.float32()))])
+        for value in (float('nan'), float('inf')):
+            with self.subTest(value=value):
+                table = self._create_table(pa_schema=schema, options=dict(
+                    self.table_options, **{'write.native.enabled': 'true', key: value}))
+                actual = self._native_build_options(GlobalIndexBuilder(
+                    table, 'embedding', 'ivf-flat', options={key: '2'}))
+                self.assertEqual('2', actual[key])
 
     def _native_build_options(self, request):
         from unittest.mock import Mock
@@ -328,11 +364,15 @@ class GlobalIndexBuildTest(
         with patch.dict(sys.modules, {'pypaimon_rust.datafusion': sdk}), \
                 patch.object(native_index_build, 'native_runtime_available', return_value=True), \
                 patch.object(native_index_build, '_rest_catalog_supported', return_value=True), \
-                patch.object(native_index_build, '_native_table', return_value=proxy), \
+                patch.object(native_index_build, '_native_table', return_value=proxy) as bridge, \
                 patch.object(native_index_build, 'from_native_commit_messages',
                              side_effect=lambda table, messages: messages):
             self.assertEqual([], request.build())
-        return native.with_options.call_args[0][0]
+        self._captured_native_table = bridge.call_args[0][0]
+        from pypaimon.execution.native.table import _resolved_schema_json
+        options = json.loads(_resolved_schema_json(self._captured_native_table))['options']
+        options.update(native.with_options.call_args[0][0])
+        return options
 
     def test_full_text_build_and_raw_fallback_share_field_options(self):
         from pypaimon.execution.python.read.search.full_text_read import DataEvolutionFullTextRead

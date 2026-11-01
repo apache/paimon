@@ -21,6 +21,8 @@ from pypaimon.execution.native.table import (_native_table, _options_to_native)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported, from_native_commit_messages
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 
 
 def build_native_global_index(builder, partition_filter, *, execution="local", concurrency=None, ray_remote_args=None):
@@ -43,12 +45,19 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
     from pypaimon_rust.datafusion import GlobalIndexBuildBuilder
     if not GlobalIndexBuildBuilder.supports_index_type(builder._index_type):
         return None
-    options = dict(table.options.options.to_map())
-    options.update(builder._user_options)
-    native_table = table.copy_without_time_travel(builder._user_options)
+    # Keep build parameters separate from schema defaults: alias precedence is
+    # resolved within each source, then explicit build parameters win.
+    options = _build_options_to_native(builder._user_options)
+    table_overrides = {key: None for key, value in builder._user_options.items() if value is None}
+    parallelism = CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM.key()
+    table_values = table.options.options.to_map()
+    if parallelism not in builder._user_options and isinstance(table_values.get(parallelism), (bool, float)):
+        table_overrides[parallelism] = _build_options_to_native(
+            {parallelism: table_values[parallelism]})[parallelism]
+    native_table = table.copy_without_time_travel(table_overrides)
     native = _native_table(native_table).new_global_index_build_builder()
     native.with_index_column(builder._index_columns[0]).with_index_type(builder._index_type)
-    native.with_options(_options_to_native(options))
+    native.with_options(options)
     if partition_filter is not None:
         native.with_partition_filter(_predicate_to_native(partition_filter))
     if execution == "ray":
@@ -58,6 +67,15 @@ def build_native_global_index(builder, partition_filter, *, execution="local", c
         plan = native.plan()
         return build_native_vector_index(table, plan, concurrency, ray_remote_args)
     return from_native_commit_messages(table, native.build())
+
+
+def _build_options_to_native(options):
+    encoded = _options_to_native(options)
+    key = CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM.key()
+    if isinstance(options.get(key), (bool, float)):
+        # Retain Python's typed integer conversion before the string-only ABI.
+        encoded[key] = str(int(Options(options).get(CoreOptions.GLOBAL_INDEX_BUILD_PARALLELISM)))
+    return encoded
 
 
 def build_native_index_shard(table, shard):
