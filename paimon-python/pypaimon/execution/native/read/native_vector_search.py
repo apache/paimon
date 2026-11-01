@@ -22,8 +22,8 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.execution.native.table import (_catalog_metastore, _native_table)
 from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
-from pypaimon.execution.native.read.native_search_plan import _result, _index_search_options
-from pypaimon.execution.native.index_options import configure_vector_index_type, native_search_options
+from pypaimon.execution.native.read.native_search_plan import _result, _index_search_options, _vector_query_options
+from pypaimon.execution.native.index_options import configure_vector_index_type
 
 
 def _native_vector_builder(builder, batch=False):
@@ -45,17 +45,17 @@ def _native_vector_builder(builder, batch=False):
         return None
     if not native_runtime_available():
         return None
-    options = _index_search_options(table, builder._vector_column.name if builder._vector_column else None,
-                                    overrides=builder._options, scalar_filter=builder._filter)
+    column = builder._vector_column.name if builder._vector_column else None
+    options = _index_search_options(table, column, overrides=builder._options, scalar_filter=builder._filter)
     if options is None:
         return None
     native_table = _native_table(table.copy(options))
     native = (native_table.new_batch_vector_search_builder() if batch else
               native_table.new_vector_search_builder())
-    configure_vector_index_type(native, options, builder._vector_column.name if builder._vector_column else None)
+    configure_vector_index_type(native, options, column)
     if builder._vector_column is not None:
         native.with_vector_column(builder._vector_column.name)
-    native.with_limit(builder._limit).with_options(native_search_options(builder._options))
+    native.with_limit(builder._limit).with_options(_vector_query_options(builder._options, column, options))
     try:
         if builder._filter is not None:
             native.with_filter(_predicate_to_native(builder._filter))

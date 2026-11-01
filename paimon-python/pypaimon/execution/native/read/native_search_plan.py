@@ -63,6 +63,16 @@ def _index_search_options(table, column, index_type=None, overrides=None, scalar
     return native_search_options(resolved)
 
 
+def _vector_query_options(options, column, resolved_options):
+    """Resolve explicit query parameters without treating table defaults as overrides."""
+    values = native_search_options(options)
+    if column is None:
+        return values
+    index_type = VectorIndexOptions.index_type(Options(resolved_options), column)
+    return native_search_options(VectorIndexOptions.resolve(
+        Options(values), index_type, column, default_metric=False).to_map())
+
+
 def _range(value):
     return Range(*value)
 

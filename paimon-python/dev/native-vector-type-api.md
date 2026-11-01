@@ -51,6 +51,11 @@ the Rust implementation and binding are a separate change.
 * This API sets only the implementation. Resolved vector parameters still use
   `with_options`/route options; an unspecified metric must remain unspecified so
   persisted index metadata can provide it.
+* Query and route options contain only explicitly supplied query parameters,
+  resolved through the shared vector parser. Table defaults remain in the schema;
+  a table metric must not become an explicit query metric that conflicts with
+  persisted index metadata. New and legacy field JSON query options follow the
+  same rule.
 * Native code must stop interpreting `index_type`, `index-type`,
   `vector.index-type`, and `fields.<column>.index-type` as option aliases.
   Legitimate API argument names and index metadata fields named `index_type`

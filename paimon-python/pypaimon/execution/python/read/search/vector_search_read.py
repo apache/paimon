@@ -991,21 +991,12 @@ def _table_options_map(table):
 
 
 def _configured_vector_metric(options, vector_column, index_type=None):
-    field_prefix = "fields.%s." % vector_column.name
-    if field_prefix + "index-options" in options:
-        core = CoreOptions(Options(options))
-        selected_type = index_type or VectorIndexOptions.index_type(core.options, vector_column.name) or "vector"
-        metric = VectorIndexOptions.resolve(Options(options), selected_type, vector_column.name,
-                                            default_metric=False).to_map().get(selected_type + ".metric")
-        if metric is not None:
-            return metric
-    index_prefix = "%s." % index_type if index_type else None
-    keys = [field_prefix + "pk-vector.distance.metric",
-            field_prefix + "distance.metric", field_prefix + "metric"]
-    if index_prefix is not None:
-        keys.extend([index_prefix + "distance.metric", index_prefix + "metric"])
-    keys.extend(["test.vector.metric", "lumina.distance.metric", "distance.metric", "metric"])
-    for key in keys:
+    selected_type = index_type or VectorIndexOptions.index_type(Options(options), vector_column.name) or "vector"
+    metric = VectorIndexOptions.resolve(Options(options), selected_type, vector_column.name,
+                                        default_metric=False).to_map().get(selected_type + ".metric")
+    if metric is not None:
+        return metric
+    for key in ("test.vector.metric", "lumina.distance.metric"):
         if key in options:
             return _normalize_metric(options[key])
     return None

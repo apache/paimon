@@ -16,6 +16,8 @@
 # under the License.
 
 import importlib.util
+import json
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -191,6 +193,56 @@ class VectorMetricResolutionTest(unittest.TestCase):
         native.vector_metric.return_value = 'inner_product'
         with self.assertRaisesRegex(ValueError, 'does not match index metric'):
             self._reader(options)._record_index_metric(native, 'ivf-flat')
+
+    def test_legacy_field_json_metric_reaches_raw_single_and_batch_search(self):
+        _install_raw_vector_read_builder(self.table, 'embedding', {0: [2.0], 1: [3.0]})
+        split = RawVectorSearchSplit([Range(0, 1)], [], 'ivf-flat')
+        for key in ('metric', 'distance.metric', 'fields.embedding.metric'):
+            for scope in ('table', 'query'):
+                for batch in (False, True):
+                    with self.subTest(key=key, scope=scope, batch=batch):
+                        options = {'pk-vector.index.columns': 'embedding',
+                                   'fields.embedding.pk-vector.index.type': 'ivf-flat',
+                                   'fields.embedding.pk-vector.index.options': json.dumps({key: 'COSINE'})}
+                        self.table.options.options.to_map().clear()
+                        if scope == 'table':
+                            self.table.options.options.to_map().update(options)
+                        reader = self._reader(options if scope == 'query' else {}, batch)
+                        results = reader.read_batch([split]) if batch else [reader.read([split])]
+                        self.assertEqual([{0: 1.0}], [_scores(result) for result in results])
+
+    def test_legacy_field_json_query_metric_is_validated_against_index_metadata(self):
+        options = {'fields.embedding.pk-vector.index.options': '{"metric":"cosine"}'}
+        native = Mock(spec=['vector_metric'])
+        native.vector_metric.return_value = 'cosine'
+        reader = self._reader(options)
+        reader._record_index_metric(native, 'ivf-flat')
+        self.assertEqual('cosine', reader._search_metric('ivf-flat'))
+        native.vector_metric.return_value = 'inner_product'
+        with self.assertRaisesRegex(ValueError, 'does not match index metric'):
+            self._reader(options)._record_index_metric(native, 'ivf-flat')
+
+    def test_primary_key_uncovered_rows_use_legacy_field_json_metric(self):
+        from pypaimon.execution.python.read.search.primary_key_vector_read import PrimaryKeyVectorRead
+        from pypaimon.table.row.generic_row import GenericRow
+
+        self.table.options.options.to_map().update({
+            'pk-vector.index.columns': 'embedding',
+            'fields.embedding.pk-vector.index.type': 'ivf-flat',
+            'fields.embedding.pk-vector.index.options': '{"metric":"cosine"}',
+        })
+        read_builder = Mock()
+        read_builder.with_projection.return_value = read_builder
+        read_builder.new_read.return_value.to_arrow.return_value = pa.table({'embedding': [[2.0], [3.0]]})
+        self.table.new_read_builder = lambda: read_builder
+        data_file = SimpleNamespace(file_name='raw.parquet', row_count=2)
+        data_split = SimpleNamespace(files=[data_file], partition=GenericRow([], []), bucket=0,
+                                     data_deletion_files=None)
+        split = SimpleNamespace(uncovered_data_files=['raw.parquet'], data_split=data_split, row_ranges_by_file={})
+        plan = SimpleNamespace(splits=lambda: [split])
+        reader = PrimaryKeyVectorRead(self.table, 1, self.column, [1.0])
+        candidates = list(reader._raw_candidates(plan))
+        self.assertEqual([(0, 1.0), (1, 1.0)], [(row.row_position, row.score) for row in candidates])
 
     def test_unrelated_field_options_do_not_override_persisted_metric(self):
         native = Mock(spec=['vector_metric'])

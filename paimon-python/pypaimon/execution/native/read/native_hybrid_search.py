@@ -25,7 +25,7 @@ from pypaimon.execution.native.read.builder import (_predicate_to_native)
 from pypaimon.execution.native.runtime import (native_runtime_available)
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.execution.native.write.native_commit import _rest_catalog_supported
-from pypaimon.execution.native.read.native_search_plan import _index_search_options
+from pypaimon.execution.native.read.native_search_plan import _index_search_options, _vector_query_options
 from pypaimon.execution.native.index_options import configure_vector_index_type
 
 
@@ -71,7 +71,8 @@ def _native_builder(builder, executor=None):
     native.with_limit(builder._limit).with_ranker(builder._ranker)
     for route, options in zip(builder._routes, route_options):
         if route.is_vector():
-            native.add_vector_route(route.field_name, route.vector, route.limit, route.weight, options)
+            native.add_vector_route(route.field_name, route.vector, route.limit, route.weight,
+                                    _vector_query_options(route.options, route.field_name, options))
         else:
             native.add_full_text_route(
                 route.field_name, route.full_text_query, route.limit, route.weight, options)

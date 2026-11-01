@@ -51,22 +51,28 @@ def _builder(table, family):
     return table.new_vector_search_builder().with_vector_column('embedding').with_limit(2).with_query_vector([1.0, 0.0])
 
 
-@pytest.mark.parametrize('family', ['vector', 'batch', 'text', 'hybrid'])
+@pytest.mark.parametrize('family,legacy', [
+    ('vector', False), ('batch', False), ('text', False), ('hybrid', False), ('vector', True),
+])
 @pytest.mark.parametrize('configure_metric', [True, False])
-@pytest.mark.parametrize('legacy', [True, False])
-def test_native_search_routes_use_shared_index_options(search_table, family, configure_metric, legacy):
+def test_native_search_routes_use_shared_index_options(search_table, tmp_path, family, configure_metric, legacy):
     from pypaimon.execution.native.read import native_vector_search, native_full_text_search, native_hybrid_search
     from pypaimon.table.source.hybrid_search_builder import HybridSearchRoute
 
     declaration = ({'pk-vector.index.columns': 'embedding', 'fields.embedding.pk-vector.index.type': 'ivf-pq'}
                    if legacy else {'global-index.ivf-pq.index-columns': 'embedding'})
-    table = search_table.copy(dict(declaration, **{
+    options = dict(declaration, **{
         'global-index.full-text.index-column': 'body',
         'ivf-pq.dimension': '2',
         'fields.embedding.index-options': json.dumps(
             {'distance.metric': 'COSINE', 'refine_factor': 3} if configure_metric else {'refine_factor': 3}),
         'fields.body.index-options': '{"tokenizer":"raw","lower-case":false}',
-    }))
+    })
+    if legacy:
+        from pypaimon.tests.native_index_options_test import _table
+        table = _table(tmp_path / 'pk', True, dict(options, **{'read.native.enabled': 'true'}))
+    else:
+        table = search_table.copy(options)
     core = Mock()
     core.with_limit.return_value = core
     core.add_full_text_route.side_effect = HybridSearchRoute.full_text_route
@@ -92,15 +98,19 @@ def test_native_search_routes_use_shared_index_options(search_table, family, con
                            .add_full_text_route('body', '{}', 2))
                 module._native_builder(builder)
         if family == 'hybrid':
+            from pypaimon.execution.native.index_options import native_index_options
+
             vector = core.add_vector_route.call_args[0][-1]
+            assert vector == {}
             assert core.add_full_text_route.call_args[0][-1] == {}
             text = bridge.call_args[0][0].options.options.to_map()
+            wire = native_index_options(bridge.call_args[0][0].table_schema)
             if configure_metric:
-                assert vector['fields.embedding.metric'] == 'cosine'
+                assert wire['fields.embedding.metric'] == 'cosine'
             else:
-                assert 'fields.embedding.metric' not in vector
-                assert 'ivf-pq.metric' not in vector
-            assert vector['fields.embedding.refine_factor'] == '3'
+                assert 'fields.embedding.metric' not in wire
+                assert 'ivf-pq.metric' not in wire
+            assert wire['fields.embedding.refine_factor'] == '3'
             assert text['full-text.tokenizer'] == 'raw'
             assert text['full-text.lower-case'] == 'false'
         else:
@@ -120,14 +130,70 @@ def test_native_search_routes_use_shared_index_options(search_table, family, con
 
 
 @pytest.mark.parametrize('family', ['vector', 'batch', 'hybrid'])
+@pytest.mark.parametrize('query_options,metric', [
+    ({}, None),
+    ({'fields.embedding.index-options': '{"metric":"COSINE","refine_factor":4}'}, 'cosine'),
+    ({'fields.embedding.pk-vector.index.options': '{"distance.metric":"COSINE","refine_factor":4}'}, 'cosine'),
+    ({'fields.embedding.metric': 'COSINE'}, 'cosine'),
+    ({'ivf-pq.distance.metric': 'COSINE'}, 'cosine'),
+    ({'metric': 'COSINE'}, 'cosine'),
+    ({'fields.embedding.index-options': '{"refine_factor":4}'}, None),
+])
+def test_native_vector_query_options_preserve_explicit_metric_scope(search_table, family, query_options, metric):
+    from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
+
+    table = search_table.copy({'global-index.ivf-pq.index-columns': 'embedding',
+                               'ivf-pq.dimension': '2', 'fields.embedding.distance.metric': 'l2',
+                               'fields.embedding.refine_factor': '3'})
+    core = Mock()
+    core.with_limit.return_value = core
+    proxy = SimpleNamespace(new_vector_search_builder=lambda: core,
+                            new_batch_vector_search_builder=lambda: core,
+                            new_hybrid_search_builder=lambda: core)
+    module = native_hybrid_search if family == 'hybrid' else native_vector_search
+    original = dict(query_options)
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'native_runtime_available', return_value=True))
+        bridge = stack.enter_context(patch.object(module, '_native_table', return_value=proxy))
+        if family == 'hybrid':
+            stack.enter_context(patch.object(module, '_rest_catalog_supported', return_value=True))
+            builder = (table.new_hybrid_search_builder().with_limit(2)
+                       .add_vector_route('embedding', [1., 0.], 2, options=query_options))
+            assert module._native_builder(builder) is not None
+            actual = core.add_vector_route.call_args[0][-1]
+        else:
+            stack.enter_context(patch.object(module, '_catalog_metastore', return_value='rest'))
+            builder = _builder(table, family).with_options(query_options)
+            assert module._native_vector_builder(builder, family == 'batch') is core
+            actual = core.with_options.call_args[0][0]
+    assert 'ivf-pq.dimension' not in actual
+    for key in ('metric', 'distance.metric'):
+        assert actual.get('fields.embedding.' + key) == metric
+        assert actual.get('ivf-pq.' + key) == metric
+    if any(key.endswith('index-options') or key.endswith('index.options') for key in query_options):
+        assert actual['ivf-pq.refine_factor'] == '4'
+    else:
+        assert 'fields.embedding.refine_factor' not in actual
+    if not query_options:
+        assert bridge.call_args[0][0].options.options.to_map()['fields.embedding.distance.metric'] == 'l2'
+    assert query_options == original
+
+
+@pytest.mark.parametrize('family,legacy', [
+    ('vector', False), ('batch', False), ('hybrid', False), ('vector', True),
+])
 @pytest.mark.parametrize('configured', [True, False])
-@pytest.mark.parametrize('legacy', [True, False])
-def test_missing_native_type_api_errors_before_execution(search_table, family, configured, legacy):
+def test_missing_native_type_api_errors_before_execution(search_table, tmp_path, family, configured, legacy):
     from pypaimon.execution.native.read import native_vector_search, native_hybrid_search
 
     declaration = ({'pk-vector.index.columns': 'embedding', 'fields.embedding.pk-vector.index.type': 'ivf-flat'}
                    if legacy else {'global-index.ivf-flat.index-columns': 'embedding'})
-    table = search_table.copy(declaration if configured else {})
+    if legacy:
+        from pypaimon.tests.native_index_options_test import _table
+        table = _table(tmp_path / 'pk', True, dict(
+            declaration if configured else {}, **{'read.native.enabled': 'true'}))
+    else:
+        table = search_table.copy(declaration if configured else {})
     core = Mock(spec=['with_limit', 'with_ranker', 'with_options', 'with_vector_column',
                       'add_vector_route', 'execute', 'route_builders'])
     core.with_limit.return_value = core
