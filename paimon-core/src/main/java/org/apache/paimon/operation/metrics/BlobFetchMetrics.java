@@ -20,10 +20,20 @@ package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BlobFetchMetricReporter;
+import org.apache.paimon.data.BlobTransferSource;
 import org.apache.paimon.metrics.Counter;
+import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.rest.HttpClientUtils;
+import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.IOUtils;
+
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /** Metrics to measure blob fetches during write. */
 public class BlobFetchMetrics implements BlobFetchMetricReporter {
@@ -45,6 +55,21 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
     public static final String BLOB_FETCH_INVALID_URI = "blobFetchInvalidUri";
     public static final String BLOB_FETCH_OTHER_ERROR = "blobFetchOtherError";
 
+    public static final String TRANSFER_GROUP_NAME = "blobTransfer";
+    public static final String TRANSFER_READ_BYTES = "blobTransferReadBytes";
+    public static final String TRANSFER_WRITTEN_BYTES = "blobTransferWrittenBytes";
+    public static final String TRANSFER_DURATION_NANOS = "blobTransferDurationNanos";
+    public static final String TRANSFER_LATENCY_MILLIS = "blobTransferLatencyMillis";
+    public static final String TRANSFER_COMPLETED = "blobTransferCompleted";
+    public static final String TRANSFER_FAILED = "blobTransferFailed";
+
+    private final MetricRegistry registry;
+    private final String tableName;
+    // An enum bounds the number of dynamic groups, independently of URI or user-provided data.
+    private final Map<BlobTransferSource, TransferMetrics> transferGroups =
+            new EnumMap<>(BlobTransferSource.class);
+    private boolean closed;
+
     private final MetricGroup metricGroup;
     private final Counter totalCounter;
     private final Counter successCounter;
@@ -61,6 +86,8 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
     private final Counter otherErrorCounter;
 
     public BlobFetchMetrics(MetricRegistry registry, String tableName) {
+        this.registry = registry;
+        this.tableName = tableName;
         this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         this.totalCounter = metricGroup.counter(BLOB_FETCH_TOTAL);
         this.successCounter = metricGroup.counter(BLOB_FETCH_SUCCESS);
@@ -117,8 +144,76 @@ public class BlobFetchMetrics implements BlobFetchMetricReporter {
         recordFailureReason(throwable);
     }
 
-    public void close() {
-        metricGroup.close();
+    @Override
+    public synchronized void recordTransfer(
+            BlobTransferSource source,
+            long readBytes,
+            long writtenBytes,
+            long durationNanos,
+            boolean completed) {
+        if (closed) {
+            return;
+        }
+        BlobTransferSource kind = source == null ? BlobTransferSource.UNKNOWN : source;
+        TransferMetrics transfer = transferGroups.get(kind);
+        if (transfer == null) {
+            Map<String, String> variables = new LinkedHashMap<>();
+            variables.put("table", tableName);
+            variables.put("sourceKind", kind.metricValue());
+            MetricGroup candidate = registry.createMetricGroup(TRANSFER_GROUP_NAME, variables);
+            try {
+                transfer = new TransferMetrics(candidate);
+            } catch (RuntimeException | Error e) {
+                try {
+                    candidate.close();
+                } catch (RuntimeException | Error closeFailure) {
+                    ExceptionUtils.firstOrSuppressed(closeFailure, e);
+                }
+                throw e;
+            }
+            transferGroups.put(kind, transfer);
+        }
+        transfer.readBytes.inc(Math.max(0, readBytes));
+        transfer.writtenBytes.inc(Math.max(0, writtenBytes));
+        transfer.durationNanos.inc(Math.max(0, durationNanos));
+        transfer.latencyMillis.update(Math.max(0, durationNanos) / 1_000_000L);
+        (completed ? transfer.completed : transfer.failed).inc();
+    }
+
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        List<AutoCloseable> closeables = new ArrayList<>();
+        closeables.add(metricGroup::close);
+        transferGroups.values().forEach(transfer -> closeables.add(transfer.group::close));
+        transferGroups.clear();
+        try {
+            IOUtils.closeAll(closeables);
+        } catch (Exception e) {
+            ExceptionUtils.rethrow(e);
+        }
+    }
+
+    private static class TransferMetrics {
+        private final MetricGroup group;
+        private final Counter readBytes;
+        private final Counter writtenBytes;
+        private final Counter durationNanos;
+        private final Histogram latencyMillis;
+        private final Counter completed;
+        private final Counter failed;
+
+        private TransferMetrics(MetricGroup group) {
+            this.group = group;
+            this.readBytes = group.counter(TRANSFER_READ_BYTES);
+            this.writtenBytes = group.counter(TRANSFER_WRITTEN_BYTES);
+            this.durationNanos = group.counter(TRANSFER_DURATION_NANOS);
+            this.latencyMillis = group.histogram(TRANSFER_LATENCY_MILLIS, 1024);
+            this.completed = group.counter(TRANSFER_COMPLETED);
+            this.failed = group.counter(TRANSFER_FAILED);
+        }
     }
 
     private void recordFailureReason(Throwable throwable) {

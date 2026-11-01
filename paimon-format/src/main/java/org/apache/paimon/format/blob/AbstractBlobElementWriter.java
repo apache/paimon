@@ -23,6 +23,7 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobTransferSource;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.ReusingBlobRefStreamProvider;
 import org.apache.paimon.fs.Path;
@@ -55,11 +56,16 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     private final boolean writeNullOnMissingFile;
     private final boolean writeNullOnFetchFailure;
     private final BlobFetchMetricReporter blobFetchMetricReporter;
+    private final boolean transferMetricsEnabled;
     private final CRC32 crc32;
     private final byte[] copyBuffer;
     private final ReusingBlobRefStreamProvider reuseSource;
 
     private String pathString;
+    private long transferStartNanos;
+    private long transferReadBytes;
+    private long transferWrittenBytes;
+    private BlobTransferSource transferSource = BlobTransferSource.UNKNOWN;
 
     AbstractBlobElementWriter(
             PositionOutputStream out,
@@ -79,6 +85,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFetchMetricReporter = blobFetchMetricReporter;
+        this.transferMetricsEnabled = blobFetchMetricReporter != BlobFetchMetricReporter.NOOP;
         this.crc32 = new CRC32();
         this.copyBuffer = new byte[copyBufferSize];
         this.reuseSource = new ReusingBlobRefStreamProvider();
@@ -115,15 +122,23 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     }
 
     protected final BlobFetchResult getBlob(BlobGetter getter) {
+        if (transferMetricsEnabled) {
+            transferStartNanos = System.nanoTime();
+            transferReadBytes = 0;
+            transferWrittenBytes = 0;
+            transferSource = BlobTransferSource.UNKNOWN;
+        }
         try {
             return new BlobFetchResult(getter.get(), false);
         } catch (RuntimeException e) {
             if (shouldWriteNullOnFetchFailure(e)) {
                 logWriteNullOnFetchFailure(e, null);
                 blobFetchMetricReporter.recordFetchFailureNullWritten(e);
+                recordTransfer(false);
                 return new BlobFetchResult(null, true);
             }
             blobFetchMetricReporter.recordFetchFailure(e);
+            recordTransfer(false);
             throw e;
         }
     }
@@ -134,6 +149,9 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
      * (bounded to the descriptor); other blobs open their own stream and read until EOF.
      */
     protected final @Nullable BlobCopySource prepareBlobSource(Blob blob) throws IOException {
+        if (transferMetricsEnabled) {
+            transferSource = BlobTransferSource.classify(blob);
+        }
         // Exact class only: subclasses may override newInputStream() and must not be bypassed.
         if (blob != null && blob.getClass() == BlobRef.class) {
             BlobRef ref = (BlobRef) blob;
@@ -162,6 +180,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         try {
             return opener.open();
         } catch (IOException | RuntimeException e) {
+            recordTransfer(false);
             if (handleFetchFailure(e, blob)) {
                 return null;
             }
@@ -195,6 +214,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             try {
                 copyExactly(source.stream(), source.length());
             } catch (IOException | RuntimeException e) {
+                recordTransfer(false);
                 blobFetchMetricReporter.recordFetchFailure(e);
                 // Source is at an unknown position now; drop it so the next blob reopens.
                 reuseSource.discardQuietly();
@@ -204,14 +224,22 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             try (SeekableInputStream stream = source.stream()) {
                 int bytesRead = stream.read(copyBuffer);
                 while (bytesRead >= 0) {
+                    if (transferMetricsEnabled) {
+                        transferReadBytes += bytesRead;
+                    }
                     write(copyBuffer, bytesRead);
+                    if (transferMetricsEnabled) {
+                        transferWrittenBytes += bytesRead;
+                    }
                     bytesRead = stream.read(copyBuffer);
                 }
             } catch (IOException | RuntimeException e) {
+                recordTransfer(false);
                 blobFetchMetricReporter.recordFetchFailure(e);
                 throw e;
             }
         }
+        recordTransfer(true);
         return new BlobDescriptor(pathString, blobPosition, out.getPos() - blobPosition);
     }
 
@@ -233,7 +261,13 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
                         "Source returned 0 bytes while copying BLOB payload for field "
                                 + blobFieldName);
             }
+            if (transferMetricsEnabled) {
+                transferReadBytes += bytesRead;
+            }
             write(copyBuffer, bytesRead);
+            if (transferMetricsEnabled) {
+                transferWrittenBytes += bytesRead;
+            }
             remaining -= bytesRead;
         }
     }
@@ -248,6 +282,24 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
 
     protected final void recordSuccess(long length) {
         blobFetchMetricReporter.recordSuccess(length);
+    }
+
+    private void recordTransfer(boolean completed) {
+        if (!transferMetricsEnabled) {
+            return;
+        }
+        try {
+            blobFetchMetricReporter.recordTransfer(
+                    transferSource,
+                    transferReadBytes,
+                    transferWrittenBytes,
+                    Math.max(0, System.nanoTime() - transferStartNanos),
+                    completed);
+        } catch (RuntimeException e) {
+            // Optional transfer telemetry must not replace the original write outcome or exception.
+            // Do not log the exception message, which a custom reporter could populate with a URI.
+            LOG.debug("Unable to report BLOB transfer metrics: {}", e.getClass().getName());
+        }
     }
 
     protected final void recordPreCheckedMissingFileNull(InternalRow row) {

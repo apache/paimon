@@ -420,6 +420,47 @@ Lookup metrics are available for local partial lookup. They are reported at look
     </tbody>
 </table>
 
+### Blob Payload Transfer Metrics
+
+Raw, array and map BLOB writers expose the following metrics in the `blobTransfer` group,
+scoped by `table` and `sourceKind`:
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `blobTransferReadBytes` | Counter | Payload bytes returned by source reads, including partial attempts that later fail. |
+| `blobTransferWrittenBytes` | Counter | Payload bytes passed to destination writes that returned successfully, including partial attempts. |
+| `blobTransferDurationNanos` | Counter | Cumulative elapsed nanoseconds for reported transfer outcomes. |
+| `blobTransferCompleted` | Counter | Payload copies that completed, before record-footer writing, descriptor callbacks, flushing or snapshot commit. |
+| `blobTransferFailed` | Counter | Failures obtaining or opening a source, or copying its payload. |
+| `blobTransferLatencyMillis` | Histogram | Elapsed milliseconds for completed and failed transfers, with a fixed 1024-sample window per source kind. |
+
+`sourceKind` describes the reader API used by the writer: `inline` for an in-memory BLOB,
+`http` for the standard HTTP reader, `file` for the standard FileIO reader, and `custom`
+for a custom URI reader. Unrecognized or transforming BLOB subclasses use `unknown`.
+Classification does not parse or expose URIs, object paths, hostnames or credentials.
+These five values bound the number of source groups. They do not identify a storage
+provider, content owner, physical serving location or network route.
+
+Elapsed time starts when obtaining the BLOB value and ends when its payload copy completes
+or fails. It includes source opening, intervening prefix framing, the copy, and per-payload
+stream close where applicable; final closure of a reused underlying source is outside this
+interval. Record-footer writing, descriptor callbacks, flush and snapshot commit are excluded.
+Errors in surrounding record framing are outside these payload-copy outcome counters. User NULLs,
+placeholders and prechecked missing resources do not attempt a payload copy and are excluded.
+Specialized video range-copy paths retain their existing metrics.
+
+Byte counts exclude file framing, checksums, protocol headers and lower-layer retries or
+transport overhead. A failed write may have changed the destination before throwing; those
+unknown partial bytes are not claimed as successfully written. These metrics describe
+application payload processing, not physical network bandwidth or committed snapshot size.
+Failure of the optional transfer reporter does not replace the data-processing outcome.
+
+For payload B/s or copies/s, compute reset-aware nonnegative rates per writer series before
+aggregation. Computing a rate after summing counters can hide a reset in one writer behind
+an increase in another. A histogram exposes per-writer statistics: averaging per-writer
+quantiles does not produce a global quantile. Keep the writer dimension or label an aggregate
+such as the maximum of per-writer quantiles explicitly.
+
 ### Compaction Metrics
 
 <table class="table table-bordered">
