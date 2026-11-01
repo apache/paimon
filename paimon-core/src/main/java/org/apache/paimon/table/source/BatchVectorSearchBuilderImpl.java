@@ -129,13 +129,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
     public VectorScan newVectorScan() {
         TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         if (isPrimaryKeyVectorSearch()) {
-            return new PrimaryKeyVectorScan(
-                    table,
-                    vectorColumn.id(),
-                    VectorIndexOptions.indexType(
-                            table.coreOptions().toConfiguration(), vectorColumn.name()),
-                    partitionFilter,
-                    filter);
+            return new PrimaryKeyVectorScan(table, vectorColumn.id(), partitionFilter, filter);
         }
         return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }

@@ -37,9 +37,13 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -119,6 +123,52 @@ class PrimaryKeyVectorSearchTest extends TableTestBase {
         assertThat(readIds(table, factorOne)).containsExactly(3);
         assertThat(((PrimaryKeyVectorResult) factorOne).splits().get(0).scores())
                 .containsExactly(0.1F);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testReadsIndexTypeFromSnapshotEntries(boolean refine) throws Exception {
+        catalog.createTable(identifier(), vectorSchema("deduplicate", true, true), false);
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {1, 0})),
+                GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {2, 0})),
+                GenericRow.of(3, BinaryVector.fromPrimitiveArray(new float[] {3, 0})));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                "global-index." + TestVectorGlobalIndexerFactory.IDENTIFIER + ".index-columns", "");
+        options.put("global-index.future-vector.index-columns", "embedding");
+        // Query parameters must follow the persisted algorithm, including on the batch path.
+        Map<String, String> searchOptions = new HashMap<>();
+        searchOptions.put("future-vector.refine_factor", "invalid");
+        if (refine) {
+            searchOptions.put(TestVectorGlobalIndexerFactory.IDENTIFIER + ".refine_factor", "3");
+        }
+        FileStoreTable readTable = table.copy(options);
+
+        GlobalIndexResult result =
+                readTable
+                        .newVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVector(new float[] {0, 0})
+                        .withLimit(1)
+                        .withOptions(searchOptions)
+                        .executeLocal();
+        assertThat(readIds(table, result)).containsExactly(refine ? 1 : 3);
+
+        List<GlobalIndexResult> batch =
+                readTable
+                        .newBatchVectorSearchBuilder()
+                        .withVectorColumn("embedding")
+                        .withVectors(new float[][] {{0, 0}})
+                        .withLimit(1)
+                        .withOptions(searchOptions)
+                        .executeBatchLocal();
+        assertThat(batch).hasSize(1);
+        assertThat(readIds(table, batch.get(0))).containsExactly(refine ? 1 : 3);
     }
 
     @Test

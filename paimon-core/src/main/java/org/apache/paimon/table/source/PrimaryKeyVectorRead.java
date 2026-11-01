@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.VectorSearchMetric;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentSearcher;
 import org.apache.paimon.index.pkvector.PkVectorBucketIndexState;
@@ -59,6 +60,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,14 +102,9 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
 
     protected final FileStoreTable table;
     protected final DataField vectorField;
-    private final String indexType;
-    private final Options indexOptions;
     private final Map<String, String> searchOptions;
     private final float[] query;
     protected final int limit;
-    private final String metric;
-    private final int refineFactor;
-    private final int indexedLimit;
     @Nullable private final Predicate filter;
 
     public PrimaryKeyVectorRead(
@@ -136,24 +133,9 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         checkArgument(limit > 0, "Vector search limit must be positive: %s.", limit);
         this.table = table;
         this.vectorField = vectorField;
-        this.indexType =
-                VectorIndexOptions.indexType(
-                        table.coreOptions().toConfiguration(), vectorField.name());
-        this.indexOptions =
-                VectorIndexOptions.resolve(
-                        table.coreOptions().toConfiguration(), indexType, vectorField.name());
         this.searchOptions = Collections.unmodifiableMap(new HashMap<>(searchOptions));
         this.query = query.clone();
         this.limit = limit;
-        this.metric =
-                normalize(VectorIndexOptions.metric(indexOptions, indexType, vectorField.name()));
-        this.refineFactor =
-                VectorSearchRefineOptions.resolve(
-                        this.searchOptions,
-                        this.indexOptions.toMap(),
-                        vectorField.name(),
-                        indexType);
-        this.indexedLimit = VectorSearchRefineOptions.searchLimit(limit, refineFactor);
         this.filter = filter;
     }
 
@@ -171,7 +153,9 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
     @Override
     public GlobalIndexResult read(VectorScan.Plan plan) {
         PrimaryKeyVectorScan.Plan primaryKeyPlan = primaryKeyPlan(plan);
-        return createResult(primaryKeyPlan, searchBuckets(bucketSplits(primaryKeyPlan)));
+        List<BucketVectorSearchSplit> splits = bucketSplits(primaryKeyPlan);
+        SearchParameters parameters = searchParameters(splits);
+        return createResult(primaryKeyPlan, searchBuckets(splits, parameters), parameters);
     }
 
     protected PrimaryKeyVectorScan.Plan primaryKeyPlan(VectorScan.Plan plan) {
@@ -196,9 +180,54 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         return splits;
     }
 
-    protected SearchResult searchBuckets(List<BucketVectorSearchSplit> splits) {
+    protected SearchParameters searchParameters(List<BucketVectorSearchSplit> splits) {
+        String indexType = null;
+        for (BucketVectorSearchSplit split : splits) {
+            Set<String> payloadTypes = new HashSet<>();
+            for (IndexFileMeta payload : split.payloadFiles()) {
+                payloadTypes.add(payload.indexType());
+            }
+            for (String payloadType : payloadTypes) {
+                PkVectorBucketIndexState state =
+                        PkVectorBucketIndexState.fromActiveDataFiles(
+                                vectorField.id(),
+                                payloadType,
+                                split.dataSplit().dataFiles(),
+                                split.payloadFiles());
+                if (state.annSegments().isEmpty()) {
+                    continue;
+                }
+                checkArgument(
+                        indexType == null || indexType.equals(payloadType),
+                        "Primary-key vector search cannot mix index types %s and %s.",
+                        indexType,
+                        payloadType);
+                indexType = payloadType;
+            }
+        }
+        Options tableOptions = table.coreOptions().toConfiguration();
+        if (indexType == null) {
+            indexType = VectorIndexOptions.indexType(tableOptions, vectorField.name());
+        }
+        Options indexOptions =
+                VectorIndexOptions.resolve(tableOptions, indexType, vectorField.name());
+        String metric =
+                normalize(VectorIndexOptions.metric(indexOptions, indexType, vectorField.name()));
+        int refineFactor =
+                VectorSearchRefineOptions.resolve(
+                        searchOptions, indexOptions.toMap(), vectorField.name(), indexType);
+        return new SearchParameters(
+                indexType,
+                indexOptions,
+                metric,
+                refineFactor,
+                VectorSearchRefineOptions.searchLimit(limit, refineFactor));
+    }
+
+    protected SearchResult searchBuckets(
+            List<BucketVectorSearchSplit> splits, SearchParameters parameters) {
         try {
-            SearchContext context = createSearchContext();
+            SearchContext context = createSearchContext(parameters);
             List<CompletableFuture<SearchResult>> futures = new ArrayList<>(splits.size());
             // Start from the caller because each bucket submits leaf searches to the same executor.
             // Wrapping the whole bucket in that executor and waiting inside it can starve leaf
@@ -211,7 +240,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             for (CompletableFuture<SearchResult> future : futures) {
                 results.add(future.join());
             }
-            return mergeSearchResults(results);
+            return mergeSearchResults(results, parameters);
         } catch (IOException e) {
             throw new RuntimeException("Failed to search primary-key vector index.", e);
         } catch (CompletionException e) {
@@ -220,9 +249,9 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
     }
 
     protected List<SearchResult> searchBuckets(
-            List<BucketVectorSearchSplit> splits, float[][] queries) {
+            List<BucketVectorSearchSplit> splits, float[][] queries, SearchParameters parameters) {
         try {
-            SearchContext context = createSearchContext();
+            SearchContext context = createSearchContext(parameters);
             List<CompletableFuture<List<SearchResult>>> futures = new ArrayList<>(splits.size());
             for (BucketVectorSearchSplit split : splits) {
                 futures.add(searchBatchAsync(split, context, queries));
@@ -243,7 +272,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             }
             List<SearchResult> results = new ArrayList<>(queries.length);
             for (List<SearchResult> queryResults : resultsByQuery) {
-                results.add(mergeSearchResults(queryResults));
+                results.add(mergeSearchResults(queryResults, parameters));
             }
             return Collections.unmodifiableList(results);
         } catch (IOException e) {
@@ -253,24 +282,28 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         }
     }
 
-    SearchContext createSearchContext() {
-        return new SearchContext(table);
+    SearchContext createSearchContext(SearchParameters parameters) {
+        return new SearchContext(table, parameters);
     }
 
     protected GlobalIndexResult createResult(
-            PrimaryKeyVectorScan.Plan plan, SearchResult searchResult) {
-        List<Candidate> indexedCandidates = topK(searchResult.indexedCandidates(), indexedLimit);
-        if (refineFactor > 0 && !indexedCandidates.isEmpty()) {
-            indexedCandidates = rerank(plan, indexedCandidates);
+            PrimaryKeyVectorScan.Plan plan,
+            SearchResult searchResult,
+            SearchParameters parameters) {
+        List<Candidate> indexedCandidates =
+                topK(searchResult.indexedCandidates(), parameters.indexedLimit);
+        if (parameters.refineFactor > 0 && !indexedCandidates.isEmpty()) {
+            indexedCandidates = rerank(plan, indexedCandidates, parameters.metric);
         } else {
             indexedCandidates = topK(indexedCandidates, limit);
         }
         List<Candidate> candidates = new ArrayList<>(indexedCandidates);
         candidates.addAll(topK(searchResult.exactCandidates(), limit));
-        return new PrimaryKeyVectorResult(plan, topK(candidates, limit), metric);
+        return new PrimaryKeyVectorResult(plan, topK(candidates, limit), parameters.metric);
     }
 
-    protected SearchResult mergeSearchResults(List<SearchResult> results) {
+    protected SearchResult mergeSearchResults(
+            List<SearchResult> results, SearchParameters parameters) {
         List<Candidate> indexedCandidates = new ArrayList<>();
         List<Candidate> exactCandidates = new ArrayList<>();
         for (SearchResult result : results) {
@@ -278,7 +311,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             exactCandidates.addAll(result.exactCandidates());
         }
         return new SearchResult(
-                topK(indexedCandidates, indexedLimit), topK(exactCandidates, limit));
+                topK(indexedCandidates, parameters.indexedLimit), topK(exactCandidates, limit));
     }
 
     CompletableFuture<SearchResult> searchAsync(
@@ -291,13 +324,14 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             BucketVectorSearchSplit split, SearchContext context, float[][] queries)
             throws IOException {
         DataSplit dataSplit = split.dataSplit();
+        SearchParameters parameters = context.parameters;
         List<DataFileMeta> activeFiles =
                 dataSplit.dataFiles().stream()
                         .filter(PrimaryKeyIndexSourcePolicy::shouldRead)
                         .collect(Collectors.toList());
         PkVectorBucketIndexState state =
                 PkVectorBucketIndexState.fromActiveDataFiles(
-                        vectorField.id(), indexType, activeFiles, split.payloadFiles());
+                        vectorField.id(), parameters.indexType, activeFiles, split.payloadFiles());
         Map<String, DeletionVector> deletionVectors = deletionVectors(dataSplit, context.fileIO);
         PkVectorDataFileReader.Factory readerFactory =
                 new PkVectorDataFileReader.Factory(
@@ -312,15 +346,15 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         context.indexFileHandler.pkVectorAnnSegment(
                                 dataSplit.partition(), dataSplit.bucket()),
                         vectorField,
-                        indexOptions,
-                        metric,
+                        parameters.indexOptions,
+                        parameters.metric,
                         context.executor);
         PrimaryKeyVectorBucketSearch bucketSearch =
                 new PrimaryKeyVectorBucketSearch(
                         readerFactory,
                         annSearcher,
                         searchOptions,
-                        metric,
+                        parameters.metric,
                         table.coreOptions().vectorIndexSearchMode());
         return bucketSearch
                 .searchBatchAsync(
@@ -329,7 +363,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         deletionVectors,
                         rowRangesByFile(split),
                         queries,
-                        indexedLimit,
+                        parameters.indexedLimit,
                         limit,
                         context.executor)
                 .thenApply(
@@ -445,7 +479,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
     }
 
     private List<Candidate> rerank(
-            PrimaryKeyVectorScan.Plan plan, List<Candidate> indexedCandidates) {
+            PrimaryKeyVectorScan.Plan plan, List<Candidate> indexedCandidates, String metric) {
         Map<PhysicalPosition, Candidate> candidatesByPosition = new HashMap<>();
         for (Candidate candidate : indexedCandidates) {
             PhysicalPosition position = new PhysicalPosition(candidate);
@@ -461,7 +495,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         List<Candidate> reranked = new ArrayList<>(indexedCandidates.size());
         try {
             for (IndexedSplit split : splits) {
-                rerankSplit(read, split, candidatesByPosition, reranked);
+                rerankSplit(read, split, candidatesByPosition, reranked, metric);
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to rerank primary-key vector candidates.", e);
@@ -478,7 +512,8 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
             TableRead read,
             IndexedSplit split,
             Map<PhysicalPosition, Candidate> candidatesByPosition,
-            List<Candidate> reranked)
+            List<Candidate> reranked,
+            String metric)
             throws IOException {
         DataSplit dataSplit = split.dataSplit();
         checkArgument(
@@ -691,14 +726,41 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
         }
     }
 
+    /** Query parameters resolved once from the captured plan and shared by all bucket tasks. */
+    protected static class SearchParameters implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @Nullable private final String indexType;
+        private final Options indexOptions;
+        private final String metric;
+        private final int refineFactor;
+        private final int indexedLimit;
+
+        private SearchParameters(
+                @Nullable String indexType,
+                Options indexOptions,
+                String metric,
+                int refineFactor,
+                int indexedLimit) {
+            this.indexType = indexType;
+            this.indexOptions = indexOptions;
+            this.metric = metric;
+            this.refineFactor = refineFactor;
+            this.indexedLimit = indexedLimit;
+        }
+    }
+
     static class SearchContext {
 
         private final FileIO fileIO;
         private final IndexFileHandler indexFileHandler;
         private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
         private final ExecutorService executor;
+        private final SearchParameters parameters;
 
-        private SearchContext(FileStoreTable table) {
+        private SearchContext(FileStoreTable table, SearchParameters parameters) {
+            this.parameters = parameters;
             this.fileIO = table.fileIO();
             this.indexFileHandler = table.store().newIndexFileHandler();
             this.readerFactoryBuilder = keyValueStore(table).newReaderFactoryBuilder();

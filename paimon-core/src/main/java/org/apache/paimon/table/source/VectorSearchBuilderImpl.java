@@ -133,13 +133,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
         rejectUnderQueryAuth();
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorScan(
-                    table,
-                    vectorColumn.id(),
-                    VectorIndexOptions.indexType(
-                            table.coreOptions().toConfiguration(), vectorColumn.name()),
-                    partitionFilter,
-                    filter,
-                    pinnedSnapshot);
+                    table, vectorColumn.id(), partitionFilter, filter, pinnedSnapshot);
         }
         return new DataEvolutionVectorScan(
                 table, partitionFilter, filter, vectorColumn, options, pinnedSnapshot);
